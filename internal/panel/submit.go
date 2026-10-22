@@ -67,7 +67,7 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 			return reg.Err
 		}
 		p := reg.Panel
-		newRound := fmt.Sprintf("mindspec panel create %s --round %d", filepath.Base(target.Dir), p.Round+1)
+		newRound := fmt.Sprintf("mindspec panel create %s --round %d", promptShellQuote(filepath.Base(target.Dir)), p.Round+1)
 		if p.Abandoned {
 			return submitRefusal("panel is abandoned", newRound)
 		}
@@ -169,7 +169,7 @@ func Submit(target SubmitTarget, data []byte, resolve SubmitResolver) (Submissio
 			}
 		}
 		attempt := target.Attempt
-		replaceAttempt := fmt.Sprintf("mindspec panel checkout --slot %s --dispatch --replace", target.Slot)
+		replaceAttempt := fmt.Sprintf("mindspec panel checkout --slot %s --dispatch --replace", promptShellQuote(target.Slot))
 		if via == "direct" {
 			attempt = 0
 			j, err := AttemptFromPath(target.SlotDir, target.File)

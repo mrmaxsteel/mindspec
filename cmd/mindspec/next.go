@@ -254,7 +254,7 @@ team lead spawns fresh agents per bead.`,
 		if named != "" {
 			selected, err = next.SelectNamedFromReadySet(rs, named)
 		} else if len(items) == 0 && pick > 0 && specFlag != "" {
-			return fmt.Errorf("--pick %d is out of range: 0 items\nrecovery: mindspec next --spec %s", pick, idrender.Spec(specFlag))
+			return fmt.Errorf("--pick %d is out of range: 0 items\nrecovery: mindspec next --spec %s", pick, shellQuoteTarget(idrender.Spec(specFlag)))
 		} else if len(items) == 0 {
 			if specFlag != "" {
 				return handleEmptyScoped(root, rs, exec, func(activeBead string) {
@@ -524,7 +524,7 @@ func runEmitOnly(root, specFlag string, pick int, args []string) error {
 	items := rs.Filtered
 	if len(items) == 0 {
 		if specFlag != "" && pick > 0 {
-			return fmt.Errorf("--pick %d is out of range: 0 items\nrecovery: mindspec next --spec %s", pick, idrender.Spec(specFlag))
+			return fmt.Errorf("--pick %d is out of range: 0 items\nrecovery: mindspec next --spec %s", pick, shellQuoteTarget(idrender.Spec(specFlag)))
 		}
 		if specFlag != "" {
 			return handleEmptyScoped(root, rs, nil, nil)
@@ -708,7 +708,7 @@ func nextPhaseAdvanceRecoveryCommand(specID string) string {
 	if specID == "" {
 		return "mindspec repair phase <spec-id>"
 	}
-	return fmt.Sprintf("mindspec repair phase %s", idrender.Spec(specID))
+	return fmt.Sprintf("mindspec repair phase %s", shellQuoteTarget(idrender.Spec(specID)))
 }
 
 // readinessOverrideFailure builds the guard failure for a
@@ -881,18 +881,18 @@ func handleEmptyScoped(root string, rs next.ReadySet, exec executor.Executor, re
 				fmt.Printf("recovery: bd list --parent %s --status=in_progress\n", idrender.Bead(rs.EpicID))
 			}
 		} else {
-			fmt.Printf("recovery: mindspec next --spec %s\n", idrender.Spec(rs.SpecFlag))
+			fmt.Printf("recovery: mindspec next --spec %s\n", shellQuoteTarget(idrender.Spec(rs.SpecFlag)))
 		}
 	case open > 0:
 		fmt.Printf("%d open lifecycle bead(s), none selectable (any that are bd-ready but unmapped or unlinked are named above)\n", open)
 		fmt.Printf("recovery: bd blocked --parent %s\n", idrender.Bead(rs.EpicID))
 	case closed > 0:
-		fmt.Printf("recovery: mindspec impl approve %s\n", idrender.Spec(rs.SpecFlag))
+		fmt.Printf("recovery: mindspec impl approve %s\n", shellQuoteTarget(idrender.Spec(rs.SpecFlag)))
 	default:
-		fmt.Printf("recovery: mindspec plan approve %s\n", idrender.Spec(rs.SpecFlag))
+		fmt.Printf("recovery: mindspec plan approve %s\n", shellQuoteTarget(idrender.Spec(rs.SpecFlag)))
 	}
 	if detail.Stored != "" && detail.Derived != "" && detail.Stored != detail.Derived && !phase.IsBackwardMove(detail.Stored, detail.Derived) {
-		fmt.Printf("recovery: mindspec repair phase %s\n", idrender.Spec(rs.SpecFlag))
+		fmt.Printf("recovery: mindspec repair phase %s\n", shellQuoteTarget(idrender.Spec(rs.SpecFlag)))
 	}
 	if rs.HasBlockingNearMisses() {
 		return fmt.Errorf("no ready plan bead for spec %s; blocking near-misses are named above", idrender.Spec(rs.SpecFlag))

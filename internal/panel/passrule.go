@@ -23,11 +23,11 @@ func (r *Result) intactError() error {
 		return fmt.Errorf("panel registration unreadable")
 	}
 	p := r.Panel
-	scope := " --spec " + termsafe.Escape(p.Spec)
+	scope := " --spec " + promptShellQuote(termsafe.Escape(p.Spec))
 	if p.Gate == "adhoc" {
 		scope = " --gate adhoc"
 	}
-	recovery := fmt.Sprintf("mindspec panel create %s%s --round %d", termsafe.Escape((&Registration{Dir: r.Dir}).Slug()), scope, p.Round+1)
+	recovery := fmt.Sprintf("mindspec panel create %s%s --round %d", promptShellQuote(termsafe.Escape((&Registration{Dir: r.Dir}).Slug())), scope, p.Round+1)
 	if p.ExpectedReviewers < 2 {
 		return fmt.Errorf("panel registration requires at least 2 reviewers; recovery: %s --reviewers 2", recovery)
 	}

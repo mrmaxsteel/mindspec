@@ -272,11 +272,11 @@ func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle
 	if r.Fallback || r.State == lifecycle.ReattestStateMultipleFallbackCandidates {
 		return guard.NewFailure(
 			fmt.Sprintf("cannot re-attest bead %s: %s\nThe single-candidate, branch-tip, not-reverted and read checks must pass; nothing was written. For the dependent bead, override deliberately with fresh justification.", idrender.Bead(safeBeadID), r.Detail),
-			fmt.Sprintf("git log --merges --topo-order %s   (inspect the reachable candidates)", scanned),
+			fmt.Sprintf("git log --merges --topo-order %s   (inspect the reachable candidates)", shellQuoteTarget(termsafe.Escape(scanned))),
 			"mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>",
 		)
 	}
-	inspect := fmt.Sprintf("git log --first-parent --merges %s   (inspect the candidate merges before any recovery)", scanned)
+	inspect := fmt.Sprintf("git log --first-parent --merges %s   (inspect the candidate merges before any recovery)", shellQuoteTarget(termsafe.Escape(scanned)))
 	switch r.State {
 	case lifecycle.ReattestStateNoOwnedMerge:
 		// Truly-bare: the audited ADR-0035 mindspec-q9ea human
@@ -285,9 +285,9 @@ func reattestRefusalFailure(safeBeadID, beadBranch, scanned string, r *lifecycle
 		return guard.NewFailure(
 			fmt.Sprintf("cannot re-attest bead %s: %s.\n"+
 				"this is the genuinely-no-mechanical-corroboration state — the blessed exit is the audited human attested-restore: locate the merge you believe carried this bead's work, VERIFY it by inspecting its diff, then restore the branch ref at its second parent (`git branch %s <verified-second-parent-sha>`) — never run it blindly.",
-				safeBeadID, r.Detail, beadBranch),
+				safeBeadID, r.Detail, shellQuoteTarget(termsafe.Escape(beadBranch))),
 			inspect,
-			fmt.Sprintf("git branch %s <verified-second-parent-sha>   (attested-restore — human verification REQUIRED first)", beadBranch),
+			fmt.Sprintf("git branch %s <verified-second-parent-sha>   (attested-restore — human verification REQUIRED first)", shellQuoteTarget(termsafe.Escape(beadBranch))),
 		)
 	case lifecycle.ReattestStateAmbiguous:
 		return guard.NewFailure(

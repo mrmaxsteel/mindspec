@@ -978,3 +978,36 @@ func TestPanelSubmit_RefusesUnsafeAttemptFile(t *testing.T) {
 		})
 	}
 }
+
+func TestPanelLaunch_LargeDiagnosticTranscript(t *testing.T) {
+	for _, exit := range []int{0, 7} {
+		t.Run(fmt.Sprint(exit), func(t *testing.T) {
+			f := newLaunchFixture(t)
+			f.runner(t, `dd if=/dev/zero bs=1048576 count=17 2>/dev/null | tr '\000' x; printf '\n'`, exit)
+			out, err := f.run(t, false)
+			if exit == 0 {
+				if err != nil {
+					t.Fatalf("valid verdict after large diagnostics must submit: %v; output: %s", err, out)
+				}
+				f.status(t, "final")
+			} else {
+				if err == nil {
+					t.Fatal("nonzero runner exit must refuse automatic submission")
+				}
+				f.status(t, "launch_failed")
+			}
+			out, err = launchRun(t, panelRecoverCmd, "run", "R1")
+			if err != nil {
+				t.Fatalf("recover must submit the valid block: %v; output: %s", err, out)
+			}
+			f.status(t, "final")
+			subs, err := panel.LatestSubmissions(f.dir, 1)
+			if err != nil || subs["R1"].Seq != 1 {
+				t.Fatalf("wrong recovered submission: %+v %v", subs, err)
+			}
+			if exit != 0 && subs["R1"].Via != "recover" {
+				t.Fatalf("missing recover submission: %+v", subs["R1"])
+			}
+		})
+	}
+}

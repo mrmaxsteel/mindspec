@@ -128,7 +128,7 @@ func ReadSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time
 				if matches {
 					s.Status = "final"
 				}
-			case exists && !matches:
+			case (exists || readErr != nil && !os.IsNotExist(readErr)) && !matches:
 				s.Status = "unsubmitted"
 			default:
 				e, later := latestLaterAttempt(events)
@@ -177,9 +177,8 @@ func ReadSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time
 			}
 		}
 		if readErr != nil && !os.IsNotExist(readErr) {
-			s.Status = "malformed"
-			if round.VerdictSchema == 2 {
-				s.Status = "damaged"
+			if round.VerdictSchema != 2 {
+				s.Status = "malformed"
 			}
 			s.Annotations = append(s.Annotations, "verdict read failed: "+termsafe.Escape(readErr.Error()))
 		}

@@ -2,6 +2,7 @@
 package panellaunch
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -99,32 +100,62 @@ func ReadExit(dir string) (Exit, error) {
 
 // Extract accepts one complete marker pair and binds its nonce by digest.
 func Extract(raw []byte, nonceHash string) ([]byte, error) {
+	return extractReader(bytes.NewReader(raw), nonceHash)
+}
+
+const maxVerdictBytes = 1 << 20
+
+// extractReader discards diagnostic lines as it reads them. Only the verdict
+// body and a possible marker line are retained, each with a fixed size bound.
+func extractReader(input io.Reader, nonceHash string) ([]byte, error) {
+	reader := bufio.NewReader(input)
 	var nonce string
-	var body bytes.Buffer
-	started, ended := false, false
-	for _, line := range bytes.Split(raw, []byte{'\n'}) {
-		s := strings.TrimSuffix(string(line), "\r")
-		if strings.HasPrefix(s, "MINDSPEC-VERDICT-BEGIN ") {
-			if started || ended {
-				return nil, fmt.Errorf("multiple verdict blocks")
-			}
-			nonce = strings.TrimPrefix(s, "MINDSPEC-VERDICT-BEGIN ")
-			if Hash([]byte(nonce)) != nonceHash {
-				return nil, fmt.Errorf("verdict nonce differs")
-			}
-			started = true
-			continue
+	var body, marker bytes.Buffer
+	started, ended, lineStart, markerLine := false, false, true, false
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		if err != nil && err != bufio.ErrBufferFull && err != io.EOF {
+			return nil, err
 		}
-		if strings.HasPrefix(s, "MINDSPEC-VERDICT-END ") {
-			if !started || ended || s != "MINDSPEC-VERDICT-END "+nonce {
-				return nil, fmt.Errorf("invalid verdict end marker")
+		if len(fragment) > 0 {
+			if lineStart {
+				markerLine = bytes.HasPrefix(fragment, []byte("MINDSPEC-VERDICT-BEGIN ")) || bytes.HasPrefix(fragment, []byte("MINDSPEC-VERDICT-END "))
 			}
-			ended = true
-			continue
+			switch {
+			case markerLine:
+				if marker.Len()+len(fragment) > maxVerdictBytes {
+					return nil, fmt.Errorf("verdict marker exceeds size limit")
+				}
+				marker.Write(fragment)
+			case started && !ended:
+				if body.Len()+len(fragment) > maxVerdictBytes {
+					return nil, fmt.Errorf("verdict block exceeds size limit")
+				}
+				body.Write(fragment)
+			}
 		}
-		if started && !ended {
-			body.Write(line)
-			body.WriteByte('\n')
+		lineStart = err != bufio.ErrBufferFull
+		if lineStart && markerLine && marker.Len() > 0 {
+			line := strings.TrimSuffix(strings.TrimSuffix(marker.String(), "\n"), "\r")
+			if strings.HasPrefix(line, "MINDSPEC-VERDICT-BEGIN ") {
+				if started || ended {
+					return nil, fmt.Errorf("multiple verdict blocks")
+				}
+				nonce = strings.TrimPrefix(line, "MINDSPEC-VERDICT-BEGIN ")
+				if Hash([]byte(nonce)) != nonceHash {
+					return nil, fmt.Errorf("verdict nonce differs")
+				}
+				started = true
+			} else {
+				if !started || ended || line != "MINDSPEC-VERDICT-END "+nonce {
+					return nil, fmt.Errorf("invalid verdict end marker")
+				}
+				ended = true
+			}
+			marker.Reset()
+		}
+		if err == io.EOF {
+			break
 		}
 	}
 	if !started || !ended {
@@ -135,20 +166,20 @@ func Extract(raw []byte, nonceHash string) ([]byte, error) {
 
 // Verdict reads only the current attempt. File bytes are preserved exactly.
 func Verdict(dir, output, nonceHash string) ([]byte, error) {
-	name := "stdout.log"
 	if output == "file" {
-		name = "verdict.json"
+		return ReadAttemptFile(dir, "verdict.json", maxVerdictBytes)
 	}
-	// A stdout transcript may include reviewer diagnostics around its block.
-	const maxChannelBytes = 16 << 20
-	raw, err := ReadAttemptFile(dir, name, maxChannelBytes)
+	f, err := safefile.Open(filepath.Join(dir, "stdout.log"))
 	if err != nil {
 		return nil, err
 	}
-	if output == "file" {
-		return raw, nil
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
 	}
-	return Extract(raw, nonceHash)
+	// Appended diagnostics cannot extend the transcript being read.
+	return extractReader(io.LimitReader(f, info.Size()), nonceHash)
 }
 
 func Quota(dir string, signals []string) bool {

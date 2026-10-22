@@ -88,7 +88,7 @@ func TestReleaseSyncPhase_LockTimeoutSurfacedNotDiscarded(t *testing.T) {
 	if !guard.HasFinalRecoveryLine(out) {
 		t.Errorf("surfaced lock-timeout output must end with a recovery: <command> line: %q", out)
 	}
-	if !strings.Contains(out, "recovery: mindspec repair phase 010-test") {
+	if !strings.Contains(out, "recovery: mindspec repair phase '010-test'") {
 		t.Errorf("self-heal leg's recovery must be the convergent repair-phase command: %q", out)
 	}
 	if !strings.Contains(out, "recovery: bd show epic-1") {
@@ -124,7 +124,7 @@ func TestReleaseSyncPhase_WriteFailureSurfacedWithConvergentRecovery(t *testing.
 	if out == "" {
 		t.Fatal("expected releaseSyncPhase to surface the real bd write failure, got no output")
 	}
-	if !strings.Contains(out, "recovery: mindspec repair phase 010-test") {
+	if !strings.Contains(out, "recovery: mindspec repair phase '010-test'") {
 		t.Errorf("self-heal leg's recovery must be the convergent repair-phase command even on a plain write failure: %q", out)
 	}
 	if !strings.Contains(out, "recovery: bd show epic-1") {

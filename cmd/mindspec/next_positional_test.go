@@ -81,7 +81,11 @@ func TestNext_SelectorOnEmptySet_Refuses(t *testing.T) {
 				t.Fatalf("empty selector succeeded: %s", out)
 			}
 			requireText(t, err.Error(), tc.sentence)
-			if !strings.HasSuffix(err.Error(), "\nrecovery: mindspec next --spec 129-fixture") {
+			recovery := "\nrecovery: mindspec next --spec 129-fixture"
+			if tc.name == "pick" {
+				recovery = "\nrecovery: mindspec next --spec '129-fixture'"
+			}
+			if !strings.HasSuffix(err.Error(), recovery) {
 				t.Fatalf("selector recovery must end refusal: %v", err)
 			}
 			if f.audit(t) != before {

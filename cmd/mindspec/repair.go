@@ -209,7 +209,7 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return guard.NewFailure(
 			fmt.Sprintf("repair phase: %v", err),
-			fmt.Sprintf("cd into a mindspec-managed repository and re-run `mindspec repair phase %s`", idrender.Spec(specID)),
+			fmt.Sprintf("cd into a mindspec-managed repository and re-run `mindspec repair phase %s`", shellQuoteTarget(idrender.Spec(specID))),
 		)
 	}
 
@@ -245,7 +245,7 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		// read / merge write) — escape at this render sink.
 		return guard.NewFailure(
 			fmt.Sprintf("repair phase: v2 phase-semantics reconciliation for spec %s (epic %s) failed: %v", idrender.Spec(specID), idrender.Bead(epicID), next.RenderBDError(err)),
-			fmt.Sprintf("mindspec repair phase %s", idrender.Spec(specID)),
+			fmt.Sprintf("mindspec repair phase %s", shellQuoteTarget(idrender.Spec(specID))),
 		)
 	}
 
@@ -313,7 +313,7 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		}, nil
 	})
 	if lockErr != nil {
-		recovery := fmt.Sprintf("mindspec repair phase %s", specID)
+		recovery := fmt.Sprintf("mindspec repair phase %s", shellQuoteTarget(idrender.Spec(specID)))
 		if errors.Is(lockErr, errRepairDerivationFailed) || errors.Is(lockErr, errRepairNoDerivedPhase) {
 			recovery = fmt.Sprintf("bd show %s", epicID)
 		}
@@ -326,7 +326,7 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 			fmt.Sprintf("repair phase: refusing backward move for spec %s (epic %s): stored phase %q is ahead of the re-derived phase %q in lifecycle order (spec < plan < implement < review < done) — the derivation may be stale, or the epic genuinely regressed",
 				idrender.Spec(specID), idrender.Bead(epicID), freshStored, freshDerived),
 			fmt.Sprintf("bd show %s   (inspect the epic before forcing a backward move)", idrender.Bead(epicID)),
-			fmt.Sprintf("mindspec repair phase %s --force-backward \"<reason>\"   (only if the backward move is intentional)", idrender.Spec(specID)),
+			fmt.Sprintf("mindspec repair phase %s --force-backward \"<reason>\"   (only if the backward move is intentional)", shellQuoteTarget(idrender.Spec(specID))),
 		)
 	}
 

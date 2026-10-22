@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -513,7 +514,7 @@ func TestPanelSubmit_CoreRefusals(t *testing.T) {
 					return SubmitResolution{Family: s.Family, Model: s.Model, RunnerKind: "process", RunnerSource: "default"}, nil
 				}
 			case "landed":
-				wantRecovery = "recovery: mindspec panel create p --round 2"
+				wantRecovery = "recovery: mindspec panel create 'p' --round 2"
 				resolve = func(p Panel, s RosterSlot) (SubmitResolution, error) {
 					return SubmitResolution{Family: s.Family, Model: s.Model, RunnerKind: "harness", RunnerSource: "default", Landed: true}, nil
 				}
@@ -526,7 +527,7 @@ func TestPanelSubmit_CoreRefusals(t *testing.T) {
 					t.Fatal(err)
 				}
 				seedTestRecords(t, target.Dir, RoundRecord{Record: RecordRound, Spec: p.Spec, Panel: "p", Round: 2, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target, Gate: p.Gate, Roster: p.Roster, ExpectedReviewers: 2, Telemetry: p.Telemetry, CreatedAt: ledgerTime})
-				wantRecovery = "recovery: mindspec panel create p --round 3"
+				wantRecovery = "recovery: mindspec panel create 'p' --round 3"
 			case "sha":
 				v.ReviewedSHA = strings.Repeat("b", 40)
 			case "model":
@@ -538,7 +539,7 @@ func TestPanelSubmit_CoreRefusals(t *testing.T) {
 			case "not dispatched":
 				target.File = filepath.Join(target.SlotDir, "attempt-1", "v.json")
 			case "ended":
-				wantRecovery = "recovery: mindspec panel checkout --slot R1 --dispatch --replace"
+				wantRecovery = "recovery: mindspec panel checkout --slot 'R1' --dispatch --replace"
 				target.File = filepath.Join(target.SlotDir, "attempt-1", "v.json")
 				seedTestRecords(t, target.Dir, submitLaunch(1, 1, "dispatched"), submitLaunch(1, 1, "launch_failed"))
 			case "abandoned":
@@ -596,7 +597,7 @@ func TestPanelSubmit_LegacyRoundBeforeVerdict(t *testing.T) {
 				t.Fatal("legacy fixture has a schema pin")
 			}
 			_, err = Submit(target, b, resolve)
-			want := "round does not accept submissions\nrecovery: mindspec panel create p --round 2"
+			want := "round does not accept submissions\nrecovery: mindspec panel create 'p' --round 2"
 			if err == nil || err.Error() != want {
 				t.Fatalf("legacy round refusal: want %q, got %v", want, err)
 			}
@@ -606,6 +607,101 @@ func TestPanelSubmit_LegacyRoundBeforeVerdict(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(target.Dir, "R1-round-1.json")); !os.IsNotExist(err) {
 				t.Fatalf("legacy refusal wrote verdict: %v", err)
+			}
+		})
+	}
+}
+
+func assertRecoveryArgs(t *testing.T, recovery string, want []string) {
+	t.Helper()
+	const prefix = "mindspec panel create "
+	if !strings.HasPrefix(recovery, prefix) {
+		t.Fatalf("missing create command: %q", recovery)
+	}
+	script := `capture() { printf '%s\000' "$@"; }; capture ` + strings.TrimPrefix(recovery, prefix)
+	got, err := exec.Command("/bin/sh", "-c", script).CombinedOutput()
+	expected := strings.Join(want, "\x00") + "\x00"
+	if err != nil || string(got) != expected {
+		t.Fatalf("recovery=%q got=%q want=%q shell error=%v", recovery, got, expected, err)
+	}
+}
+
+func TestPanelSubmit_RecoveryPreservesSlug(t *testing.T) {
+	for _, slug := range []string{"panel review", "panel's review", "p;printf INJECTED;#"} {
+		t.Run(slug, func(t *testing.T) {
+			target, raw, resolve := submitFixtureSchema(t, 0)
+			dir := filepath.Join(filepath.Dir(target.Dir), slug)
+			if err := os.Rename(target.Dir, dir); err != nil {
+				t.Fatal(err)
+			}
+			target.Dir, target.Panel = dir, slug
+			_, err := Submit(target, raw, resolve)
+			if err == nil {
+				t.Fatal("historical submit must refuse")
+			}
+			_, recovery, ok := strings.Cut(err.Error(), "\nrecovery: ")
+			if !ok {
+				t.Fatal(err)
+			}
+			assertRecoveryArgs(t, recovery, []string{slug, "--round", "2"})
+		})
+	}
+}
+
+func TestPanelSubmit_IntegrityRecoveryPreservesArguments(t *testing.T) {
+	for _, slug := range []string{"panel review", "panel's review", "p;printf INJECTED;#"} {
+		t.Run(slug, func(t *testing.T) {
+			spec := "spec;printf INJECTED;#"
+			r := &Result{Dir: filepath.Join(t.TempDir(), slug), Panel: &Panel{Spec: spec, Round: 1, ExpectedReviewers: 1}}
+			err := r.intactError()
+			if err == nil {
+				t.Fatal("invalid reviewer count must refuse")
+			}
+			_, recovery, ok := strings.Cut(err.Error(), "recovery: ")
+			if !ok {
+				t.Fatal(err)
+			}
+			assertRecoveryArgs(t, recovery, []string{slug, "--spec", spec, "--round", "2", "--reviewers", "2"})
+		})
+	}
+}
+
+func TestPanelSubmit_ReplacementRecoveryPreservesSlot(t *testing.T) {
+	for _, slot := range []string{"panel review", "panel's review", "p;printf INJECTED;#"} {
+		t.Run(slot, func(t *testing.T) {
+			target, raw, resolve := submitFixture(t)
+			p := load(target.Dir).Panel
+			p.Roster[0].Slot = slot
+			if err := WriteSnapshot(target.Dir, p); err != nil {
+				t.Fatal(err)
+			}
+			target.Slot = slot
+			target.File = filepath.Join(target.SlotDir, "attempt-1", "verdict.json")
+			if err := os.MkdirAll(filepath.Dir(target.File), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			var v VerdictV2
+			if err := json.Unmarshal(raw, &v); err != nil {
+				t.Fatal(err)
+			}
+			v.Slot = slot
+			raw, err := json.Marshal(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Submit(target, raw, resolve); err == nil {
+				t.Fatal("undispatched attempt must refuse")
+			} else {
+				_, recovery, ok := strings.Cut(err.Error(), "\nrecovery: ")
+				const prefix = "mindspec panel checkout "
+				if !ok || !strings.HasPrefix(recovery, prefix) {
+					t.Fatalf("missing replacement recovery: %v", err)
+				}
+				got, shellErr := exec.Command("/bin/sh", "-c", `capture() { printf '%s\000' "$@"; }; capture `+strings.TrimPrefix(recovery, prefix)).CombinedOutput()
+				want := "--slot\x00" + slot + "\x00--dispatch\x00--replace\x00"
+				if shellErr != nil || string(got) != want {
+					t.Fatalf("recovery=%q got=%q want=%q error=%v", recovery, got, want, shellErr)
+				}
 			}
 		})
 	}

@@ -470,7 +470,7 @@ func TestRepairPhase_WriteFailureHasRecoveryLine(t *testing.T) {
 	if !guard.HasFinalRecoveryLine(err.Error()) {
 		t.Errorf("repair write failure must end with a recovery line: %v", err)
 	}
-	if !strings.Contains(err.Error(), "mindspec repair phase 092-agent-contract-hardening") {
+	if !strings.Contains(err.Error(), "mindspec repair phase '092-agent-contract-hardening'") {
 		t.Errorf("recovery should be the re-runnable repair command: %v", err)
 	}
 	if strings.Contains(err.Error(), "bd update --metadata") {

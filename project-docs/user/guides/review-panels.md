@@ -111,7 +111,7 @@ Verify reports one status per slot:
 | Status | Meaning |
 |:-------|:--------|
 | `final` | Latest final submission is complete and its file matches |
-| `damaged` | Counted final submission has a missing or changed file. Any unreadable verdict file on a v2 round also gives this status. On a pre-v2 round, an unreadable file gives `malformed`. |
+| `damaged` | Latest submission is final, is not VOID, and is closed. Its file is missing, unreadable or changed. |
 | `void` | Latest submitted verdict is VOID |
 | `draft` | Latest submission is a draft |
 | `running` | Current attempt is pending or running |
@@ -126,7 +126,8 @@ Exit 1 means a slot is running or missing, a harness draft is pending, or a quot
 Exit 2 applies in every other case. `--json` includes the effective family, model, lens, kind, annotations and `handoff_pending`.
 On a status-read error, verify exits 2. Text output includes a preview. With `--json`, output contains only a JSON error object.
 A slot can show `attempt <k> run.lock probe failed: ...` when its lock probe fails.
-An unreadable verdict marks only its slot as `damaged` on a v2 round or `malformed` on a pre-v2 round.
+On a v2 round, an unreadable verdict gives `damaged` only when the latest submission is final, is not VOID, and is closed. Otherwise it gives `unsubmitted`.
+On a pre-v2 round, an unreadable verdict gives `malformed`.
 The slot includes `verdict read failed: ...`. Verify still reports all slots.
 
 ## Decision and recovery

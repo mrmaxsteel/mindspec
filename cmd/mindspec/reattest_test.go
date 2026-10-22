@@ -28,7 +28,7 @@ func TestReattest_FallbackRefusalHasAuditedExit(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			err := reattestRefusalFailure("bead-one", "bead/bead-one", "spec/129-test", &lifecycle.ReattestRefusal{State: state, Fallback: true, Detail: "candidate refused"})
 			text := err.Error()
-			for _, want := range []string{"candidate refused", "nothing was written", "git log --merges --topo-order spec/129-test", "recovery: mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
+			for _, want := range []string{"candidate refused", "nothing was written", "git log --merges --topo-order 'spec/129-test'", "recovery: mindspec next <dependent> --allow-not-ready=MF-3 --evidence <path-to-justification>"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("refusal %q missing %q", text, want)
 				}

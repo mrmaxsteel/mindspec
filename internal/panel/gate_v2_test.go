@@ -568,7 +568,59 @@ func TestGateV2_OversizeVerdictWithoutSubmission(t *testing.T) {
 		t.Fatalf("oversize v2 verdict must be INVALID: %+v", r)
 	}
 	slots, err := ReadSlotStatuses(r, nil, time.Now())
+	if err != nil || len(slots) != 2 || slots[0].Status != "unsubmitted" || slots[1].Status != "missing" {
+		t.Fatalf("unreadable v2 verdict without submission must be unsubmitted: %+v %v", slots, err)
+	}
+}
+
+func TestGateV2_OversizeVerdictAfterClosedFinal(t *testing.T) {
+	target, data, resolve := submitFixture(t)
+	if _, err := Submit(target, data, resolve); err != nil {
+		t.Fatal(err)
+	}
+	createWrite(t, target.Dir, "R1-round-1.json", strings.Repeat("x", MaxVerdictBytes+1))
+	slots, err := ReadSlotStatuses(gateV2Read(t, target.Dir), nil, time.Now())
 	if err != nil || len(slots) != 2 || slots[0].Status != "damaged" || slots[1].Status != "missing" {
-		t.Fatalf("unreadable v2 verdict without submission must be damaged: %+v %v", slots, err)
+		t.Fatalf("unreadable closed final verdict must be damaged: %+v %v", slots, err)
+	}
+	if len(slots[0].Annotations) != 1 || !strings.HasPrefix(slots[0].Annotations[0], "verdict read failed: ") {
+		t.Fatalf("read failure annotation missing: %+v", slots[0])
+	}
+}
+
+func TestGateV2_UnreadableVerdictStatusOrder(t *testing.T) {
+	for _, state := range []string{"draft", "void", "replacement_dispatched", "replacement_failed"} {
+		t.Run(state, func(t *testing.T) {
+			target, data, resolve := submitFixture(t)
+			var v VerdictV2
+			if err := json.Unmarshal(data, &v); err != nil {
+				t.Fatal(err)
+			}
+			switch state {
+			case "draft":
+				v.Status = "draft"
+			case "void":
+				reason := "no review"
+				v.Verdict, v.VoidReason = "VOID", &reason
+			}
+			data, err := json.Marshal(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Submit(target, data, resolve); err != nil {
+				t.Fatal(err)
+			}
+			if strings.HasPrefix(state, "replacement_") {
+				seedTestRecords(t, target.Dir, submitLaunch(1, 1, "dispatched"))
+				if state == "replacement_failed" {
+					seedTestRecords(t, target.Dir, submitLaunch(1, 1, "launch_failed"))
+				}
+			}
+			createWrite(t, target.Dir, "R1-round-1.json", strings.Repeat("x", MaxVerdictBytes+1))
+			slots, err := ReadSlotStatuses(gateV2Read(t, target.Dir), nil, time.Now())
+			if err != nil || len(slots) != 2 || slots[0].Status != "unsubmitted" || len(slots[0].Annotations) == 0 {
+				t.Fatalf("unreadable file must follow unmatched-file rule: %+v %v", slots, err)
+			}
+		})
 	}
 }

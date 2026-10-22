@@ -328,7 +328,7 @@ consolidated-round-N.md, `panel.ConsolidatedName(N)`).
   of `APPROVE`, `REQUEST_CHANGES`, `REJECT` — the three values the gate
   acts on. A parseable file with any other verdict value is INVALID and blocks.
   This includes an empty, whitespace-only or missing verdict.
-  On a v2 round, an unreadable verdict is INVALID in tally and `damaged` in verify.
+  On a v2 round, an unreadable verdict is INVALID in tally. Verify gives `damaged` only when the latest submission is final, is not VOID, and is closed. Otherwise verify gives `unsubmitted`.
   On a pre-v2 round, an unreadable or unparseable file is malformed.
   It counts as missing on the roster and counts for nothing off the roster or on a legacy panel.
 - `hard_block` (optional boolean): a top-level sibling of `verdict`.

@@ -14,6 +14,8 @@ paths:
   - internal/setup/**
   - internal/panel/**
   - internal/panellaunch/**
+  - internal/safefile/**
+  - internal/shellquote/**
   - internal/rules/**
   - internal/bootstrap/**
   - internal/adr/**

@@ -11,11 +11,14 @@ import (
 )
 
 func TestAttemptReadersRefuseUnsafeFiles(t *testing.T) {
-	for _, api := range []string{"Verdict", "Digests", "ReadExit", "Quota"} {
+	for _, api := range []string{"Verdict", "StdoutVerdict", "Digests", "ReadExit", "Quota"} {
 		for _, kind := range []string{"symlink", "fifo", "directory"} {
 			t.Run(api+"/"+kind, func(t *testing.T) {
 				dir := t.TempDir()
 				name := "verdict.json"
+				if api == "StdoutVerdict" {
+					name = "stdout.log"
+				}
 				if api == "ReadExit" {
 					name = "exit.json"
 				}
@@ -51,6 +54,9 @@ func TestAttemptReadersRefuseUnsafeFiles(t *testing.T) {
 					switch api {
 					case "Verdict":
 						_, err := Verdict(dir, "file", "")
+						refused = err != nil
+					case "StdoutVerdict":
+						_, err := Verdict(dir, "stdout", "")
 						refused = err != nil
 					case "Digests":
 						_, err := Digests(dir)
