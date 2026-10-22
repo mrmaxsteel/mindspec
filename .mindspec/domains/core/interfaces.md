@@ -444,3 +444,27 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 ## Events
 
 None defined yet. Future: health check completion events for observability.
+
+### Epic lineage and full spec IDs
+
+`phase.FindEpicLineageWithCache(cache, beadID)` returns `(epicID, specID,
+LineageProvenance, error)`. `LineageProvenance` records `ParentChild` and
+`NonEpicParent` from one bead read. Only one parent-child dependency on an
+epic supplies lineage. A blocks edge does not supply lineage. Two epic
+parents refuse with `bd dep remove` recovery. A bead title supplies no lineage.
+`FindEpicForBead` and `FindEpicForBeadWithCache` keep their signatures.
+
+`phase.ResolveSpec(epic)` reads `spec_id`, then the legacy `spec_num` and
+`spec_title` pair, then a full ID in the epic's `[SPEC <id>]` title.
+A valid stored full ID decides. An invalid stored full ID refuses.
+Zero numeric metadata or an empty title makes the legacy pair absent.
+A legacy/title disagreement requires `bd update <epic> --set-metadata
+spec_id=<title-id>`. No source requires the spec directory name as the ID.
+A lettered ID keeps its letter. The numeric format applies only to the legacy pair.
+`ErrNoSpecID` marks an absent source. `ErrNoEpicLineage` marks an absent edge.
+`ErrNoEpicForSpec` marks a successful scoped lookup with no match.
+`ErrSpecResolution` marks a spec binding refusal; callers use `errors.Is` to branch on it.
+
+`Cache.FindEpicBySpecID` checks all epics, including closed epics, before
+it stores a match. Duplicate bindings refuse that spec and name all matching
+epics. The cache stores these resolution errors. It retries I/O errors.

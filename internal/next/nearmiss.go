@@ -1,11 +1,9 @@
 package next
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
@@ -27,37 +25,6 @@ type NearMiss struct {
 }
 
 func (m NearMiss) String() string { return m.Message + "\n" + strings.Join(m.Recoveries, "\n") }
-
-// hasEpicDependency distinguishes dependency resolution from the title fallback.
-// FindEpicForBead deliberately exposes only the resolved identity, so the
-// ambiguous foreign-epic case inspects the dependency list rather than guessing.
-func hasEpicDependency(id, epic string) (bool, error) {
-	if err := idvalidate.BeadID(id); err != nil {
-		return false, err
-	}
-	out, err := runBDFn("show", id, "--json")
-	if err != nil {
-		return false, err
-	}
-	var rows []struct {
-		Dependencies []struct {
-			ID        string
-			IssueType string `json:"issue_type"`
-		}
-	}
-	if err := json.Unmarshal(out, &rows); err != nil {
-		return false, err
-	}
-	if len(rows) == 0 {
-		return false, fmt.Errorf("bead %s disappeared during lineage read", idrender.Bead(id))
-	}
-	for _, dep := range rows[0].Dependencies {
-		if dep.ID == epic && strings.EqualFold(dep.IssueType, "epic") {
-			return true, nil
-		}
-	}
-	return false, nil
-}
 
 func classifyNearMiss(item BeadInfo, epic, spec string, n int, form bool, l lineageInfo) (NearMiss, bool) {
 	// A mapped row with this lineage is a plan bead even if a ready
@@ -94,19 +61,9 @@ func classifyNearMiss(item BeadInfo, epic, spec string, n int, form bool, l line
 		if l.none {
 			m.Message += "; it also has no lineage, so readiness cannot evaluate it at all"
 		}
-	case form && l.epic != "" && l.epic != epic:
-		m.Class, m.Blocking = "N2b", true
-		number := strings.SplitN(l.spec, "-", 2)[0]
-		m.Message = prefix + fmt.Sprintf("its lineage resolves to %s by title number %s", idrender.Bead(l.epic), number)
-		reparent := fmt.Sprintf("bd update %s --parent %s", id, e)
-		if number == strings.SplitN(spec, "-", 2)[0] {
-			m.Recoveries = []string{"recovery: " + reparent}
-		} else {
-			m.Recoveries = append(m.Recoveries, fmt.Sprintf("recovery (only if %s belongs to %s): %s", id, s, reparent))
-		}
 	case form && l.none:
 		m.Class, m.Blocking = "N1", true
-		m.Message = prefix + "it has no lineage (no parent edge and no spec tag in its title)"
+		m.Message = prefix + "it has no lineage (no parent-child edge to an epic)"
 		m.Recoveries = []string{fmt.Sprintf("recovery: bd update %s --parent %s", id, e)}
 	default:
 		if link == "" {

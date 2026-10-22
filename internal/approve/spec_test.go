@@ -2,6 +2,7 @@ package approve
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"os"
@@ -200,7 +201,7 @@ func TestScaffoldPlanEmitsADRCitations(t *testing.T) {
 	}
 }
 
-func TestSpecApprove_EpicHasNoSpecID(t *testing.T) {
+func TestSpecApprove_WritesSpecID(t *testing.T) {
 	fakeDir := t.TempDir()
 	logPath := filepath.Join(fakeDir, "bd.log")
 	if err := os.WriteFile(filepath.Join(fakeDir, "bd"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BD_INVOCATIONS\"\nexit 1\n"), 0755); err != nil {
@@ -240,8 +241,8 @@ func TestSpecApprove_EpicHasNoSpecID(t *testing.T) {
 			if !epic || !found || meta["spec_num"] != float64(129) {
 				t.Fatalf("expected epic metadata, got %q", args)
 			}
-			if _, ok := meta["spec_id"]; ok {
-				t.Fatalf("epic must not carry spec_id: %q", args)
+			if meta["spec_id"] != specID {
+				t.Fatalf("epic must carry the full spec_id: %q", args)
 			}
 			return []byte(`{"id":"epic-129"}`), nil
 		}
@@ -259,5 +260,37 @@ func TestSpecApprove_EpicHasNoSpecID(t *testing.T) {
 	}
 	if creates != 1 {
 		t.Fatalf("expected one checked epic create, got %d", creates)
+	}
+}
+
+func TestSpecApprove_DuplicateRefusesBeforeApproval(t *testing.T) {
+	for _, specID := range []string{"129-linkage", "129b-linkage"} {
+		t.Run(specID, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, ".mindspec/specs", specID)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "spec.md")
+			before := specE2EValidSpecMD(specID)
+			if err := os.WriteFile(path, []byte(before), 0644); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) {
+				return []byte(fmt.Sprintf(`[{"id":"epic-a","metadata":{"spec_id":%q}},{"id":"epic-b","status":"closed","metadata":{"spec_id":%q}}]`, specID, specID)), nil
+			}))
+			mock := &executor.MockExecutor{}
+			_, err := ApproveSpec(root, specID, "test", mock)
+			if err == nil || !strings.Contains(err.Error(), "epic-a, epic-b") {
+				t.Fatalf("duplicate approval: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != before || len(mock.Calls) != 0 {
+				t.Fatal("duplicate refusal changed approval or executor state")
+			}
+		})
 	}
 }

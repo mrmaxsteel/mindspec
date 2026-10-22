@@ -2,6 +2,7 @@ package phase
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -13,6 +14,9 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
+// ErrNoEpicForSpec marks a successful lookup with no matching epic.
+var ErrNoEpicForSpec = errors.New("no epic found for spec")
+
 // Cache memoizes bd subprocess results within a single CLI invocation.
 //
 // Lifetime: ONE Cache MUST be created per cobra RunE (or top-level entrypoint)
@@ -23,8 +27,8 @@ import (
 // Safety: methods are safe for sequential use; the embedded sync.Mutex allows
 // concurrent reads from goroutines if the CLI ever fans out work.
 //
-// Error policy: errors are NOT memoized. A transient bd failure on one call
-// inside an invocation does not poison subsequent attempts. "Not found"
+// Error policy: scoped spec-resolution errors are memoized. I/O errors are
+// not memoized. A transient bd failure does not poison subsequent attempts. "Not found"
 // (successful query, zero matches) IS memoized as a sentinel — a present
 // map entry with an empty/nil value.
 //
@@ -41,10 +45,11 @@ type Cache struct {
 	openAllLoaded  bool
 
 	// Per-key memoization. Presence of the map key means "looked up successfully".
-	// Errors are never stored.
+	// I/O errors are never stored. specErrors stores data-resolution refusals.
 	epicByID   map[string]*EpicInfo   // epicID → bd show result; nil pointer = "looked up, not found"
 	children   map[string][]ChildInfo // epicID → fetchChildren result
-	specToEpic map[string]string      // specID → epicID; "" = looked up, not found
+	specErrors map[string]error
+	specToEpic map[string]string // specID → epicID; "" = looked up, not found
 }
 
 // NewCache constructs an empty Cache. Callers should create one per cobra RunE
@@ -54,6 +59,7 @@ func NewCache() *Cache {
 		epicByID:   make(map[string]*EpicInfo),
 		children:   make(map[string][]ChildInfo),
 		specToEpic: make(map[string]string),
+		specErrors: make(map[string]error),
 	}
 }
 
@@ -169,14 +175,18 @@ func (c *Cache) GetChildren(epicID string) ([]ChildInfo, error) {
 }
 
 // FindEpicBySpecID resolves a spec ID to its epic ID using AllEpics + the
-// existing ExtractSpecMetadata/SpecIDFromMetadata logic. Memoizes the mapping.
+// full-ID resolver. It checks all epics, including closed epics, before caching.
 func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 	if c != nil {
 		c.mu.Lock()
+		if err, ok := c.specErrors[specID]; ok {
+			c.mu.Unlock()
+			return "", err
+		}
 		if eid, ok := c.specToEpic[specID]; ok {
 			c.mu.Unlock()
 			if eid == "" {
-				return "", fmt.Errorf("no epic found for spec %s", idrender.Spec(specID))
+				return "", fmt.Errorf("%w %s", ErrNoEpicForSpec, idrender.Spec(specID))
 			}
 			return eid, nil
 		}
@@ -186,40 +196,46 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	var matches []string
+	var resolutionErr error
 	for _, epic := range epics {
-		num, title := ExtractSpecMetadata(epic)
-		if num == 0 || title == "" {
+		derived, err := ResolveSpec(epic)
+		if err != nil {
+			legacy, _ := legacySpecID(epic)
+			if titleSpecID(epic.Title) == specID || legacy == specID || epic.Metadata["spec_id"] == specID {
+				resolutionErr = err
+			}
 			continue
 		}
-		// D1 (ADR-0042): a malformed derivation can never match a
-		// well-formed specID lookup — treat it as no-match rather than
-		// letting the comparison itself observe a hostile derived value.
-		derived, derivedErr := SpecIDFromMetadata(num, title)
-		if derivedErr != nil || derived != specID {
-			continue
+		if derived == specID && idvalidate.BeadID(epic.ID) == nil {
+			matches = append(matches, epic.ID)
 		}
-		// Round-9 RETURN gate (ADR-0042 §1, gate-all-ids): epic.ID is
-		// bd-sourced and therefore agent-writable (bd create --force
-		// --id=<arbitrary> is empirically unsafe) — validate BEFORE it is
-		// ever returned as an ID a caller (fetchChildren,
-		// ResolveActiveBead, the `bd list --parent` sites) will treat as
-		// trusted and embed in bd/git argv.
-		if idvalidate.BeadID(epic.ID) != nil {
-			continue
-		}
+	}
+	if len(matches) > 1 {
+		resolutionErr = fmt.Errorf("%w: multiple epics resolve to spec %s: %s; keep one epic bound to this spec\nrecovery: bd show %s --json", ErrSpecResolution, idrender.Spec(specID), strings.Join(matches, ", "), idrender.Bead(matches[0]))
+	}
+	if resolutionErr != nil {
 		if c != nil {
 			c.mu.Lock()
-			c.specToEpic[specID] = epic.ID
+			c.specErrors[specID] = resolutionErr
 			c.mu.Unlock()
 		}
-		return epic.ID, nil
+		return "", resolutionErr
+	}
+	if len(matches) == 1 {
+		if c != nil {
+			c.mu.Lock()
+			c.specToEpic[specID] = matches[0]
+			c.mu.Unlock()
+		}
+		return matches[0], nil
 	}
 	if c != nil {
 		c.mu.Lock()
 		c.specToEpic[specID] = "" // memoize the not-found
 		c.mu.Unlock()
 	}
-	return "", fmt.Errorf("no epic found for spec %s", idrender.Spec(specID))
+	return "", fmt.Errorf("%w %s", ErrNoEpicForSpec, idrender.Spec(specID))
 }
 
 // FetchChildren returns all children (any status) of an epic via a single

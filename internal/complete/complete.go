@@ -537,6 +537,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				)
 			}
 		}
+	case errors.Is(lineageErr, phase.ErrSpecResolution):
+		return nil, fmt.Errorf("resolving the spec binding for bead %s failed before any mutation: %w", safeBeadID, lineageErr)
 	case errors.Is(lineageErr, phase.ErrMalformedSpecMetadata):
 		// D1 explicit-verb refusal (ADR-0042 §1, spec 120 AC-4): the
 		// lineage lookup SUCCEEDED in finding an epic, but that epic's

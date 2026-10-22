@@ -2,6 +2,7 @@ package approve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,6 +72,15 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 		return nil, err
 	}
 
+	specNum, _ := parseSpecID(specID)
+	existingEpicID, lookupErr := phase.FindEpicBySpecID(specID)
+	if lookupErr != nil && !errors.Is(lookupErr, phase.ErrNoEpicForSpec) {
+		if errors.Is(lookupErr, phase.ErrSpecResolution) {
+			return nil, lookupErr
+		}
+		return nil, fmt.Errorf("%w\nrecovery: mindspec spec approve %s", next.RenderBDError(lookupErr), idrender.Spec(specID))
+	}
+
 	// Step 2: Update spec frontmatter + markdown Approval section.
 	specPath := filepath.Join(specDir, "spec.md")
 	if err = updateSpecApproval(specPath, approvedBy); err != nil {
@@ -81,9 +91,7 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	// Epic creation = spec approval gate. The epic's existence is the durable record.
 	// Idempotent: if the epic already exists (e.g., pre-created by test setup or
 	// a previous approval attempt), skip creation.
-	specNum, _ := parseSpecID(specID)
 	if specNum > 0 {
-		existingEpicID, _ := phase.FindEpicBySpecID(specID)
 		if existingEpicID != "" {
 			// Epic already exists — skip creation (idempotent).
 			result.Warnings = append(result.Warnings, fmt.Sprintf("lifecycle epic already exists: %s", existingEpicID))
@@ -103,7 +111,7 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 				return nil, fmt.Errorf("spec number collision: %w", err)
 			}
 			// Spec 080: include mindspec_phase in initial epic metadata
-			metadata := fmt.Sprintf(`{"spec_num":%d,"spec_title":"%s","mindspec_phase":"plan"}`, specNum, titleFromSpecID(specID))
+			metadata := fmt.Sprintf(`{"spec_id":"%s","spec_num":%d,"spec_title":"%s","mindspec_phase":"plan"}`, specID, specNum, titleFromSpecID(specID))
 			epicTitle := fmt.Sprintf("[SPEC %s] %s", specID, titleFromSpecID(specID))
 			out, epicErr := specRunBDFn("create", "--title", epicTitle, "--type=epic", "--metadata", metadata, "--json")
 			if epicErr != nil {

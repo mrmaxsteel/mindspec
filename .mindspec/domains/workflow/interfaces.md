@@ -859,3 +859,24 @@ refutation removes each covered item whose round and raw-text hash still match.
 It replays the recorded landed identity through `SetLandedReview` before
 `CompleteBead`. A resume with no recorded identity supplies none. Each new marker
 attestation overwrites both identity fields, including when there was no Allow.
+
+### Lineage health and spec IDs
+
+Spec approval writes the full spec ID to epic metadata `spec_id`.
+Legacy `spec_num` and `spec_title` stay available for numeric queries.
+Plan approval, lifecycle scans and scoped next selection use the phase
+package's full-ID resolver. A lettered ID resolves to its own directory.
+Scoped lookup refuses duplicate epic bindings, including closed duplicates.
+
+`mindspec spec create` accepts a bare slug or a numeric full ID. It refuses
+a new lettered full ID. Existing lettered spec directories remain valid.
+
+Doctor runs `checkLineage` after the lifecycle integrity check. It reports
+each open bead that only the old title rule would resolve, at Warn, with
+`bd update <bead> --parent <epic>` recovery. It also reports duplicate epic
+bindings at Warn. It continues to the remaining checks.
+
+Scoped next selection uses `phase.FindEpicLineageWithCache`. Its returned
+provenance replaces the second bead read. A foreign parent-child epic stays
+inspection-only. A mapped title-only row has no lineage and is N1.
+Readiness accepts a positional bead index only for the exact `<epic>.<N>` ID.

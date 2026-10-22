@@ -1385,7 +1385,7 @@ pinned bypass disclosure below, making no claim about readiness.
 
 Scoped selection uses one uncapped global `bd ready -n 0 --json` result.
 A selectable member is an open non-epic whose ID is exactly `<E>.<N>`
-(N ≥ 1, one segment), whose unchanged `phase.FindEpicForBead` resolver
+(N ≥ 1, one segment), whose `phase.FindEpicLineageWithCache` resolver
 returns E, and whose positional heading AND `work_chunks` entry N exist.
 `bead.PlanBeadIndex` and `readiness.PlanMapsBead` are the shared predicates.
 Issue type, title and metadata are not membership inputs. Members keep bd's
@@ -1399,14 +1399,14 @@ need mapping. Readiness still reads the checkout, as the notice discloses.
 
 Every linked non-member is named by ID with its reason and recovery.
 Classification order is N2a (non-epic parent), N2c (foreign epic dependency),
-N4 (unmapped follow-up), N2b (foreign title lineage), N1 (mapped but no
-lineage), N3 (parent/title/metadata link without the plan-bead predicate).
-N1, N2a, N2b, N2c and lifecycle parent-edge N3 rows block an empty-set
+N4 (unmapped follow-up), N1 (mapped but no lineage), N3 (parent/title/metadata link without the plan-bead predicate).
+N1, N2a, N2c and lifecycle parent-edge N3 rows block an empty-set
 success. N4, non-lifecycle parent-edge N3, title-only and metadata-only N3
 rows are informational. Recoveries never overwrite a named parent.
-A detached mapped N1, or same-number N2b, can recover by adding the intended
-epic parent; other-number N2b first calls for inspection and makes that
-edit conditional on ownership.
+A detached mapped N1 can recover by adding the intended epic parent.
+A title tag does not supply lineage. A foreign parent-child epic stays N2c
+and requires inspection. A blocks edge does not supply lineage. Each plan
+row uses one bead read; the resolver returns edge provenance with the ID.
 
 Selectors are checked before empty-set handling. A positional near-miss
 gets its reason even when no members exist. An N4 with lineage E can
@@ -1518,3 +1518,24 @@ no automatic fix and uses the same dependent recovery commands. The scan
 uses the invocation cache to resolve each surviving bead branch to its epic.
 The dependent read uses uncached tracker reads, with one `bd show` per
 eligible child.
+
+### Full spec binding and lineage checks
+
+The workflow uses one parent-child epic as bead lineage. The phase resolver
+returns its provenance with the full spec ID. Scoped next selection uses
+this result without a second bead read. A foreign parent with no spec ID
+stays an inspection-only N2a near-miss. A foreign spec-bound parent stays
+N2c even when its binding needs repair. Both use `bd show <bead> --json`;
+only the scoped spec's own binding can refuse selection. Readiness requires
+the exact `<epic>.<N>` form for positional mapping.
+
+Spec approval checks the full ID for duplicate bindings before it writes
+approval, including for existing lettered specs. It writes `spec_id` on
+each new epic. Plan approval and lifecycle scans use full-ID resolution. The stored ID takes priority over legacy
+numeric metadata and epic title IDs. Conflicting legacy and title IDs
+require an explicit stored-ID repair. Lettered IDs retain their letter.
+A scoped lookup checks closed epics too. Duplicate bindings block that
+spec only. Doctor reports duplicate bindings and open title-only beads at
+Warn, then runs the remaining checks. The lineage check skips projects
+without a Beads store or redirect. An export alone does not enable the check. New spec creation refuses lettered IDs;
+existing lettered directories stay valid.

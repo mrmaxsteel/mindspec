@@ -193,7 +193,7 @@ func TestNext_N4WithLineageReachesMF1(t *testing.T) {
 func TestNext_N4ForeignLineagePositionalRefuses(t *testing.T) {
 	f := newNextHonestyFixture(t)
 	f.epics = append(f.epics, map[string]interface{}{"id": "epic-777", "title": "[SPEC 777] other", "status": "open", "issue_type": "epic", "metadata": map[string]interface{}{"spec_num": 777, "spec_title": "other", "mindspec_phase": "plan"}})
-	f.rows = append(f.rows, nextHonestyRow("epic-129.4", "[777] foreign follow-up", "", "task", "open"))
+	f.rows = append(f.rows, nextHonestyRow("epic-129.4", "[777] foreign follow-up", "epic-777", "task", "open"))
 	f.write(t)
 	old := nextGateReadinessFn
 	calls := 0
@@ -210,7 +210,7 @@ func TestNext_N4ForeignLineagePositionalRefuses(t *testing.T) {
 	if err == nil {
 		t.Fatal("foreign-lineage N4 selected")
 	}
-	requireText(t, err.Error(), "bead epic-129.4 is a follow-up child of epic epic-129 that plan.md does not map", "recovery: bd show epic-129.4 --json")
+	requireText(t, err.Error(), "bead epic-129.4 has the plan-bead form for epic epic-129, but its lineage resolves to epic-777", "recovery: bd show epic-129.4 --json")
 }
 
 func TestNext_EpicPositionalRefuses(t *testing.T) {
