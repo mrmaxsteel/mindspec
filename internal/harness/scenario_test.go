@@ -521,19 +521,20 @@ func TestInstructPhaseDetection(t *testing.T) {
 
 		// Epic with no children → plan phase (spec approved, plan being drafted)
 		sandbox.CreateSpecEpic(specID)
-		setupWorktrees(sandbox, specID, "", "plan")
 		sandbox.Commit("setup: plan mode")
+		wt := setupWorktrees(sandbox, specID, "", "plan")
 
-		out, err := sandbox.Run("mindspec", "instruct", "--format=json")
+		// Run from the spec worktree. The sandbox's primary checkout is on
+		// the host's init.defaultBranch; when that is the protected "main",
+		// instruct reports idle there by design, so a main-CWD probe
+		// measured the host's git config instead of phase detection.
+		out, err := sandbox.RunIn(wt.SpecWtDir, "mindspec", "instruct", "--format=json")
 		if err != nil {
 			t.Logf("mindspec instruct exit: %v", err)
 		}
 		mode := parseInstructJSON(t, out)
-		// From main CWD with spec worktree active, instruct emits a redirect
-		// telling the agent to cd into the worktree. Both are acceptable —
-		// redirect proves it detected the active worktree correctly.
-		if mode != "plan" && mode != "redirect" {
-			t.Errorf("expected plan or redirect, got %q\nraw: %s", mode, out)
+		if mode != "plan" {
+			t.Errorf("expected plan, got %q\nraw: %s", mode, out)
 		}
 	})
 
@@ -545,18 +546,17 @@ func TestInstructPhaseDetection(t *testing.T) {
 		beadID := sandbox.CreateBead("["+specID+"] Test task", "task", epicID)
 		sandbox.ClaimBead(beadID)
 
-		setupWorktrees(sandbox, specID, beadID, "implement")
 		sandbox.Commit("setup: implement mode")
+		wt := setupWorktrees(sandbox, specID, beadID, "implement")
 
-		out, err := sandbox.Run("mindspec", "instruct", "--format=json")
+		// Run from the bead worktree (see the plan case for why not main).
+		out, err := sandbox.RunIn(wt.BeadWtDir, "mindspec", "instruct", "--format=json")
 		if err != nil {
 			t.Logf("mindspec instruct exit: %v", err)
 		}
 		mode := parseInstructJSON(t, out)
-		// From main CWD with nested bead worktree active, instruct emits a
-		// redirect. Both are acceptable — redirect proves correct detection.
-		if mode != "implement" && mode != "redirect" {
-			t.Errorf("expected implement or redirect, got %q\nraw: %s", mode, out)
+		if mode != "implement" {
+			t.Errorf("expected implement, got %q\nraw: %s", mode, out)
 		}
 	})
 }

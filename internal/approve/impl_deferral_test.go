@@ -723,3 +723,38 @@ func TestImplPreflight_RejectsDuplicatePanelIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestImplApprove_SourceBoundDeferralCurrency(t *testing.T) {
+	for _, source := range []string{panel.VerdictApprove, panel.VerdictRequestChanges} {
+		t.Run(source, func(t *testing.T) {
+			t.Setenv(panel.SkipPanelEnv, "0")
+			root := core3ApproveRoot(t)
+			reg := core3Fixture(t, root, "bound-deferral", "final_review", false)
+			v := panel.FindingVerdict{Verdict: panel.VerdictRequestChanges, ConcreteChangesRequired: []string{"same finding"}}
+			core3JSON(t, reg.Dir, "R1-round-1.json", v)
+			res, err := panel.Tally(reg.Dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := res.Verdicts[0].Findings[0]
+			d := panel.Deferral{Slot: "R1", Round: 1, Finding: f.ID, FindingSHA256: f.SHA256, FindingText: f.Text, Bead: "follow-up", By: "operator", CreatedAt: core3Time, SourceVerdict: source, SourceFileSHA256: res.Verdicts[0].FileSHA256}
+			reg.Panel.Deferrals = []panel.Deferral{d}
+			core3Append(t, reg.Dir, panel.DeferralRecord{Record: panel.RecordDeferral, Spec: reg.Panel.Spec, Panel: reg.Slug(), Deferral: d})
+			core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+			round := 1
+			row := panel.DispositionRow{Record: panel.RecordDisposition, ID: "bound-row", Spec: reg.Panel.Spec, Gate: reg.Panel.Gate, Panel: reg.Slug(), Reviewer: "R1", Model: "model-a", Severity: "blocking", Summary: f.Text, ConvergentWith: []string{}, Disposition: "confirmed-deferred", EvidenceRef: d.Bead, CreatedAt: d.CreatedAt, Round: &round}
+			core3Append(t, reg.Dir, row, panel.DeriveCoverageManifest(res))
+			if source == panel.VerdictRequestChanges {
+				if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err != nil {
+					t.Fatalf("current bound deferral must pass: %v", err)
+				}
+			}
+			// Same finding and terminal verdict, but different submission bytes.
+			v.Rationale = "resubmitted"
+			core3JSON(t, reg.Dir, "R1-round-1.json", v)
+			if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err == nil || !strings.Contains(err.Error(), "R1") {
+				t.Fatalf("impl approve accepted ineffective %s deferral: %v", source, err)
+			}
+		})
+	}
+}

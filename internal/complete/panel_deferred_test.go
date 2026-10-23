@@ -718,3 +718,74 @@ func TestGateTime_AuditedDeferralScope(t *testing.T) {
 		})
 	}
 }
+
+// This guards the gate rejection; the completion-time currency recheck is
+// exercised separately below, after a prior Allow decision.
+func TestComplete_GateBlocksSupersededDeferrals(t *testing.T) {
+	for _, source := range []string{panel.VerdictApprove, panel.VerdictRequestChanges} {
+		t.Run(source, func(t *testing.T) {
+			t.Setenv(panel.SkipPanelEnv, "0")
+			root := t.TempDir()
+			reg := core3Fixture(t, root, "bound-deferral", "bead", false)
+			v := panel.FindingVerdict{Verdict: panel.VerdictRequestChanges, ConcreteChangesRequired: []string{"same finding"}}
+			core3JSON(t, reg.Dir, "R1-round-1.json", v)
+			res, err := panel.Tally(reg.Dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := res.Verdicts[0].Findings[0]
+			d := panel.Deferral{Slot: "R1", Round: 1, Finding: f.ID, FindingSHA256: f.SHA256, FindingText: f.Text, Bead: "follow-up", By: "operator", CreatedAt: core3Time, SourceVerdict: source, SourceFileSHA256: res.Verdicts[0].FileSHA256}
+			reg.Panel.Deferrals = []panel.Deferral{d}
+			core3Append(t, reg.Dir, panel.DeferralRecord{Record: panel.RecordDeferral, Spec: reg.Panel.Spec, Panel: reg.Slug(), Deferral: d})
+			core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+			v.Rationale = "resubmitted"
+			core3JSON(t, reg.Dir, "R1-round-1.json", v)
+			orig := gateRevParseFn
+			t.Cleanup(func() { gateRevParseFn = orig })
+			gateRevParseFn = func(string, string) (string, error) { return reg.Panel.ReviewedHeadSHA, nil }
+			results, err := PanelGate(*reg.Panel.BeadID, []string{root}, "", true, nil)
+			if err == nil || len(results) != 1 || results[0].Decision.Action != panel.Block || !strings.Contains(err.Error(), "unresolved") {
+				t.Fatalf("complete accepted ineffective %s deferral: decisions=%+v err=%v", source, results, err)
+			}
+		})
+	}
+}
+
+// A verdict may be resubmitted after the gate produced an Allow decision.
+// The completion-time recheck must discard its now audit-only deferrals.
+func TestComplete_DeferralRecheckDropsSupersededSources(t *testing.T) {
+	for _, source := range []string{panel.VerdictApprove, panel.VerdictRequestChanges} {
+		t.Run(source, func(t *testing.T) {
+			saveAndRestore(t)
+			t.Setenv(panel.SkipPanelEnv, "0")
+			stubPhaseEpic(t, "130-core3", "epic-130-core3")
+			deferralBD(t, "epic-130-core3")
+			store := newFakeMetadataStore()
+			store.wire(t)
+			reg := deferredFixture(t, t.TempDir(), false)
+			res, err := panel.Tally(reg.Dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := reg.Panel.Deferrals[0]
+			d.SourceVerdict, d.SourceFileSHA256 = source, res.Verdicts[0].FileSHA256
+			// Preserve the source binding in both the registration and its audit.
+			reg.Panel.Deferrals[0] = d
+			core3Append(t, reg.Dir, panel.DeferralRecord{Record: panel.RecordDeferral, Spec: reg.Panel.Spec, Panel: reg.Slug(), Deferral: d})
+			core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
+			v := panel.FindingVerdict{Verdict: panel.VerdictRequestChanges, ConcreteChangesRequired: []string{"test finding /tmp/x", "second ask"}, Rationale: "resubmitted after gate"}
+			core3JSON(t, reg.Dir, "R1-round-1.json", v)
+			results := []PanelGateResult{{Registration: reg, Decision: panel.Decision{Action: panel.Allow, AppliedDeferrals: []panel.Deferral{d}}}}
+			if err := checkAndRecordPanelDeferrals("reviewed-bead", results, true); err != nil {
+				t.Fatal(err)
+			}
+			pending, err := DecodePanelDeferred(store.data["reviewed-bead"], "deferral_pending_entries")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(pending) != 0 {
+				t.Fatalf("superseded %s source became a completion obligation: %+v", source, pending)
+			}
+		})
+	}
+}

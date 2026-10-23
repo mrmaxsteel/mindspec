@@ -147,6 +147,7 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+cmd/mindspec/panel_defer.go	runPanelDefer	arg1:unprovable
 internal/approve/impl.go	implFinalizeFailure	arg1:unprovable
 internal/lifecycle/merge_state.go	RestoreMergeRecovery	variadic-spread:commands
 internal/lifecycle/stale_open.go	StaleOpenBead.Message	arg1:unprovable

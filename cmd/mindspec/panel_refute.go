@@ -123,6 +123,44 @@ func refuteFinding(dir, slot string, round int, id string) (panel.Finding, error
 	if strings.ToUpper(strings.TrimSpace(v.Verdict)) != panel.VerdictRequestChanges || v.HardBlock {
 		return panel.Finding{}, fmt.Errorf("only REQUEST_CHANGES without hard_block can be refuted")
 	}
+	return pickFinding(v, id)
+}
+
+// deferVerdict reads a verdict for panel defer. A finding on an APPROVE
+// verdict (a minor note in v2 findings or legacy concrete_changes_required)
+// can go to a follow-up bead too; REJECT, INVALID and hard_block verdicts
+// cannot. An APPROVE
+// verdict's items get the same ccr[i] ids and hashes as REQUEST_CHANGES
+// items. The second value is the verdict word, which sets the severity.
+func deferVerdict(dir, slot string, round int) (panel.FindingVerdict, string, error) {
+	v, err := panel.ReadSubmittedFindingVerdict(dir, slot, round)
+	if err != nil {
+		return panel.FindingVerdict{}, "", err
+	}
+	verdict := strings.ToUpper(strings.TrimSpace(v.Verdict))
+	if (verdict != panel.VerdictRequestChanges && verdict != panel.VerdictApprove) || v.HardBlock {
+		return panel.FindingVerdict{}, "", fmt.Errorf("only APPROVE or REQUEST_CHANGES findings without hard_block can be deferred")
+	}
+	if verdict == panel.VerdictApprove {
+		if len(v.ConcreteChangesRequired) == 0 {
+			return panel.FindingVerdict{}, "", fmt.Errorf("the APPROVE verdict lists no findings to defer")
+		}
+		v.Verdict = panel.VerdictRequestChanges
+	}
+	return v, verdict, nil
+}
+
+// deferFinding resolves one finding (or the slot) for panel defer.
+func deferFinding(dir, slot string, round int, id string) (panel.Finding, string, error) {
+	v, verdict, err := deferVerdict(dir, slot, round)
+	if err != nil {
+		return panel.Finding{}, "", err
+	}
+	f, err := pickFinding(v, id)
+	return f, verdict, err
+}
+
+func pickFinding(v panel.FindingVerdict, id string) (panel.Finding, error) {
 	if id == "" {
 		return panel.SlotFinding(v)
 	}

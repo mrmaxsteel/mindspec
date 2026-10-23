@@ -71,9 +71,25 @@ func setupRebind(t *testing.T, gates ...string) (root, dir, from string) {
 	rebindWrite(t, root, "source.go", "package example\n")
 	rebindWrite(t, root, ".gitignore", "review/\n")
 	rebindWrite(t, root, ".mindspec/domains/core/OWNERSHIP.yaml", "paths: []\n")
+	rebindWrite(t, root, ".mindspec/specs/900-demo/plan.md", "# plan\n")
 	rebindGit(t, root, "add", ".")
 	rebindGit(t, root, "commit", "-qm", "base")
 	from = rebindGit(t, root, "rev-parse", "HEAD")
+	if len(gates) > 0 && (gates[0] == "plan-pinned" || gates[0] == "spec-pinned") {
+		// A spec or plan panel pinned to the reviewed commit object name.
+		gate, target = "plan_approve", from
+		if gates[0] == "spec-pinned" {
+			gate = "spec_approve"
+		}
+		if len(gates) > 1 {
+			var length int
+			if _, err := fmt.Sscan(gates[1], &length); err != nil || length < 4 || length > len(from) {
+				t.Fatal("invalid test SHA length")
+			}
+			target = from[:length]
+		}
+		rebindGit(t, root, "branch", "spec/900-demo")
+	}
 	digest, err := panel.SubjectDigest(rebindGit(t, root, "ls-tree", "-r", "HEAD")+"\n", panel.Subject(gate, ".mindspec/specs/900-demo"))
 	if err != nil {
 		t.Fatal(err)
@@ -353,5 +369,41 @@ func TestPanelRebind_EffectiveDeferral(t *testing.T) {
 	}
 	if d := rebindGate(t, root, dir); d.Action != panel.Allow || len(d.AppliedDeferrals) != 1 {
 		t.Fatalf("rebound panel: %+v", d)
+	}
+}
+
+// TestPanelRebind_PinnedPlanTargetSeesSpecBranchChange: a plan panel whose
+// target is the reviewed SHA must read the spec branch tip as its live
+// target. The old code resolved the pinned SHA to itself, printed
+// "already fresh", and wrote no rebind record for a plan.md edit.
+func TestPanelRebind_PinnedPlanTargetSeesSpecBranchChange(t *testing.T) {
+	root, dir, from := setupRebind(t, "plan-pinned")
+	rebindGit(t, root, "checkout", "-q", "spec/900-demo")
+	name := ".mindspec/specs/900-demo/plan.md"
+	rebindWrite(t, root, name, "# plan\none more line\n")
+	rebindGit(t, root, "add", name)
+	rebindGit(t, root, "commit", "-qm", "plan edit")
+	tip := rebindGit(t, root, "rev-parse", "HEAD")
+	rebindGit(t, root, "checkout", "-q", "main")
+
+	if d := rebindGate(t, root, dir); d.Action != panel.Block || !strings.Contains(d.Message, "commits landed after review") {
+		t.Fatalf("before rebind: pinned plan panel must read stale against the spec branch, got %+v", d)
+	}
+	out, err := runPanelVerbCmd("rebind", "demo", "--reason", "max: one-line plan edit")
+	if err != nil {
+		t.Fatalf("rebind: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "already fresh") {
+		t.Fatalf("rebind reported already fresh: %s", out)
+	}
+	p := rebindRegistration(t, dir).Panel
+	if p.ReviewedHeadSHA != tip || len(p.Rebinds) != 1 || p.Rebinds[0].FromSHA != from || p.Rebinds[0].ToSHA != tip {
+		t.Fatalf("rebind not recorded: %+v", p)
+	}
+	if !reflect.DeepEqual(p.Rebinds[0].Paths, []string{name}) {
+		t.Fatalf("rebind paths = %v, want [%s]", p.Rebinds[0].Paths, name)
+	}
+	if d := rebindGate(t, root, dir); d.Action != panel.Allow {
+		t.Fatalf("after rebind: %+v", d)
 	}
 }

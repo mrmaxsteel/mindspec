@@ -154,6 +154,16 @@ func (s *Sandbox) Run(name string, args ...string) (string, error) {
 	return string(out), err
 }
 
+// RunIn executes a command in relDir (relative to the sandbox root) with
+// the sandbox environment.
+func (s *Sandbox) RunIn(relDir, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = filepath.Join(s.Root, relDir)
+	cmd.Env = s.Env()
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 // ReadEvents reads the recorded command events from the JSONL log.
 func (s *Sandbox) ReadEvents() []ActionEvent {
 	s.t.Helper()

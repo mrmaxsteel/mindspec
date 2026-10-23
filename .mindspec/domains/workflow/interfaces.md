@@ -291,7 +291,7 @@ to `disposition` rows and `panel` coverage manifests. Every event carries
 |:-----|:--------|:-------------------------------|
 | `round` | round, verdict_schema, reviewed_head_sha, subject_digest, target, gate, bead_id, roster, expected_reviewers, telemetry, carried | round, created_at |
 | `refutation` | slot, round, finding, finding_sha256, finding_text, ground, ac?, reason, evidence, by | slot, round, finding, finding_sha256 |
-| `deferral` | slot, round, finding, finding_sha256, finding_text, bead, by | slot, round, finding, finding_sha256 |
+| `deferral` | slot, round, finding, finding_sha256, finding_text, bead, by, source_verdict?, source_file_sha256? | slot, round, finding, finding_sha256; plus source_verdict, source_file_sha256 when bound |
 | `rebind` | round, from_sha, to_sha, subject_digest, paths, reason | to_sha |
 | `abandon` | reason, by | created_at |
 
@@ -300,7 +300,16 @@ difference refuses the entire batch. For `round` and `abandon`, a different
 timestamp is a different key. Coverage manifest keys are
 `spec, panel, round, created_at` (timestamp absent on legacy manifests).
 `panel disposition validate`, `check` and `query` accept all event kinds and
-reject malformed records. Events contribute no telemetry rows or slot coverage.
+reject malformed records. A check that finds no coverage manifest (before the first tally) says to
+run `mindspec panel tally <panel>` first. The completeness check is ledger-only: it reads only `dispositions.jsonl`. Source currency is checked by the panel gate, `complete`, and `impl approve`, which already read verdict files. `panel disposition check` takes the panel as an
+optional positional (`check <panel>`, same as `--panel`; a conflicting pair
+refuses) and infers `--spec` from that panel's registration when omitted.
+`panel disposition append` completes a finding-only disposition row: it fills
+`record`, `spec` and `gate` (panel registration; spec falls back to `--spec`),
+`panel`, `created_at`, `convergent_with` and `backfilled` when absent, and a
+rejected row prints the full required shape with an example.
+`panel create` recovery lines fill in the spec and bead target the caller
+already gave, shell-quoted, instead of `<id>` placeholders. Events contribute no telemetry rows or slot coverage.
 `panel disposition append` refuses the verb kinds, and manifests on non-legacy
 panels; only `tally` writes those manifests.
 
@@ -584,7 +593,21 @@ configuration.
 The entry records `{round, from_sha, to_sha, paths, reason, created_at}`,
 with subject exclusions removed from `paths`. The `rebind` event also records
 the new subject digest. The verb appends the event before one snapshot write.
-An equal SHA prints `already fresh` and writes nothing. Completion copies
+An equal SHA prints `already fresh` and writes nothing. For a `spec_approve`
+or `plan_approve` panel pinned to a commit, the live subject tracks its spec
+branch. A hex-looking name is read as a commit, not as a branch or tag name.
+Resolution uses exactly `refs/heads/<spec branch>` so a tag cannot shadow it.
+Only confirmed branch absence permits fallback to the recorded target. The
+exact lookup uses `git show-ref --exists`: exit 0 means present, exit 2 confirms
+absence, and every other exit blocks. Git 2.43 or later is needed for a spec or
+plan panel whose target is a commit. Older Git (exit 129) blocks and gives the
+version requirement. Upgrade Git, or create the panel with the spec branch name
+as its target. A ref that exists but has an unreadable
+commit (including a dangling symbolic ref or a tree/blob tip) also blocks.
+Ordinary branch or tag targets and bead panels
+keep their existing target behavior. `verify`, `tally`, `rebind` and instruct
+panel state share this rule, so an edit to the spec or plan after a pinned
+review reads stale and a rebind records the real branch tip. Completion copies
 entries into `panel_rebound_entries` through the fail-closed metadata stage
 before close; only ledger-matched `from_sha` values join the landed reviewed-SHA
 set, with exact equality. This verb shares slug validation and supports `--spec`
@@ -612,7 +635,7 @@ extra display line or a fake `recovery:` line).
 
 **`mindspec panel refute <slug> --slot S --round N [--finding ccr[i]] --ground G [--ac AC-n] --reason T --evidence REF --by WHO`** validates a latest-round REQUEST_CHANGES finding without hard_block. APPROVE, REJECT, INVALID, absent slots, stale rounds, unknown findings and empty names refuse without writes. Grounds are `disproven`, `not-load-bearing` and `out_of_acceptance_scope`; the last requires an AC id in the owning spec. Evidence resolves to a commit, repo path or HTTPS URL. One batch lock hold appends the refutation event and an `audited-refuted` disposition row; an atomic rename updates the snapshot afterward. Retries converge by key. Finding text is path-redacted while hashes pin the raw text.
 
-**`mindspec panel defer <slug> --slot S --round N [--finding ccr[i]] --bead B --by WHO`** appends a deferral event and a `confirmed-deferred` row in one locked batch. It then replaces the snapshot. Only the panel verbs write discharge records. Spec approval and adhoc panels cannot defer findings.
+**`mindspec panel defer <slug> --slot S --round N [--finding ccr[i]] --bead B --by WHO`** appends a deferral event and a `confirmed-deferred` row in one locked batch. It then replaces the snapshot. Only the panel verbs write discharge records. Spec approval and adhoc panels cannot defer findings. Defer accepts a finding on a REQUEST_CHANGES verdict or an item in a schema-v2 APPROVE verdict's `findings`, addressed as `ccr[i]`. Legacy (v1) APPROVE items come from `concrete_changes_required`, with the same ids and hashes. Defer refuses REJECT, INVALID and `hard_block` verdicts. The refusal names defer. A deferral from an APPROVE slot writes severity `minor` (REQUEST_CHANGES writes `blocking`). Each new deferral records the source verdict kind and file hash. Both the event key and its coverage row ID include that source submission identity, so a resubmitted finding can be deferred again and exact retries remain idempotent. Unbound legacy events and rows retain their original keys. The gate and completion count only effective REQUEST_CHANGES deferrals. A new deferral is effective only while its source submission is current. An APPROVE-slot deferral is an audit record only, even if the slot later submits REQUEST_CHANGES with the same text. Legacy deferrals without a source binding count only for a current REQUEST_CHANGES verdict. When the follow-up bead misses the `discovered-from` edge and/or the finding text, one refusal lists every miss: the exact `bd dep add <follow-up> <epic> --type discovered-from` command and the finding text to add to the description, with the edge command as the recovery line.
 
 An effective deferral applies to the latest round and unchanged finding text. A covering refutation supersedes it. Rebind uses the same resolution rule as the gate. Completion re-checks every effective deferral before materialization. It persists a pending marker from Allow decisions and settles the durable `panel_deferred` audit before close. Each entry holds panel, spec, slot, round, finding, finding text, finding hash, follow-up bead and author. The audit also stores effective finding text boundaries for slot-level entries.
 
@@ -824,6 +847,7 @@ Core 3 runs in `complete` before materialization for every required matched regi
 | `mindspec instruct` | Emit mode-appropriate operating guidance |
 | `mindspec next` | Discover, claim, and start next bead — evaluates the mechanical readiness floor gate-before-mutate: a NOT-READY refusal claims nothing, creates no branch/worktree (spec 124 R3, ADR-0041 fourth-verb preflight leg) |
 | `mindspec next --allow-not-ready=<ids> --evidence <path>` | Proceed only when every failing signal is named and determinate, with fresh evidence — warns naming each failure and replaces the schema-v2 failure-digest `mindspec_readiness_override` marker BEFORE claiming, fail-closed (spec 124 R3/AC-4); orthogonal to `--force` (session-freshness only) |
+| `mindspec next <bead-id>` (session freshness) | A stale session (resumed, compacted, or a bead already claimed in it) refuses an unselected claim unless `--force` is set. A claim that names the bead only warns (`claiming the named bead anyway`) and proceeds, so lane claims need no `--force`. The decision lives in `sessionFreshnessGate`. |
 | `mindspec bead ready-check <id>` | Read-only MF-1..MF-4 report with validated schema-v2 override coverage (spec 129 R6.4). Exit 0 iff all signals pass or all current failures are covered; indeterminate records never cover. Reports OVERRIDDEN, no-longer-needed, legacy or malformed markers. Otherwise exits non-zero naming uncovered signals and release/re-claim recovery with ALL currently failing IDs. Metadata read errors refuse. |
 | `mindspec bead clarify <id> --file <record.json>` | Write the append-only readiness-attempt record for a NOT-READY bead — original ordinal-keyed report + span-grounded clarifications; refuses a second write per bead, the categorical R8 cap (spec 124 R8) |
 | `mindspec complete` | Close bead, remove worktree, advance state |

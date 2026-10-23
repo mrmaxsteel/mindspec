@@ -216,7 +216,7 @@ func (r *Result) EffectiveDeferrals() []Deferral {
 			continue
 		}
 		for _, v := range r.Verdicts {
-			if !r.refutationApplies(v, Refutation{Slot: d.Slot, Round: d.Round, Finding: d.Finding, FindingSHA256: d.FindingSHA256}) {
+			if !r.deferralSourceApplies(d, v) || !r.refutationApplies(v, Refutation{Slot: d.Slot, Round: d.Round, Finding: d.Finding, FindingSHA256: d.FindingSHA256}) {
 				continue
 			}
 			if len(r.DeferralTexts(d)) > 0 {
@@ -227,11 +227,24 @@ func (r *Result) EffectiveDeferrals() []Deferral {
 	return out
 }
 
-// DeferralTexts returns only findings not superseded by a refutation.
+// deferralSourceApplies excludes audit-only APPROVE deferrals and replaced
+// submissions. Unbound legacy entries apply only to current REQUEST_CHANGES.
+func (r *Result) deferralSourceApplies(d Deferral, v Verdict) bool {
+	if r.Panel == nil || d.Slot != v.Slot || d.Round != r.LatestRound || v.Verdict != VerdictRequestChanges || v.HardBlock || invalidVerdict(v) {
+		return false
+	}
+	if d.SourceVerdict == "" && d.SourceFileSHA256 == "" {
+		return true
+	}
+	return d.SourceVerdict == VerdictRequestChanges && d.SourceFileSHA256 != "" && d.SourceFileSHA256 == v.FileSHA256
+}
+
+// DeferralTexts returns current REQUEST_CHANGES findings whose source submission
+// still matches, excluding findings superseded by a refutation.
 func (r *Result) DeferralTexts(d Deferral) []string {
 	var texts []string
 	for _, v := range r.Verdicts {
-		if v.Slot != d.Slot {
+		if !r.deferralSourceApplies(d, v) {
 			continue
 		}
 		for _, f := range v.Findings {
@@ -253,6 +266,12 @@ func (r *Result) DeferralTexts(d Deferral) []string {
 }
 
 func validateDeferral(d Deferral) error {
+	if d.SourceVerdict != "" || d.SourceFileSHA256 != "" {
+		sourceHash, err := hex.DecodeString(d.SourceFileSHA256)
+		if err != nil || len(sourceHash) != 32 || (d.SourceVerdict != VerdictApprove && d.SourceVerdict != VerdictRequestChanges) {
+			return fmt.Errorf("invalid deferral source")
+		}
+	}
 	hash, err := hex.DecodeString(d.FindingSHA256)
 	if err != nil || len(hash) != 32 || !validFindingID(d.Finding) || d.Slot == "" || d.Round < 1 || strings.TrimSpace(d.By) == "" || strings.TrimSpace(d.FindingText) == "" {
 		return fmt.Errorf("invalid deferral fields")

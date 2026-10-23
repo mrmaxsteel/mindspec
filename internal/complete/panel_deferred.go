@@ -85,6 +85,9 @@ func checkedPanelDeferrals(reg panel.Registration, entries []panel.Deferral) ([]
 	var failures []failed
 	for _, d := range entries {
 		texts := res.DeferralTexts(d)
+		if len(texts) == 0 {
+			continue
+		}
 		if err := checkDeferral(reg, d, texts, epic, epicErr); err != nil {
 			failures = append(failures, failed{d, err})
 			continue
@@ -144,6 +147,9 @@ func checkAuditedPanelDeferrals(reg panel.Registration, entries []PanelDeferredE
 	}
 	var checks []checked
 	for _, d := range entries {
+		if d.SourceVerdict != "" && d.SourceVerdict != panel.VerdictRequestChanges {
+			continue
+		}
 		texts := d.FindingTexts
 		if len(texts) == 0 {
 			texts = []string{d.FindingText}

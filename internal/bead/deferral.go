@@ -8,6 +8,18 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 )
 
+// DeferralRequirementsError lists every requirement a follow-up bead
+// misses, so one refusal names all of them. Recovery is the next command
+// to run.
+type DeferralRequirementsError struct {
+	Missing  []string
+	Recovery string
+}
+
+func (e *DeferralRequirementsError) Error() string {
+	return "follow-up bead does not meet the deferral requirements:\n- " + strings.Join(e.Missing, "\n- ")
+}
+
 // DeferralIssue contains the live facts used at write time and at both gates.
 type DeferralIssue struct {
 	ID           string `json:"id"`
@@ -89,14 +101,26 @@ func CheckDeferral(id, epic, panelBead string, texts []string, redact func(strin
 			edge = true
 		}
 	}
+	var missing, recovery []string
 	if !edge {
-		return fmt.Errorf("follow-up bead needs a discovered-from edge to the owning epic or reviewed bead")
+		link := fmt.Sprintf("bd dep add %s %s --type discovered-from", id, epic)
+		missing = append(missing, "follow-up bead needs a discovered-from edge to the owning epic or reviewed bead; run: "+link)
+		recovery = append(recovery, link)
 	}
 	description := redact(b.Description)
+	var absent []string
 	for _, text := range texts {
 		if strings.TrimSpace(text) == "" || !strings.Contains(description, redact(text)) {
-			return fmt.Errorf("follow-up description must contain every deferred finding")
+			absent = append(absent, redact(text))
 		}
+	}
+	if len(absent) > 0 {
+		missing = append(missing, "follow-up description must contain every deferred finding; add this text to the description of "+id+":\n"+strings.Join(absent, "\n"))
+		recovery = append(recovery, "add the listed finding text to the description of "+id)
+	}
+	if len(missing) > 0 {
+		recovery = append(recovery, "retry the panel verb")
+		return &DeferralRequirementsError{Missing: missing, Recovery: strings.Join(recovery, ", then ")}
 	}
 	return nil
 }

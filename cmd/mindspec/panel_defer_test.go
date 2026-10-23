@@ -171,7 +171,7 @@ func TestPanelDefer_Writes(t *testing.T) {
 	if err := json.Unmarshal(lines[2], &row); err != nil {
 		t.Fatal(err)
 	}
-	if event.Record != "deferral" || event.Spec != "900-demo" || event.Panel != "p" || event.Bead != "follow-up" || row.Disposition != "confirmed-deferred" || row.Reviewer != "R1" || row.Model != "claude" || row.ID != "p:R1:r1:slot:"+event.FindingSHA256[:12]+":deferral" {
+	if event.Record != "deferral" || event.Spec != "900-demo" || event.Panel != "p" || event.Bead != "follow-up" || row.Disposition != "confirmed-deferred" || row.Reviewer != "R1" || row.Model != "claude" || row.ID != "p:R1:r1:slot:"+event.FindingSHA256+":"+event.SourceVerdict+":"+event.SourceFileSHA256+":deferral" {
 		t.Fatalf("bad write: %+v %+v", event, row)
 	}
 	res, _ := panel.Tally(dir)
@@ -306,5 +306,69 @@ func TestPanelDefer_RechecksInsideLock(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, panelTreeBytes(t, root)) {
 		t.Fatal("in-lock refusal wrote panel files")
+	}
+}
+
+// TestPanelDefer_ApproveSlotMinorFinding: a MINOR item on an APPROVE verdict
+// can go to a follow-up bead. The old verb refused it with refute wording.
+func TestPanelDefer_ApproveSlotMinorFinding(t *testing.T) {
+	_, dir := setupDischarge(t)
+	fake := fakeDeferralBD(t)
+	writeDischargeVerdict(t, dir, "R2", panel.FindingVerdict{Verdict: panel.VerdictApprove, ConcreteChangesRequired: []string{"minor nit"}})
+	rebindWrite(t, fake, "follow-up.json", `[{"id":"follow-up","status":"open","description":"minor nit","dependencies":[{"id":"epic-x","dependency_type":"discovered-from"}]}]`)
+	args := replaceRefuteArg(deferArgs(), "--slot", "R2")
+	args = append(args, "--finding", "ccr[0]")
+	requirePanelVerb(t, args...)
+	lines, err := panel.ReadLedger(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event panel.DeferralRecord
+	var row panel.DispositionRow
+	if len(lines) != 3 {
+		t.Fatalf("want round, deferral, disposition: %s", lines)
+	}
+	if err := json.Unmarshal(lines[1], &event); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(lines[2], &row); err != nil {
+		t.Fatal(err)
+	}
+	if event.Slot != "R2" || event.Finding != "ccr[0]" || event.FindingText != "minor nit" || event.Bead != "follow-up" {
+		t.Fatalf("bad deferral event: %+v", event)
+	}
+	if row.Disposition != "confirmed-deferred" || row.Severity != "minor" || row.Model != "codex" {
+		t.Fatalf("bad disposition row: %+v", row)
+	}
+}
+
+// TestPanelDefer_RefusalNamesDefer: a defer refusal names the defer verb,
+// not refute.
+func TestPanelDefer_RefusalNamesDefer(t *testing.T) {
+	root, dir := setupDischarge(t)
+	fakeDeferralBD(t)
+	writeDischargeVerdict(t, dir, "R1", panel.FindingVerdict{Verdict: panel.VerdictReject, Rationale: "no"})
+	msg := assertPanelRefusal(t, root, deferArgs()...)
+	if !strings.Contains(msg, "can be deferred") || strings.Contains(msg, "refuted") {
+		t.Fatalf("defer refusal must name defer: %s", msg)
+	}
+}
+
+// TestPanelDefer_RefusalListsEveryMissingRequirement: with no
+// discovered-from edge and no finding text in the description, one
+// refusal names both and its recovery line gives the exact edge command
+// instead of the generic "correct the panel arguments" line.
+func TestPanelDefer_RefusalListsEveryMissingRequirement(t *testing.T) {
+	root, _ := setupDischarge(t)
+	fake := fakeDeferralBD(t)
+	rebindWrite(t, fake, "follow-up.json", `[{"id":"follow-up","status":"open","description":"other","dependencies":[]}]`)
+	msg := assertPanelRefusal(t, root, deferArgs()...)
+	for _, want := range []string{"discovered-from edge", "must contain every deferred finding", "missing test", "recovery: bd dep add follow-up epic-x --type discovered-from"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal lacks %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "correct the panel arguments") {
+		t.Errorf("refusal must not fall back to the generic recovery:\n%s", msg)
 	}
 }
