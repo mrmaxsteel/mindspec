@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // Lifecycle seeds a local approval panel and its durable verdicts. State is
@@ -13,7 +14,11 @@ import (
 // integrity, round mismatch or malformed. Git facts belong to the caller.
 func Lifecycle(t testing.TB, dir, spec, gate, sha, digest, state string) Fixture {
 	t.Helper()
-	p := panel.Panel{Spec: spec, Target: "spec/" + spec, Gate: gate, Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: sha, SubjectDigest: digest,
+	branch, err := workspace.SpecBranch(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := panel.Panel{Spec: spec, Target: branch, Gate: gate, Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: sha, SubjectDigest: digest,
 		Roster: []panel.RosterSlot{{Slot: "R1", Family: "harness", Model: "m", Lens: "correctness"}, {Slot: "R2", Family: "harness", Model: "m", Lens: "correctness"}}}
 	if err := panel.Create(dir, panel.CreateInput{Spec: spec, Target: p.Target, Gate: gate, Round: 1, ReviewedHeadSHA: sha, SubjectDigest: digest, Roster: p.Roster}); err != nil {
 		t.Fatal(err)

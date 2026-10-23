@@ -22,7 +22,8 @@ func IsLifecycleGate(gate string) bool {
 
 // CheckLifecycleTarget requires approval panels to follow their spec branch.
 func CheckLifecycleTarget(gate, spec, target string) error {
-	if IsLifecycleGate(gate) && target != "spec/"+spec {
+	targetSpec, specBranch := strings.CutPrefix(target, "spec/")
+	if IsLifecycleGate(gate) && (!specBranch || targetSpec != spec) {
 		return fmt.Errorf("gate %s requires target spec/%s; recorded target is %s", termsafe.Escape(gate), termsafe.Escape(spec), termsafe.Escape(target))
 	}
 	return nil

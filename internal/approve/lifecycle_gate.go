@@ -15,6 +15,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/safefile"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -38,7 +39,7 @@ var lifecycleMergeMetadataFn = bead.MergeMetadata
 // runLifecycleGate reads all registrations for an approval, without mutation.
 func runLifecycleGate(root, specID, gate, worktree string, out io.Writer) (Outcome, error) {
 	o := Outcome{Gate: gate}
-	recovery := fmt.Sprintf("mindspec panel create <slug> --spec %s --gate %s --target spec/%s", termsafe.Escape(specID), termsafe.Escape(gate), termsafe.Escape(specID))
+	recovery := fmt.Sprintf("mindspec panel create <slug> --spec %s --gate %s --target spec/%s", idrender.Spec(specID), termsafe.Escape(gate), idrender.Spec(specID))
 	refuse := func(slug, leg string, err error) (Outcome, error) {
 		o.Action = panel.Block
 		detail, _, _ := strings.Cut(err.Error(), "\nrecovery:")

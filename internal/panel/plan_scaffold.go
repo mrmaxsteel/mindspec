@@ -1,9 +1,17 @@
 package panel
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+)
 
 // PlanScaffold returns the exact initial plan written by spec approval.
 func PlanScaffold(specID string) string {
+	if err := idvalidate.SpecID(specID); err != nil {
+		specID = strconv.Quote(specID)
+	}
 	return fmt.Sprintf(`---
 status: Draft
 spec_id: %s
