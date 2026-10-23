@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-10-23T12:15:31Z"
+approved_by: mrmaxsteel
+status: Approved
 ---
 # Spec 133-document-final-gates: Document Final Gates
 
@@ -295,7 +295,7 @@ Each refusal AC requires that the message names the gate or the check, so that a
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: mrmaxsteel
+- **Approval Date**: 2026-10-23
+- **Notes**: Approved via mindspec approve spec
