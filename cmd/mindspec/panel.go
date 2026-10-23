@@ -229,7 +229,7 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 			return fmt.Errorf("resolving --target %q: %w", target, err)
 		}
 
-		digest, err := panelSubjectReader(root, gate, specDir, lsTreeForPanelFn)(panel.PanelDirScanRoot(dir), sha, panel.Subject(gate, specDir))
+		digest, err := panelSubjectReader(gate, specDir, lsTreeForPanelFn)(panel.PanelDirScanRoot(dir), sha, panel.Subject(gate, specDir))
 		if err != nil {
 			return fmt.Errorf("reading panel subject: %w", err)
 		}
@@ -701,7 +701,7 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 
 	return panel.ResolveGateFacts(reg, beadID, scanRoot, panel.GateIO{
 		SpecDir:       filepath.Join(workspace.SpecsDir(root), reg.Panel.Spec),
-		SubjectTree:   panelSubjectReader(scanRoot, reg.Panel.Gate, panel.PanelSpecDir(reg.Dir, filepath.Join(workspace.SpecsDir(root), reg.Panel.Spec)), exec.LsTree),
+		SubjectTree:   panelSubjectReader(reg.Panel.Gate, panel.PanelSpecDir(reg.Dir, filepath.Join(workspace.SpecsDir(root), reg.Panel.Spec)), exec.LsTree),
 		RevParse:      revParse,
 		Status:        exec.Status,
 		IsRefNotFound: exec.IsRefNotFound,
@@ -1351,7 +1351,7 @@ func panelSlotStatuses(root string, res *panel.Result) ([]panel.SlotStatus, erro
 }
 
 // panelSubjectReader supplies the same document digest to each panel verb.
-func panelSubjectReader(root, gate, specDir string, lsTree func(string, string) (string, error)) func(string, string, panel.SubjectRoots) (string, error) {
+func panelSubjectReader(gate, specDir string, lsTree func(string, string) (string, error)) func(string, string, panel.SubjectRoots) (string, error) {
 	return panel.DocumentSubjectTreeReader(gate, specDir, lsTree, func(workdir, ref, name string) ([]byte, error) {
 		return newExecutor(workdir).FileAtRef(ref, name)
 	})

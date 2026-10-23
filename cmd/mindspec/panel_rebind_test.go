@@ -165,7 +165,7 @@ func assertRebindSuccess(t *testing.T, root, dir, from string, paths []string) {
 		t.Fatalf("binding did not advance: %+v", p)
 	}
 	subject := panel.Subject(p.Gate, panel.PanelSpecDir(dir, filepath.Join(root, ".mindspec/specs", p.Spec)))
-	digest, err := panelSubjectReader(root, p.Gate, panel.PanelSpecDir(dir, filepath.Join(root, ".mindspec/specs", p.Spec)), newExecutor(root).LsTree)(root, tip, subject)
+	digest, err := panelSubjectReader(p.Gate, panel.PanelSpecDir(dir, filepath.Join(root, ".mindspec/specs", p.Spec)), newExecutor(root).LsTree)(root, tip, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
