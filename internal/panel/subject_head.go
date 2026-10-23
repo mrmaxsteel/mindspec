@@ -15,6 +15,17 @@ func ResolveSubjectHead(p Panel, workdir string, branchForSpec func(string) (str
 		return "", fmt.Errorf("panel.json records no target ref")
 	}
 	if (p.Gate == "spec_approve" || p.Gate == "plan_approve") && looksLikeCommitSHA(target) {
+		// Hexadecimal names can also be branches, tags or remote refs. Resolve
+		// those explicit namespaces before treating the target as an object pin.
+		for _, prefix := range []string{"refs/heads/", "refs/tags/", "refs/remotes/"} {
+			sha, err := revParse(workdir, prefix+target)
+			if err == nil {
+				return sha, nil
+			}
+			if !isRefNotFound(err) {
+				return "", err
+			}
+		}
 		branch, err := branchForSpec(p.Spec)
 		if err != nil {
 			return "", err

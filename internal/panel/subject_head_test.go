@@ -22,6 +22,9 @@ func TestResolveSubjectHead_BranchErrors(t *testing.T) {
 					return "spec/900-demo", nil
 				},
 				func(_, ref string) (string, error) {
+					if strings.HasPrefix(ref, "refs/") {
+						return "", missing
+					}
 					refs = append(refs, ref)
 					if ref == "spec/900-demo" {
 						return "", branchErr

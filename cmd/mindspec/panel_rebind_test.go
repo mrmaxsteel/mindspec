@@ -90,6 +90,16 @@ func setupRebind(t *testing.T, gates ...string) (root, dir, from string) {
 		}
 		rebindGit(t, root, "branch", "spec/900-demo")
 	}
+	if len(gates) > 0 && strings.HasPrefix(gates[0], "hex-") {
+		gate, target = "plan_approve", "cafe"
+		rebindGit(t, root, "branch", "spec/900-demo")
+		switch gates[0] {
+		case "hex-branch":
+			rebindGit(t, root, "branch", target)
+		case "hex-tag":
+			rebindGit(t, root, "tag", target)
+		}
+	}
 	digest, err := panel.SubjectDigest(rebindGit(t, root, "ls-tree", "-r", "HEAD")+"\n", panel.Subject(gate, ".mindspec/specs/900-demo"))
 	if err != nil {
 		t.Fatal(err)

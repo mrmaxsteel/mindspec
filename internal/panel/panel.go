@@ -137,14 +137,16 @@ type RosterSlot struct {
 
 // Deferral pins a finding to a follow-up bead. Gate-time checks belong to callers.
 type Deferral struct {
-	Slot          string `json:"slot"`
-	Round         int    `json:"round"`
-	Finding       string `json:"finding"`
-	FindingSHA256 string `json:"finding_sha256"`
-	FindingText   string `json:"finding_text"`
-	Bead          string `json:"bead"`
-	By            string `json:"by"`
-	CreatedAt     string `json:"created_at"`
+	SourceVerdict    string `json:"source_verdict,omitempty"`
+	SourceFileSHA256 string `json:"source_file_sha256,omitempty"`
+	Slot             string `json:"slot"`
+	Round            int    `json:"round"`
+	Finding          string `json:"finding"`
+	FindingSHA256    string `json:"finding_sha256"`
+	FindingText      string `json:"finding_text"`
+	Bead             string `json:"bead"`
+	By               string `json:"by"`
+	CreatedAt        string `json:"created_at"`
 }
 
 // Rebind records a same-round refresh after tool-artifact-only changes.

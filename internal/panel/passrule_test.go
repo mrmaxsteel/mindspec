@@ -374,3 +374,30 @@ func TestPassRule_DeferralSlotPins(t *testing.T) {
 		})
 	}
 }
+
+func TestEffectiveDeferrals_SourceSubmissionBinding(t *testing.T) {
+	fs, err := Findings(FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"same finding"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fs[0]
+	for _, tc := range []struct {
+		name, source, hash, current string
+		want                        int
+	}{
+		{"legacy request changes", "", "", VerdictRequestChanges, 1},
+		{"legacy approve", "", "", VerdictApprove, 0},
+		{"bound request changes", VerdictRequestChanges, strings.Repeat("a", 64), VerdictRequestChanges, 1},
+		{"superseded request changes", VerdictRequestChanges, strings.Repeat("b", 64), VerdictRequestChanges, 0},
+		{"approve replaced by request changes", VerdictApprove, strings.Repeat("a", 64), VerdictRequestChanges, 0},
+		{"partial binding", VerdictRequestChanges, "", VerdictRequestChanges, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := Deferral{Slot: "R1", Round: 1, Finding: f.ID, FindingSHA256: f.SHA256, FindingText: f.Text, Bead: "follow-up", By: "max", CreatedAt: ledgerTime, SourceVerdict: tc.source, SourceFileSHA256: tc.hash}
+			r := Result{Panel: &Panel{Deferrals: []Deferral{d}}, LatestRound: 1, Verdicts: []Verdict{{Slot: "R1", Round: 1, Verdict: tc.current, FileSHA256: strings.Repeat("a", 64), Findings: fs}}}
+			if got := len(r.EffectiveDeferrals()); got != tc.want {
+				t.Fatalf("effective=%d want=%d", got, tc.want)
+			}
+		})
+	}
+}

@@ -60,6 +60,7 @@ type Verdict struct {
 	HardBlock  bool
 	Invalid    bool
 	Findings   []Finding
+	FileSHA256 string
 	SlotSHA256 string
 	// ReadError marks an unreadable verdict as INVALID. It cannot supply findings.
 	ReadError string
@@ -449,11 +450,12 @@ func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, erro
 			continue
 		}
 		v := Verdict{
-			File:      vf.name,
-			Slot:      vf.slot,
-			Round:     vf.round,
-			Verdict:   strings.ToUpper(strings.TrimSpace(vj.Verdict)),
-			HardBlock: vj.HardBlock,
+			FileSHA256: findingHash(data),
+			File:       vf.name,
+			Slot:       vf.slot,
+			Round:      vf.round,
+			Verdict:    strings.ToUpper(strings.TrimSpace(vj.Verdict)),
+			HardBlock:  vj.HardBlock,
 		}
 		var payload FindingVerdict
 		payloadErr := json.Unmarshal(data, &payload)

@@ -90,9 +90,18 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		}
 		return panelVerbFailure(err)
 	}
+	sourceHash := ""
+	for _, v := range res.Verdicts {
+		if v.Slot == slot && v.Verdict == verdict {
+			sourceHash = v.FileSHA256
+		}
+	}
+	if sourceHash == "" {
+		return panelVerbFailure(fmt.Errorf("source verdict changed; retry against the current verdict"))
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	ref := panel.Deferral{Slot: slot, Round: round, Finding: f.ID, FindingSHA256: f.SHA256,
-		FindingText: f.Text, Bead: beadID, By: by, CreatedAt: now}
+		FindingText: f.Text, Bead: beadID, By: by, CreatedAt: now, SourceVerdict: verdict, SourceFileSHA256: sourceHash}
 	event, err := json.Marshal(panel.DeferralRecord{Record: panel.RecordDeferral, Spec: panelRecordSpec(*res.Panel), Panel: args[0], Deferral: ref})
 	if err != nil {
 		return panelVerbFailure(err)
@@ -119,7 +128,13 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if latest != f {
+		sourceMatches := false
+		for _, v := range current.Verdicts {
+			if v.Slot == slot && v.Verdict == verdict && v.FileSHA256 == sourceHash {
+				sourceMatches = true
+			}
+		}
+		if latest != f || !sourceMatches {
 			return fmt.Errorf("finding changed; retry against the current verdict")
 		}
 		res = current
@@ -130,7 +145,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	}
 	found := false
 	for _, old := range res.Panel.Deferrals {
-		if old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 {
+		if old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 && old.SourceVerdict == verdict && old.SourceFileSHA256 == sourceHash {
 			found = true
 		}
 	}

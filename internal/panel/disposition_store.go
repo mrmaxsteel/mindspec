@@ -302,6 +302,8 @@ func CheckCompletenessAt(dir, panelName string) error {
 	}
 
 	var manifest *CoverageManifest
+	var rows []DispositionRow
+	var boundDeferrals []Deferral
 	covered := map[string]bool{}
 
 	for _, line := range lines {
@@ -323,7 +325,15 @@ func CheckCompletenessAt(dir, panelName string) error {
 				return fmt.Errorf("panel %s: %s", termsafe.Escape(panelName), cmErr.Error())
 			}
 			manifest = &cm
-		case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon:
+		case RecordDeferral:
+			var event DeferralRecord
+			if err := json.Unmarshal(line, &event); err != nil {
+				return err
+			}
+			if event.SourceVerdict != "" || event.SourceFileSHA256 != "" {
+				boundDeferrals = append(boundDeferrals, event.Deferral)
+			}
+		case RecordRound, RecordRefutation, RecordRebind, RecordAbandon:
 			// Events are validated above; only disposition rows cover slots.
 			continue
 		case RecordDisposition:
@@ -331,15 +341,53 @@ func CheckCompletenessAt(dir, panelName string) error {
 			if rowErr != nil {
 				return fmt.Errorf("panel %s: %s", termsafe.Escape(panelName), rowErr.Error())
 			}
-			covered[row.Reviewer] = true
-			for _, c := range row.ConvergentWith {
-				covered[c] = true
-			}
+			rows = append(rows, row)
 		}
 	}
 
 	if manifest == nil {
 		return fmt.Errorf("panel %s: dispositions.jsonl has no record:\"panel\" coverage manifest%s", termsafe.Escape(panelName), tallyFirstHint(panelName))
+	}
+
+	// A deferral row covers only the submission its event discharged. Minor
+	// APPROVE notes remain audit records, including in legacy ledgers.
+	var effective []Deferral
+	if len(boundDeferrals) > 0 {
+		res, err := Tally(dir)
+		if err != nil {
+			return err
+		}
+		effective = res.EffectiveDeferrals()
+	}
+	for _, row := range rows {
+		if row.Disposition == "confirmed-deferred" {
+			if row.Severity == "minor" {
+				continue
+			}
+			superseded := false
+			for _, d := range boundDeferrals {
+				if d.Slot != row.Reviewer || d.CreatedAt != row.CreatedAt || d.Bead != row.EvidenceRef || row.Round == nil || d.Round != *row.Round {
+					continue
+				}
+				current := false
+				for _, live := range effective {
+					if live == d {
+						current = true
+						break
+					}
+				}
+				if !current {
+					superseded = true
+				}
+			}
+			if superseded {
+				continue
+			}
+		}
+		covered[row.Reviewer] = true
+		for _, c := range row.ConvergentWith {
+			covered[c] = true
+		}
 	}
 
 	for _, slot := range manifest.Slots {
