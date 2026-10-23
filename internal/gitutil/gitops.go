@@ -1629,6 +1629,33 @@ func RevParseRef(workdir, ref string) (string, error) {
 	return sha, nil
 }
 
+// ExactRefExists checks a fully qualified ref without revision-name precedence.
+// Only show-ref --exists exit 2 confirms absence; exit 0 means present, without
+// validating the target object. Every other exit is an error. Git 2.43 or later
+// is required so callers cannot mistake ref lookup failures for branch deletion.
+func ExactRefExists(workdir, ref string) (bool, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return false, err
+	}
+	if !strings.HasPrefix(ref, "refs/") {
+		return false, fmt.Errorf("expected fully qualified ref: %s", ref)
+	}
+	cmd := execCommand("git", gitArgs(workdir, "show-ref", "--exists", ref)...)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		switch exitErr.ExitCode() {
+		case 2:
+			return false, nil
+		case 129:
+			return false, fmt.Errorf("checking exact ref %s: git 2.43 or later is needed to check whether the spec branch exists; upgrade git, or create the panel with the spec branch name as its target: %w", ref, err)
+		}
+	}
+	return false, fmt.Errorf("checking exact ref %s: %w", ref, err)
+}
+
 // LogOneline returns `git log -1 --oneline <ref>` for workdir
 // (workdir=="" → cwd), trimmed: the one-line "<short-sha> <subject>"
 // summary of the tip commit of ref. The error is non-nil when ref does

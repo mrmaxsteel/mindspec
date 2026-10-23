@@ -23,6 +23,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/shellquote"
@@ -81,6 +82,13 @@ For existing bead panels with a divergent recorded target, the gate compares
 that target to the live bead/<id> branch. On a SHA mismatch, a changed subject
 tree blocks; an equal subject stays fresh. A legacy panel without a digest
 blocks on a SHA mismatch.
+A spec or plan panel pinned to a commit tracks its spec branch. A hex-looking
+name is read as a commit, not as a branch or tag name. The live subject uses
+exactly refs/heads/<spec branch>. Only confirmed branch absence permits
+fallback to the recorded target; an unreadable branch blocks the gate.
+Confirmation uses git show-ref --exists (git 2.43 or later); lookup errors
+and older Git versions block the gate.
+Ordinary branch or tag targets keep tracking their recorded target.
 Existing panel.json must parse. Verdict files prevent recreating their
 round or an older round; bump --round or use panel rebind.
 These refusals write nothing.
@@ -145,9 +153,13 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 		// Any explicit --spec — blank or not — is refused with --gate
 		// adhoc.
 		if gate == "adhoc" && cmd.Flags().Changed("spec") {
+			specForRecovery := specID
+			if strings.TrimSpace(specForRecovery) == "" {
+				specForRecovery = ""
+			}
 			return guard.NewFailure(
-				fmt.Sprintf("--spec %q cannot be combined with --gate adhoc: an ad-hoc panel has no owning spec", specID),
-				fmt.Sprintf("use `panel create %s --spec <id> --target <ref>` for a gated panel, or `panel create %s --gate adhoc --target <ref>` for an ad-hoc panel", slug, slug))
+				fmt.Sprintf("--spec %q cannot be combined with --gate adhoc: an ad-hoc panel has no owning spec", idrender.Spec(specID)),
+				fmt.Sprintf("use `panel create %s --spec %s --target %s` for a gated panel, or `panel create %s --gate adhoc --target %s` for an ad-hoc panel", slug, knownOr(idrender.Spec(specForRecovery), "<id>"), knownOr(target, "<ref>"), slug, knownOr(target, "<ref>")))
 		}
 		if gate != "adhoc" && strings.TrimSpace(specID) == "" {
 			return fmt.Errorf("--spec is required")
@@ -173,7 +185,8 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 
 		beadPtr, err := panel.CreateBeadID(gate, target, beadID)
 		if err != nil {
-			recovery := fmt.Sprintf("mindspec panel create %s --gate bead --spec <id> --target bead/<id>", shellQuoteTarget(slug))
+			targetRef := beadRecoveryTarget(target, beadID)
+			recovery := fmt.Sprintf("mindspec panel create %s --gate bead --spec %s --target %s", shellQuoteTarget(slug), knownOr(idrender.Spec(specID), "<id>"), knownOr(targetRef, "bead/<id>"))
 			if beadID != "" && gate != "" && gate != "bead" {
 				recovery = fmt.Sprintf("mindspec panel create %s --round %d --target %s", shellQuoteTarget(slug), round, shellQuoteTarget(target)) + panelCreateScope(specID, gate)
 				if gate != "adhoc" {
@@ -573,8 +586,30 @@ func findPanelRegistration(root, slug string, specIDs ...string) (panel.Registra
 			"repeat the command with --spec <id> (choose a listed spec; if copies remain, run from that checkout)")
 	}
 	return panel.Registration{}, guard.NewFailure(
-		fmt.Sprintf("no registered panel found for slug %q and spec %q", slug, specID),
-		fmt.Sprintf("mindspec panel create %s --spec <id> --target <ref>", shellQuoteTarget(slug)))
+		fmt.Sprintf("no registered panel found for slug %q and spec %q", slug, idrender.Spec(specID)),
+		fmt.Sprintf("mindspec panel create %s --spec %s --target <ref>", shellQuoteTarget(slug), knownOr(idrender.Spec(specID), "<id>")))
+}
+
+// knownOr renders a known value for a recovery line, shell-quoted and
+// terminal-safe, or the placeholder when the value is blank.
+func knownOr(value, placeholder string) string {
+	if strings.TrimSpace(value) == "" {
+		return placeholder
+	}
+	return shellQuoteTarget(escapeConfigValue(value))
+}
+
+// beadRecoveryTarget picks the bead/<id> target a bead-panel recovery line
+// can name: the given target when it is a valid bead/<id>, else the valid
+// --bead value, else "" (the caller prints the placeholder).
+func beadRecoveryTarget(target, beadID string) string {
+	if strings.HasPrefix(target, "bead/") && idvalidate.BeadID(strings.TrimPrefix(target, "bead/")) == nil {
+		return target
+	}
+	if branch, err := workspace.BeadBranch(beadID); err == nil {
+		return branch
+	}
+	return ""
 }
 
 // checkPanelSlugOwner refuses cross-spec and adhoc collisions before any write.
@@ -664,36 +699,19 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 	})
 }
 
-// nonBeadTargetRevParse builds the GateIO.RevParse closure a non-bead
-// panel's `panel verify`/`panel tally` uses (Bead 1 Half 1, R1): it IGNORES
-// the "bead/"+beadID ref argument panel.ResolveGateFacts always passes
-// (beadID == "" for a non-bead panel, so that ref is the literal,
-// always-absent "bead/") and instead rev-parses reg.Panel's RECORDED
-// Target in the caller-supplied scanRoot, through the SAME
-// revParseForPanelFn seam `panel create` uses to capture reviewed_head_sha
-// at write time. This un-shadows PanelGateDecision's staleness (leg 6) and
-// incomplete/REJECT/threshold legs (8)-(10) for a non-bead panel: a stale
-// target now Blocks, a genuinely-deleted target (exec.IsRefNotFound, still
-// wired to errors.Is(err, gitutil.ErrRefNotFound)) still gets the honest
-// missing-ref Warn, and a transient git error still gets the honest
-// transient Warn (leg 5b) — never a false MissingRef.
-//
-// When the registration itself is unparsed (reg.Err != nil) or its Target
-// is empty (a panel.json that, however it was produced, records no target
-// ref), this returns a plain non-ErrRefNotFound error so the facts surface
-// as the honest transient GitErr Warn rather than a false "target deleted"
-// claim — though an unreadable registration Blocks first regardless, at
-// leg (2), before this closure is ever invoked.
+// nonBeadTargetRevParse adapts the shared live-subject resolver for non-bead
+// verify, tally and rebind. Commit-pinned spec/plan panels follow the exact spec
+// branch; other panels follow their recorded target. The create-time rev-parse
+// seam is shared here, while exact-ref existence comes from the executor.
+// Invalid registrations return an ordinary error rather than claiming absence.
 func nonBeadTargetRevParse(reg panel.Registration) func(scanRoot, ref string) (string, error) {
 	return func(scanRoot, _ string) (string, error) {
 		if reg.Err != nil {
 			return "", fmt.Errorf("panel.json records no target ref: %w", reg.Err)
 		}
-		target := strings.TrimSpace(reg.Panel.Target)
-		if target == "" {
-			return "", fmt.Errorf("panel.json records no target ref")
-		}
-		return revParseForPanelFn(scanRoot, target)
+		return panel.ResolveSubjectHead(reg.Panel, scanRoot, func(specID string) (string, error) {
+			return workspace.SpecBranch(specID)
+		}, revParseForPanelFn, newExecutor(scanRoot).ExactRefExists)
 	}
 }
 

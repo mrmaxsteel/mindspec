@@ -157,10 +157,16 @@ func TestPanelCreate_SpecAdhocCombo_Refused(t *testing.T) {
 			if !guard.HasFinalRecoveryLine(err.Error()) {
 				t.Errorf("refusal must carry a final recovery line (ADR-0035): %q", err.Error())
 			}
-			if !strings.Contains(err.Error(), "--spec <id> --target <ref>") {
+			// The recovery fills the known target (and a non-blank spec)
+			// instead of placeholders.
+			gated := "--spec <id> --target 'cafebabecafebabecafebabecafebabecafebabe'"
+			if strings.TrimSpace(tc.spec) != "" {
+				gated = "--spec '" + tc.spec + "' --target 'cafebabecafebabecafebabecafebabecafebabe'"
+			}
+			if !strings.Contains(err.Error(), gated) {
 				t.Errorf("refusal must name the gated invocation form: %q", err.Error())
 			}
-			if !strings.Contains(err.Error(), "--gate adhoc --target <ref>") {
+			if !strings.Contains(err.Error(), "--gate adhoc --target 'cafebabecafebabecafebabecafebabecafebabe'") {
 				t.Errorf("refusal must name the ad-hoc invocation form: %q", err.Error())
 			}
 

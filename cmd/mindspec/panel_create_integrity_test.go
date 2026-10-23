@@ -187,8 +187,16 @@ func TestPanelCreate_BeadTargetRefusals(t *testing.T) {
 				} else if !strings.Contains(recovery, "--gate '"+tc.gate+"'") || !strings.Contains(recovery, "--spec '900-demo'") {
 					t.Fatalf("recovery lost gate/spec: %s", recovery)
 				}
-			} else if !strings.Contains(recovery, "--gate bead --spec <id> --target bead/<id>") {
-				t.Fatalf("bead-target recovery: %s", recovery)
+			} else {
+				// Known values fill the recovery line; only an unusable
+				// target keeps the bead/<id> placeholder.
+				want := "--gate bead --spec '900-demo' --target bead/<id>"
+				if tc.target == "bead/probe-x.1" {
+					want = "--gate bead --spec '900-demo' --target 'bead/probe-x.1'"
+				}
+				if !strings.Contains(recovery, want) {
+					t.Fatalf("bead-target recovery: %s (want %s)", recovery, want)
+				}
 			}
 		})
 	}

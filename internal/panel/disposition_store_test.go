@@ -205,6 +205,26 @@ func TestCheckCompleteness_NoManifest_Errors(t *testing.T) {
 	}
 }
 
+// TestCheckCompleteness_PreTallyNamesTally: a check before the first
+// tally (no file yet, or rows but no manifest) tells the caller to run
+// panel tally first. The old errors named only the missing manifest.
+func TestCheckCompleteness_PreTallyNamesTally(t *testing.T) {
+	specDir := t.TempDir()
+	const name = "pre-tally"
+	want := "run mindspec panel tally " + name + " first"
+	if err := CheckCompleteness(specDir, name); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("empty panel: error %v, want it to contain %q", err, want)
+	}
+	row := []byte(`{"record":"disposition","id":"d-1","spec":"130","gate":"bead","panel":"pre-tally","reviewer":"R1","model":"opus","severity":"minor","summary":"x","convergent_with":[],"disposition":"confirmed-fixed","created_at":"2026-10-20T10:00:00Z","backfilled":false}`)
+	if err := AppendRecords(panelStoreDir(specDir, name), CanonicalizeDispositionRowID(row)); err != nil {
+		t.Fatal(err)
+	}
+	err := CheckCompleteness(specDir, name)
+	if err == nil || !strings.Contains(err.Error(), "coverage manifest") || !strings.Contains(err.Error(), want) {
+		t.Fatalf("rows without a manifest: error %v, want it to contain %q", err, want)
+	}
+}
+
 // --- AC7b: finding-less all-APPROVE panel still gets its manifest --------
 
 func TestWriteTerminalManifest_FindingLessPanel(t *testing.T) {
@@ -688,5 +708,60 @@ func TestAppendRecord_SameIDDifferentPayload_Conflict(t *testing.T) {
 	}
 	if got := countLines(t, path); got != 1 {
 		t.Errorf("after a conflicting append, got %d line(s), want 1 (the conflict must not append)", got)
+	}
+}
+
+// The durable floor must work in a clone containing no runtime panel artifacts.
+func TestCheckCompletenessAt_SourceBoundDeferralLedgerOnly(t *testing.T) {
+	checkDeferralLedgerOnly(t, true)
+}
+
+func TestCheckCompletenessAt_LegacyUnboundDeferralLedgerOnly(t *testing.T) {
+	checkDeferralLedgerOnly(t, false)
+}
+
+func checkDeferralLedgerOnly(t *testing.T, bound bool) {
+	t.Helper()
+	specDir := t.TempDir()
+	round := 1
+	event := DeferralRecord{Record: RecordDeferral, Spec: "999", Panel: "p", Deferral: Deferral{
+		Slot: "R1", Round: round, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64),
+		FindingText: "blocking finding", Bead: "follow-up", By: "operator", CreatedAt: "2026-10-20T00:00:00Z",
+		SourceVerdict: VerdictRequestChanges, SourceFileSHA256: strings.Repeat("b", 64),
+	}}
+	if !bound {
+		event.SourceVerdict, event.SourceFileSHA256 = "", ""
+	}
+	row := testRow("bound-deferral", "p", "R1", nil)
+	row.Disposition, row.EvidenceRef, row.Round, row.CreatedAt = "confirmed-deferred", event.Bead, &round, event.CreatedAt
+	manifest := testManifest("p", round, []ManifestSlot{{Slot: "R1", Model: "sonnet", Verdict: VerdictRequestChanges}})
+	writeDispositionsFile(t, specDir, "p", mustMarshal(t, event), mustMarshal(t, row), mustMarshal(t, manifest))
+	dir := filepath.Join(specDir, "reviews", "p")
+	if lines, err := ReadLedger(dir); err != nil || len(lines) != 3 {
+		t.Fatalf("load legacy or bound ledger: lines=%d err=%v", len(lines), err)
+	}
+	if err := CheckCompletenessAt(dir, "p"); err != nil {
+		t.Fatalf("ledger-only deferral must cover its slot: %v", err)
+	}
+}
+
+// An upgrade retry can retain the event's original timestamp while appending
+// a new source-aware row. Currency must follow the event identity in that row.
+func TestCheckCore3_DeferralRowRetainsSourceIdentityAcrossRetry(t *testing.T) {
+	specDir := t.TempDir()
+	round := 1
+	d := Deferral{Slot: "R1", Round: round, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64), FindingText: "same finding", Bead: "follow-up", By: "operator", CreatedAt: "2026-10-20T00:00:00Z", SourceVerdict: VerdictRequestChanges, SourceFileSHA256: strings.Repeat("b", 64)}
+	event := DeferralRecord{Record: RecordDeferral, Spec: "999", Panel: "p", Deferral: d}
+	row := testRow(fmt.Sprintf("p:R1:r1:ccr[0]:%s:%s:%s:deferral", d.FindingSHA256, d.SourceVerdict, d.SourceFileSHA256), "p", "R1", nil)
+	row.Disposition, row.EvidenceRef, row.Round, row.CreatedAt = "confirmed-deferred", d.Bead, &round, "2026-10-21T00:00:00Z"
+	manifest := testManifest("p", round, []ManifestSlot{{Slot: "R1", Model: "sonnet", Verdict: VerdictRequestChanges}})
+	writeDispositionsFile(t, specDir, "p", mustMarshal(t, event), mustMarshal(t, row), mustMarshal(t, manifest))
+	dir := filepath.Join(specDir, "reviews", "p")
+	current := &Result{Panel: &Panel{Deferrals: []Deferral{d}}, LatestRound: round, Verdicts: []Verdict{{Slot: "R1", Round: round, Verdict: VerdictRequestChanges, FileSHA256: strings.Repeat("c", 64)}}}
+	if err := checkCompletenessAt(dir, "p", current); err == nil {
+		t.Fatal("retry row lost its source link and covered a superseded deferral")
+	}
+	if err := CheckCompletenessAt(dir, "p"); err != nil {
+		t.Fatalf("standalone check must remain ledger-only: %v", err)
 	}
 }

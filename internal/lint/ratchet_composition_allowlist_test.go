@@ -9,6 +9,9 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/instruct/panelstate.go gatherPanelState workspace.SpecBranch":                                             {Count: 1, Gate: "SpecBranch validates the registered spec ID before live subject resolution"},
+	"cmd/mindspec/panel.go beadRecoveryTarget workspace.BeadBranch":                                                     {Count: 1, Gate: "BeadBranch validates the recovery bead ID before branch composition"},
+	"cmd/mindspec/panel.go nonBeadTargetRevParse workspace.SpecBranch":                                                  {Count: 1, Gate: "SpecBranch validates the registered spec ID before live subject resolution"},
 	"internal/lifecycle/scan.go scanAncestorFindings workspace.SpecBranch":                                              {Count: 1, Gate: "waist: workspace.SpecBranch validates the spec ID before composition. The lineage resolver also validates the returned ID."},
 	"internal/complete/merge_only.go ownershipCompletionFailure workspace.BeadBranch":                                   {Count: 1, Gate: "The workspace helper validates the bead ID before the preserved-merge recovery uses its branch."},
 	"internal/complete/closing.go runMergedCompletion workspace.SpecBranch":                                             {Count: 1, Gate: "The workspace helper validates the ID. Run validates the bead at ingress and resolves the owning spec before this call."},

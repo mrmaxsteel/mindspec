@@ -155,6 +155,7 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "cmd/mindspec/panel_defer.go", Func: "runPanelDefer", Detail: "arg1:unprovable", Rationale: "CheckDeferral builds a non-destructive dependency command from validated IDs; no destructive constructor applies.", Obligation: "TestPanelDefer_RefusalListsEveryMissingRequirement pins the dependency command and finding text."},
 	{File: "cmd/mindspec/reattest.go", Func: "reattestRefusalFailure", Detail: "variadic-spread:recovery", Rationale: "The ancestor reader renders each dependent ID with idrender.Bead. The default recovery inspects first-parent merges for no-owned and unknown-base refusals or runs doctor for other diagnoses.", Obligation: mindspecVerbTemplateObligation},
 	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.finalizeBeadWorktrees", Detail: "arg1:unprovable",
 		Rationale:  "The recovery substitutes idrender.Spec(specID). Both callers validate specID before this helper runs. The command repeats implementation approval and does not remove work.",

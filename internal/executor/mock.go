@@ -105,6 +105,8 @@ type MockExecutor struct {
 	CheckSlotTreeErr  error
 	IsRefNotFoundFn   func(error) bool
 
+	ExactRefExistsFn func(workdir, ref string) (bool, error)
+
 	CheckSlotIgnoreFn  func(workdir, file string) error
 	CheckSlotIgnoreErr error
 
@@ -311,6 +313,14 @@ func (m *MockExecutor) LsTree(workdir, rev string) (string, error) {
 		return m.LsTreeFn(workdir, rev)
 	}
 	return m.LsTreeResult, m.LsTreeErr
+}
+
+func (m *MockExecutor) ExactRefExists(workdir, ref string) (bool, error) {
+	m.record("ExactRefExists", workdir, ref)
+	if m.ExactRefExistsFn != nil {
+		return m.ExactRefExistsFn(workdir, ref)
+	}
+	return false, nil
 }
 
 func (m *MockExecutor) RevParseRef(workdir, ref string) (string, error) {

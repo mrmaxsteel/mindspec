@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -43,9 +44,13 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	if res.Panel.Abandoned {
 		return panelVerbFailure(fmt.Errorf("panel is abandoned"))
 	}
-	f, err := refuteFinding(reg.Dir, slot, round, finding)
+	f, verdict, err := deferFinding(reg.Dir, slot, round, finding)
 	if err != nil {
 		return panelVerbFailure(err)
+	}
+	severity := "blocking"
+	if verdict == panel.VerdictApprove {
+		severity = "minor"
 	}
 	model := ""
 	for _, s := range res.Panel.Roster {
@@ -59,7 +64,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	check := func() error {
 		texts := []string{f.Text}
 		if f.ID == "slot" {
-			v, err := panel.ReadSubmittedFindingVerdict(reg.Dir, slot, round)
+			v, _, err := deferVerdict(reg.Dir, slot, round)
 			if err != nil {
 				return err
 			}
@@ -79,11 +84,24 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		return bead.CheckDeferral(beadID, epic, reviewedBead, texts, panel.RedactFindingPaths)
 	}
 	if err := check(); err != nil {
+		var reqErr *bead.DeferralRequirementsError
+		if errors.As(err, &reqErr) {
+			return guard.NewFailure(reqErr.Error(), reqErr.Recovery)
+		}
 		return panelVerbFailure(err)
+	}
+	sourceHash := ""
+	for _, v := range res.Verdicts {
+		if v.Slot == slot && v.Verdict == verdict {
+			sourceHash = v.FileSHA256
+		}
+	}
+	if sourceHash == "" {
+		return panelVerbFailure(fmt.Errorf("source verdict changed; retry against the current verdict"))
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	ref := panel.Deferral{Slot: slot, Round: round, Finding: f.ID, FindingSHA256: f.SHA256,
-		FindingText: f.Text, Bead: beadID, By: by, CreatedAt: now}
+		FindingText: f.Text, Bead: beadID, By: by, CreatedAt: now, SourceVerdict: verdict, SourceFileSHA256: sourceHash}
 	event, err := json.Marshal(panel.DeferralRecord{Record: panel.RecordDeferral, Spec: panelRecordSpec(*res.Panel), Panel: args[0], Deferral: ref})
 	if err != nil {
 		return panelVerbFailure(err)
@@ -92,8 +110,8 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	if gate == "" {
 		gate = "adhoc"
 	}
-	row, err := json.Marshal(panel.DispositionRow{Record: "disposition", ID: fmt.Sprintf("%s:%s:r%d:%s:%s:deferral", args[0], slot, round, f.ID, f.SHA256[:12]),
-		Spec: panelRecordSpec(*res.Panel), Gate: gate, Panel: args[0], Reviewer: slot, Model: model, Severity: "blocking",
+	row, err := json.Marshal(panel.DispositionRow{Record: "disposition", ID: panel.DeferralRowID(args[0], ref),
+		Spec: panelRecordSpec(*res.Panel), Gate: gate, Panel: args[0], Reviewer: slot, Model: model, Severity: severity,
 		Summary: termsafe.Escape(f.Text), ConvergentWith: []string{}, Disposition: "confirmed-deferred", EvidenceRef: beadID, CreatedAt: now, Round: &round})
 	if err != nil {
 		return panelVerbFailure(err)
@@ -106,11 +124,17 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		if current.Panel.Abandoned {
 			return fmt.Errorf("panel is abandoned")
 		}
-		latest, err := refuteFinding(reg.Dir, slot, round, finding)
+		latest, _, err := deferFinding(reg.Dir, slot, round, finding)
 		if err != nil {
 			return err
 		}
-		if latest != f {
+		sourceMatches := false
+		for _, v := range current.Verdicts {
+			if v.Slot == slot && v.Verdict == verdict && v.FileSHA256 == sourceHash {
+				sourceMatches = true
+			}
+		}
+		if latest != f || !sourceMatches {
 			return fmt.Errorf("finding changed; retry against the current verdict")
 		}
 		res = current
@@ -121,7 +145,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	}
 	found := false
 	for _, old := range res.Panel.Deferrals {
-		if old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 {
+		if old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 && old.SourceVerdict == verdict && old.SourceFileSHA256 == sourceHash {
 			found = true
 		}
 	}

@@ -472,3 +472,10 @@ readable, then retry approval.
 `FinalizeStageError` carries the failed stage without changing the inner error.
 `SetFinalizeStepHookForTest` lets approval tests inject faults into real executor
 runs. Tests use temporary git repos, fake tracker commands, and file remotes.
+
+`Sandbox.RunIn(relDir, ...)` runs a command from a sandbox sub-directory
+(for example a spec or bead worktree). The sandbox's `git init` takes the
+host's `init.defaultBranch`; when that is the protected `main`, `instruct`
+from the primary checkout reports idle by design. Phase-detection scenarios
+therefore run `instruct` from the worktree, so the result does not depend
+on host git config.

@@ -442,6 +442,16 @@ error across its three legs (the orphan scan, the worktree-enumeration
 merge-prevention leg, and the durable-obligation backstop) and performs NO
 epic close, NO phase write, NO merge, NO push on a refusal.
 
+The whole-branch doc-sync and ADR-divergence gates diff from
+`implDiffBase`, not from the local-main merge-base alone. When local `main`
+is behind `origin/main` and the spec branch has merged `origin/main`, the
+`origin/main` merge-base is a descendant of the local one; it is then the
+base, so files that only `origin/main` changed do not read as spec changes
+(a stale local `main` used to produce a false `adr-divergence-unowned`).
+With no `origin/main` ref, or with local `main` ahead or diverged, the local
+merge-base stays the base. `complete` does not read `main`: its per-bead
+base is the merge-base of the spec branch and the bead head.
+
 ### `mindspec doctor` + `mindspec next`: shared lifecycle-divergence predicates
 
 Doctor uses git state to classify an open bead after a naming merge.

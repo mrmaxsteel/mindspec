@@ -93,6 +93,7 @@ func verdictV2Definition() *verdictSchemaNode {
 			"cmd": stringSchema(false), "exit": integer(), "tail": stringSchema(false),
 		})},
 	})
+	s.Properties["findings"].Description = "Minor notes on APPROVE verdicts. Use panel defer with ccr[i] to defer a note. These notes do not count toward the gate."
 	s.Description = "Transport and relation checks outside this schema: file size at most 1 MiB; UTF-8 tail size at most 4096 bytes; void_reason presence only for VOID; non-empty rationale unless VOID; executed command index binding; no command on other bases; verdict and concrete_changes_required cardinality."
 	return s
 }
@@ -315,11 +316,15 @@ func ParseVerdictV2(data []byte) (VerdictV2, error) {
 }
 func ValidateVerdictV2(data []byte) error { _, err := ParseVerdictV2(data); return err }
 
-// FindingVerdict projects item texts before the existing positional hash rules.
+// FindingVerdict projects blocking items and APPROVE notes for finding-aware verbs.
+// APPROVE notes remain outside the blocking-finding gate rules.
 func (v VerdictV2) FindingVerdict() FindingVerdict {
 	texts := make([]string, len(v.ConcreteChangesRequired))
 	for i, c := range v.ConcreteChangesRequired {
 		texts[i] = c.Text
+	}
+	if v.Verdict == VerdictApprove {
+		texts = append([]string(nil), v.Findings...)
 	}
 	return FindingVerdict{Verdict: v.Verdict, HardBlock: v.HardBlock, Rationale: v.Rationale, ConcreteChangesRequired: texts}
 }

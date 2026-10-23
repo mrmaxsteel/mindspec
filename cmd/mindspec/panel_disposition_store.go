@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
@@ -50,6 +51,12 @@ already exist.
   - "-" to read the line from stdin;
   - "@<path>" to read it from a file.
 
+A disposition row needs only the finding: reviewer, model, severity,
+summary and disposition. append fills record, spec and gate (from the
+panel registration; spec falls back to --spec), panel (from --panel),
+created_at (now), convergent_with ([]) and backfilled (false) when they
+are absent. A rejected row prints the full shape with an example.
+
 For a disposition row, the canonical "id" is COMPUTED from the record
 content (a content hash of {spec, panel, reviewer, summary}); any "id"
 you supply is overridden, so a re-append of the same finding is an
@@ -76,6 +83,10 @@ never interpolated into a shell-quoted argument.`,
 		}
 
 		record, err := readDispositionData(cmd, dataArg)
+		if err != nil {
+			return err
+		}
+		record, err = fillDispositionRow(record, specID, panelName, time.Now)
 		if err != nil {
 			return err
 		}
@@ -121,8 +132,15 @@ never interpolated into a shell-quoted argument.`,
 			}, record); err != nil {
 				return err
 			}
-		} else if err := panel.AppendRecord(specDir, panelName, record); err != nil {
-			return err
+		} else {
+			if discriminator.Record == panel.RecordDisposition {
+				if err := panel.Validate(record); err != nil {
+					return fmt.Errorf("%w\n%s", err, dispositionRowShape)
+				}
+			}
+			if err := panel.AppendRecord(specDir, panelName, record); err != nil {
+				return err
+			}
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "OK: appended to spec %s panel %s dispositions.jsonl\n", idrender.Spec(specID), panelName)
@@ -131,7 +149,7 @@ never interpolated into a shell-quoted argument.`,
 }
 
 var panelDispositionCheckCmd = &cobra.Command{
-	Use:   "check --spec <id> [--panel <name>]",
+	Use:   "check [panel] --spec <id> [--panel <name>]",
 	Short: "Run the completeness floor against the durable per-panel store",
 	Long: `check reads
 ONLY a panel's dispositions.jsonl (its coverage manifest plus its
@@ -140,17 +158,31 @@ slot whose terminal verdict is REQUEST_CHANGES or REJECT, requires at
 least one disposition row naming that slot (as "reviewer" or in
 "convergent_with[]").
 
+This check is ledger-only; source currency is checked by the panel gate,
+complete, and impl approve, which already read verdict files.
+
 With --panel, only that one panel is checked. Without it, every panel
 directory under <spec-dir>/reviews/ that has a dispositions.jsonl is
-checked. Exit code: 0 if every checked panel passes the floor; non-zero,
-naming every failing panel + slot, otherwise.`,
-	Args: cobra.NoArgs,
+checked. A positional panel name is the same as --panel; without --spec
+the spec comes from that panel's registration. Exit code: 0 if every
+checked panel passes the floor; non-zero, naming every failing panel +
+slot, otherwise.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		specID, _ := cmd.Flags().GetString("spec")
 		panelName, _ := cmd.Flags().GetString("panel")
+		if len(args) == 1 {
+			if panelName != "" && panelName != args[0] {
+				return fmt.Errorf("the positional panel %s and --panel %s differ; give one", termsafe.Escape(args[0]), termsafe.Escape(panelName))
+			}
+			panelName = args[0]
+		}
+		if specID == "" && panelName != "" {
+			specID = dispositionPanelSpec(panelName)
+		}
 
 		if specID == "" {
-			return fmt.Errorf("--spec is required")
+			return fmt.Errorf("--spec is required: mindspec panel disposition check --spec <id> [--panel <name>]")
 		}
 		if panelName != "" {
 			if err := validatePanelSlug(panelName); err != nil {
@@ -189,6 +221,98 @@ naming every failing panel + slot, otherwise.`,
 		fmt.Fprintf(cmd.OutOrStdout(), "OK: completeness floor satisfied for %d panel(s)\n", len(panels))
 		return nil
 	},
+}
+
+// dispositionRowShape is the hint printed when a disposition row fails
+// validation: the fields the caller must give, and an example.
+const dispositionRowShape = `a disposition row needs: reviewer, model, severity, summary, disposition
+(one of confirmed-fixed, confirmed-scope-trim, deferred, false-contamination).
+Use panel defer for confirmed-deferred and panel refute for audited-refuted.
+Optional: convergent_with, evidence_ref,
+note, round. append fills record, id, spec, gate, panel, created_at,
+convergent_with and backfilled when they are absent.
+example: {"reviewer":"R1","model":"opus","severity":"minor","summary":"rename X","disposition":"confirmed-fixed","evidence_ref":"abc1234"}`
+
+// fillDispositionRow completes a disposition row from the command flags
+// and the panel registration, so the caller supplies only the finding.
+// A record with no "record" field is a disposition row. It fills record,
+// panel (from --panel), spec and gate (from the panel registration; spec
+// falls back to --spec),
+// created_at (now), convergent_with ([]) and backfilled (false) when they
+// are absent; a field the caller gave is kept. Other record kinds and
+// undecodable input pass through unchanged for the store's own validation.
+func fillDispositionRow(record []byte, specID, panelName string, now func() time.Time) ([]byte, error) {
+	var m map[string]interface{}
+	if err := json.Unmarshal(bytes.TrimSpace(record), &m); err != nil || m == nil {
+		return record, nil
+	}
+	if _, ok := m["record"]; !ok {
+		m["record"] = panel.RecordDisposition
+	}
+	if r, _ := m["record"].(string); r != panel.RecordDisposition {
+		return record, nil
+	}
+	if _, ok := m["panel"]; !ok {
+		m["panel"] = panelName
+	}
+	_, hasSpec := m["spec"]
+	_, hasGate := m["gate"]
+	if root, err := findPanelRoot(config.IsolationRootFor); err == nil && len(panelSlugMatches(root, panelName)) > 0 {
+		reg, err := findPanelRegistration(root, panelName, specID)
+		if err != nil {
+			return nil, err
+		}
+		if reg.Err != nil {
+			return nil, reg.Err
+		}
+		if reg.Panel.Spec != specID {
+			return nil, fmt.Errorf("panel spec must match --spec")
+		}
+		if !hasSpec {
+			m["spec"] = panel.RecordSpec(reg.Panel)
+		}
+		if !hasGate {
+			gate := reg.Panel.Gate
+			if gate == "" {
+				gate = "adhoc"
+			}
+			m["gate"] = gate
+		}
+	}
+	if _, ok := m["spec"]; !ok {
+		m["spec"] = specID
+	}
+	if _, ok := m["created_at"]; !ok {
+		m["created_at"] = now().UTC().Format(time.RFC3339)
+	}
+	if _, ok := m["convergent_with"]; !ok {
+		m["convergent_with"] = []string{}
+	}
+	if _, ok := m["backfilled"]; !ok {
+		m["backfilled"] = false
+	}
+	if _, ok := m["id"]; !ok {
+		m["id"] = ""
+	}
+	return json.Marshal(m)
+}
+
+// dispositionPanelSpec returns the spec recorded in the panel's
+// registration, or "" when the slug is invalid or does not resolve to one
+// registration.
+func dispositionPanelSpec(slug string) string {
+	if validatePanelSlug(slug) != nil {
+		return ""
+	}
+	root, err := findPanelRoot(config.IsolationRootFor)
+	if err != nil {
+		return ""
+	}
+	reg, err := findPanelRegistration(root, slug)
+	if err != nil || reg.Err != nil {
+		return ""
+	}
+	return reg.Panel.Spec
 }
 
 // resolveDispositionSpecDir resolves --spec's value to an on-disk spec
