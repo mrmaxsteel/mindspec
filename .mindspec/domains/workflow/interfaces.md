@@ -1220,3 +1220,25 @@ round carries backed entries. The spec approval gate discharges only findings
 whose slot, round, id and hash match. Other gates do not use these entries to
 discharge findings. The implementation approval bead-deferral check reads only
 bead deferrals.
+
+### Lifecycle panel gate core
+
+`panel.DocumentSubjectDigest` computes the semantic subject for document and
+final-review panels. Create, rebind and verify use the same reader. Document
+subjects exclude approval-owned fields, the standard approval section and
+the exact initial plan scaffold. Other frontmatter values remain in scope.
+Final review excludes the exact generated placeholder ADR. Each lifecycle
+panel target must be `spec/<id>`.
+
+`runLifecycleGate(root, specID, gate, worktree, out)` returns an `Outcome`
+and an error. It makes no lifecycle write. It checks each live registration,
+the recorded target tip, semantic subject dirt and durable coverage. A failed
+leg refuses under both presence policies. A missing panel warns or refuses
+as the policy directs. The skip, disabled and abandonment hatches retain
+their audit rules.
+
+`recordLifecycleGateAudit(epicID, outcome, deferralIDs)` writes the due audit
+through a metadata merge. It records skip, abandonment and absence with their
+times. Absence includes `panel_absent_gate`. It writes the accepted IDs to
+`plan_deferral_ids`. A nil list writes no deferral key. Call it after epic
+resolution. A failed write returns an error.

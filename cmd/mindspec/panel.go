@@ -76,6 +76,9 @@ are 6 reviewers for spec_approve, plan_approve, final_review and adhoc,
 and 4 for bead. --reviewers N overrides the size; N must be at least 2.
 A later round keeps the previous roster unless --reviewers is supplied.
 
+For spec_approve, plan_approve and final_review, --target must be spec/<id>.
+These gates use a semantic subject digest. Document gates exclude the fields
+that approval writes.
 For --gate bead, --target must be bead/<id>; bead_id is derived from it.
 An explicit --bead must match and is refused for other gates.
 For existing bead panels with a divergent recorded target, the gate compares
@@ -183,6 +186,9 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 				fmt.Sprintf("pass one of %s to --gate", keys))
 		}
 
+		if err := panel.CheckLifecycleTarget(gate, specID, target); err != nil {
+			return guard.NewFailure(err.Error(), fmt.Sprintf("mindspec panel create %s --spec %s --gate %s --target spec/%s", shellQuoteTarget(slug), idrender.Spec(specID), gate, idrender.Spec(specID)))
+		}
 		beadPtr, err := panel.CreateBeadID(gate, target, beadID)
 		if err != nil {
 			targetRef := beadRecoveryTarget(target, beadID)
@@ -214,12 +220,16 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 			return err
 		}
 
-		sha, err := revParseForPanelFn(root, target)
+		resolvedTarget := target
+		if panel.IsLifecycleGate(gate) {
+			resolvedTarget = "refs/heads/" + target
+		}
+		sha, err := revParseForPanelFn(root, resolvedTarget)
 		if err != nil {
 			return fmt.Errorf("resolving --target %q: %w", target, err)
 		}
 
-		digest, err := panel.SubjectTreeReader(lsTreeForPanelFn)(panel.PanelDirScanRoot(dir), sha, panel.Subject(gate, specDir))
+		digest, err := panelSubjectReader(gate, specDir, lsTreeForPanelFn)(panel.PanelDirScanRoot(dir), sha, panel.Subject(gate, specDir))
 		if err != nil {
 			return fmt.Errorf("reading panel subject: %w", err)
 		}
@@ -691,7 +701,7 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 
 	return panel.ResolveGateFacts(reg, beadID, scanRoot, panel.GateIO{
 		SpecDir:       filepath.Join(workspace.SpecsDir(root), reg.Panel.Spec),
-		SubjectTree:   panel.SubjectTreeReader(exec.LsTree),
+		SubjectTree:   panelSubjectReader(reg.Panel.Gate, panel.PanelSpecDir(reg.Dir, filepath.Join(workspace.SpecsDir(root), reg.Panel.Spec)), exec.LsTree),
 		RevParse:      revParse,
 		Status:        exec.Status,
 		IsRefNotFound: exec.IsRefNotFound,
@@ -1338,4 +1348,11 @@ func panelSlotStatuses(root string, res *panel.Result) ([]panel.SlotStatus, erro
 		runtime[slot.Slot] = rt
 	}
 	return panel.ReadSlotStatuses(res, runtime, time.Now())
+}
+
+// panelSubjectReader supplies the same document digest to each panel verb.
+func panelSubjectReader(gate, specDir string, lsTree func(string, string) (string, error)) func(string, string, panel.SubjectRoots) (string, error) {
+	return panel.DocumentSubjectTreeReader(gate, specDir, lsTree, func(workdir, ref, name string) ([]byte, error) {
+		return newExecutor(workdir).FileAtRef(ref, name)
+	})
 }

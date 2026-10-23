@@ -22,6 +22,10 @@ func ResolveSubjectHead(p Panel, workdir string, branchForSpec func(string) (str
 	if target == "" {
 		return "", fmt.Errorf("panel.json records no target ref")
 	}
+	targetSpec, specBranch := strings.CutPrefix(target, "spec/")
+	if IsLifecycleGate(p.Gate) && specBranch && targetSpec == p.Spec {
+		return revParse(workdir, "refs/heads/"+target)
+	}
 	if (p.Gate == "spec_approve" || p.Gate == "plan_approve") && looksLikeCommitSHA(target) {
 		branch, err := branchForSpec(p.Spec)
 		if err != nil {

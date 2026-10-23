@@ -203,6 +203,7 @@ func renderConfig(cfg *config.Config) (string, error) {
 	fmt.Fprintf(&b, "  cli_guards: %t\n", cfg.Enforcement.CLIGuards)
 	fmt.Fprintf(&b, "  agent_hooks: %t\n", cfg.Enforcement.AgentHooks)
 	fmt.Fprintf(&b, "  panel_gate: %t\n", cfg.Enforcement.PanelGate)
+	fmt.Fprintf(&b, "  panel_presence: %s\n", escapeConfigValue(cfg.Enforcement.PanelPresence))
 	fmt.Fprintln(&b)
 
 	fmt.Fprintln(&b, "recording:")

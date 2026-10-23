@@ -371,6 +371,8 @@ type Enforcement struct {
 	// leaves pre-populated struct fields untouched for absent keys); an
 	// explicit `false` disables it.
 	PanelGate bool `yaml:"panel_gate"`
+	// PanelPresence controls only gates with no registration.
+	PanelPresence string `yaml:"panel_presence"`
 }
 
 // DefaultConfig returns a Config with all defaults applied.
@@ -385,6 +387,7 @@ func DefaultConfig() *Config {
 			CLIGuards:     true,
 			AgentHooks:    true,
 			PanelGate:     true,
+			PanelPresence: "warn",
 		},
 		Decomposition: Decomposition{
 			MaxBeads:        6,
@@ -493,6 +496,21 @@ func loadUncached(root string) (*Config, error) {
 	cfg := DefaultConfig()
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, termsafe.PrefixFailure(err, "parsing config: ")
+	}
+	// A present null must not inherit the absent-key default.
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, termsafe.PrefixFailure(err, "parsing config: ")
+	}
+	if enforcement, ok := raw["enforcement"].(map[string]any); ok {
+		if value, present := enforcement["panel_presence"]; present {
+			if _, ok := value.(string); !ok {
+				cfg.Enforcement.PanelPresence = ""
+			}
+		}
+	}
+	if cfg.Enforcement.PanelPresence != "warn" && cfg.Enforcement.PanelPresence != "enforce" {
+		return nil, termsafe.NewFailure("enforcement.panel_presence must be warn or enforce", "set enforcement.panel_presence to warn or enforce")
 	}
 	if err := loadPanelLayers(root, data, cfg); err != nil {
 		return nil, err

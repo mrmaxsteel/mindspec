@@ -151,6 +151,9 @@ func Create(dir string, in CreateInput) error {
 }
 
 func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
+	if err := CheckLifecycleTarget(in.Gate, in.Spec, in.Target); err != nil {
+		return nil, err
+	}
 	beadID := ""
 	if in.BeadID != nil {
 		beadID = *in.BeadID

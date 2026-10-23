@@ -9,6 +9,8 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/approve/lifecycle_gate.go runLifecycleGate workspace.SpecDir":                                             {Count: 1, Gate: "SpecDir validates specID before path composition and returns an error on invalid IDs"},
+	"internal/panel/paneltest/lifecycle.go Lifecycle workspace.SpecBranch":                                              {Count: 1, Gate: "SpecBranch validates the fixture spec ID before branch composition; an error fails the fixture"},
 	"internal/instruct/panelstate.go gatherPanelState workspace.SpecBranch":                                             {Count: 1, Gate: "SpecBranch validates the registered spec ID before live subject resolution"},
 	"cmd/mindspec/panel.go beadRecoveryTarget workspace.BeadBranch":                                                     {Count: 1, Gate: "BeadBranch validates the recovery bead ID before branch composition"},
 	"cmd/mindspec/panel.go nonBeadTargetRevParse workspace.SpecBranch":                                                  {Count: 1, Gate: "SpecBranch validates the registered spec ID before live subject resolution"},

@@ -113,7 +113,7 @@ func resetPanelCreateFlags(t *testing.T) {
 		spec, _ := panelCreateCmd.Flags().GetString("spec")
 		var listing strings.Builder
 		for _, specs := range []string{".mindspec/specs", ".mindspec/docs/specs", "docs/specs"} {
-			fmt.Fprintf(&listing, "100644 blob abc123\t%s/%s/spec.md\n", specs, spec)
+			fmt.Fprintf(&listing, "100644 blob abc123\t%s/%s/context.md\n", specs, spec)
 		}
 		return listing.String(), nil
 	}
@@ -1788,8 +1788,7 @@ func TestSanitizeNonBeadDecision(t *testing.T) {
 			}(),
 		},
 		{
-			// Round==2 vs panel.Round==1 fires buildResult's RoundMismatch,
-			// which the leg-4 template appends RawMergeFence("") to.
+			// Round==2 vs panel.Round==1 fires buildResult's RoundMismatch.
 			name:  "leg (4) round mismatch",
 			facts: panel.GateFacts{BeadID: "", Reg: reg, Res: buildResult(basePanel(), 6, 0, 6, 2, nil), HeadSHA: sha},
 		},
@@ -1835,8 +1834,11 @@ func TestSanitizeNonBeadDecision(t *testing.T) {
 			if strings.Contains(got.Message, "could not verify branch bead/") {
 				t.Errorf("sanitized message still leaks the transient-error bead/ fragment: %q", got.Message)
 			}
-			if strings.Contains(got.Message, panel.RawMergeFence("")) {
-				t.Errorf("sanitized message still carries the empty-interpolation merge fence: %q", got.Message)
+			// Check fixed fence text: the empty-bead helper intentionally returns nothing.
+			for _, fenceText := range []string{"Do NOT bypass with raw", "git merge bead/"} {
+				if strings.Contains(got.Message, fenceText) {
+					t.Errorf("sanitized message still carries merge fence text %q: %q", fenceText, got.Message)
+				}
 			}
 			if strings.Contains(got.Message, "mindspec complete") {
 				t.Errorf("sanitized message must never introduce a mindspec complete instruction: %q", got.Message)
@@ -1909,7 +1911,7 @@ func TestPanelCreate_GateStampsPerGateDefaults(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"panel", "create", "p113g", "--spec", "113-test", "--target", "spec/113-x", "--gate", "final_review"})
+	rootCmd.SetArgs([]string{"panel", "create", "p113g", "--spec", "113-test", "--target", "spec/113-test", "--gate", "final_review"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("panel create --gate final_review: %v\nstderr=%s", err, stderr.String())
 	}
@@ -2164,7 +2166,7 @@ func TestPanelCreate_GateAdvisoryReadThrough(t *testing.T) {
 	var createOut, createErr bytes.Buffer
 	rootCmd.SetOut(&createOut)
 	rootCmd.SetErr(&createErr)
-	rootCmd.SetArgs([]string{"panel", "create", "p113-advisory", "--spec", "113-test", "--target", "spec/113-x", "--gate", "final_review"})
+	rootCmd.SetArgs([]string{"panel", "create", "p113-advisory", "--spec", "113-test", "--target", "spec/113-test", "--gate", "final_review"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("panel create --gate final_review: %v\nstderr=%s", err, createErr.String())
 	}
