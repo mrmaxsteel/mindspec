@@ -253,6 +253,68 @@ func TestS133LifecycleGate_TargetAndAllRegistrations(t *testing.T) {
 	}
 }
 
+func TestS133LifecycleGate_OtherSpecTarget(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		for _, gate := range []string{"spec_approve", "plan_approve", "final_review"} {
+			t.Run(policy+"/"+gate, func(t *testing.T) {
+				root, dir := s133GateFixture(t, policy, gate, "absent")
+				preflightGit(t, root, "branch", "spec/901-other")
+				exec := executor.NewMindspecExecutor(root)
+				head, err := exec.RevParseRef(root, "refs/heads/spec/901-other")
+				if err != nil {
+					t.Fatal(err)
+				}
+				specDir := filepath.Join(root, ".mindspec/specs/900-example")
+				digest, err := panel.DocumentSubjectTreeReader(gate, specDir, exec.LsTree, func(_, ref, name string) ([]byte, error) { return exec.FileAtRef(ref, name) })(root, head, panel.Subject(gate, specDir))
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Seed an older registration with the same target in its snapshot and
+				// first round. Current create refuses this target before writing it.
+				p := panel.Panel{VerdictSchema: 2, Spec: "900-example", Target: "spec/901-other", Gate: gate, Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: head, SubjectDigest: digest, Telemetry: "required",
+					Roster: []panel.RosterSlot{{Slot: "R1", Family: "harness", Model: "m", Lens: "correctness"}, {Slot: "R2", Family: "harness", Model: "m", Lens: "correctness"}}}
+				if err := panel.WriteSnapshot(dir, p); err != nil {
+					t.Fatal(err)
+				}
+				paneltest.Fixture{Dir: dir, Panel: p}.Round(t, 2)
+				for _, slot := range p.Roster {
+					v := paneltest.Verdict("APPROVE")
+					v.Slot, v.ReviewedSHA = slot.Slot, head
+					if _, err := panel.Submit(panel.SubmitTarget{Dir: dir, Slot: slot.Slot, Round: 1}, paneltest.Bytes(t, v), paneltest.Resolve); err != nil {
+						t.Fatal(err)
+					}
+				}
+				res, err := panel.Tally(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if res.IntegrityErr != nil {
+					t.Fatalf("fixture integrity: %v", res.IntegrityErr)
+				}
+				if err := panel.WriteCoverageManifest(res); err != nil {
+					t.Fatal(err)
+				}
+				reg := panel.Registration{Dir: dir, Panel: *res.Panel}
+				if err := panel.CheckCore3(reg); err != nil {
+					t.Fatalf("fixture coverage: %v", err)
+				}
+				if d := panel.PanelGateDecision(panel.GateFacts{Reg: &reg, Res: res, HeadSHA: head, SubjectDigest: digest, WorktreeAbsent: true}); d.Action != panel.Allow {
+					t.Fatalf("fixture must pass the other decision legs: %+v", d)
+				}
+				o, err := runLifecycleGate(root, "900-example", gate, root, nil)
+				if err == nil || o.Action != panel.Block {
+					t.Fatalf("other spec target passed: %+v %v", o, err)
+				}
+				want := "target: gate " + gate + " requires target spec/900-example; recorded target is spec/901-other"
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("wrong target refusal, want %q: %v", want, err)
+				}
+				s133GateText(t, err.Error(), gate, root)
+			})
+		}
+	}
+}
+
 func TestS133LifecycleGate_OwnWritesAndExclusions(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		for _, gate := range []string{"spec_approve", "plan_approve"} {

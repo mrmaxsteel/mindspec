@@ -341,6 +341,8 @@ func TestCeremonyNonInflation_ConfigKeys(t *testing.T) {
 		"enforcement.agent_hooks",
 		"enforcement.cli_guards",
 		"enforcement.panel_gate",
+		// The presence policy controls missing review panels at lifecycle gates.
+		"enforcement.panel_presence",
 		"enforcement.pre_commit_hook",
 		"loop",
 		"loop.budget",

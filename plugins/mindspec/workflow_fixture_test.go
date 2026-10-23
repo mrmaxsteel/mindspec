@@ -310,6 +310,9 @@ func TestMsPanelWorkflow_CreateGate(t *testing.T) {
 			}
 			input := fmt.Sprintf("commit refs/heads/main\ncommitter Workflow Test <workflow@example.invalid> 1760000000 +0000\ndata 7\ninitial\nM 100644 inline .mindspec/specs/900-example/spec.md\ndata %d\n%s\ndone\n", len(spec), spec)
 			workflowGit(t, root, input, "fast-import", "--quiet")
+			if panel.IsLifecycleGate(gate) {
+				workflowGit(t, root, "", "branch", "spec/900-example", "main")
+			}
 			source := WorkflowFiles()["ms-panel.js"]
 			js := `const cp=require('child_process'), assert=require('assert');
 const [source,gate,bin,root]=process.argv.slice(1); let created;
@@ -324,6 +327,7 @@ const agent=async(prompt,options)=>{
 const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
 (async()=>{
  const args={slug:'p',target:'main',round:1};
+ if(['spec_approve','plan_approve','final_review'].includes(gate))args.target='spec/900-example';
  if(gate){args.gate=gate;if(gate!=='adhoc')args.spec='900-example';}
  await new AsyncFunction('args','agent','pipeline',source)(args,agent,async(items,fn)=>Promise.all(items.map(fn)));
  const expected=gate ? " --gate '"+gate+"'" : ' --gate adhoc';
