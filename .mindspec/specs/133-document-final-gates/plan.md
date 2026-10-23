@@ -19,7 +19,7 @@ work_chunks:
     depends_on: [1, 5, 6]
     key_file_paths: [internal/approve/spec.go, internal/approve/plan.go, .mindspec/adr/ADR-0041-gate-before-mutate.md]
   - id: 3
-    depends_on: [1, 4]
+    depends_on: [1]
     key_file_paths: [internal/approve/impl.go, internal/executor/mindspec_executor.go]
   - id: 4
     depends_on: [1]
@@ -29,7 +29,7 @@ work_chunks:
     key_file_paths: [cmd/mindspec/panel_defer.go, internal/panel/ledger.go, internal/panel/gate.go, internal/panel/create.go,
         .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md]
   - id: 6
-    depends_on: [1, 4]
+    depends_on: [1]
     key_file_paths: [internal/panel/verdict_v2.go, internal/panel/gate.go, cmd/mindspec/panel_schema.go]
   - id: 7
     depends_on: [1, 4]
@@ -49,7 +49,7 @@ work_chunks:
 ---
 # Plan: 133-document-final-gates
 
-This plan builds spec 133 R1–R12 in 9 beads. The longest dependency chain is 4 beads: Bead 1, Bead 4, then Bead 3, 6 or 7, then Bead 2 or 8. Beads 1 and 5 start at once. Each other bead starts when its dependencies merge.
+This plan builds spec 133 R1–R12 in 9 beads. The longest dependency chain is 4 beads: Bead 1, Bead 4, Bead 7, Bead 8. Beads 1 and 5 start at once. When Bead 1 merges, Beads 3, 4, 6 and 9 start at once. Each other bead starts when its dependencies merge.
 
 ## Resolutions
 
@@ -59,7 +59,8 @@ The spec has no to-plan deferrals. This section names the plan-time decisions.
 - **Dogfood boundary.** See `## Testing Strategy`. Owner: every bead and every panel of this lane.
 - **In-flight specs (R4.4).** Bead 2 owns the rule. This change does not check approvals that exist: a spec in Plan or Implement mode keeps its spec and plan approvals, and no other verb runs the `spec_approve` or `plan_approve` gate for them again. Each new run of `spec approve` or `plan approve` is a new approval and runs its gate (R1.1). This includes a re-run of `spec approve` on a spec whose epic exists (the replay path, `backfillExistingEpicPhase` in `internal/approve/spec.go`), and `plan approve` on an edited plan whose old beads are all open: the gate runs before the supersede close and before the new beads. A re-run after a fault is not a new approval of changed content: R1.6 applies. Tests: `TestS133DocGate_InFlightSpecKeepsApproval` (AC16, first sentence), `TestS133DocGate_ReApproveEditedPlanRunsGateBeforeSupersede` (AC16, second and third sentences) and `TestS133DocGate_SpecApproveReplayRunsGate`. Bead 9 adds the `doctor` Warn line for an in-flight spec whose epic has `panel_absent` (`TestS133DoctorPresence_InFlightWarn`).
 - **Bead count (9).** Each bead is one mechanism: gate core, document gate, final-review gate, bead presence, plan deferral, artifact path, content-gate report, doc declarations, guidance. Merging two of them puts two unrelated mechanisms in one diff and one panel.
-- **Dependencies for the `enforce` half.** An AC that names no policy holds under `warn` and under `enforce`. A bead can test `enforce` only when Bead 1 (the config key) and the presence code of its verb have merged. So Beads 3, 6 and 7 depend on Bead 4 (the bead-gate presence of `complete`), Bead 8 depends on Bead 3 (the final-review presence of `impl approve`) and on Bead 7, and each of these beads re-runs its cases under both policies. Bead 5 has no edge: Bead 2 re-runs its `spec approve` and `panel defer` cases under `enforce`. No other edge is needed. The `## Policy sweep` section names the bead that verifies each such AC under `enforce`.
+- **Dependencies for the `enforce` half.** An AC that names no policy holds under `warn` and under `enforce`. Each fixture has a passing panel for each gate other than the one under test (the spec's AC preamble). So a bead needs the presence code of another verb only when one of its cases runs that verb with no registration. Bead 7 depends on Bead 4: its `--check` case under `enforce` with no bead panel can fail only when the presence refusal of Bead 4 exists. Bead 8 depends on Bead 3 (the final-review presence of `impl approve`) and on Bead 7. Beads 3 and 6 do not depend on Bead 4: each `complete` case of Bead 3 (AC11 (b) and (c)) and of Bead 6 (AC20) has a bead registration, and Bead 4 changes only the result with no registration. Bead 5 has no edge: Bead 2 re-runs its `spec approve` and `panel defer` cases under `enforce`. No other edge is needed. Each bead re-runs its cases under both policies. The `## Policy sweep` section names the bead that verifies each such AC under `enforce`.
+- **Validation Proofs commands.** The `-run` patterns in the spec's `## Validation Proofs` (`DocumentGate|FinalReviewGate|Resolutions|ReApprove`, `PanelDeferToPlan|PanelCreateTarget`, `PanelPresence`, `BeadCycleCheck` and others) match none of this plan's `TestS133<Mechanism>_` names. `go test -run` exits 0 when no test matches, so those commands would prove nothing. The commands in `## Provenance` and in each bead's Verification replace them. The spec text stays as approved.
 - **Shared helpers with one owner.** Bead 1 owns these. Beads 2, 3 and 9 call them and do not write a second copy.
   - `panel.DocumentSubjectDigest`: the one subject-digest function of R1.6 for `spec_approve`, `plan_approve` and `final_review` (own write sets out, frontmatter compared as parsed keys and values). `panel create`, `panel rebind`, `panel verify` and the gates call it.
   - `config.Enforcement.PanelPresence` (`warn` or `enforce`).
@@ -94,6 +95,7 @@ No ADR needs a superseding ADR.
 - **Doc-sync on the released binary.** The released `complete` refuses a change to `internal/**` with no domain-doc change. Each bead updates `.mindspec/domains/workflow/interfaces.md` (Bead 1 also `.mindspec/domains/core/interfaces.md`) for its mechanism. Bead 9 edits `CHANGELOG.md`, which no manifest claims; the released binary refuses it with `adr-divergence-unowned`, so Bead 9 completes with `--override-adr` and a reason.
 - **Test names.** Each new test of this spec has a name that starts with `TestS133<Mechanism>_`, with the mechanism prefix that its bead's Verification names. No test on the base tree matches `S133` (checked with `go test <pkg> -list` in each package). `go test -run` exits 0 with "no tests to run" when no test matches. So each bead's new tests must appear in `go test -v` output for each Verification line that names a `TestS133` prefix. A run that lists none of them fails the bead. A Verification line without a `TestS133` prefix is a regression run of tests that exist on the base tree.
 - **Both policies.** Each test for an AC that names no presence policy runs its case under `warn` and under `enforce` (a table over the two values). A test that sets only one value fails the review.
+- **Fixture panels.** Each fixture has a passing panel for each gate other than the one under test (the spec's AC preamble), under both policies. A fixture has no panel for a gate only when its AC names the missing panel, or when the verb does not run that gate (`complete --check` skips the bead panel gate).
 - **No real model runs.** Tests use temp git repos, scratch bead stores (the existing `bd` test seams such as `SetSpecRunBDForTest`) and local fake runners. No test starts a real codex, claude or other model CLI.
 - **Shared fixtures.** Bead 1 adds a test fixture builder for a spec with a registration at `spec/<id>` for a named gate (pass, each failing leg, abandoned, SHA target). Beads 2, 3 and 9 use it. Bead 6 uses the existing `internal/panel/paneltest` builders.
 - **Unit tests** cover the digest, config validation, verdict schema, ledger kinds and message text. **Integration tests** drive `ApproveSpec`, `ApprovePlan`, `ApproveImpl` and `complete.Run` in temp repos, with fault injection through the existing fault seams.
@@ -196,15 +198,15 @@ R2.1, R2.4–R2.8, R4.2 and R4.3 for `final_review`.
 - [ ] Every AC8 case gives the AC8 result. No placeholder ADR exists after a refused run with `--supersede-adr` (AC8).
 - [ ] Under `warn`, the AC8 fixture (2 plan beads, no `final_review` registration) exits 0, prints one `warning:` line that names `final_review` and records `panel_absent` on the epic (AC15).
 - [ ] With 1 plan bead, `warn` gives exit 0, one `warning:` line and `panel_absent` on the epic; `enforce` refuses before any write. A gate that skips one-bead specs fails (AC9, AC15).
-- [ ] Every AC10 case gives the AC10 result. A dirt check that names the ledger or `.beads/issues.jsonl` fails (AC10).
-- [ ] Under `warn` and under `enforce`, every AC11 case (a)–(d) gives the AC11 result, the `mindspec complete <bead>` recovery steps included. A check that runs inside `FinalizeEpic` after the spec-artifact commit fails case (b). A recovery that prints `panel create` for an export-only path fails case (c) (AC11).
+- [ ] Every AC10 case gives the AC10 result. The flat-layout ledger case and the `.beads/issues.jsonl` case run under `warn` and under `enforce`. A dirt check that names the ledger or `.beads/issues.jsonl` fails (AC10).
+- [ ] Under `warn` and under `enforce`, every AC11 case (a)–(d) gives the AC11 result, the `mindspec complete <bead>` recovery steps included. Each merged plan bead in these fixtures has a passing bead panel, so `complete <bead>` gives the same result before and after Bead 4. A check that runs inside `FinalizeEpic` after the spec-artifact commit fails case (b). A recovery that prints `panel create` for an export-only path fails case (c) (AC11).
 - [ ] Every AC12 fault, re-run and no-worktree case gives the AC12 result. The cases that name no policy run under both (AC12).
 - [ ] A committed edit to the placeholder ADR beyond the placeholder text makes the `final_review` gate refuse with a stale-subject message. An own write set that leaves out the placeholder path whatever its content fails this test (R2.5).
 - [ ] No string this bead adds to a CLI message or recovery line cites an ADR number, spec number, requirement id, bead id or issue number.
 - [ ] The ADR-0041 pins listed in Bead 2 stay green after this bead (it does not edit the ADR).
 
 **Depends on**
-Bead 1 (gate core), Bead 4 (bead-gate presence, for the `complete` recovery steps of AC11 under `enforce`)
+Bead 1 (gate core)
 
 ## Bead 4: Bead panel presence in complete
 
@@ -278,12 +280,12 @@ R5.1–R5.4.
 
 **Acceptance Criteria**
 - [ ] `panel submit` refuses `../x`, `/x` and a control byte, and names the JSON pointer. `panel schema` output contains `artifact_path` (AC19).
-- [ ] Under `warn` and under `enforce`, every `complete` case of AC20 gives the AC20 result. A check that reads the rebound head instead of the round tree fails the rebind case (AC20).
+- [ ] Under `warn` and under `enforce`, every `complete` case of AC20 gives the AC20 result. Each case has a bead registration with the finding-bearing round. A check that reads the rebound head instead of the round tree fails the rebind case (AC20).
 - [ ] A verdict with no `artifact_path` gives the same decision as before (R5.4).
 - [ ] No string this bead adds to a CLI message or recovery line cites an ADR number, spec number, requirement id, bead id or issue number.
 
 **Depends on**
-Bead 1 (`PanelPresence` config field), Bead 4 (bead-gate presence, for the AC20 `complete` cases under `enforce`)
+Bead 1 (`PanelPresence` config field)
 
 ## Bead 7: complete --check and the full content-gate report
 
@@ -294,11 +296,13 @@ R7.1–R7.6, R7.7 (refused flags), R10, R12 for ADR-0032.
 2. Run doc-sync, the ADR gates and the work-destruction preflight on the landing tree that plain `complete` uses. Fork `--check` before the panel gate and its presence refusal. Skip the panel gate and the coverage check. Write nothing.
 3. Make plain `complete` run every content gate before it refuses, and name every failing gate. Share one function between `--check` and plain `complete`.
 4. Make `validateDivergence` give a Warn `adr-divergence-unowned` that names the file and the domains root. Keep the undeclared-domain, attribute and uncovered cases as Errors.
-5. Re-seat the existing guards that use the `adr-divergence-unowned` Error as their red signal (list below).
+5. Re-seat the existing guards whose red signal depends on an unowned file being an Error (list below).
 6. Add the `## Amendment (Spec 133)` section to ADR-0032 and its pin test. Change `TestADR0032Amendment_ThirdAmendmentAnchorsPresent` to select the spec-122 section by its header. Update the domain docs.
 
-**Guards to re-seat** (from `grep -rn 'adr-divergence-unowned' --include='*_test.go' internal cmd` on the base tree; each name is the enclosing test function):
-- Guards of another mechanism. Each must use a fixture where the wrong read makes the file owned by a declared domain outside the spec's Impacted Domains, so the failure stays an Error (R10.2): `TestCommittedRangeGate_RevokedAtSpecTipRefuses` and `TestCommittedRangeGate_SourceConflictPassesThenResolves` (`internal/complete/landing_tree_test.go`), `TestCompleteRun_RefAnchoredOwnershipClaimPassesFromMainRoot` (`internal/complete/refanchor_e2e_test.go`, its RED-on-revert of the ownership read), `TestComplete_OwnershipResolutionRevokesClaimRefuses` (`internal/complete/ownership_conflict_test.go`), `TestApproveImpl_WholeBranchOwnershipFromRef` and `TestApproveImpl_ScenarioImplApproveCoverageTriple` (`internal/approve/impl_test.go`).
+**Guards to re-seat.** The list comes from the substring grep `grep -rn 'adr-divergence\|unowned' --include='*_test.go' internal cmd` on the base tree. Each name is the enclosing test function (a hit in a doc comment belongs to the function below it). A hit whose red signal does not need an unowned Error (an uncovered, attribute, proposed or load case, a load count, a direct ownership read, or a message sample) is not listed.
+- Guards of another mechanism. Each must use a fixture where the wrong read makes the file owned by a declared domain outside the spec's Impacted Domains, so the failure stays an Error (R10.2): `TestCommittedRangeGate_RevokedAtSpecTipRefuses` and `TestCommittedRangeGate_SourceConflictPassesThenResolves` (`internal/complete/landing_tree_test.go`), `TestCompleteRun_RefAnchoredOwnershipClaimPassesFromMainRoot` (`internal/complete/refanchor_e2e_test.go`, its RED-on-revert of the ownership read), `TestComplete_OwnershipResolutionRevokesClaimRefuses` (`internal/complete/ownership_conflict_test.go`), `TestBead6Leg_i_UntrackedFileGatesBeforeCommit` (the gate measures untracked files before any commit) and `TestBead6Leg_xxiv_ForgedMarkerAndTrailerNeverResumePastGates` (a forged marker cannot resume past the gates) (`internal/complete/bead6_fixture_legs_test.go`), `TestApproveImpl_WholeBranchOwnershipFromRef` and `TestApproveImpl_ScenarioImplApproveCoverageTriple` (`internal/approve/impl_test.go`).
+- Guards whose wrong read makes the file unowned by every domain, so no re-seat keeps an Error. Each also asserts that no `adr-divergence-unowned` issue exists at any severity, not only `HasFailures()`: `TestValidateDivergence_BranchOnlyDomainDirFromRef` (`ownership_ref_test.go`, its RED-on-revert of the ref-anchored enumeration) and `TestValidateDivergence_ProjectDocsNotUnowned` (`layout_classifier_test.go`).
+- Guards that read the unowned finding from the `ValidateDivergence` findings slice: `TestProcessArtifactsFiltered` and `TestRootOperatorDocsNotUnowned` (`divergence_test.go`). They stay as they are. The findings-slice AC below keeps them falsifiable.
 - Tests of the unowned case itself. Each asserts the Warn (same name, the file, no failure) and adds an R10.2 case that stays an Error: `TestUnownedFileRejected`, `TestValidateDivergenceGenuinelyUnownedStillFails`, `TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight` (`plan_test.go`), `TestValidateDivergenceUnownedSplitNamesRealOwner`, `TestValidateDivergenceUnownedHintLayoutAware`, `TestValidateDivergenceUnownedIndeterminateOnBrokenSibling`, `TestValidateDivergenceUnownedHintRefConsistentRoot` (`divergence_test.go`).
 - Tests that pin the message text or level. Each is updated only where the text or level of its own case changes (an R10.2 case keeps the Error): `TestValidateDiagnosticsByteIdenticalAfterCaching` (`divergence_caching_test.go`), `TestComplete_HandMergeImpactedDomainsExitCloses` (`internal/complete/merge_only_test.go`), the `divergenceFoldedFixture` golden fixture (`internal/redact/golden_corpus_test.go`).
 - Tests that assert the absence of the finding stay as they are: `TestValidateDivergenceFilePathImpactedDomainResolves`, `Test147EndToEndZeroErrors`.
@@ -309,22 +313,26 @@ R7.1–R7.6, R7.7 (refused flags), R10, R12 for ADR-0032.
 - [ ] `go test ./internal/validate/... -run '^TestS133UnownedWarn_|^TestADRAmendments_Spec133ADR0032$' -v` passes and lists the new tests.
 - [ ] `go test ./internal/validate/... -run 'Unowned|Divergence|ADR0032'` passes (regression and re-seated guards).
 - [ ] `go test ./internal/complete/... -run 'LandingTree|Materializ|FaultInjection|CommittedRangeGate|RefAnchored|OwnershipResolution|HandMerge'` passes (regression and re-seated guards).
+- [ ] `go test ./internal/complete/... -run 'Bead6Leg_(i|xxiv)_|OverrideUnblocks|ADRDivergenceFailure_RepairFirstLadder' -v` passes and lists the four tests (re-seated guards and uncovered-Error regression).
+- [ ] `go test ./internal/validate/... -run 'BranchOnlyDomainDirFromRef|ProjectDocsNotUnowned|ProcessArtifactsFiltered|RootOperatorDocsNotUnowned' -v` passes and lists the four tests (re-seated guards).
 - [ ] `go test ./internal/approve/... -run 'WholeBranchOwnershipFromRef|ScenarioImplApproveCoverageTriple'` passes (re-seated guards).
 - [ ] `go test ./internal/redact/... -run Golden` passes (regression).
 
 **Acceptance Criteria**
 - [ ] On a fixture with a doc-sync and an ADR failure, `--check` exits 1 and names both. `git status --porcelain`, `git rev-parse HEAD`, the bead status and the bead metadata are byte-equal before and after. On a closed bead, `--check` exits non-zero and writes nothing (AC23).
 - [ ] Under `enforce`, `complete <bead> --check` on an open bead with no panel exits 0 on a passing tree and reports only content gates: no panel-gate line and no `panel_absent` record. A presence refusal before the `--check` fork fails this test (R7.3, AC23).
-- [ ] Each AC23, AC24, AC25 (refused part) and AC29 case runs under `warn` and under `enforce`, with no bead panel, and gives the same result under both.
+- [ ] Each AC23, AC24, AC25 (refused part) and AC29 case runs under `warn` and under `enforce` and gives the same result under both. Each plain `complete` fixture (the AC24 comparisons and the AC29 completion cases) has a passing bead panel. Only the `--check` cases (AC23, the `--check` half of AC24, AC25) have no bead panel.
+- [ ] Control: under `enforce`, on the AC24 pass tree with no bead panel, plain `complete` exits non-zero and names the bead panel gate, and `--check` exits 0. A plain `complete` that acts as `warn` under `enforce` fails this test.
 - [ ] For the five AC24 trees, the failing set of `--check` equals the refusal set of plain `complete`. A plain `complete` that returns on the first failure fails the "all three" tree (AC24).
 - [ ] `--check` with each of the five refused flags exits non-zero (AC25, refused part).
 - [ ] Every AC29 case gives the AC29 result. A Warn for an undeclared-domain file fails (AC29).
+- [ ] The unowned Warn still returns its finding (Kind `unowned`, the path) in the `ValidateDivergence` findings slice. A Warn that drops the finding fails a `TestS133UnownedWarn_` case (R10.1).
 - [ ] Each guard in "Guards to re-seat" passes. For each guard of another mechanism, a revert of the code it guards still makes the test fail with an Error (the bead report names the revert and the red assertion for each). Inverting a guard's expectation to accept the Warn fails the review.
 - [ ] No string this bead adds to a CLI message, flag help or recovery line cites an ADR number, spec number, requirement id, bead id or issue number.
 - [ ] `TestADRAmendments_Spec133ADR0032` finds the unowned Warn. `TestADR0032Amendment_ThirdAmendmentAnchorsPresent` keeps every anchor and passes. The tests in `adr_domain_resolve_test.go` stay green.
 
 **Depends on**
-Bead 1 (`PanelPresence` config field), Bead 4 (bead-gate presence, so the `--check` cases run under `enforce`)
+Bead 1 (`PanelPresence` config field), Bead 4 (bead-gate presence: the `--check` case with no bead panel under `enforce` and the control case need its refusal)
 
 ## Bead 8: No-doc-impact declaration and doc-deferral owner
 
@@ -389,12 +397,13 @@ Bead 1 (`PanelPresence` config field for `doctor`)
 
 ## Policy sweep
 
-An AC that names no presence policy holds under `warn` and under `enforce`. This table names the bead that verifies each such AC, or each such part, under `enforce`. ACs that name the policy of each case (AC1, AC2, AC5, AC7, AC8, AC9, AC10, AC13, AC15, AC16, AC22) are not listed. AC33 and AC34 check static text and the full suite.
+An AC that names no presence policy holds under `warn` and under `enforce`. This table names the bead that verifies each such AC, or each such part, under `enforce`. ACs that name the policy of each case (AC1, AC2, AC5, AC7, AC8, AC9, AC13, AC15, AC16, AC22) are not listed. AC10 names `enforce` only for its first case. AC33 and AC34 check static text and the full suite.
 
 | AC (part with no policy) | Bead that verifies it under `enforce` |
 |---|---|
 | AC3, AC4 | Bead 2 |
 | AC6 (the cases that name no policy) | Bead 2 |
+| AC10 (the flat-layout ledger case and the `.beads/issues.jsonl` case) | Bead 3 |
 | AC11, AC12 (the cases that name no policy) | Bead 3 |
 | AC17 (the Warn line) | Bead 9 |
 | AC18 | Bead 1 (the config file, policy-free) |
