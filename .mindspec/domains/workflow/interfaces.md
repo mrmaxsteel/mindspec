@@ -599,9 +599,10 @@ branch. A hex-looking name is read as a commit, not as a branch or tag name.
 Resolution uses exactly `refs/heads/<spec branch>` so a tag cannot shadow it.
 Only confirmed branch absence permits fallback to the recorded target. The
 exact lookup uses `git show-ref --exists`: exit 0 means present, exit 2 confirms
-absence, and every other exit blocks. Confirming absence requires Git 2.43 or
-later; older Git (exit 129) returns an explicit version requirement and blocks,
-with no fallback to an ambiguous check. A ref that exists but has an unreadable
+absence, and every other exit blocks. Git 2.43 or later is needed for a spec or
+plan panel whose target is a commit. Older Git (exit 129) blocks and gives the
+version requirement. Upgrade Git, or create the panel with the spec branch name
+as its target. A ref that exists but has an unreadable
 commit (including a dangling symbolic ref or a tree/blob tip) also blocks.
 Ordinary branch or tag targets and bead panels
 keep their existing target behavior. `verify`, `tally`, `rebind` and instruct

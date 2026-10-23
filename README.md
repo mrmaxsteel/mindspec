@@ -270,6 +270,7 @@ your-project/
 - Go 1.23+ (building from source only)
 - [Beads](https://github.com/gastownhall/beads) CLI (`bd`)
 - Git (worktree support)
+- Git 2.43 or later is needed for a spec or plan panel whose target is a commit.
 - A coding agent — Claude Code, Codex CLI, or Copilot for the integrated workflow; the CLI works standalone
 
 ## Building

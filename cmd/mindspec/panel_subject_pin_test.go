@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -251,15 +252,37 @@ func TestPanelVerify_CorruptSpecBranchFailsClosed(t *testing.T) {
 			{"truncated", "1234\n"},
 			{"garbage", "garbage\n"},
 			{"dangling-symbolic", "ref: refs/heads/nowhere\n"},
+			{"symbolic-loop", "ref: refs/heads/spec/900-demo\n"},
+			{"packed-corrupt", ""},
+			{"loose-unreadable", ""},
 		} {
 			t.Run(gate+"/"+tc.name, func(t *testing.T) {
+				if tc.name == "loose-unreadable" && os.Geteuid() == 0 {
+					t.Skip("root can read refs with mode 000")
+				}
 				root, _, reviewed := setupRebind(t, "plan-pinned")
 				requirePanelShowRefExists(t, root)
 				dir := createObjectPinPanel(t, root, gate, reviewed, reviewed)
 				rebindGit(t, root, "checkout", "-q", "spec/900-demo")
 				editPinnedPlan(t, root)
 				rebindGit(t, root, "checkout", "-q", "main")
-				rebindWrite(t, root, ".git/refs/heads/spec/900-demo", tc.contents)
+				switch tc.name {
+				case "packed-corrupt":
+					rebindGit(t, root, "pack-refs", "--all")
+					rebindWrite(t, root, ".git/packed-refs", "zz refs/heads/x\n")
+				case "loose-unreadable":
+					refPath := filepath.Join(root, ".git/refs/heads/spec/900-demo")
+					if err := os.Chmod(refPath, 0000); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := os.Chmod(refPath, 0644); err != nil {
+							t.Error(err)
+						}
+					})
+				default:
+					rebindWrite(t, root, ".git/refs/heads/spec/900-demo", tc.contents)
+				}
 				assertObjectPinSubjectBlocked(t, root, dir)
 			})
 		}

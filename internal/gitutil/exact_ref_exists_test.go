@@ -50,8 +50,14 @@ func TestExactRefExists_OnlyExitTwoConfirmsAbsence(t *testing.T) {
 			if exists != (code == 0) || (err != nil) != (code != 0 && code != 2) {
 				t.Fatalf("exit %d: exists=%v err=%v", code, exists, err)
 			}
-			if code == 129 && !strings.Contains(err.Error(), "confirming the spec branch is absent needs git 2.43 or later") {
-				t.Errorf("old Git error must explain the version requirement: %v", err)
+			if code == 129 {
+				if !strings.Contains(err.Error(), "checking exact ref refs/heads/spec/demo: git 2.43 or later is needed to check whether the spec branch exists; upgrade git, or create the panel with the spec branch name as its target") {
+					t.Errorf("old Git error must explain the version requirement and recovery: %v", err)
+				}
+				var exitErr *exec.ExitError
+				if !errors.As(err, &exitErr) || exitErr.ExitCode() != code {
+					t.Errorf("old Git error must wrap the exit error: %v", err)
+				}
 			}
 			if len(*calls) != 1 || strings.Join((*calls)[0].args, " ") != "-C /repo show-ref --exists refs/heads/spec/demo" {
 				t.Fatalf("expected exact show-ref: %v", *calls)

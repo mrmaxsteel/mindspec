@@ -1650,7 +1650,7 @@ func ExactRefExists(workdir, ref string) (bool, error) {
 		case 2:
 			return false, nil
 		case 129:
-			return false, fmt.Errorf("checking exact ref %s: confirming the spec branch is absent needs git 2.43 or later: %w", ref, err)
+			return false, fmt.Errorf("checking exact ref %s: git 2.43 or later is needed to check whether the spec branch exists; upgrade git, or create the panel with the spec branch name as its target: %w", ref, err)
 		}
 	}
 	return false, fmt.Errorf("checking exact ref %s: %w", ref, err)
