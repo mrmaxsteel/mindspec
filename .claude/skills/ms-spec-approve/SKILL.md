@@ -8,12 +8,13 @@ managed-by: mindspec
 
 1. Identify the active spec via `mindspec state show`
 2. Run a pre-approve review panel: invoke `/ms-panel-run` with
-   `mindspec panel create <slug> --spec <id> --gate spec_approve --target <ref>`
+   `mindspec panel create <slug> --spec <id> --gate spec_approve --target spec/<id>`
    against the spec DOCUMENT (not a code diff), and do NOT run
    `mindspec spec approve` until `/ms-panel-tally` returns PASS.
-   The binary resolves the review lenses. This step is guidance, not a mechanized
-   preflight: binary enforcement of these gates is a separate, tracked
-   enhancement.
+   The binary resolves the review lenses. `mindspec spec approve` refuses without a passing document panel.
+   Gates without a panel only warn when `enforcement.panel_presence: warn`.
+   For a spec that changes a gate, a schema, a trust boundary or a merge path,
+   use reviewers from more than one family. `mindspec config resolve --gate spec_approve` shows the families.
 3. Run `mindspec spec approve <id>` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
 4. If approval fails, show the validation errors and help the user fix them
 5. If validation flags the unchecked `grill deferred: headless session` marker:

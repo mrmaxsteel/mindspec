@@ -822,12 +822,13 @@ managed-by: mindspec
 
 1. Identify the active spec via ` + "`mindspec state show`" + `
 2. Run a pre-approve review panel: invoke ` + "`/ms-panel-run`" + ` with
-   ` + "`mindspec panel create <slug> --spec <id> --gate spec_approve --target <ref>`" + `
+   ` + "`mindspec panel create <slug> --spec <id> --gate spec_approve --target spec/<id>`" + `
    against the spec DOCUMENT (not a code diff), and do NOT run
    ` + "`mindspec spec approve`" + ` until ` + "`/ms-panel-tally`" + ` returns PASS.
-   The binary resolves the review lenses. This step is guidance, not a mechanized
-   preflight: binary enforcement of these gates is a separate, tracked
-   enhancement.
+   The binary resolves the review lenses. ` + "`mindspec spec approve`" + ` refuses without a passing document panel.
+   Gates without a panel only warn when ` + "`enforcement.panel_presence: warn`" + `.
+   For a spec that changes a gate, a schema, a trust boundary or a merge path,
+   use reviewers from more than one family. ` + "`mindspec config resolve --gate spec_approve`" + ` shows the families.
 3. Run ` + "`mindspec spec approve <id>`" + ` in the terminal (validates, closes the spec-approve gate, generates context pack, sets state, emits guidance)
 4. If approval fails, show the validation errors and help the user fix them
 5. If validation flags the unchecked ` + "`grill deferred: headless session`" + ` marker:
@@ -846,12 +847,13 @@ managed-by: mindspec
 
 1. Identify the active spec/plan via ` + "`mindspec state show`" + `
 2. Run a pre-approve review panel: invoke ` + "`/ms-panel-run`" + ` with
-   ` + "`mindspec panel create <slug> --spec <id> --gate plan_approve --target <ref>`" + `
+   ` + "`mindspec panel create <slug> --spec <id> --gate plan_approve --target spec/<id>`" + `
    against the plan DOCUMENT (not a code diff), and do NOT run
    ` + "`mindspec plan approve`" + ` until ` + "`/ms-panel-tally`" + ` returns PASS.
-   The binary resolves the review lenses. This step is guidance, not a mechanized
-   preflight: binary enforcement of these gates is a separate, tracked
-   enhancement.
+   The binary resolves the review lenses. ` + "`mindspec plan approve`" + ` refuses without a passing document panel.
+   Gates without a panel only warn when ` + "`enforcement.panel_presence: warn`" + `.
+   For a spec that changes a gate, a schema, a trust boundary or a merge path,
+   use reviewers from more than one family. ` + "`mindspec config resolve --gate plan_approve`" + ` shows the families.
 3. Run ` + "`mindspec plan approve <id>`" + ` in the terminal (validates, closes the plan-approve gate, sets state, emits guidance)
 4. If approval fails, show the validation errors and help the user fix them
 5. On success: run ` + "`mindspec next`" + ` to claim the first bead and enter Implementation Mode
@@ -867,9 +869,14 @@ managed-by: mindspec
 
 1. Identify the active spec via ` + "`mindspec state show`" + `
 2. If not in review mode, run ` + "`mindspec complete`" + ` first to transition
-3. Run ` + "`mindspec impl approve <id>`" + ` in the terminal (verifies review mode, transitions to idle, emits guidance)
-4. If approval fails, show the error and help the user resolve it
-5. On success: run the session close protocol:
+3. Run ` + "`/ms-spec-final-review`" + ` with ` + "`--target spec/<id>`" + ` before approval.
+   ` + "`mindspec impl approve`" + ` refuses without a passing final review for every spec, whatever the number of beads.
+   Gates without a panel only warn when ` + "`enforcement.panel_presence: warn`" + `.
+   For a spec that changes a gate, a schema, a trust boundary or a merge path,
+   use reviewers from more than one family. ` + "`mindspec config resolve --gate final_review`" + ` shows the families.
+4. Run ` + "`mindspec impl approve <id>`" + ` in the terminal (verifies review mode, transitions to idle, emits guidance)
+5. If approval fails, show the error and help the user resolve it
+6. On success: run the session close protocol:
    - ` + "`bd sync`" + `
    - ` + "`git add`" + ` all changed files (state, specs, recordings, beads)
    - ` + "`git commit`" + `

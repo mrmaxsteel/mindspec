@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Approval skills describe document and final-review gates. Final review applies to every spec. Document and final-review panels target the spec branch.
+- The bead cycle checks content gates before each review round. Spec findings can defer to the plan.
+- Spec and Plan guidance names the required panel and when to use reviewers from more than one family. Doctor reports the panel presence policy and in-flight specs with a missing-panel record.
+
 ## [0.18.0] - 2026-10-22
 
 Two specs and one fix PR since v0.17.0. The theme is **the binary runs the panel and finishes the landing**. PR #271 moves panel execution into the binary: reviewers submit verdicts through `mindspec panel submit`, the binary launches and recovers reviewer processes, and runners, lenses and acceptance questions are config. PR #270 makes the lifecycle verbs finish safely after a partial failure: `impl approve` refuses early for failures it can predict and converges on a re-run, `complete --merge-only` lets you verify a merge before you close the bead, and bead titles no longer decide lineage. PR #269 tells subagents to skip the session-start steps. Not a pure drop-in. Read **Changed** and **Removed** before you upgrade: every new panel round needs submitted v2 verdicts, every reviewer family needs a runner, `panel.substitution` and `merge_strategy` are gone, a bead needs a parent-child edge to its epic, and `spec create` refuses new lettered spec IDs.

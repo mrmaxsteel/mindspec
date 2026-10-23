@@ -52,6 +52,9 @@ A spec containing:
 
 ## Human Gates
 
+Approval needs a passing document panel: `mindspec panel create <slug> --spec {{.ActiveSpec}} --gate spec_approve --target spec/{{.ActiveSpec}}`.
+Use reviewers from more than one family for a spec that changes a gate, a schema, a trust boundary or a merge path.
+
 - **Spec approval**: You MUST run `mindspec spec approve {{.ActiveSpec}}` before starting any plan work. This gate resolves the spec-approve step in the lifecycle molecule. Skipping it causes mode resolution to remain stuck in spec mode.
 
 ## Next Action
