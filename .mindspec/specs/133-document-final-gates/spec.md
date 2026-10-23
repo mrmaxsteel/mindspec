@@ -291,7 +291,7 @@ Each refusal AC requires that the message names the gate or the check, so that a
 - [x] OQ5: Can a small spec use its bead panel as the final review? Decided: no small-spec exception. The final-review gate follows the presence policy.
 - [x] OQ6: Does a file that an undeclared domain owns stay an Error (R10.2)? Decided: yes. It is scope drift with a named owner, and the message gives the fix.
 - [x] OQ7: Does an abandoned registration pass a gate under `enforce` (R1.7)? Decided: yes, with a Warn and the `panel_abandoned` record, as ADR-0037 §7 states. Abandonment is an audited hatch, and R6.4 keeps the plan obligations of an abandoned spec panel.
-- [ ] OQ8: Must a document or final-review panel target `spec/<id>` (R1.3)? Panels in this lane now use a commit SHA. Recommended: yes. A SHA target never moves, so the gate cannot see a later commit. A live registration with a SHA target blocks the gate. The operator runs a new round of it at `spec/<id>`, or abandons it with a reason. A round that a binary from before this change created needs the same recovery, also with a `spec/<id>` target (R1.6).
+- [x] OQ8: Must a document or final-review panel target `spec/<id>` (R1.3)? Decided: yes. A SHA target never moves, so the gate cannot see a later commit. A panel created before this change may hold a SHA target. A live registration with a SHA target blocks the gate. The operator runs a new round of it at `spec/<id>`, or abandons it with a reason. A round that a binary from before this change created needs the same recovery, also with a `spec/<id>` target (R1.6).
 
 ## Approval
 
