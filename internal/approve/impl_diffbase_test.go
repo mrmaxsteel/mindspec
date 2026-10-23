@@ -1,9 +1,11 @@
 package approve
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -128,5 +130,33 @@ func TestApproveImpl_ContentGatesConsultOriginMain(t *testing.T) {
 	}
 	if !sawOrigin {
 		t.Errorf("ApproveImpl never asked for merge-base(origin/main, spec); calls: %+v", mock.CallsTo("MergeBase"))
+	}
+}
+
+func TestImplDiffBase_SpecAlreadyMergedIntoOriginKeepsFullRange(t *testing.T) {
+	for _, later := range []bool{false, true} {
+		t.Run(fmt.Sprint("upstreamLater=", later), func(t *testing.T) {
+			dir := adoptInitRepo(t)
+			local := adoptRefHash(t, dir, "main")
+			adoptGitRun(t, dir, "checkout", "-q", "-b", "spec/999-x")
+			adoptWriteFile(t, dir, "internal/feature.go", "package feature\n")
+			adoptCommit(t, dir, "spec source change")
+			tip := adoptRefHash(t, dir, "HEAD")
+			adoptGitRun(t, dir, "checkout", "-q", "-b", "upstream", local)
+			adoptGitRun(t, dir, "merge", "-q", "--no-ff", "--no-edit", "spec/999-x")
+			if later {
+				adoptWriteFile(t, dir, "later.txt", "later\n")
+				adoptCommit(t, dir, "later upstream change")
+			}
+			adoptGitRun(t, dir, "update-ref", "refs/remotes/origin/main", adoptRefHash(t, dir, "HEAD"))
+			base, err := implDiffBase(dir, executor.NewMindspecExecutor(dir), "spec/999-x")
+			if err != nil {
+				t.Fatal(err)
+			}
+			files := diffNames(t, dir, base, "spec/999-x")
+			if base != local || !slices.Contains(files, "internal/feature.go") {
+				t.Fatalf("content gates lost spec range: base=%s local=%s spec=%s files=%v", base, local, tip, files)
+			}
+		})
 	}
 }

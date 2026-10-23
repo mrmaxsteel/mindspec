@@ -110,7 +110,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	if gate == "" {
 		gate = "adhoc"
 	}
-	row, err := json.Marshal(panel.DispositionRow{Record: "disposition", ID: fmt.Sprintf("%s:%s:r%d:%s:%s:deferral", args[0], slot, round, f.ID, f.SHA256[:12]),
+	row, err := json.Marshal(panel.DispositionRow{Record: "disposition", ID: panel.DeferralRowID(args[0], ref),
 		Spec: panelRecordSpec(*res.Panel), Gate: gate, Panel: args[0], Reviewer: slot, Model: model, Severity: severity,
 		Summary: termsafe.Escape(f.Text), ConvergentWith: []string{}, Disposition: "confirmed-deferred", EvidenceRef: beadID, CreatedAt: now, Round: &round})
 	if err != nil {

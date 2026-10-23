@@ -8,23 +8,23 @@ import (
 // ResolveSubjectHead resolves the live subject of a non-bead panel. A spec or
 // plan review pinned to an object name follows its spec branch when it exists.
 // Moving refs keep their recorded target. Only a missing branch permits fallback.
-// The caller supplies spec branch composition to keep this package a leaf.
-func ResolveSubjectHead(p Panel, workdir string, branchForSpec func(string) (string, error), revParse func(string, string) (string, error), isRefNotFound func(error) bool) (string, error) {
+// The caller supplies spec branch composition and Git resolution to keep this
+// package a leaf. symbolicFullName returns Git's selected ref, or empty for an
+// object pin, including a full SHA that is also a branch name.
+func ResolveSubjectHead(p Panel, workdir string, branchForSpec func(string) (string, error), revParse func(string, string) (string, error), symbolicFullName func(string, string) (string, error), isRefNotFound func(error) bool) (string, error) {
 	target := strings.TrimSpace(p.Target)
 	if target == "" {
 		return "", fmt.Errorf("panel.json records no target ref")
 	}
 	if (p.Gate == "spec_approve" || p.Gate == "plan_approve") && looksLikeCommitSHA(target) {
-		// Hexadecimal names can also be branches, tags or remote refs. Resolve
-		// those explicit namespaces before treating the target as an object pin.
-		for _, prefix := range []string{"refs/heads/", "refs/tags/", "refs/remotes/"} {
-			sha, err := revParse(workdir, prefix+target)
-			if err == nil {
-				return sha, nil
-			}
-			if !isRefNotFound(err) {
-				return "", err
-			}
+		// Git owns ref precedence, including tag/branch collisions and full
+		// object IDs. Do not guess namespaces for hexadecimal names here.
+		name, err := symbolicFullName(workdir, target)
+		if err != nil {
+			return "", err
+		}
+		if name != "" {
+			return revParse(workdir, name)
 		}
 		branch, err := branchForSpec(p.Spec)
 		if err != nil {

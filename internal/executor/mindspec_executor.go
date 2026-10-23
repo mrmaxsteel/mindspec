@@ -1962,6 +1962,11 @@ func (g *MindspecExecutor) MergeBase(a, b string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// SymbolicFullName exposes Git's ref/object classification through the I/O boundary.
+func (g *MindspecExecutor) SymbolicFullName(workdir, ref string) (string, error) {
+	return gitutil.SymbolicFullName(workdir, ref)
+}
+
 // RevParseRef resolves ref to its commit SHA in workdir. Thin pass-through to
 // gitutil.RevParseRef so the in-binary panel gate (spec 099) reaches the
 // byte-identical bead/<id> staleness rev-parse the hook uses, while keeping

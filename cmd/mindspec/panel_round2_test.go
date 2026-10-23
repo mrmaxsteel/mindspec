@@ -126,6 +126,9 @@ func TestPanelDefer_RequestChangesSubmissionBinding(t *testing.T) {
 	v.Verdict = panel.VerdictRequestChanges
 	v.ConcreteChangesRequired = []panel.ChangeRequired{{Text: "blocking finding", Basis: "traced"}}
 	submitted := f.submit(t, v)
+	other := f.verdict()
+	other.Slot = "R2"
+	f.submit(t, other)
 	requirePanelVerb(t, append(deferArgs(), "--spec", "900-test", "--finding", "ccr[0]")...)
 	res, err := panel.Tally(f.dir)
 	if err != nil {
@@ -157,7 +160,66 @@ func TestPanelDefer_RequestChangesSubmissionBinding(t *testing.T) {
 	if len(res.EffectiveDeferrals()) != 0 || res.ResolvedCount() != 0 || res.UnresolvedNames() != "R1 (ccr[0])" {
 		t.Fatalf("superseded submission still deferred: %s", panel.RuleLine(res))
 	}
-	if err := panel.CheckCompletenessAt(f.dir, "p"); err == nil {
-		t.Fatal("superseded deferral still covered its slot")
+	// Currency belongs to tally/gate; the durable floor does not read verdicts.
+	if err := panel.CheckCompletenessAt(f.dir, "p"); err != nil {
+		t.Fatalf("ledger-only floor must retain recorded coverage: %v", err)
+	}
+	if err := panel.CheckCore3(panel.Registration{Dir: f.dir, Panel: *res.Panel}); err == nil || !strings.Contains(err.Error(), "no covering disposition row") {
+		t.Fatalf("lifecycle coverage check must reject superseded deferral: %v", err)
+	}
+}
+
+func TestPanelVerify_HexTagTakesPrecedenceOverBranch(t *testing.T) {
+	root, _, from := setupRebind(t, "hex-branch")
+	rebindGit(t, root, "tag", "cafe", from)
+	rebindGit(t, root, "checkout", "-qb", "target-change")
+	rebindWrite(t, root, ".mindspec/specs/900-demo/plan.md", "# changed tag subject\n")
+	rebindGit(t, root, "add", ".")
+	rebindGit(t, root, "commit", "-qm", "tag edit")
+	tip := rebindGit(t, root, "rev-parse", "HEAD")
+	rebindGit(t, root, "tag", "-f", "cafe", tip)
+	rebindGit(t, root, "checkout", "-q", "main")
+	if got := rebindGit(t, root, "rev-parse", "--verify", "cafe^{commit}"); !strings.HasSuffix(got, tip) {
+		t.Fatalf("git precedence got %s", got)
+	}
+	out, err := runPanelVerbCmd("verify", "demo")
+	if err != nil || !strings.Contains(out, "BLOCK:") {
+		t.Fatalf("changed tag bypassed: %v %s", err, out)
+	}
+}
+
+func TestPanelVerify_FullSHANameRemainsObjectPin(t *testing.T) {
+	root, _, from := setupRebind(t, "plan-pinned")
+	rebindGit(t, root, "branch", from, from)
+	// Git's symbolic output names this branch, but revision resolution uses
+	// the full object ID. Pin both behaviors so classification cannot confuse them.
+	if got := rebindGit(t, root, "rev-parse", "--symbolic-full-name", from); !strings.HasSuffix(got, "refs/heads/"+from) {
+		t.Fatalf("git symbolic full-SHA behavior changed: %s", got)
+	}
+	if got := rebindGit(t, root, "rev-parse", "--verify", from+"^{commit}"); !strings.HasSuffix(got, from) {
+		t.Fatalf("git full-SHA object behavior changed: %s", got)
+	}
+	rebindGit(t, root, "checkout", "-q", "spec/900-demo")
+	rebindWrite(t, root, ".mindspec/specs/900-demo/plan.md", "# unreviewed spec plan\n")
+	rebindGit(t, root, "add", ".")
+	rebindGit(t, root, "commit", "-qm", "plan edit")
+	rebindGit(t, root, "checkout", "-q", "main")
+	out, err := runPanelVerbCmd("verify", "demo")
+	if err != nil || !strings.Contains(out, "BLOCK:") {
+		t.Fatalf("full SHA named branch hides unreviewed pinned spec: %v %s", err, out)
+	}
+}
+
+func TestPanelVerify_ShortSHARefKeepsOwnTip(t *testing.T) {
+	root, _, from := setupRebind(t, "plan-pinned", "6")
+	rebindGit(t, root, "branch", from[:6], from)
+	rebindGit(t, root, "checkout", "-q", "spec/900-demo")
+	rebindWrite(t, root, ".mindspec/specs/900-demo/plan.md", "# spec plan edit\n")
+	rebindGit(t, root, "add", ".")
+	rebindGit(t, root, "commit", "-qm", "plan edit")
+	rebindGit(t, root, "checkout", "-q", "main")
+	out, err := runPanelVerbCmd("verify", "demo")
+	if err != nil || strings.Contains(out, "BLOCK:") {
+		t.Fatalf("named prefix branch should retain its own tip: %v %s", err, out)
 	}
 }

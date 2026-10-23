@@ -95,6 +95,11 @@ func recordKey(m map[string]interface{}) (kind, key string) {
 		fields = []string{"round", "created_at"}
 	case RecordRefutation, RecordDeferral:
 		fields = []string{"slot", "round", "finding", "finding_sha256"}
+		// Preserve the original tuple for unbound legacy events. A new source
+		// submission is a distinct deferral even when the finding text is unchanged.
+		if kind == RecordDeferral && (m["source_verdict"] != nil || m["source_file_sha256"] != nil) {
+			fields = append(fields, "source_verdict", "source_file_sha256")
+		}
 	case RecordRebind:
 		fields = []string{"to_sha"}
 	case RecordAbandon:
@@ -286,12 +291,22 @@ func isTerminalRC(verdict string) bool {
 // one disposition row. It returns an error naming panelName and the
 // first uncovered slot token on violation, or nil if the floor holds
 // (including the vacuous case of a manifest with zero RC/REJECT slots).
+// This check is ledger-only; source currency is checked by the panel gate,
+// complete, and impl approve, which already read verdict files.
 func CheckCompleteness(specDir, panelName string) error {
 	return CheckCompletenessAt(panelStoreDir(specDir, panelName), panelName)
 }
 
-// CheckCompletenessAt checks a panel in any supported directory layout.
+// CheckCompletenessAt checks a panel in any supported directory layout using
+// only dispositions.jsonl. Source currency is checked by the panel gate,
+// complete, and impl approve, which already read verdict files.
 func CheckCompletenessAt(dir, panelName string) error {
+	return checkCompletenessAt(dir, panelName, nil)
+}
+
+// current is supplied only by lifecycle checks that already read verdicts.
+// A nil current keeps the standalone completeness floor ledger-only.
+func checkCompletenessAt(dir, panelName string, current *Result) error {
 	path := filepath.Join(dir, dispositionsFileName)
 	lines, err := readDispositionLines(path)
 	if err != nil {
@@ -326,12 +341,14 @@ func CheckCompletenessAt(dir, panelName string) error {
 			}
 			manifest = &cm
 		case RecordDeferral:
-			var event DeferralRecord
-			if err := json.Unmarshal(line, &event); err != nil {
-				return err
-			}
-			if event.SourceVerdict != "" || event.SourceFileSHA256 != "" {
-				boundDeferrals = append(boundDeferrals, event.Deferral)
+			if current != nil {
+				var event DeferralRecord
+				if err := json.Unmarshal(line, &event); err != nil {
+					return err
+				}
+				if event.SourceVerdict != "" || event.SourceFileSHA256 != "" {
+					boundDeferrals = append(boundDeferrals, event.Deferral)
+				}
 			}
 		case RecordRound, RecordRefutation, RecordRebind, RecordAbandon:
 			// Events are validated above; only disposition rows cover slots.
@@ -349,15 +366,11 @@ func CheckCompletenessAt(dir, panelName string) error {
 		return fmt.Errorf("panel %s: dispositions.jsonl has no record:\"panel\" coverage manifest%s", termsafe.Escape(panelName), tallyFirstHint(panelName))
 	}
 
-	// A deferral row covers only the submission its event discharged. Minor
-	// APPROVE notes remain audit records, including in legacy ledgers.
+	// Minor APPROVE notes are audit records, including in legacy ledgers.
+	// Only lifecycle callers supply current verdicts to filter superseded rows.
 	var effective []Deferral
-	if len(boundDeferrals) > 0 {
-		res, err := Tally(dir)
-		if err != nil {
-			return err
-		}
-		effective = res.EffectiveDeferrals()
+	if current != nil {
+		effective = current.EffectiveDeferrals()
 	}
 	for _, row := range rows {
 		if row.Disposition == "confirmed-deferred" {
@@ -366,17 +379,22 @@ func CheckCompletenessAt(dir, panelName string) error {
 			}
 			superseded := false
 			for _, d := range boundDeferrals {
-				if d.Slot != row.Reviewer || d.CreatedAt != row.CreatedAt || d.Bead != row.EvidenceRef || row.Round == nil || d.Round != *row.Round {
+				// Each coverage row stays linked to its own event, including legacy
+				// source-bound rows whose ID predates submission-aware IDs.
+				if d.Slot != row.Reviewer || d.Bead != row.EvidenceRef || row.Round == nil || d.Round != *row.Round {
 					continue
 				}
-				current := false
-				for _, live := range effective {
-					if live == d {
-						current = true
+				if row.ID != DeferralRowID(panelName, d) && d.CreatedAt != row.CreatedAt {
+					continue
+				}
+				live := false
+				for _, e := range effective {
+					if e == d {
+						live = true
 						break
 					}
 				}
-				if !current {
+				if !live {
 					superseded = true
 				}
 			}
@@ -508,7 +526,7 @@ func CheckCore3(reg Registration) error {
 	if last.Spec != derived.Spec || last.Panel != derived.Panel || last.Gate != derived.Gate || !reflect.DeepEqual(last.Slots, derived.Slots) {
 		return fmt.Errorf("coverage manifest differs from the roster and verdict files (slots %s)", coverageSlotNames(derived))
 	}
-	return CheckCompletenessAt(reg.Dir, reg.Slug())
+	return checkCompletenessAt(reg.Dir, reg.Slug(), res)
 }
 
 func coverageSlotNames(m CoverageManifest) string {
@@ -525,6 +543,15 @@ type UncoveredSlotError struct{ Panel, Slot, Verdict string }
 
 func (e *UncoveredSlotError) Error() string {
 	return fmt.Sprintf("panel %s: completeness floor violated — slot %s (terminal verdict %s) has no covering disposition row (reviewer or convergent_with)", termsafe.Escape(e.Panel), termsafe.Escape(e.Slot), termsafe.Escape(e.Verdict))
+}
+
+// DeferralRowID links a coverage row to its deferral's finding and source
+// submission. Unbound legacy deferrals retain their original ID shape.
+func DeferralRowID(panelName string, d Deferral) string {
+	if d.SourceVerdict == "" && d.SourceFileSHA256 == "" {
+		return fmt.Sprintf("%s:%s:r%d:%s:%.12s:deferral", panelName, d.Slot, d.Round, d.Finding, d.FindingSHA256)
+	}
+	return fmt.Sprintf("%s:%s:r%d:%s:%s:%s:%s:deferral", panelName, d.Slot, d.Round, d.Finding, d.FindingSHA256, d.SourceVerdict, d.SourceFileSHA256)
 }
 
 // DispositionRowID derives a disposition row's canonical DispositionRow.ID:

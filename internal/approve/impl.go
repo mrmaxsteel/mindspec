@@ -736,7 +736,8 @@ func implFinalizeFailure(epicID, specID, stage string, inner error) error {
 // Then the files that origin/main changed after the local main tip look
 // like spec changes, and the ADR gate refuses them as unowned. When the
 // merge-base with origin/main is a descendant of the local merge-base, it
-// is the true fork point, so this function uses it. In all other cases
+// is the true fork point, so this function uses it unless origin/main already
+// contains the spec tip (which would hide reviewed changes). In all other cases
 // (no origin/main ref, local main ahead, or diverged history) the local
 // merge-base stays the base.
 func implDiffBase(root string, exec executor.Executor, specBranch string) (string, error) {
@@ -750,6 +751,10 @@ func implDiffBase(root string, exec executor.Executor, specBranch string) (strin
 	}
 	newer, aErr := implIsAncestorFn(root, local, remote)
 	if aErr != nil || !newer {
+		return local, nil
+	}
+	merged, mergedErr := implIsAncestorFn(root, specBranch, "origin/main")
+	if mergedErr != nil || merged {
 		return local, nil
 	}
 	return remote, nil

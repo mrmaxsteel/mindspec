@@ -158,6 +158,9 @@ slot whose terminal verdict is REQUEST_CHANGES or REJECT, requires at
 least one disposition row naming that slot (as "reviewer" or in
 "convergent_with[]").
 
+This check is ledger-only; source currency is checked by the panel gate,
+complete, and impl approve, which already read verdict files.
+
 With --panel, only that one panel is checked. Without it, every panel
 directory under <spec-dir>/reviews/ that has a dispositions.jsonl is
 checked. A positional panel name is the same as --panel; without --spec

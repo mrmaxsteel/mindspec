@@ -171,7 +171,7 @@ func TestPanelDefer_Writes(t *testing.T) {
 	if err := json.Unmarshal(lines[2], &row); err != nil {
 		t.Fatal(err)
 	}
-	if event.Record != "deferral" || event.Spec != "900-demo" || event.Panel != "p" || event.Bead != "follow-up" || row.Disposition != "confirmed-deferred" || row.Reviewer != "R1" || row.Model != "claude" || row.ID != "p:R1:r1:slot:"+event.FindingSHA256[:12]+":deferral" {
+	if event.Record != "deferral" || event.Spec != "900-demo" || event.Panel != "p" || event.Bead != "follow-up" || row.Disposition != "confirmed-deferred" || row.Reviewer != "R1" || row.Model != "claude" || row.ID != "p:R1:r1:slot:"+event.FindingSHA256+":"+event.SourceVerdict+":"+event.SourceFileSHA256+":deferral" {
 		t.Fatalf("bad write: %+v %+v", event, row)
 	}
 	res, _ := panel.Tally(dir)

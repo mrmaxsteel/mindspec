@@ -1629,6 +1629,35 @@ func RevParseRef(workdir, ref string) (string, error) {
 	return sha, nil
 }
 
+// SymbolicFullName returns the ref Git selects for target, or an empty name
+// for an object pin. Git ignores full object-ID-shaped refs when the object
+// exists, even though --symbolic-full-name alone reports those refs.
+func SymbolicFullName(workdir, target string) (string, error) {
+	if err := rejectOptionLike(target); err != nil {
+		return "", err
+	}
+	if len(target) == 40 || len(target) == 64 {
+		sha, err := RevParseRef(workdir, target)
+		if err != nil {
+			return "", err
+		}
+		if strings.EqualFold(sha, target) {
+			return "", nil
+		}
+	}
+	// Disable strict ambiguity reporting so Git returns its selected ref
+	// (e.g. tag before branch), rather than an empty name for a collision.
+	cmd := execCommand("git", gitArgs(workdir, "-c", "core.warnAmbiguousRefs=false", "rev-parse", "--verify", "--quiet", "--symbolic-full-name", target)...)
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return "", fmt.Errorf("symbolic ref %s: %w", target, ErrRefNotFound)
+		}
+		return "", fmt.Errorf("symbolic ref %s: %w", target, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // LogOneline returns `git log -1 --oneline <ref>` for workdir
 // (workdir=="" → cwd), trimmed: the one-line "<short-sha> <subject>"
 // summary of the tip commit of ref. The error is non-nil when ref does

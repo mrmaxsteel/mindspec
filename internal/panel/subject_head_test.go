@@ -22,15 +22,12 @@ func TestResolveSubjectHead_BranchErrors(t *testing.T) {
 					return "spec/900-demo", nil
 				},
 				func(_, ref string) (string, error) {
-					if strings.HasPrefix(ref, "refs/") {
-						return "", missing
-					}
 					refs = append(refs, ref)
 					if ref == "spec/900-demo" {
 						return "", branchErr
 					}
 					return target, nil
-				}, func(err error) bool { return errors.Is(err, missing) })
+				}, func(_, _ string) (string, error) { return "", nil }, func(err error) bool { return errors.Is(err, missing) })
 			if branchErr == missing {
 				if err != nil || sha != target || !reflect.DeepEqual(refs, []string{"spec/900-demo", target}) {
 					t.Fatalf("missing branch must fall back: sha=%s err=%v refs=%v", sha, err, refs)
@@ -51,6 +48,10 @@ func TestResolveSubjectHead_MovingRefs(t *testing.T) {
 				return "", nil
 			},
 			func(_, ref string) (string, error) { refs = append(refs, ref); return "tip", nil },
+			func(_, _ string) (string, error) {
+				t.Fatal("non-hex target must not need classification")
+				return "", nil
+			},
 			func(error) bool { return false })
 		if err != nil || !reflect.DeepEqual(refs, []string{target}) {
 			t.Fatalf("moving ref changed: %s %v %v", target, err, refs)

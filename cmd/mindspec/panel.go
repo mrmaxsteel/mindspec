@@ -719,7 +719,7 @@ func nonBeadTargetRevParse(reg panel.Registration) func(scanRoot, ref string) (s
 		}
 		return panel.ResolveSubjectHead(reg.Panel, scanRoot, func(specID string) (string, error) {
 			return workspace.SpecBranch(specID)
-		}, revParseForPanelFn, newExecutor(scanRoot).IsRefNotFound)
+		}, revParseForPanelFn, newExecutor(scanRoot).SymbolicFullName, newExecutor(scanRoot).IsRefNotFound)
 	}
 }
 

@@ -265,7 +265,7 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 						exec := &executor.MindspecExecutor{}
 						return panel.ResolveSubjectHead(reg.Panel, workdir, func(specID string) (string, error) {
 							return workspace.SpecBranch(specID)
-						}, exec.RevParseRef, exec.IsRefNotFound)
+						}, exec.RevParseRef, exec.SymbolicFullName, exec.IsRefNotFound)
 					}
 					sha, exists := resolve(beadID)
 					if !exists {
