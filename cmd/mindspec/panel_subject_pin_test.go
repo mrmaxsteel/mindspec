@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -203,10 +204,89 @@ func TestPanelVerify_PresentSpecBranchMissingObjectFailsClosed(t *testing.T) {
 	}
 }
 
+func requirePanelShowRefExists(t *testing.T, root string) {
+	t.Helper()
+	out, err := exec.Command("git", "-C", root, "show-ref", "--exists", "refs/heads/spec/900-demo").CombinedOutput()
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 129 {
+		t.Skip("git show-ref --exists requires git 2.43 or later")
+	}
+	if err != nil {
+		t.Fatalf("probe git show-ref --exists: %v: %s", err, out)
+	}
+}
+
+func assertObjectPinSubjectBlocked(t *testing.T, root, dir string) {
+	t.Helper()
+	facts := resolvePanelGateFacts(root, rebindRegistration(t, dir))
+	if !errors.Is(facts.SubjectErr, panel.ErrSubjectHead) || facts.MissingRef || facts.GitErr != nil {
+		t.Errorf("unreadable branch must report ErrSubjectHead, not missing ref: %+v", facts)
+	}
+	if d := panel.PanelGateDecision(facts); d.Action != panel.Block {
+		t.Errorf("unreadable spec branch gate must BLOCK: %+v", d)
+	}
+	if out, err := runPanelVerbCmd("verify", "object-pin"); err != nil || !strings.Contains(out, "BLOCK:") || !strings.Contains(out, panel.ErrSubjectHead.Error()) {
+		t.Errorf("verify must BLOCK on ErrSubjectHead: %v %s", err, out)
+	}
+	if out, err := runPanelVerbCmd("tally", "object-pin"); err == nil || !strings.Contains(out, "decision: BLOCK") || !strings.Contains(out, panel.ErrSubjectHead.Error()) {
+		t.Errorf("tally must BLOCK on ErrSubjectHead: %v %s", err, out)
+	}
+	if out := instruct.PanelState(root); !strings.Contains(out, "**object-pin** — gate would BLOCK") || !strings.Contains(out, panel.ErrSubjectHead.Error()) {
+		t.Errorf("instruct must block unreadable spec branch: %s", out)
+	}
+	before := rebindRegistration(t, dir).Panel
+	if out, err := runPanelVerbCmd("rebind", "object-pin", "--reason", "operator: checked spec branch"); err == nil {
+		t.Errorf("rebind must refuse an unreadable spec branch: %s", out)
+	}
+	after := rebindRegistration(t, dir).Panel
+	if after.ReviewedHeadSHA != before.ReviewedHeadSHA || len(after.Rebinds) != len(before.Rebinds) {
+		t.Errorf("refused rebind changed the binding: before=%+v after=%+v", before, after)
+	}
+}
+
+// PR 273: an uncertain branch lookup must never reuse a fresh reviewed SHA.
+func TestPanelVerify_CorruptSpecBranchFailsClosed(t *testing.T) {
+	for _, gate := range []string{"spec_approve", "plan_approve"} {
+		for _, tc := range []struct{ name, contents string }{
+			{"empty", ""},
+			{"truncated", "1234\n"},
+			{"garbage", "garbage\n"},
+			{"dangling-symbolic", "ref: refs/heads/nowhere\n"},
+		} {
+			t.Run(gate+"/"+tc.name, func(t *testing.T) {
+				root, _, reviewed := setupRebind(t, "plan-pinned")
+				requirePanelShowRefExists(t, root)
+				dir := createObjectPinPanel(t, root, gate, reviewed, reviewed)
+				rebindGit(t, root, "checkout", "-q", "spec/900-demo")
+				editPinnedPlan(t, root)
+				rebindGit(t, root, "checkout", "-q", "main")
+				rebindWrite(t, root, ".git/refs/heads/spec/900-demo", tc.contents)
+				assertObjectPinSubjectBlocked(t, root, dir)
+			})
+		}
+	}
+}
+
+func TestPanelVerify_NonCommitSpecBranchFailsClosed(t *testing.T) {
+	for _, gate := range []string{"spec_approve", "plan_approve"} {
+		for _, object := range []string{"HEAD^{tree}", "HEAD:source.go"} {
+			t.Run(gate+"/"+object, func(t *testing.T) {
+				root, _, reviewed := setupRebind(t, "plan-pinned")
+				requirePanelShowRefExists(t, root)
+				dir := createObjectPinPanel(t, root, gate, reviewed, reviewed)
+				sha := rebindGit(t, root, "rev-parse", object)
+				// update-ref rejects non-commit branch tips, so write the loose ref.
+				rebindWrite(t, root, ".git/refs/heads/spec/900-demo", sha+"\n")
+				assertObjectPinSubjectBlocked(t, root, dir)
+			})
+		}
+	}
+}
+
 func TestPanelVerify_DeletedSpecBranchFallsBackToCommitPin(t *testing.T) {
 	for _, gate := range []string{"spec_approve", "plan_approve"} {
 		t.Run(gate, func(t *testing.T) {
 			root, _, reviewed := setupRebind(t, "plan-pinned")
+			requirePanelShowRefExists(t, root)
 			dir := createObjectPinPanel(t, root, gate, reviewed, reviewed)
 			rebindGit(t, root, "branch", "-D", "spec/900-demo")
 			if d := rebindGate(t, root, dir); d.Action != panel.Allow {

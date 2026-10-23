@@ -86,6 +86,8 @@ A spec or plan panel pinned to a commit tracks its spec branch. A hex-looking
 name is read as a commit, not as a branch or tag name. The live subject uses
 exactly refs/heads/<spec branch>. Only confirmed branch absence permits
 fallback to the recorded target; an unreadable branch blocks the gate.
+Confirmation uses git show-ref --exists (git 2.43 or later); lookup errors
+and older Git versions block the gate.
 Ordinary branch or tag targets keep tracking their recorded target.
 Existing panel.json must parse. Verdict files prevent recreating their
 round or an older round; bump --round or use panel rebind.

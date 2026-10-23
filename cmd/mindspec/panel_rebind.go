@@ -30,7 +30,8 @@ must be an ancestor of the live target. An already fresh panel writes nothing.
 A spec or plan panel pinned to a commit tracks its spec branch. A hex-looking
 name is read as a commit, not as a branch or tag name. Only confirmed absence
 of refs/heads/<spec branch> permits fallback to the recorded target.
-An unreadable spec branch refuses rebind.`,
+Confirmation uses git show-ref --exists (git 2.43 or later). An unreadable
+spec branch, lookup errors and older Git versions refuse rebind.`,
 	SilenceUsage: true,
 	Args:         cobra.ExactArgs(1),
 	RunE:         panelRebindRunE,

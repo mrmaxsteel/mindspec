@@ -1630,8 +1630,9 @@ func RevParseRef(workdir, ref string) (string, error) {
 }
 
 // ExactRefExists checks a fully qualified ref without revision-name precedence.
-// Only show-ref's exit 1 confirms absence. A broken ref or unreadable repository
-// is an error, so callers cannot mistake corruption for branch deletion.
+// Only show-ref --exists exit 2 confirms absence; exit 0 means present, without
+// validating the target object. Every other exit is an error. Git 2.43 or later
+// is required so callers cannot mistake ref lookup failures for branch deletion.
 func ExactRefExists(workdir, ref string) (bool, error) {
 	if err := rejectOptionLike(ref); err != nil {
 		return false, err
@@ -1639,13 +1640,18 @@ func ExactRefExists(workdir, ref string) (bool, error) {
 	if !strings.HasPrefix(ref, "refs/") {
 		return false, fmt.Errorf("expected fully qualified ref: %s", ref)
 	}
-	cmd := execCommand("git", gitArgs(workdir, "show-ref", "--verify", "--quiet", ref)...)
+	cmd := execCommand("git", gitArgs(workdir, "show-ref", "--exists", ref)...)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-		return false, nil
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		switch exitErr.ExitCode() {
+		case 2:
+			return false, nil
+		case 129:
+			return false, fmt.Errorf("checking exact ref %s: confirming the spec branch is absent needs git 2.43 or later: %w", ref, err)
+		}
 	}
 	return false, fmt.Errorf("checking exact ref %s: %w", ref, err)
 }
