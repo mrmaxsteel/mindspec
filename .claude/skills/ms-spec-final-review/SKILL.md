@@ -9,12 +9,16 @@ description: Review the whole spec branch after the last bead and before impleme
 
 Use `pr-number`, `spec-slug` and `merge-base-against` (default `origin/main`).
 Run this panel once after the last bead merges and before `/ms-impl-approve`.
+`mindspec impl approve` refuses without a passing final review for every spec, whatever the number of beads.
+Gates without a panel only warn when `enforcement.panel_presence: warn`.
+For a spec that changes a gate, a schema, a trust boundary or a merge path,
+use reviewers from more than one family. `mindspec config resolve --gate final_review` shows the families.
 
 ## Steps
 
 1. Run `git fetch origin`. Read the cumulative diff against the selected base.
 Record the changed paths, totals, merged commits and known fixer deviations.
-2. Invoke `/ms-panel-run` with gate `final_review` and target `spec/<spec-slug>`.
+2. Invoke `/ms-panel-run` with gate `final_review` and `--target spec/<id>` (the active spec id).
 The binary creates the registration, BRIEF, roster, lenses and acceptance question.
 Supply the PR link and cumulative context. Do not create panel artifacts by hand.
 3. Use `mindspec panel checkout <panel-slug> --slot <slot>` for isolated reviewer work.

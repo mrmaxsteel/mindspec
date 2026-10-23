@@ -1,12 +1,49 @@
 package doctor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/state"
 )
+
+func checkPanelPresencePolicy(r *Report, cfg *config.Config) {
+	if cfg.Enforcement.PanelPresence == "warn" {
+		r.Checks = append(r.Checks, Check{
+			Name: "Panel presence policy", Status: Info,
+			Message: "enforcement.panel_presence: warn — gates without a panel only warn",
+		})
+	}
+}
+
+func checkPanelAbsence(r *Report, cache *phase.Cache) {
+	active, err := phase.DiscoverActiveSpecsWithCache(cache)
+	if err != nil {
+		r.Checks = append(r.Checks, Check{Name: "Panel absence records", Status: Warn,
+			Message: "cannot read in-flight panel absence records\nrecovery: check the issue tracker and run mindspec doctor"})
+		return
+	}
+	for _, spec := range active {
+		if spec.Phase != state.ModePlan && spec.Phase != state.ModeImplement {
+			continue
+		}
+		epic, err := cache.FindEpic(spec.EpicID)
+		if err != nil || epic == nil {
+			r.Checks = append(r.Checks, Check{Name: "Panel absence records", Status: Warn,
+				Message: fmt.Sprintf("cannot read panel absence record for %s\nrecovery: check the issue tracker and run mindspec doctor", idrender.Spec(spec.SpecID))})
+			continue
+		}
+		if absent, _ := epic.Metadata["panel_absent"].(bool); absent {
+			r.Checks = append(r.Checks, Check{Name: "Panel absent: " + idrender.Spec(spec.SpecID), Status: Warn,
+				Message: fmt.Sprintf("%s is in %s mode and its epic has a panel_absent record; an approval ran without a panel", idrender.Spec(spec.SpecID), spec.Phase)})
+		}
+	}
+}
 
 // sourceGlobsBlock is the LITERAL scaffolded default for the
 // source_globs config field (spec 091 Req 11), verbatim — comment plus

@@ -1221,7 +1221,7 @@ whose slot, round, id and hash match. Other gates do not use these entries to
 discharge findings. The implementation approval bead-deferral check reads only
 bead deferrals.
 
-### Lifecycle panel gate core
+## Lifecycle panel gate core
 
 `panel.DocumentSubjectDigest` computes the semantic subject for document and
 final-review panels. Create, rebind and verify use the same reader. Document
@@ -1242,3 +1242,15 @@ through a metadata merge. It records skip, abandonment and absence with their
 times. Absence includes `panel_absent_gate`. It writes the accepted IDs to
 `plan_deferral_ids`. A nil list writes no deferral key. Call it after epic
 resolution. A failed write returns an error.
+
+## Approval guidance
+
+Spec and Plan instruct output names the document panel gate and its spec-branch
+target. Approval skills use the same target for document and final-review panels.
+The bead cycle runs the content check after each implementation commit and before
+the bead panel. Setup preserves old skill bodies as refresh snapshots and keeps
+user edits.
+
+Doctor reports `enforcement.panel_presence: warn` at Info. It reports each
+in-flight spec in Plan or Implement mode with `panel_absent` metadata at Warn,
+under both presence policies. These checks do not change approval state.

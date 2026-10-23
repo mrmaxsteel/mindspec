@@ -33,6 +33,7 @@ Apply `panel.fix-after-final` and `panel.one-fixer` before a fix dispatch.
 
 `mindspec instruct --panel-state` lists the panel state.
 For a stale bead panel, run `mindspec panel create <slug> --spec <spec-id> --gate bead --target bead/<bead-id> --bead <bead-id> --round <N+1>`.
+For `spec_approve`, `plan_approve` and `final_review`, create the next round with `--target spec/<id>`.
 Use the recorded gate and target for other panels. Omit `--spec` for adhoc panels.
 `mindspec panel rebind <slug> --reason "<who>: <why>"` accepts a passing panel when changed paths need no new review.
 `mindspec panel abandon <panel-slug> --reason "<why>" --by "<name>"` records an audited exit from the panel flow.
@@ -48,7 +49,9 @@ An agent must not set it on a command line. Completion records the audited skip.
 
 Run `mindspec panel defer <panel-slug> --slot <slot> --round N --finding 'ccr[0]' --bead <follow-up> --by "<name>"`.
 Omit `--finding` for the whole slot. Use an open follow-up outside the owning epic and its descendants, with a discovered-from edge and each finding in its description.
-Spec approval and adhoc panels cannot defer. Use a fix or refutation. The verbs write their own disposition rows.
+For a spec-approval panel, use `--to-plan` instead of `--bead <follow-up>`.
+The plan must name each deferral id in its `## Resolutions` section before plan approval.
+Adhoc panels cannot defer. Use a fix or refutation. The verbs write their own disposition rows.
 
 ## Then
 

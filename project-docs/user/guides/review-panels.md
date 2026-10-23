@@ -139,7 +139,7 @@ A missing required measurement artifact stays open until the artifact exists.
 
 - Fix the findings, then use `panel create <slug> --round <N+1>` for a new review.
 - Refute a finding with `mindspec panel refute <slug> --slot R1 --round N --finding 'ccr[0]' --ground disproven --reason '<why>' --evidence <reference> --by '<name>'`.
-- Defer a finding with `mindspec panel defer <slug> --slot R1 --round N --finding 'ccr[0]' --bead <follow-up> --by '<name>'`. Spec approval and adhoc panels cannot defer.
+- Defer a finding with `mindspec panel defer <slug> --slot R1 --round N --finding 'ccr[0]' --bead <follow-up> --by '<name>'`. Spec-approval panels use `--to-plan` instead of `--bead`. The plan must name each deferral id in its `## Resolutions` section before plan approval. Adhoc panels cannot defer.
 - Use `mindspec panel rebind <slug> --reason '<who>: <why>'` when a passing panel's changed paths need no new review.
 - Use `mindspec panel abandon <slug> --reason '<why>' --by '<name>'` to record an exit from the panel flow.
 
@@ -151,3 +151,24 @@ Only a human can set `MINDSPEC_SKIP_PANEL=1` in the session environment before l
 Completion records the audited skip. An agent cannot set it on a command line.
 
 See the [autonomy guide](autonomy.md) for gate authority and loop budgets.
+
+## Approval gates
+
+Run document panels before `spec approve` and `plan approve`. Use `--target spec/<id>`
+for `spec_approve`, `plan_approve` and `final_review`. A live registration with
+another target blocks approval. Replace it with a new round at `spec/<id>` or
+abandon it with a reason. Rounds from an older binary can also need a new round.
+
+`impl approve` needs a passing final review for every spec, whatever the number
+of beads. A failing registered panel refuses approval under both presence policies.
+With `enforcement.panel_presence: warn` (the default), a missing panel only warns
+and records `panel_absent`. Set the key to `enforce` to refuse a missing panel.
+Existing approvals remain valid. Doctor reports the warning policy at Info and
+reports each in-flight spec in Plan or Implement mode with a missing-panel record
+at Warn.
+
+For changes to a gate, a schema, a trust boundary or a merge path, use reviewers
+from more than one family. `mindspec config resolve --gate <gate>` shows the families.
+After each implementation or fix commit, run `mindspec complete <bead> --check`
+before the bead panel. Send failures to the implementer or fixer, then check the
+fixed commit before review.
