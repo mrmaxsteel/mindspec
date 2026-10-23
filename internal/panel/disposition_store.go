@@ -93,6 +93,8 @@ func recordKey(m map[string]interface{}) (kind, key string) {
 		fields = []string{"spec", "panel", "round", "created_at"}
 	case RecordRound:
 		fields = []string{"round", "created_at"}
+	case RecordDeferredToPlan:
+		fields = []string{"id"}
 	case RecordRefutation, RecordDeferral:
 		fields = []string{"slot", "round", "finding", "finding_sha256"}
 		// Preserve the original tuple for unbound legacy events. A new source
@@ -350,7 +352,7 @@ func checkCompletenessAt(dir, panelName string, current *Result) error {
 					boundDeferrals = append(boundDeferrals, event.Deferral)
 				}
 			}
-		case RecordRound, RecordRefutation, RecordRebind, RecordAbandon:
+		case RecordRound, RecordRefutation, RecordDeferredToPlan, RecordRebind, RecordAbandon:
 			// Events are validated above; only disposition rows cover slots.
 			continue
 		case RecordDisposition:

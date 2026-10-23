@@ -14,20 +14,21 @@ import (
 )
 
 const (
-	RecordVerdict      = "verdict"
-	RecordLaunch       = "launch"
-	RecordSubstitution = "substitution"
-	RecordRound        = "round"
-	RecordRefutation   = "refutation"
-	RecordDeferral     = "deferral"
-	RecordRebind       = "rebind"
-	RecordAbandon      = "abandon"
+	RecordVerdict        = "verdict"
+	RecordLaunch         = "launch"
+	RecordSubstitution   = "substitution"
+	RecordRound          = "round"
+	RecordRefutation     = "refutation"
+	RecordDeferral       = "deferral"
+	RecordDeferredToPlan = "deferred_to_plan"
+	RecordRebind         = "rebind"
+	RecordAbandon        = "abandon"
 )
 
 // IsVerbRecord identifies event kinds reserved to panel verbs.
 func IsVerbRecord(kind string) bool {
 	switch kind {
-	case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon, RecordVerdict, RecordLaunch, RecordSubstitution:
+	case RecordRound, RecordRefutation, RecordDeferral, RecordDeferredToPlan, RecordRebind, RecordAbandon, RecordVerdict, RecordLaunch, RecordSubstitution:
 		return true
 	}
 	return false
@@ -101,10 +102,15 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 		fields = append(fields, "slot", "model")
 	case RecordRound:
 		fields = append(fields, "reviewed_head_sha", "subject_digest", "target", "telemetry")
-	case RecordRefutation, RecordDeferral:
+	case RecordRefutation, RecordDeferral, RecordDeferredToPlan:
 		fields = append(fields, "slot", "finding", "finding_sha256", "finding_text", "by")
 		if kind == RecordRefutation {
 			fields = append(fields, "ground", "reason", "evidence")
+		} else if kind == RecordDeferredToPlan {
+			fields = append(fields, "id")
+			if _, exists := m["bead"]; exists {
+				return fmt.Errorf("deferred_to_plan must not contain bead")
+			}
 		} else {
 			fields = append(fields, "bead")
 		}
@@ -202,7 +208,7 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 		if err := json.Unmarshal(data, &entries); err != nil {
 			return fmt.Errorf("round carried: %s", termsafe.Escape(err.Error()))
 		}
-	case RecordRefutation, RecordDeferral:
+	case RecordRefutation, RecordDeferral, RecordDeferredToPlan:
 		finding := m["finding"].(string)
 		if !validFindingID(finding) {
 			return fmt.Errorf("%s finding must be slot or ccr[i]", kind)

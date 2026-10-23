@@ -21,7 +21,7 @@ func resetDischargeFlags(t *testing.T) {
 	t.Helper()
 	for _, cmd := range []*cobra.Command{panelRefuteCmd, panelAbandonCmd, panelDeferCmd} {
 		reset := func() {
-			for _, name := range []string{"spec", "slot", "finding", "ground", "ac", "reason", "evidence", "by", "round", "bead"} {
+			for _, name := range []string{"spec", "slot", "finding", "ground", "ac", "reason", "evidence", "by", "round", "bead", "to-plan"} {
 				flag := cmd.Flags().Lookup(name)
 				if flag != nil {
 					if err := flag.Value.Set(flag.DefValue); err != nil {

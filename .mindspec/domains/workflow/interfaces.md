@@ -1200,3 +1200,23 @@ and the spec worktree before forced removal of those worktrees. The branch-missi
 the same check before its first removal. Pending changes or a read error return
 a cleanup-stage failure with the epic state and recovery commands. No worktree
 or branch is removed.
+
+
+## Spec findings deferred to the plan
+
+`panel defer <slug> --slot S --round N --to-plan --by <actor>` works only on a
+`spec_approve` panel. It refuses `--bead`. Add `--finding I` to cover one finding.
+Without that flag, the verb covers each finding in the slot.
+
+The verb appends one `deferred_to_plan` record and one `confirmed-deferred` row
+per finding in one ledger write. The evidence is `plan:<deferral id>`. Each
+record has a stable id, finding identity, raw text, hash, actor and time. It has
+no `bead` field. The snapshot stores the entries in `plan_deferrals` and leaves
+`deferrals` unchanged. A retry repairs a missing snapshot entry without a second
+ledger record.
+
+The integrity check requires a matching ledger record for each entry. A new
+round carries backed entries. The spec approval gate discharges only findings
+whose slot, round, id and hash match. Other gates do not use these entries to
+discharge findings. The implementation approval bead-deferral check reads only
+bead deferrals.

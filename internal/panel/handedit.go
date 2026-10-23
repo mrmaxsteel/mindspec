@@ -62,6 +62,15 @@ func checkHandEditsFromLedger(dir string, p Panel, lines [][]byte) (string, erro
 	if err != nil {
 		return "", err
 	}
+	backed, err := planDeferralsFromLedger(lines)
+	if err != nil {
+		return "", err
+	}
+	for i, entry := range p.PlanDeferrals {
+		if !matchesPlanDeferral(entry, backed) {
+			return fmt.Sprintf("plan_deferrals[%d]", i), nil
+		}
+	}
 	if legacy {
 		return "", nil
 	}
