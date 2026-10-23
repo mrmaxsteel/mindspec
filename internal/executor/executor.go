@@ -204,8 +204,8 @@ type Executor interface {
 	// git-I/O seam the in-binary panel gate (spec 099) uses for the bead/<id>
 	// staleness rev-parse, keeping internal/complete off gitutil (ADR-0030).
 	RevParseRef(workdir, ref string) (string, error)
-	// SymbolicFullName returns Git's selected ref, or empty for an object pin.
-	SymbolicFullName(workdir, ref string) (string, error)
+	// ExactRefExists checks a fully qualified ref; only confirmed absence is false, nil.
+	ExactRefExists(workdir, ref string) (bool, error)
 
 	// Status returns `git status --porcelain --no-renames` for workdir (the worktree
 	// dirty-check seam for the panel gate). Empty output means a clean tree.

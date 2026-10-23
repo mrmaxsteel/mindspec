@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mrmaxsteel/mindspec/internal/instruct"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
@@ -77,46 +76,6 @@ func TestPanelDefer_ApproveResubmittedRequestChanges(t *testing.T) {
 	}
 }
 
-func TestPanelVerify_HexNamedTargetMoves(t *testing.T) {
-	for _, kind := range []string{"branch", "tag"} {
-		t.Run(kind, func(t *testing.T) {
-			root, dir, from := setupRebind(t, "hex-"+kind)
-			out, err := runPanelVerbCmd("verify", "demo")
-			if err != nil || strings.Contains(out, "BLOCK:") {
-				t.Fatalf("initial target must be fresh: %v %s", err, out)
-			}
-			rebindGit(t, root, "checkout", "-qb", "target-change")
-			name := ".mindspec/specs/900-demo/plan.md"
-			rebindWrite(t, root, name, "# changed target subject\n")
-			rebindGit(t, root, "add", name)
-			rebindGit(t, root, "commit", "-qm", "target edit")
-			tip := rebindGit(t, root, "rev-parse", "HEAD")
-			if kind == "branch" {
-				rebindGit(t, root, "branch", "-f", "cafe", tip)
-			} else {
-				rebindGit(t, root, "tag", "-f", "cafe", tip)
-			}
-			rebindGit(t, root, "checkout", "-q", "main")
-			if spec := rebindGit(t, root, "rev-parse", "spec/900-demo"); spec != from {
-				t.Fatalf("spec moved: %s", spec)
-			}
-			if got := rebindGit(t, root, "rev-parse", "cafe"); got != tip {
-				t.Fatalf("target did not move: %s", got)
-			}
-			out, err = runPanelVerbCmd("verify", "demo")
-			if err != nil || !strings.Contains(out, "BLOCK:") || !strings.Contains(out, "commits landed after review") {
-				t.Fatalf("hex %s must be stale: %v %s", kind, err, out)
-			}
-			if out := instruct.PanelState(root); !strings.Contains(out, "gate would BLOCK") || !strings.Contains(out, "commits landed after review") {
-				t.Fatalf("instruct must read stale: %s", out)
-			}
-			if d := rebindGate(t, root, dir); d.Action != panel.Block {
-				t.Fatalf("gate allowed changed hex ref: %+v", d)
-			}
-		})
-	}
-}
-
 func TestPanelDefer_RequestChangesSubmissionBinding(t *testing.T) {
 	f := newCLIV2(t)
 	fake := fakeDeferralBD(t)
@@ -166,60 +125,5 @@ func TestPanelDefer_RequestChangesSubmissionBinding(t *testing.T) {
 	}
 	if err := panel.CheckCore3(panel.Registration{Dir: f.dir, Panel: *res.Panel}); err == nil || !strings.Contains(err.Error(), "no covering disposition row") {
 		t.Fatalf("lifecycle coverage check must reject superseded deferral: %v", err)
-	}
-}
-
-func TestPanelVerify_HexTagTakesPrecedenceOverBranch(t *testing.T) {
-	root, _, from := setupRebind(t, "hex-branch")
-	rebindGit(t, root, "tag", "cafe", from)
-	rebindGit(t, root, "checkout", "-qb", "target-change")
-	rebindWrite(t, root, ".mindspec/specs/900-demo/plan.md", "# changed tag subject\n")
-	rebindGit(t, root, "add", ".")
-	rebindGit(t, root, "commit", "-qm", "tag edit")
-	tip := rebindGit(t, root, "rev-parse", "HEAD")
-	rebindGit(t, root, "tag", "-f", "cafe", tip)
-	rebindGit(t, root, "checkout", "-q", "main")
-	if got := rebindGit(t, root, "rev-parse", "--verify", "cafe^{commit}"); !strings.HasSuffix(got, tip) {
-		t.Fatalf("git precedence got %s", got)
-	}
-	out, err := runPanelVerbCmd("verify", "demo")
-	if err != nil || !strings.Contains(out, "BLOCK:") {
-		t.Fatalf("changed tag bypassed: %v %s", err, out)
-	}
-}
-
-func TestPanelVerify_FullSHANameRemainsObjectPin(t *testing.T) {
-	root, _, from := setupRebind(t, "plan-pinned")
-	rebindGit(t, root, "branch", from, from)
-	// Git's symbolic output names this branch, but revision resolution uses
-	// the full object ID. Pin both behaviors so classification cannot confuse them.
-	if got := rebindGit(t, root, "rev-parse", "--symbolic-full-name", from); !strings.HasSuffix(got, "refs/heads/"+from) {
-		t.Fatalf("git symbolic full-SHA behavior changed: %s", got)
-	}
-	if got := rebindGit(t, root, "rev-parse", "--verify", from+"^{commit}"); !strings.HasSuffix(got, from) {
-		t.Fatalf("git full-SHA object behavior changed: %s", got)
-	}
-	rebindGit(t, root, "checkout", "-q", "spec/900-demo")
-	rebindWrite(t, root, ".mindspec/specs/900-demo/plan.md", "# unreviewed spec plan\n")
-	rebindGit(t, root, "add", ".")
-	rebindGit(t, root, "commit", "-qm", "plan edit")
-	rebindGit(t, root, "checkout", "-q", "main")
-	out, err := runPanelVerbCmd("verify", "demo")
-	if err != nil || !strings.Contains(out, "BLOCK:") {
-		t.Fatalf("full SHA named branch hides unreviewed pinned spec: %v %s", err, out)
-	}
-}
-
-func TestPanelVerify_ShortSHARefKeepsOwnTip(t *testing.T) {
-	root, _, from := setupRebind(t, "plan-pinned", "6")
-	rebindGit(t, root, "branch", from[:6], from)
-	rebindGit(t, root, "checkout", "-q", "spec/900-demo")
-	rebindWrite(t, root, ".mindspec/specs/900-demo/plan.md", "# spec plan edit\n")
-	rebindGit(t, root, "add", ".")
-	rebindGit(t, root, "commit", "-qm", "plan edit")
-	rebindGit(t, root, "checkout", "-q", "main")
-	out, err := runPanelVerbCmd("verify", "demo")
-	if err != nil || strings.Contains(out, "BLOCK:") {
-		t.Fatalf("named prefix branch should retain its own tip: %v %s", err, out)
 	}
 }

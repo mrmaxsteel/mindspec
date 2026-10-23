@@ -82,6 +82,11 @@ For existing bead panels with a divergent recorded target, the gate compares
 that target to the live bead/<id> branch. On a SHA mismatch, a changed subject
 tree blocks; an equal subject stays fresh. A legacy panel without a digest
 blocks on a SHA mismatch.
+A spec or plan panel pinned to a commit tracks its spec branch. A hex-looking
+name is read as a commit, not as a branch or tag name. The live subject uses
+exactly refs/heads/<spec branch>. Only confirmed branch absence permits
+fallback to the recorded target; an unreadable branch blocks the gate.
+Ordinary branch or tag targets keep tracking their recorded target.
 Existing panel.json must parse. Verdict files prevent recreating their
 round or an older round; bump --round or use panel rebind.
 These refusals write nothing.
@@ -692,26 +697,11 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 	})
 }
 
-// nonBeadTargetRevParse builds the GateIO.RevParse closure a non-bead
-// panel's `panel verify`/`panel tally` uses (Bead 1 Half 1, R1): it IGNORES
-// the "bead/"+beadID ref argument panel.ResolveGateFacts always passes
-// (beadID == "" for a non-bead panel, so that ref is the literal,
-// always-absent "bead/") and instead rev-parses reg.Panel's RECORDED
-// Target in the caller-supplied scanRoot, through the SAME
-// revParseForPanelFn seam `panel create` uses to capture reviewed_head_sha
-// at write time. This un-shadows PanelGateDecision's staleness (leg 6) and
-// incomplete/REJECT/threshold legs (8)-(10) for a non-bead panel: a stale
-// target now Blocks, a genuinely-deleted target (exec.IsRefNotFound, still
-// wired to errors.Is(err, gitutil.ErrRefNotFound)) still gets the honest
-// missing-ref Warn, and a transient git error still gets the honest
-// transient Warn (leg 5b) — never a false MissingRef.
-//
-// When the registration itself is unparsed (reg.Err != nil) or its Target
-// is empty (a panel.json that, however it was produced, records no target
-// ref), this returns a plain non-ErrRefNotFound error so the facts surface
-// as the honest transient GitErr Warn rather than a false "target deleted"
-// claim — though an unreadable registration Blocks first regardless, at
-// leg (2), before this closure is ever invoked.
+// nonBeadTargetRevParse adapts the shared live-subject resolver for non-bead
+// verify, tally and rebind. Commit-pinned spec/plan panels follow the exact spec
+// branch; other panels follow their recorded target. The create-time rev-parse
+// seam is shared here, while exact-ref existence comes from the executor.
+// Invalid registrations return an ordinary error rather than claiming absence.
 func nonBeadTargetRevParse(reg panel.Registration) func(scanRoot, ref string) (string, error) {
 	return func(scanRoot, _ string) (string, error) {
 		if reg.Err != nil {
@@ -719,7 +709,7 @@ func nonBeadTargetRevParse(reg panel.Registration) func(scanRoot, ref string) (s
 		}
 		return panel.ResolveSubjectHead(reg.Panel, scanRoot, func(specID string) (string, error) {
 			return workspace.SpecBranch(specID)
-		}, revParseForPanelFn, newExecutor(scanRoot).SymbolicFullName, newExecutor(scanRoot).IsRefNotFound)
+		}, revParseForPanelFn, newExecutor(scanRoot).ExactRefExists)
 	}
 }
 

@@ -2,6 +2,7 @@ package panel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -147,7 +148,8 @@ type GateFacts struct {
 	MissingRef bool
 
 	// SubjectDigest is the live subject on a SHA mismatch. SubjectErr is a
-	// fail-closed read error, separate from the rev-parse fail-open GitErr.
+	// fail-closed read error (including a pinned spec branch resolution failure),
+	// separate from the ordinary rev-parse fail-open GitErr.
 	SubjectDigest string
 	SubjectErr    error
 
@@ -488,12 +490,17 @@ func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) Ga
 	// inlined to keep internal/panel a leaf.
 	sha, rerr := deps.RevParse(scanRoot, "bead/"+beadID)
 	if rerr != nil {
+		// A pinned spec branch must be readable. Check its error marker
+		// before the missing-ref sentinel: a present ref with a missing
+		// commit is not a confirmed deletion.
 		// Distinguish a GENUINE missing ref (branch deleted — the merge
 		// landed) from a transient/structural git error. Only the former is
 		// the rerun-after-merge pass-through (Req 11); a transient error is
 		// surfaced as a distinct Warn so it is not mistaken for a confirmed
 		// deletion (round-2 false-clear).
-		if deps.IsRefNotFound != nil && deps.IsRefNotFound(rerr) {
+		if errors.Is(rerr, ErrSubjectHead) {
+			f.SubjectErr = rerr
+		} else if deps.IsRefNotFound != nil && deps.IsRefNotFound(rerr) {
 			f.MissingRef = true
 		} else {
 			f.GitErr = rerr

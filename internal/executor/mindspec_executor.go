@@ -1962,9 +1962,9 @@ func (g *MindspecExecutor) MergeBase(a, b string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// SymbolicFullName exposes Git's ref/object classification through the I/O boundary.
-func (g *MindspecExecutor) SymbolicFullName(workdir, ref string) (string, error) {
-	return gitutil.SymbolicFullName(workdir, ref)
+// ExactRefExists exposes exact-ref existence through the Git I/O boundary.
+func (g *MindspecExecutor) ExactRefExists(workdir, ref string) (bool, error) {
+	return gitutil.ExactRefExists(workdir, ref)
 }
 
 // RevParseRef resolves ref to its commit SHA in workdir. Thin pass-through to

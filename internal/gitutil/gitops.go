@@ -1629,47 +1629,25 @@ func RevParseRef(workdir, ref string) (string, error) {
 	return sha, nil
 }
 
-// SymbolicFullName returns the ref Git selects for target, or an empty name
-// for an object pin. Git ignores full object-ID-shaped refs when the object
-// exists, even though --symbolic-full-name alone reports those refs.
-func SymbolicFullName(workdir, target string) (string, error) {
-	if err := rejectOptionLike(target); err != nil {
-		return "", err
+// ExactRefExists checks a fully qualified ref without revision-name precedence.
+// Only show-ref's exit 1 confirms absence. A broken ref or unreadable repository
+// is an error, so callers cannot mistake corruption for branch deletion.
+func ExactRefExists(workdir, ref string) (bool, error) {
+	if err := rejectOptionLike(ref); err != nil {
+		return false, err
 	}
-	var out []byte
-	var err error
-	if len(target) == 40 || len(target) == 64 {
-		// Compare the unpeeled object ID: an annotated-tag object is also a
-		// pin, even when a branch with that ID points at the peeled commit.
-		cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--verify", "--quiet", target+"^{object}")...)
-		out, err = cmd.Output()
-		if err == nil && strings.EqualFold(strings.TrimSpace(string(out)), target) {
-			return "", nil
-		}
+	if !strings.HasPrefix(ref, "refs/") {
+		return false, fmt.Errorf("expected fully qualified ref: %s", ref)
 	}
+	cmd := execCommand("git", gitArgs(workdir, "show-ref", "--verify", "--quiet", ref)...)
+	err := cmd.Run()
 	if err == nil {
-		// Disable strict ambiguity reporting so Git returns its selected ref
-		// (e.g. tag before branch), rather than an empty name for a collision.
-		cmd := execCommand("git", gitArgs(workdir, "-c", "core.warnAmbiguousRefs=false", "rev-parse", "--verify", "--quiet", "--symbolic-full-name", target)...)
-		out, err = cmd.Output()
+		return true, nil
 	}
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return "", fmt.Errorf("symbolic ref %s: %w", target, ErrRefNotFound)
-		}
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
-			// Some Git versions report an ambiguous object prefix as 128.
-			// Confirm multiple matches rather than treating every 128 (e.g.
-			// a broken repository) as a pin. This also avoids parsing stderr.
-			cmd := execCommand("git", gitArgs(workdir, "rev-parse", "--disambiguate="+target)...)
-			objects, probeErr := cmd.Output()
-			if probeErr == nil && len(strings.Fields(string(objects))) > 1 {
-				return "", nil
-			}
-		}
-		return "", fmt.Errorf("symbolic ref %s: %w", target, err)
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		return false, nil
 	}
-	return strings.TrimSpace(string(out)), nil
+	return false, fmt.Errorf("checking exact ref %s: %w", ref, err)
 }
 
 // LogOneline returns `git log -1 --oneline <ref>` for workdir

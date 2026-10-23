@@ -1,14 +1,13 @@
 package main
 
 import (
-	"crypto/sha1"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/instruct"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 )
@@ -133,33 +132,157 @@ func TestPanelVerify_AnnotatedTagObjectPinIgnoresSameNamedBranch(t *testing.T) {
 	assertObjectPinRebind(t, root, dir, reviewed, tip)
 }
 
-func TestPanelVerify_AmbiguousObjectPrefixFollowsSpecBranch(t *testing.T) {
-	root, _, reviewed := setupRebind(t, "plan-pinned")
-	prefix := reviewed[:4]
-	// Find a blob sharing the commit prefix without relying on random object IDs.
-	var content string
-	for i := 0; ; i++ {
-		content = fmt.Sprintf("ambiguous review pin %d\n", i)
-		sum := sha1.Sum([]byte(fmt.Sprintf("blob %d\x00%s", len(content), content)))
-		if strings.HasPrefix(fmt.Sprintf("%x", sum), prefix) {
-			break
+// SHA-shaped targets follow the spec subject even when another ref has that name.
+func TestPanelVerify_CommitPinRefCollisionTracksSpecBranch(t *testing.T) {
+	for _, kind := range []string{"branch", "tag"} {
+		for _, length := range []int{7, 40} {
+			t.Run(fmt.Sprintf("%s/%d", kind, length), func(t *testing.T) {
+				root, _, reviewed := setupRebind(t, "plan-pinned")
+				target := reviewed[:length]
+				dir := createObjectPinPanel(t, root, "plan_approve", target, reviewed)
+				rebindGit(t, root, kind, target, reviewed)
+				rebindGit(t, root, "checkout", "-q", "spec/900-demo")
+				tip := editPinnedPlan(t, root)
+				rebindGit(t, root, "checkout", "-q", "main")
+				assertObjectPinStale(t, root, dir)
+				if out := instruct.PanelState(root); !strings.Contains(out, "**object-pin** — gate would BLOCK") {
+					t.Errorf("instruct must detect stale pin: %s", out)
+				}
+				assertObjectPinRebind(t, root, dir, reviewed, tip)
+			})
 		}
 	}
-	name := filepath.Join(t.TempDir(), "collision")
-	if err := os.WriteFile(name, []byte(content), 0600); err != nil {
-		t.Fatal(err)
+}
+
+func TestPanelVerify_PinnedSpecBranchTagCannotShadowRealBranch(t *testing.T) {
+	for _, gate := range []string{"spec_approve", "plan_approve"} {
+		t.Run(gate, func(t *testing.T) {
+			root, _, reviewed := setupRebind(t, "plan-pinned")
+			dir := createObjectPinPanel(t, root, gate, reviewed, reviewed)
+			rebindGit(t, root, "tag", "spec/900-demo", reviewed)
+			rebindGit(t, root, "checkout", "-q", "refs/heads/spec/900-demo")
+			tip := editPinnedPlan(t, root)
+			rebindGit(t, root, "update-ref", "refs/heads/spec/900-demo", tip)
+			rebindGit(t, root, "checkout", "-q", "main")
+			assertObjectPinStale(t, root, dir)
+			if out := instruct.PanelState(root); !strings.Contains(out, "**object-pin** — gate would BLOCK") {
+				t.Errorf("instruct must follow real spec branch: %s", out)
+			}
+			assertObjectPinRebind(t, root, dir, reviewed, tip)
+		})
 	}
-	blob := rebindGit(t, root, "hash-object", "-w", name)
-	if !strings.HasPrefix(blob, prefix) {
-		t.Fatalf("fixture collision failed: %s / %s", blob, prefix)
+}
+
+func TestPanelVerify_PresentSpecBranchMissingObjectFailsClosed(t *testing.T) {
+	for _, gate := range []string{"spec_approve", "plan_approve"} {
+		t.Run(gate, func(t *testing.T) {
+			root, _, reviewed := setupRebind(t, "plan-pinned")
+			dir := createObjectPinPanel(t, root, gate, reviewed, reviewed)
+			rebindGit(t, root, "checkout", "-q", "spec/900-demo")
+			editPinnedPlan(t, root)
+			rebindGit(t, root, "checkout", "-q", "main")
+			rebindWrite(t, root, ".git/refs/heads/spec/900-demo", strings.Repeat("1", 40)+"\n")
+			out, err := runPanelVerbCmd("verify", "object-pin")
+			if err == nil && !strings.Contains(out, "BLOCK:") {
+				t.Errorf("present branch with unreadable commit must fail closed: %s", out)
+			}
+			if d := rebindGate(t, root, dir); d.Action != panel.Block {
+				t.Errorf("unreadable spec branch gate must BLOCK: %+v", d)
+			}
+			if out := instruct.PanelState(root); !strings.Contains(out, "**object-pin** — gate would BLOCK") {
+				t.Errorf("instruct must block unreadable spec branch: %s", out)
+			}
+			out, err = runPanelVerbCmd("tally", "object-pin")
+			if err == nil || !strings.Contains(out, "decision: BLOCK") {
+				t.Errorf("tally must block unreadable spec branch: %v %s", err, out)
+			}
+			if out, err := runPanelVerbCmd("rebind", "object-pin", "--reason", "operator: checked spec branch"); err == nil {
+				t.Errorf("rebind must refuse unreadable spec branch: %s", out)
+			}
+		})
 	}
-	if err := exec.Command("git", "-C", root, "rev-parse", "--verify", "--quiet", prefix).Run(); err == nil {
-		t.Fatal("prefix must be ambiguous")
+}
+
+func TestPanelVerify_DeletedSpecBranchFallsBackToCommitPin(t *testing.T) {
+	for _, gate := range []string{"spec_approve", "plan_approve"} {
+		t.Run(gate, func(t *testing.T) {
+			root, _, reviewed := setupRebind(t, "plan-pinned")
+			dir := createObjectPinPanel(t, root, gate, reviewed, reviewed)
+			rebindGit(t, root, "branch", "-D", "spec/900-demo")
+			if d := rebindGate(t, root, dir); d.Action != panel.Allow {
+				t.Fatalf("deleted spec branch must fall back to target: %+v", d)
+			}
+			out, err := runPanelVerbCmd("verify", "object-pin")
+			if err != nil || strings.Contains(out, "BLOCK:") || strings.Contains(out, "no longer exists") {
+				t.Fatalf("existing pin must remain fresh after branch deletion: %v %s", err, out)
+			}
+		})
 	}
-	dir := createObjectPinPanel(t, root, "plan_approve", prefix, reviewed)
-	rebindGit(t, root, "checkout", "-q", "spec/900-demo")
-	tip := editPinnedPlan(t, root)
-	rebindGit(t, root, "checkout", "-q", "main")
-	assertObjectPinStale(t, root, dir)
-	assertObjectPinRebind(t, root, dir, reviewed, tip)
+}
+
+func TestPanelVerify_HexLookingNameTracksSpecBranch(t *testing.T) {
+	for _, kind := range []string{"branch", "tag"} {
+		t.Run(kind, func(t *testing.T) {
+			root, _, reviewed := setupRebind(t, "plan-pinned")
+			dir := createObjectPinPanel(t, root, "plan_approve", "cafe", reviewed)
+			rebindGit(t, root, kind, "cafe", reviewed)
+			rebindGit(t, root, "checkout", "-qb", "other-subject")
+			otherTip := editPinnedPlan(t, root)
+			rebindGit(t, root, "checkout", "-q", "main")
+			rebindGit(t, root, kind, "-f", "cafe", otherTip)
+			if d := rebindGate(t, root, dir); d.Action != panel.Allow {
+				t.Fatalf("hex-looking name must ignore same-named %s tip: %+v", kind, d)
+			}
+			rebindGit(t, root, "checkout", "-q", "spec/900-demo")
+			tip := editPinnedPlan(t, root)
+			rebindGit(t, root, "checkout", "-q", "main")
+			assertObjectPinStale(t, root, dir)
+			assertObjectPinRebind(t, root, dir, reviewed, tip)
+		})
+	}
+}
+
+func TestPanelVerify_NamedTargetKeepsOwnTip(t *testing.T) {
+	for _, kind := range []string{"branch", "tag"} {
+		t.Run(kind, func(t *testing.T) {
+			root, _, reviewed := setupRebind(t, "plan-pinned")
+			dir := createObjectPinPanel(t, root, "plan_approve", "review-target", reviewed)
+			rebindGit(t, root, kind, "review-target", reviewed)
+			rebindGit(t, root, "checkout", "-q", "spec/900-demo")
+			tip := editPinnedPlan(t, root)
+			rebindGit(t, root, "checkout", "-q", "main")
+			if d := rebindGate(t, root, dir); d.Action != panel.Allow {
+				t.Fatalf("ordinary %s target must keep its own tip: %+v", kind, d)
+			}
+			rebindGit(t, root, kind, "-f", "review-target", tip)
+			assertObjectPinStale(t, root, dir)
+		})
+	}
+}
+
+func TestPanelVerify_BeadPanelKeepsBeadBranchSubject(t *testing.T) {
+	root, dir, _ := setupRebind(t, "bead")
+	rebindGit(t, root, "checkout", "-qb", "spec/900-demo")
+	editPinnedPlan(t, root)
+	rebindGit(t, root, "checkout", "-q", "bead/mindspec-demo.1")
+	if d := rebindGate(t, root, dir); d.Action != panel.Allow {
+		t.Fatalf("spec branch edit must not move bead subject: %+v", d)
+	}
+	editPinnedPlan(t, root)
+	if d := rebindGate(t, root, dir); d.Action != panel.Block {
+		t.Fatalf("bead edit must block: %+v", d)
+	}
+}
+
+func TestPanelVerify_DeletedSpecBranchAndMissingPinUsesAdvisory(t *testing.T) {
+	root, _, reviewed := setupRebind(t, "plan-pinned")
+	dir := createObjectPinPanel(t, root, "plan_approve", strings.Repeat("1", 40), reviewed)
+	rebindGit(t, root, "branch", "-D", "spec/900-demo")
+	facts := resolvePanelGateFacts(root, rebindRegistration(t, dir))
+	if !facts.MissingRef || facts.SubjectErr != nil || facts.GitErr != nil {
+		t.Fatalf("confirmed absent branch and target must take missing-ref path: %+v", facts)
+	}
+	if d := panel.PanelGateDecision(facts); d.Action != panel.Warn {
+		t.Fatalf("confirmed deletion should retain advisory: %+v", d)
+	}
 }

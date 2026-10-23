@@ -105,7 +105,7 @@ type MockExecutor struct {
 	CheckSlotTreeErr  error
 	IsRefNotFoundFn   func(error) bool
 
-	SymbolicFullNameFn func(workdir, ref string) (string, error)
+	ExactRefExistsFn func(workdir, ref string) (bool, error)
 
 	CheckSlotIgnoreFn  func(workdir, file string) error
 	CheckSlotIgnoreErr error
@@ -315,12 +315,12 @@ func (m *MockExecutor) LsTree(workdir, rev string) (string, error) {
 	return m.LsTreeResult, m.LsTreeErr
 }
 
-func (m *MockExecutor) SymbolicFullName(workdir, ref string) (string, error) {
-	m.record("SymbolicFullName", workdir, ref)
-	if m.SymbolicFullNameFn != nil {
-		return m.SymbolicFullNameFn(workdir, ref)
+func (m *MockExecutor) ExactRefExists(workdir, ref string) (bool, error) {
+	m.record("ExactRefExists", workdir, ref)
+	if m.ExactRefExistsFn != nil {
+		return m.ExactRefExistsFn(workdir, ref)
 	}
-	return "", nil
+	return false, nil
 }
 
 func (m *MockExecutor) RevParseRef(workdir, ref string) (string, error) {
