@@ -1,51 +1,108 @@
 ---
-status: Draft
-spec_id: 133-document-final-gates
-version: "1"
 adr_citations:
-  - ADR-0037
-  - ADR-0041
-  - ADR-0043
-  - ADR-0032
-  - ADR-0040
-  - ADR-0035
+    - ADR-0037
+    - ADR-0041
+    - ADR-0043
+    - ADR-0032
+    - ADR-0040
+    - ADR-0035
+approved_at: "2026-10-23T17:16:49Z"
+approved_by: user
+bead_ids:
+    - mindspec-qjy8.1
+    - mindspec-qjy8.2
+    - mindspec-qjy8.3
+    - mindspec-qjy8.4
+    - mindspec-qjy8.5
+    - mindspec-qjy8.6
+    - mindspec-qjy8.7
+    - mindspec-qjy8.8
+    - mindspec-qjy8.9
+spec_id: 133-document-final-gates
+status: Approved
+version: "1"
 work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths: [internal/config/config.go, .mindspec/config.yaml, internal/panel/subject.go, internal/panel/gate.go,
-        internal/panel/create.go, cmd/mindspec/panel.go, internal/approve/lifecycle_gate.go,
-        .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md]
-  - id: 2
-    depends_on: [1, 5, 6]
-    key_file_paths: [internal/approve/spec.go, internal/approve/plan.go, .mindspec/adr/ADR-0041-gate-before-mutate.md]
-  - id: 3
-    depends_on: [1]
-    key_file_paths: [internal/approve/impl.go, internal/executor/mindspec_executor.go]
-  - id: 4
-    depends_on: [1]
-    key_file_paths: [internal/complete/panel_advisory.go, internal/complete/complete.go]
-  - id: 5
-    depends_on: []
-    key_file_paths: [cmd/mindspec/panel_defer.go, internal/panel/ledger.go, internal/panel/gate.go, internal/panel/create.go,
-        .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md]
-  - id: 6
-    depends_on: [1]
-    key_file_paths: [internal/panel/verdict_v2.go, internal/panel/gate.go, cmd/mindspec/panel_schema.go]
-  - id: 7
-    depends_on: [1, 4]
-    key_file_paths: [cmd/mindspec/complete.go, internal/complete/complete.go, internal/validate/divergence.go,
-        internal/validate/ownership_resolve.go, internal/validate/adr0032_amendment_test.go,
-        .mindspec/adr/ADR-0032-adr-semantic-gates.md]
-  - id: 8
-    depends_on: [3, 7]
-    key_file_paths: [cmd/mindspec/complete.go, internal/complete/complete.go, internal/validate/docsync.go,
-        internal/approve/impl.go, .mindspec/adr/ADR-0031-doc-sync-gate.md]
-  - id: 9
-    depends_on: [1]
-    key_file_paths: [internal/setup/claude.go, internal/setup/historical_skills, internal/setup/lifecycle_gate_step_test.go,
-        .claude/skills/ms-spec-approve/SKILL.md, plugins/mindspec/skills/ms-bead-cycle/SKILL.md,
-        internal/instruct/instruct.go, internal/doctor/config.go, project-docs/user/guides/review-panels.md,
-        CHANGELOG.md]
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/config/config.go
+        - .mindspec/config.yaml
+        - internal/panel/subject.go
+        - internal/panel/gate.go
+        - internal/panel/create.go
+        - cmd/mindspec/panel.go
+        - internal/approve/lifecycle_gate.go
+        - .mindspec/adr/ADR-0037-panel-gate-enforced-contract.md
+    - depends_on:
+        - 1
+        - 5
+        - 6
+      id: 2
+      key_file_paths:
+        - internal/approve/spec.go
+        - internal/approve/plan.go
+        - .mindspec/adr/ADR-0041-gate-before-mutate.md
+    - depends_on:
+        - 1
+      id: 3
+      key_file_paths:
+        - internal/approve/impl.go
+        - internal/executor/mindspec_executor.go
+    - depends_on:
+        - 1
+      id: 4
+      key_file_paths:
+        - internal/complete/panel_advisory.go
+        - internal/complete/complete.go
+    - depends_on: []
+      id: 5
+      key_file_paths:
+        - cmd/mindspec/panel_defer.go
+        - internal/panel/ledger.go
+        - internal/panel/gate.go
+        - internal/panel/create.go
+        - .mindspec/adr/ADR-0043-panel-disposition-telemetry-store.md
+    - depends_on:
+        - 1
+      id: 6
+      key_file_paths:
+        - internal/panel/verdict_v2.go
+        - internal/panel/gate.go
+        - cmd/mindspec/panel_schema.go
+    - depends_on:
+        - 1
+        - 4
+      id: 7
+      key_file_paths:
+        - cmd/mindspec/complete.go
+        - internal/complete/complete.go
+        - internal/validate/divergence.go
+        - internal/validate/ownership_resolve.go
+        - internal/validate/adr0032_amendment_test.go
+        - .mindspec/adr/ADR-0032-adr-semantic-gates.md
+    - depends_on:
+        - 3
+        - 7
+      id: 8
+      key_file_paths:
+        - cmd/mindspec/complete.go
+        - internal/complete/complete.go
+        - internal/validate/docsync.go
+        - internal/approve/impl.go
+        - .mindspec/adr/ADR-0031-doc-sync-gate.md
+    - depends_on:
+        - 1
+      id: 9
+      key_file_paths:
+        - internal/setup/claude.go
+        - internal/setup/historical_skills
+        - internal/setup/lifecycle_gate_step_test.go
+        - .claude/skills/ms-spec-approve/SKILL.md
+        - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
+        - internal/instruct/instruct.go
+        - internal/doctor/config.go
+        - project-docs/user/guides/review-panels.md
+        - CHANGELOG.md
 ---
 # Plan: 133-document-final-gates
 
