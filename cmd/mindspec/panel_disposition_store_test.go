@@ -139,6 +139,10 @@ func ledgerCLIFixtures(t *testing.T, name string) [][]byte {
 		panel.DeferralRecord{Record: panel.RecordDeferral, Spec: "130", Panel: name, Deferral: panel.Deferral{Slot: "R1", Round: 1, Finding: "slot", FindingSHA256: strings.Repeat("b", 64), FindingText: "blocking item", Bead: "mindspec-followup", By: "operator", CreatedAt: timestamp}},
 		panel.RebindRecord{Record: panel.RecordRebind, Spec: "130", Panel: name, SubjectDigest: "sha256:baseline", Rebind: panel.Rebind{Round: 1, FromSHA: "abc123", ToSHA: "def456", Paths: []string{"OWNERSHIP.yaml"}, Reason: "claim", CreatedAt: timestamp}},
 		panel.AbandonRecord{Record: panel.RecordAbandon, Spec: "130", Panel: name, Reason: "halt", By: "operator", CreatedAt: timestamp},
+		panel.PlanDeferralRecord{Record: panel.RecordDeferredToPlan, Spec: "130", Panel: name, PlanDeferral: panel.PlanDeferral{ID: "plan-finding", Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("b", 64), FindingText: "blocking item", By: "operator", CreatedAt: timestamp}},
+		panel.SubmissionRecord{Record: panel.RecordVerdict, Spec: "130", Panel: name, Slot: "R1", Round: 1, Seq: 1, Status: "final", Verdict: "REQUEST_CHANGES", Family: "model-a", Model: "model-a", RunnerKind: "process", RunnerSource: "default", Via: "direct", FileSHA256: strings.Repeat("a", 64), CreatedAt: timestamp},
+		panel.LaunchRecord{Record: panel.RecordLaunch, Spec: "130", Panel: name, Slot: "R1", Round: 1, Attempt: 1, Family: "model-a", Model: "model-a", Status: "dispatched", RunnerKind: "process", RunnerSource: "default", CreatedAt: timestamp},
+		panel.SubstitutionRecord{Record: panel.RecordSubstitution, Spec: "130", Panel: name, Slot: "R1", Round: 1, FromFamily: "model-a", ToFamily: "model-b", Model: "model-b", CreatedAt: timestamp},
 	}
 	records := make([][]byte, len(values))
 	for i, value := range values {
@@ -274,6 +278,13 @@ func TestDispositionAppend_RefusesVerbKinds(t *testing.T) {
 			err := runDispositionAppend(t, specID, "p", string(raw))
 			if err == nil || !strings.Contains(err.Error(), "reserved to the panel verbs") {
 				t.Fatalf("append must refuse verb kind %s: %v", disc.Record, err)
+			}
+			_, verb, ok := strings.Cut(err.Error(), "\nrecovery: use panel ")
+			if !ok || strings.TrimSpace(verb) == "" {
+				t.Fatalf("refusal for %s must name a recovery verb: %v", disc.Record, err)
+			}
+			if disc.Record == panel.RecordDeferredToPlan && verb != "defer --to-plan" {
+				t.Fatalf("plan deferral recovery = %q, want defer --to-plan", verb)
 			}
 			path := filepath.Join(root, ".mindspec", "specs", specID, "reviews", "p", "dispositions.jsonl")
 			if _, err := os.Stat(path); !os.IsNotExist(err) {

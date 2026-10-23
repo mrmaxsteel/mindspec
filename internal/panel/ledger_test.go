@@ -47,6 +47,7 @@ func ledgerFixtures(t *testing.T, name string) [][]byte {
 		DeferralRecord{Record: RecordDeferral, Spec: "130", Panel: name, Deferral: def},
 		RebindRecord{Record: RecordRebind, Spec: "130", Panel: name, SubjectDigest: "sha256:baseline", Rebind: rebind},
 		AbandonRecord{Record: RecordAbandon, Spec: "130", Panel: name, Reason: "halt", By: "operator", CreatedAt: ledgerTime},
+		PlanDeferralRecord{Record: RecordDeferredToPlan, Spec: "130", Panel: name, PlanDeferral: PlanDeferral{ID: "plan-finding", Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("b", 64), FindingText: "blocking item", By: "operator", CreatedAt: ledgerTime}},
 	}
 	out := make([][]byte, len(records))
 	for i, r := range records {
@@ -97,12 +98,13 @@ func TestLedger_RecordKeys(t *testing.T) {
 			// Keep the R5.1 keys independent of recordKey: widening a key must
 			// not turn a changed payload into a new event.
 			keyFields := map[string][]string{
-				RecordPanelManifest: {"spec", "panel", "round", "created_at"},
-				RecordRound:         {"round", "created_at"},
-				RecordRefutation:    {"slot", "round", "finding", "finding_sha256"},
-				RecordDeferral:      {"slot", "round", "finding", "finding_sha256"},
-				RecordRebind:        {"to_sha"},
-				RecordAbandon:       {"created_at"},
+				RecordPanelManifest:  {"spec", "panel", "round", "created_at"},
+				RecordRound:          {"round", "created_at"},
+				RecordRefutation:     {"slot", "round", "finding", "finding_sha256"},
+				RecordDeferral:       {"slot", "round", "finding", "finding_sha256"},
+				RecordDeferredToPlan: {"id"},
+				RecordRebind:         {"to_sha"},
+				RecordAbandon:        {"created_at"},
 			}
 			excluded := map[string]bool{"created_at": true}
 			for _, field := range keyFields[kind] {
@@ -197,6 +199,8 @@ func TestLedger_RecordKeys(t *testing.T) {
 				changes = map[string]interface{}{"round": 2, "created_at": "2026-10-20T12:00:00Z"}
 			case RecordRefutation, RecordDeferral:
 				changes = map[string]interface{}{"slot": "R2", "round": 2, "finding": "ccr[1]", "finding_sha256": strings.Repeat("c", 64)}
+			case RecordDeferredToPlan:
+				changes = map[string]interface{}{"id": "plan-other"}
 			case RecordRebind:
 				changes = map[string]interface{}{"to_sha": "new-sha"}
 			case RecordAbandon:

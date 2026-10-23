@@ -218,3 +218,22 @@ unaffected by panel SIZE):
 - **Submission records.** The ledger accepts three more record kinds: `verdict`, `launch` and `substitution`. Each record carries `spec` and `panel`. Only the panel verbs write these records. Disposition validation, checks and queries accept them.
 - **Submission keys.** A `verdict` key is `slot, round, seq`. The first submission has `seq: 1`. Each later submission adds one. The ledger keeps every submission. The latest submission replaces the prior submission for the gate. A same-bytes retry against the latest submission adds no record and repairs the verdict file.
 - **Attempt keys.** A `launch` key is `slot, round, attempt, status`. A `substitution` key is `slot, round`.
+
+
+## Amendment (Spec 133)
+
+`panel defer --to-plan` accepts only a `spec_approve` panel. It refuses `--bead`.
+Without `--finding`, it covers each finding of the slot. Without `--to-plan`,
+a spec approval panel keeps its existing deferral refusal.
+
+The verb appends one `deferred_to_plan` record and one `confirmed-deferred`
+disposition row per finding in one ledger write. Each record has a stable `id`,
+slot, round, finding id, finding hash, finding text, actor and time. It has no
+`bead` field. The row uses `plan:<deferral id>` as evidence.
+
+The snapshot stores these entries in `plan_deferrals`. Its `deferrals` list
+stays separate. The integrity check refuses an entry without a matching ledger
+record. A new round carries only entries with ledger records. For `spec_approve`,
+a backed entry discharges a finding only when its slot, round, finding id and
+finding hash match the current finding. The hash rule is the refutation rule.
+The implementation approval bead-deferral check does not read `plan_deferrals`.

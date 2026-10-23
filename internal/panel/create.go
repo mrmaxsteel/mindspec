@@ -189,6 +189,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	}
 	var first, latest *RoundRecord
 	backed := CarriedEntries{}
+	var backedPlan []PlanDeferral
 	abandonedAt := ""
 	for _, line := range lines {
 		var kind recordDiscriminator
@@ -219,6 +220,12 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 				return nil, err
 			}
 			backed.Deferrals = append(backed.Deferrals, d)
+		case RecordDeferredToPlan:
+			var d PlanDeferral
+			if err := json.Unmarshal(line, &d); err != nil {
+				return nil, err
+			}
+			backedPlan = append(backedPlan, d)
 		case RecordRebind:
 			var r Rebind
 			if err := json.Unmarshal(line, &r); err != nil {
@@ -264,6 +271,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		}
 	}
 	carried := CarriedEntries{}
+	var carriedPlan []PlanDeferral
 	var dropped []string
 	keep := func(ok bool, name string) bool {
 		if legacy || ok {
@@ -285,6 +293,13 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	for i, r := range old.Rebinds {
 		if keep(matchesRebind(r, backed.Rebinds), fmt.Sprintf("rebinds[%d] round %d from %s to %s", i, r.Round, r.FromSHA, r.ToSHA)) {
 			carried.Rebinds = append(carried.Rebinds, r)
+		}
+	}
+	for i, d := range old.PlanDeferrals {
+		if matchesPlanDeferral(d, backedPlan) {
+			carriedPlan = append(carriedPlan, d)
+		} else {
+			dropped = append(dropped, fmt.Sprintf("plan_deferrals[%d]", i))
 		}
 	}
 	roster := in.Roster
@@ -321,7 +336,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	p := Panel{VerdictSchema: 2, BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
 		ExpectedReviewers: len(roster), Roster: roster, ReviewedHeadSHA: in.ReviewedHeadSHA,
 		SubjectDigest: in.SubjectDigest, Gate: gate, Telemetry: "required",
-		Refutations: carried.Refutations, Deferrals: carried.Deferrals, Rebinds: carried.Rebinds,
+		Refutations: carried.Refutations, Deferrals: carried.Deferrals, PlanDeferrals: carriedPlan, Rebinds: carried.Rebinds,
 		AbandonHistory: old.AbandonHistory}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if old.Abandoned {

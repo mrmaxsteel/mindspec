@@ -143,6 +143,7 @@ func (r *Result) unresolvedFindings(v Verdict) []string {
 	}
 	var unresolved []string
 	deferrals := r.EffectiveDeferrals()
+	planDeferrals := r.EffectivePlanDeferrals()
 	for _, f := range v.Findings {
 		covered := false
 		for _, ref := range r.Panel.Refutations {
@@ -153,6 +154,11 @@ func (r *Result) unresolvedFindings(v Verdict) []string {
 		}
 		for _, d := range deferrals {
 			if d.Slot == v.Slot && (d.Finding == "slot" || d.Finding == f.ID) {
+				covered = true
+			}
+		}
+		for _, d := range planDeferrals {
+			if d.Slot == v.Slot && d.Finding == f.ID {
 				covered = true
 			}
 		}
