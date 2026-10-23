@@ -68,6 +68,39 @@ func TestS133DeferToPlan_IntegrityAndHash(t *testing.T) {
 	}
 }
 
+func TestS133DeferToPlan_NonSpecGateDoesNotDischarge(t *testing.T) {
+	dir, p := passFixture(t, 2, VerdictApprove)
+	p.Gate, p.BeadID, p.Target = "plan_approve", nil, "spec/130"
+	writePassJSON(t, dir, "R1-round-1.json", FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{"plan the test"}})
+	makeNonLegacy(t, dir, &p)
+	v, err := ReadFindingVerdict(dir, "R1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := Findings(v)
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("want one finding: %v, %v", findings, err)
+	}
+	f := findings[0]
+	d := PlanDeferral{ID: PlanDeferralID(p.Spec, "p", "R1", 1, f), Slot: "R1", Round: 1, Finding: f.ID, FindingSHA256: f.SHA256, FindingText: f.Text, By: "operator", CreatedAt: ledgerTime}
+	createAppend(t, dir, PlanDeferralRecord{Record: RecordDeferredToPlan, Spec: p.Spec, Panel: "p", PlanDeferral: d})
+	p.PlanDeferrals = []PlanDeferral{d}
+	writePassJSON(t, dir, FileName, p)
+	r := passTally(t, dir)
+	if r.IntegrityErr != nil {
+		t.Fatalf("backed plan deferral failed integrity: %v", r.IntegrityErr)
+	}
+	if got := r.EffectivePlanDeferrals(); len(got) != 0 {
+		t.Errorf("plan deferral is effective on %s: %+v", p.Gate, got)
+	}
+	if got := r.UnresolvedNames(); !strings.Contains(got, "R1 ("+f.ID+")") {
+		t.Errorf("plan deferral discharged the finding on %s: %q", p.Gate, got)
+	}
+	if got := passDecision(t, dir); got.Action != Block || !strings.Contains(got.Message, "unresolved") {
+		t.Fatalf("want unresolved finding refusal, got %+v", got)
+	}
+}
+
 func TestS133DeferToPlan_NewRoundCarriesOnlyBacked(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		t.Run(policy, func(t *testing.T) {

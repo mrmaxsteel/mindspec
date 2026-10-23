@@ -113,7 +113,8 @@ never interpolated into a shell-quoted argument.`,
 			verb := map[string]string{
 				panel.RecordRound: "create", panel.RecordRefutation: "refute",
 				panel.RecordDeferral: "defer", panel.RecordRebind: "rebind",
-				panel.RecordAbandon: "abandon", panel.RecordVerdict: "submit",
+				panel.RecordDeferredToPlan: "defer --to-plan",
+				panel.RecordAbandon:        "abandon", panel.RecordVerdict: "submit",
 				panel.RecordLaunch: "launch", panel.RecordSubstitution: "launch",
 			}[discriminator.Record]
 			return termsafe.NewFailure(fmt.Sprintf("record %s is reserved to the panel verbs", discriminator.Record), fmt.Sprintf("use panel %s", verb))
