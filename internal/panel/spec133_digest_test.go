@@ -4,12 +4,13 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func TestS133Digest_OwnWritesAndSemanticFrontmatter(t *testing.T) {
-	const dir = ".mindspec/specs/demo"
+	const dir = ".mindspec/specs/900-example"
 	const body = "# Spec\n\nBody.\n\n"
 	draft := "## Approval\n\n- **Status**: Draft\n- **Approved By**: —\n- **Approval Date**: —\n- **Notes**: —\n"
 	approved := "## Approval\n\n- **Status**: Approved\n- **Approved By**: user\n- **Approval Date**: today\n- **Notes**: good\n"
@@ -42,14 +43,27 @@ func TestS133Digest_OwnWritesAndSemanticFrontmatter(t *testing.T) {
 					}
 				}
 				without := s133Digest(t, dir, gate, map[string]string{dir + "/spec.md": baseSpec})
-				if digest(baseSpec, PlanScaffold("demo")) != without {
+				if digest(baseSpec, PlanScaffold("900-example")) != without {
 					t.Error("exact scaffold changed digest")
 				}
-				if digest(baseSpec, PlanScaffold("demo")+"extra\n") == without {
+				if digest(baseSpec, PlanScaffold("900-example")+"extra\n") == without {
 					t.Error("edited scaffold omitted")
 				}
 			})
 		}
+	}
+}
+
+func TestS133Digest_PlanScaffoldValidID(t *testing.T) {
+	const id = "900-example"
+	scaffold := PlanScaffold(id)
+	for _, want := range []string{"\nspec_id: " + id + "\n", "\n# Plan: " + id + "\n"} {
+		if !strings.Contains(scaffold, want) {
+			t.Errorf("scaffold missing unquoted ID: %q", want)
+		}
+	}
+	if strings.Contains(scaffold, strconv.Quote(id)) {
+		t.Error("scaffold quotes a valid ID")
 	}
 }
 

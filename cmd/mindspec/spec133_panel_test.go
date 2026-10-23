@@ -16,28 +16,30 @@ import (
 func TestS133PanelTarget_RefusesCommitForEveryGate(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		for _, gate := range []string{"spec_approve", "plan_approve", "final_review"} {
-			t.Run(policy+"/"+gate, func(t *testing.T) {
-				resetPanelCreateFlags(t)
-				root := mkFlatPanelTestRoot(t)
-				withTestChdir(t, root)
-				rebindWrite(t, root, ".mindspec/config.yaml", "enforcement:\n  panel_presence: "+policy+"\n")
-				config.ResetCache()
-				t.Cleanup(config.ResetCache)
-				out, err := runPanelCmd("create", "review", "--spec", "900-example", "--gate", gate, "--target", strings.Repeat("a", 40))
-				if err == nil || otelExitCode(err) == 0 {
-					t.Fatalf("SHA accepted: %s", out)
-				}
-				message := err.Error()
-				if !strings.Contains(message, "--target spec/900-example") || !strings.Contains(message, gate) {
-					t.Fatalf("wrong refusal: %s", message)
-				}
-				if regexp.MustCompile(`(?i)ADR-[0-9]+|spec[ -][0-9]+|\bR[0-9]+\.[0-9]+|mindspec-[a-z0-9]+|#[0-9]+`).MatchString(strings.ReplaceAll(message, "900-example", "<id>")) {
-					t.Fatalf("internal reference: %s", message)
-				}
-				if _, err := os.Stat(filepath.Join(root, ".mindspec/specs/900-example/reviews/review/panel.json")); !os.IsNotExist(err) {
-					t.Fatal("refusal wrote registration")
-				}
-			})
+			for _, target := range []string{strings.Repeat("a", 40), "spec/901-other"} {
+				t.Run(policy+"/"+gate+"/"+target, func(t *testing.T) {
+					resetPanelCreateFlags(t)
+					root := mkFlatPanelTestRoot(t)
+					withTestChdir(t, root)
+					rebindWrite(t, root, ".mindspec/config.yaml", "enforcement:\n  panel_presence: "+policy+"\n")
+					config.ResetCache()
+					t.Cleanup(config.ResetCache)
+					out, err := runPanelCmd("create", "review", "--spec", "900-example", "--gate", gate, "--target", target)
+					if err == nil || otelExitCode(err) == 0 {
+						t.Fatalf("target %q accepted: %s", target, out)
+					}
+					message := err.Error()
+					if !strings.Contains(message, "--target spec/900-example") || !strings.Contains(message, gate) {
+						t.Fatalf("wrong refusal: %s", message)
+					}
+					if regexp.MustCompile(`(?i)ADR-[0-9]+|spec[ -][0-9]+|\bR[0-9]+\.[0-9]+|mindspec-[a-z0-9]+|#[0-9]+`).MatchString(strings.ReplaceAll(message, "900-example", "<id>")) {
+						t.Fatalf("internal reference: %s", message)
+					}
+					if _, err := os.Stat(filepath.Join(root, ".mindspec/specs/900-example/reviews/review/panel.json")); !os.IsNotExist(err) {
+						t.Fatal("refusal wrote registration")
+					}
+				})
+			}
 		}
 	}
 }

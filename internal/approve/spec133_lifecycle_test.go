@@ -79,14 +79,14 @@ func TestS133LifecycleGate_FailingLegs(t *testing.T) {
 					if !strings.Contains(message, want) {
 						t.Fatalf("wrong failing leg, want %q: %s", want, message)
 					}
-					s133GateText(t, message, gate)
+					s133GateText(t, message, gate, root)
 				})
 			}
 		}
 	}
 }
 
-func s133GateText(t *testing.T, text, gate string) {
+func s133GateText(t *testing.T, text, gate, root string) {
 	t.Helper()
 	for _, want := range []string{"gate " + gate, "panel ", "recovery:"} {
 		if !strings.Contains(text, want) {
@@ -101,7 +101,19 @@ func s133GateText(t *testing.T, text, gate string) {
 			t.Errorf("forbidden %q: %s", bad, text)
 		}
 	}
-	if regexp.MustCompile(`(?i)ADR-[0-9]+|spec[ -][0-9]+|\bR[0-9]+\.[0-9]+|mindspec-[a-z0-9]+|#[0-9]+`).MatchString(strings.ReplaceAll(text, "900-example", "<id>")) {
+	// Runtime paths are operator data, not authored gate guidance. Strip both
+	// spellings because Git and temporary directories may resolve symlinks.
+	referenceText := text
+	for _, path := range []string{root, os.TempDir()} {
+		realPath, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, runtimePath := range []string{path, realPath} {
+			referenceText = strings.ReplaceAll(referenceText, runtimePath, "<path>")
+		}
+	}
+	if regexp.MustCompile(`(?i)ADR-[0-9]+|spec[ -][0-9]+|\bR[0-9]+\.[0-9]+|mindspec-[a-z0-9]+|#[0-9]+`).MatchString(strings.ReplaceAll(referenceText, "900-example", "<id>")) {
 		t.Errorf("internal reference: %s", text)
 	}
 }
@@ -131,7 +143,7 @@ func TestS133LifecycleGate_PresenceAndHatches(t *testing.T) {
 						if !strings.HasSuffix(err.Error(), want) {
 							t.Fatalf("wrong recovery: %v", err)
 						}
-						s133GateText(t, err.Error(), gate)
+						s133GateText(t, err.Error(), gate, root)
 						return
 					}
 					if err != nil || o.Action == panel.Block {
@@ -228,7 +240,7 @@ func TestS133LifecycleGate_TargetAndAllRegistrations(t *testing.T) {
 					if err == nil || o.Action != panel.Block {
 						t.Fatalf("bad registration passed: %+v %v", o, err)
 					}
-					s133GateText(t, err.Error(), gate)
+					s133GateText(t, err.Error(), gate, root)
 					if state == "old target" && !strings.Contains(err.Error(), "old-target") {
 						t.Fatal("target not named")
 					}
