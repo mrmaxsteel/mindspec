@@ -58,3 +58,27 @@ func TestResolveSubjectHead_MovingRefs(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveSubjectHead_ClassificationErrors(t *testing.T) {
+	missing := errors.New("missing or ambiguous object")
+	broken := errors.New("cannot read object database")
+	for _, gate := range []string{"spec_approve", "plan_approve"} {
+		for _, classificationErr := range []error{missing, broken} {
+			t.Run(gate+"/"+classificationErr.Error(), func(t *testing.T) {
+				var refs []string
+				sha, err := ResolveSubjectHead(Panel{Gate: gate, Spec: "900-demo", Target: strings.Repeat("a", 40)}, "repo",
+					func(string) (string, error) { return "spec/900-demo", nil },
+					func(_, ref string) (string, error) { refs = append(refs, ref); return "spec-tip", nil },
+					func(string, string) (string, error) { return "", classificationErr },
+					func(err error) bool { return errors.Is(err, missing) })
+				if classificationErr == missing {
+					if err != nil || sha != "spec-tip" || !reflect.DeepEqual(refs, []string{"spec/900-demo"}) {
+						t.Fatalf("unresolvable pin must follow spec branch: sha=%s err=%v refs=%v", sha, err, refs)
+					}
+				} else if !errors.Is(err, broken) || sha != "" || len(refs) != 0 {
+					t.Fatalf("structural git error must propagate: sha=%s err=%v refs=%v", sha, err, refs)
+				}
+			})
+		}
+	}
+}

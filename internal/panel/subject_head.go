@@ -20,12 +20,14 @@ func ResolveSubjectHead(p Panel, workdir string, branchForSpec func(string) (str
 		// Git owns ref precedence, including tag/branch collisions and full
 		// object IDs. Do not guess namespaces for hexadecimal names here.
 		name, err := symbolicFullName(workdir, target)
-		if err != nil {
+		if err != nil && !isRefNotFound(err) {
 			return "", err
 		}
-		if name != "" {
+		if err == nil && name != "" {
 			return revParse(workdir, name)
 		}
+		// A missing (including ambiguous) object pin still names the spec's
+		// subject. Only the spec branch's absence permits target fallback.
 		branch, err := branchForSpec(p.Spec)
 		if err != nil {
 			return "", err
