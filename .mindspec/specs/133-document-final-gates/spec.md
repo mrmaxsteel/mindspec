@@ -283,7 +283,7 @@ Each refusal AC requires that the message names the gate or the check, so that a
 
 ## Open Questions
 
-- [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval.
+- [x] grill waived by operator (headless session; the interactive grill was not run).
 - [x] OQ1: Default of `enforcement.panel_presence` for other repositories. Decided: `warn` in every release. A repository opts in with `enforcement.panel_presence: enforce` in its `.mindspec/config.yaml`.
 - [x] OQ2: Can a refutation discharge an artifact block (R5.3)? Decided: yes. A refutation or a deferral discharges the block.
 - [x] OQ3: Does `artifact_path` stay in verdict schema 2, or start schema 3? Decided: an optional field in schema 2. A verdict without it stays valid. A released binary refuses a verdict with it, so panels in this repository use the field only after the spec merges.
