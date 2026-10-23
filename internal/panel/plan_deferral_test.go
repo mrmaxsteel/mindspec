@@ -31,7 +31,7 @@ func TestS133DeferToPlan_IntegrityAndHash(t *testing.T) {
 	// The leaf decision has no presence-policy input. Exercise the same facts
 	// for each policy; a policy cannot exempt an existing registration.
 	for _, policy := range []string{"warn", "enforce"} {
-		for _, mutation := range []string{"backed", "hand added", "wrong hash", "wrong round", "wrong slot", "wrong finding"} {
+		for _, mutation := range []string{"backed", "hand added", "wrong hash", "wrong round", "wrong slot", "wrong finding", "changed backed slot"} {
 			t.Run(policy+"/"+mutation, func(t *testing.T) {
 				dir, p, d := planDeferralFixture(t)
 				switch mutation {
@@ -47,6 +47,9 @@ func TestS133DeferToPlan_IntegrityAndHash(t *testing.T) {
 				if mutation != "hand added" {
 					createAppend(t, dir, PlanDeferralRecord{Record: RecordDeferredToPlan, Spec: p.Spec, Panel: "p", PlanDeferral: d})
 				}
+				if mutation == "changed backed slot" {
+					d.Slot = "R2"
+				}
 				p.PlanDeferrals = []PlanDeferral{d}
 				writePassJSON(t, dir, FileName, p)
 				got := passDecision(t, dir)
@@ -57,7 +60,7 @@ func TestS133DeferToPlan_IntegrityAndHash(t *testing.T) {
 					return
 				}
 				want := "unresolved"
-				if mutation == "hand added" {
+				if mutation == "hand added" || mutation == "changed backed slot" {
 					want = "plan_deferrals[0]"
 				}
 				if got.Action != Block || !strings.Contains(got.Message, want) {
@@ -65,6 +68,34 @@ func TestS133DeferToPlan_IntegrityAndHash(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestS133DeferToPlan_OnlyDischargesOwnSlot(t *testing.T) {
+	dir, p, d := planDeferralFixture(t)
+	// Both slots have the same finding id and raw text, hence the same hash.
+	writePassJSON(t, dir, "R2-round-1.json", FindingVerdict{Verdict: VerdictRequestChanges, ConcreteChangesRequired: []string{d.FindingText}})
+	createAppend(t, dir, PlanDeferralRecord{Record: RecordDeferredToPlan, Spec: p.Spec, Panel: "p", PlanDeferral: d})
+	p.PlanDeferrals = []PlanDeferral{d}
+	writePassJSON(t, dir, FileName, p)
+	r := passTally(t, dir)
+	if r.IntegrityErr != nil || r.LatestRound != d.Round || len(r.Verdicts) != 2 {
+		t.Fatalf("invalid two-slot fixture: %+v", r)
+	}
+	for _, v := range r.Verdicts {
+		if v.Verdict != VerdictRequestChanges || len(v.Findings) != 1 || v.Findings[0].ID != d.Finding || v.Findings[0].SHA256 != d.FindingSHA256 {
+			t.Fatalf("want identical current findings: %+v", v)
+		}
+	}
+	if got := r.EffectivePlanDeferrals(); !reflect.DeepEqual(got, []PlanDeferral{d}) {
+		t.Fatalf("want only the backed R1 deferral: %+v", got)
+	}
+	if got := r.UnresolvedNames(); got != "R2 (ccr[0])" {
+		t.Fatalf("only R2 ccr[0] must remain unresolved: %q", got)
+	}
+	got := passDecision(t, dir)
+	if got.Action != Block || !strings.Contains(got.Message, "unresolved") || !strings.Contains(got.Message, "R2 (ccr[0])") || strings.Contains(got.Message, "R1 (ccr[0])") {
+		t.Fatalf("want only R2 ccr[0] to block the gate: %+v", got)
 	}
 }
 
@@ -108,7 +139,9 @@ func TestS133DeferToPlan_NewRoundCarriesOnlyBacked(t *testing.T) {
 			createAppend(t, dir, PlanDeferralRecord{Record: RecordDeferredToPlan, Spec: p.Spec, Panel: "p", PlanDeferral: d})
 			forged := d
 			forged.ID = "manual"
-			p.PlanDeferrals = []PlanDeferral{d, forged}
+			wrongSlot := d
+			wrongSlot.Slot = "R2"
+			p.PlanDeferrals = []PlanDeferral{d, forged, wrongSlot}
 			writePassJSON(t, dir, FileName, p)
 			in := CreateInput{Spec: p.Spec, Target: p.Target, Gate: p.Gate, Round: 2, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest,
 				Roster: p.Roster, HasRunner: func(string) bool { return true }}

@@ -275,6 +275,19 @@ func TestS133DeferToPlan_AtomicBatch(t *testing.T) {
 			if !strings.Contains(msg, "already exists with different content") {
 				t.Fatalf("wrong refusal: %s", msg)
 			}
+			lines, err := panel.ReadLedger(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range lines {
+				var event panel.PlanDeferralRecord
+				if err := json.Unmarshal(line, &event); err != nil {
+					t.Fatal(err)
+				}
+				if event.Record == panel.RecordDeferredToPlan && event.Slot == "R1" && event.Finding == fs[0].ID {
+					t.Fatalf("refused batch wrote the first finding: %s", line)
+				}
+			}
 		})
 	}
 }
