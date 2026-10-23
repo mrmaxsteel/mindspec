@@ -13,7 +13,7 @@ After this spec, the binary enforces a review panel at every lifecycle gate, and
 
 - `spec approve` and `plan approve` refuse without a passing document panel.
 - `impl approve` refuses without a passing final-review panel. A small spec can use its bead panel as the final review.
-- `complete` treats a bead with no panel as a finding, not a pass. A config switch gives a warn-first migration.
+- `complete` treats a bead with no panel as a finding, not a pass. A config switch selects `warn` (the default) or `enforce`.
 - A finding that names a missing artifact blocks until the artifact exists.
 - A spec-panel finding can move to the plan. `plan approve` checks that the plan resolves it.
 - `complete --check` runs the doc and ADR gates with no mutation, and the bead cycle runs it before the bead panel. The doc gate accepts a recorded "no doc impact" and a doc deferral with an owner bead. A file that no domain owns gives a warning, not a refusal.
@@ -137,7 +137,7 @@ Documentation surfaces: ADR amendments (R12); `.mindspec/domains/workflow/interf
 
 ### R4 — Presence policy and migration
 
-1. Config key `enforcement.panel_presence` is `warn` or `enforce`. The default is `warn`. Config load refuses any other value and names the key.
+1. Config key `enforcement.panel_presence` is `warn` or `enforce`. The default is `warn`. No release changes this default. Config load refuses any other value and names the key.
 2. Under `warn`, a gate with no registration prints one `warning:` line with the gate name and the R1.8 recovery command. The verb continues and exits as it does today, except when `spec approve` cannot create the epic (R1.7). The verb records `panel_absent` with the gate and time on the epic (R1, R2) or on the bead (R3). `warn` applies only to a missing registration (R1.2).
 3. Under `enforce`, a gate with no registration refuses before the first write.
 4. This change does not check approvals that exist. A spec in Plan or Implement mode keeps its spec and plan approvals, and no verb runs the `spec_approve` or `plan_approve` gate for them again. A new run of `spec approve` or `plan approve` is a new approval and runs its gate (R1.1). This includes `plan approve` on an edited plan whose old beads are all open: the gate runs before the supersede close and before the new beads. A re-run after a fault is not a new approval of changed content: R1.6 applies.
@@ -288,7 +288,7 @@ Each refusal AC requires that the message names the gate or the check, so that a
 ## Open Questions
 
 - [ ] grill deferred: headless session — run /ms-spec-grill interactively before approval.
-- [ ] OQ1: Default of `enforcement.panel_presence` for other repositories. Recommended: `warn` in the release that ships this spec, and `enforce` one minor release later, with a changelog note in both releases.
+- [x] OQ1: Default of `enforcement.panel_presence` for other repositories. Decided: `warn` in every release. A repository opts in with `enforcement.panel_presence: enforce` in its `.mindspec/config.yaml`.
 - [ ] OQ2: Can a refutation discharge an artifact block (R5.3)? Recommended: no. An absent artifact is a fact at a tree, and only a new round at a new tree can change it.
 - [ ] OQ3: Does `artifact_path` stay in verdict schema 2, or start schema 3? Recommended: an optional field in schema 2. A verdict without it stays valid. A released binary refuses a verdict with it, so panels in this repository use the field only after the spec merges.
 - [ ] OQ4: Does `panel.exempt_bead_types` ship empty, or with `chore`? Recommended: empty. An operator adds types on purpose.
