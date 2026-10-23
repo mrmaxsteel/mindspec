@@ -53,8 +53,8 @@ func TestClassifyDirty_SkipsEmpty(t *testing.T) {
 	if !reflect.DeepEqual(artifact, []string{".beads/issues.jsonl"}) {
 		t.Errorf("artifactDirt = %v", artifact)
 	}
-	if len(user) != 0 {
-		t.Errorf("userDirt = %v, want empty", user)
+	if !reflect.DeepEqual(user, []string{"  "}) {
+		t.Errorf("userDirt = %q, want whitespace filename", user)
 	}
 }
 

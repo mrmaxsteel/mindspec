@@ -154,9 +154,9 @@ func fakeGHCalls(t *testing.T, callLogPath string) [][]string {
 }
 
 // addBareOriginRemote creates a real bare git repo, wires it as
-// sandbox's `origin` remote, and pushes local `main` to it — the
-// precondition `gitutil.HasRemote()` (mindspec_executor.go's finalize
-// probe) needs to route through the "pr" merge-strategy leg at all.
+// sandbox's `origin` remote, and pushes local `main` to it. Approval's
+// single remote decision from lifecycle.RemoteConfigured selects the
+// push path. Approval passes that decision to FinalizeEpic.
 func addBareOriginRemote(t *testing.T, sandbox *Sandbox) (originDir string) {
 	t.Helper()
 	originDir = t.TempDir()

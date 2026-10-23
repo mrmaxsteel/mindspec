@@ -1,5 +1,7 @@
 paths:
   - internal/complete/**
+  # Workflow owns recovery guidance shared by merge and completion gates.
+  - internal/mergefollowup/**
   - internal/approve/**
   - internal/next/**
   - internal/resolve/**

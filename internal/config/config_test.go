@@ -18,9 +18,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ProtectedBranches[0] != "main" || cfg.ProtectedBranches[1] != "master" {
 		t.Errorf("unexpected protected branches: %v", cfg.ProtectedBranches)
 	}
-	if cfg.MergeStrategy != "auto" {
-		t.Errorf("expected merge_strategy=auto, got %q", cfg.MergeStrategy)
-	}
 	if cfg.WorktreeRoot != ".worktrees" {
 		t.Errorf("expected worktree_root=.worktrees, got %q", cfg.WorktreeRoot)
 	}
@@ -97,8 +94,35 @@ func TestLoadMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.MergeStrategy != "auto" {
-		t.Errorf("expected defaults when file missing, got merge_strategy=%q", cfg.MergeStrategy)
+	if cfg.WorktreeRoot != ".worktrees" {
+		t.Errorf("expected defaults when file missing, got worktree_root=%q", cfg.WorktreeRoot)
+	}
+}
+
+func TestConfigLoad_LegacyMergeStrategyIgnored(t *testing.T) {
+	ResetCache()
+	t.Cleanup(ResetCache)
+	root := t.TempDir()
+	dir := filepath.Join(root, ".mindspec")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("merge_strategy: pr\nworktree_root: .legacy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("legacy config must load: %v", err)
+	}
+	want := DefaultConfig()
+	want.WorktreeRoot = ".legacy"
+	// Raw-key provenance records file contents without making legacy keys behavioral.
+	want.sources = map[string]string{"merge_strategy": "config.yaml", "worktree_root": "config.yaml"}
+	if !reflect.DeepEqual(cfg, want) {
+		t.Fatalf("legacy key changed config: got %+v, want %+v", cfg, want)
+	}
+	if _, ok := reflect.TypeOf(*cfg).FieldByName("MergeStrategy"); ok {
+		t.Fatal("Config still has the removed field")
 	}
 }
 
@@ -113,7 +137,6 @@ func TestLoadFromFile(t *testing.T) {
 protected_branches:
   - main
   - develop
-merge_strategy: pr
 worktree_root: .wt
 enforcement:
   pre_commit_hook: true
@@ -131,9 +154,6 @@ enforcement:
 
 	if len(cfg.ProtectedBranches) != 2 || cfg.ProtectedBranches[1] != "develop" {
 		t.Errorf("unexpected protected branches: %v", cfg.ProtectedBranches)
-	}
-	if cfg.MergeStrategy != "pr" {
-		t.Errorf("expected merge_strategy=pr, got %q", cfg.MergeStrategy)
 	}
 	if cfg.WorktreeRoot != ".wt" {
 		t.Errorf("expected worktree_root=.wt, got %q", cfg.WorktreeRoot)
@@ -214,7 +234,7 @@ func TestSourceGlobs_DefaultEmptyWhenFieldAbsent(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("merge_strategy: pr\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("worktree_root: .worktrees\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -294,7 +314,7 @@ func TestLoadCaches_DiskMutationIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(mindspecDir, "config.yaml"),
-		[]byte("merge_strategy: rebase\n"), 0o644); err != nil {
+		[]byte("worktree_root: .first\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -302,13 +322,13 @@ func TestLoadCaches_DiskMutationIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.MergeStrategy != "rebase" {
-		t.Fatalf("first load: want rebase, got %q", first.MergeStrategy)
+	if first.WorktreeRoot != ".first" {
+		t.Fatalf("first load: want .first, got %q", first.WorktreeRoot)
 	}
 
 	// Mutate disk; cached Load must NOT pick this up.
 	if err := os.WriteFile(filepath.Join(mindspecDir, "config.yaml"),
-		[]byte("merge_strategy: squash\n"), 0o644); err != nil {
+		[]byte("worktree_root: .second\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -316,8 +336,8 @@ func TestLoadCaches_DiskMutationIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.MergeStrategy != "rebase" {
-		t.Fatalf("cache busted: want rebase (cached), got %q", second.MergeStrategy)
+	if second.WorktreeRoot != ".first" {
+		t.Fatalf("cache changed: want .first (cached), got %q", second.WorktreeRoot)
 	}
 
 	// ResetCache should force a re-read.
@@ -326,8 +346,8 @@ func TestLoadCaches_DiskMutationIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third.MergeStrategy != "squash" {
-		t.Fatalf("after reset: want squash, got %q", third.MergeStrategy)
+	if third.WorktreeRoot != ".second" {
+		t.Fatalf("after reset: want .second, got %q", third.WorktreeRoot)
 	}
 }
 
@@ -423,9 +443,6 @@ func TestLoad_ZeroConfigPanelModelsLoopDefaults(t *testing.T) {
 	// Every pre-existing field unchanged.
 	if len(cfg.ProtectedBranches) != 2 || cfg.ProtectedBranches[0] != "main" || cfg.ProtectedBranches[1] != "master" {
 		t.Errorf("protected_branches regressed: %v", cfg.ProtectedBranches)
-	}
-	if cfg.MergeStrategy != "auto" {
-		t.Errorf("merge_strategy regressed: %q", cfg.MergeStrategy)
 	}
 	if cfg.WorktreeRoot != ".worktrees" {
 		t.Errorf("worktree_root regressed: %q", cfg.WorktreeRoot)

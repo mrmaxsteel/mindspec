@@ -35,6 +35,10 @@ Usage:
   mindspec complete <bead-id> "describe what you did"    # auto-commit + close
   mindspec complete <bead-id>                            # close (tree must be clean)
 
+With --merge-only, run all gates and merge for verification. Keep the bead open.
+Run complete again after verification to publish the close and remove the workspace.
+A bead can have only one naming merge. Use a follow-up bead for later fixes.
+
 The bead ID is required as the first argument.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -133,6 +137,7 @@ The bead ID is required as the first argument.`,
 
 		// Spec 127 R5(d): --resolve-merge re-entry flag.
 		resolveMerge, _ := cmd.Flags().GetBool("resolve-merge")
+		mergeOnly, _ := cmd.Flags().GetBool("merge-only")
 
 		exec := newExecutor(root)
 		result, err := complete.Run(root, beadID, specID, commitMsg, exec, complete.CompleteOpts{
@@ -141,6 +146,7 @@ The bead ID is required as the first argument.`,
 			SupersedeADR:     supersedeADR,
 			AllowNetDeletion: allowNetDeletion,
 			ResolveMerge:     resolveMerge,
+			MergeOnly:        mergeOnly,
 		})
 		if completeOutput(os.Stdout, os.Stderr, root, invocationCwd, result, err, completeInstructFn(result)) != nil {
 			os.Exit(1)
@@ -168,7 +174,7 @@ var resolveContextFromDirFn = phase.ResolveContextFromDir
 // the summary already carries the next-bead line, cd, and STOP guidance,
 // and implement guidance would tell the agent to claim a bead.
 func completeTailDir(r *complete.Result) (dir string, ok bool) {
-	if r == nil || r.NextMode == state.ModeImplement || r.SpecWorktree == "" {
+	if r == nil || r.MergeOnly || r.NextMode == state.ModeImplement || r.SpecWorktree == "" {
 		return "", false
 	}
 	if fi, err := os.Stat(r.SpecWorktree); err != nil || !fi.IsDir() {
@@ -238,6 +244,7 @@ func completeTail(stdout, stderr io.Writer, root, invocationCwd string, result *
 }
 
 func init() {
+	completeCmd.Flags().Bool("merge-only", false, "Merge for verification and keep the bead open; run complete again to close it")
 	completeCmd.Flags().String("spec", "", "Target spec ID when multiple specs are active")
 	completeCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on bead metadata)")
 	completeCmd.Flags().String("override-adr", "", "Override the ADR-divergence gate with a recorded reason (records mindspec_adr_override_* on bead metadata)")

@@ -15,11 +15,10 @@ package executor
 // The fix (pinned by the tests here): FinalizeEpic pushes the spec branch
 // first (baseline contract), then detects the already-merged case (the
 // spec branch's pre-finalize tip is already an ancestor of origin/main)
-// and reroutes the finalize commit onto a fresh chore/finalize-<specID>
-// branch created from origin/main. The chore flow is retry-idempotent
-// (panel round 1): leftover temp worktrees are pruned, the stale local
-// branch is recreated, and an already-pushed remote branch is overwritten
-// via a lease pinned to its observed tip.
+// and routes the finalize export onto chore/finalize-<specID>, created
+// from origin/main on the first run. A retry prunes leftover temporary
+// worktrees and reuses the local carrier branch. A changed carrier tip
+// is pushed with a lease pinned to the observed remote tip.
 
 import (
 	"errors"
@@ -124,7 +123,7 @@ func TestFinalizeEpic_OrphanedSpecBranch(t *testing.T) {
 			// still-pushed assertion below.
 			specTipBefore := refHash(t, dir, "spec/077-test")
 
-			result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+			result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -200,7 +199,7 @@ func TestFinalizeEpic_OrphanedSpecBranch(t *testing.T) {
 // poison the retry. Pre-fix, the retry recreated the branch fresh from
 // origin/main and the plain push was rejected non-fast-forward, hard-failing
 // `impl approve` until manual intervention. The retry must succeed and the
-// REMOTE chore tip must be replaced by the retry's fresh export commit.
+// remote carrier must retain run 1 in the retry's history.
 func TestFinalizeEpic_OrphanedSpecBranch_RetryConverges(t *testing.T) {
 	g, fake, dir := newRepoExecutor(t)
 	exportContent := stubBeadExport(t)
@@ -211,7 +210,7 @@ func TestFinalizeEpic_OrphanedSpecBranch_RetryConverges(t *testing.T) {
 	// spec-worktree removal in FinalizeEpic's cleanup block errors.
 	fake.removeErr = errors.New("simulated crash: spec worktree removal failed")
 
-	if _, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false); err == nil {
+	if _, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true); err == nil {
 		t.Fatal("run 1 must fail (injected worktree-removal error), got nil")
 	}
 	if !branchExistsIn(t, origin, "chore/finalize-077-test") {
@@ -225,7 +224,7 @@ func TestFinalizeEpic_OrphanedSpecBranch_RetryConverges(t *testing.T) {
 	fake.removeErr = nil
 	*exportContent = []byte(`{"id":"epic-1","status":"closed","retry":2}` + "\n")
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true)
 	if err != nil {
 		t.Fatalf("retry must succeed, got: %v", err)
 	}
@@ -240,6 +239,9 @@ func TestFinalizeEpic_OrphanedSpecBranch_RetryConverges(t *testing.T) {
 	if !isAncestorIn(t, origin, "main", "chore/finalize-077-test") {
 		t.Error("the retried chore branch must still be a descendant of origin/main")
 	}
+	if !isAncestorIn(t, origin, run1Tip, run2Tip) {
+		t.Fatal("retry must retain the first carrier tip in its history")
+	}
 	out, showErr := exec.Command("git", "-C", origin, "show", run2Tip+":.beads/issues.jsonl").Output()
 	if showErr != nil {
 		t.Fatalf("reading .beads/issues.jsonl from retried tip: %v", showErr)
@@ -249,13 +251,9 @@ func TestFinalizeEpic_OrphanedSpecBranch_RetryConverges(t *testing.T) {
 	}
 }
 
-// TestFinalizeEpic_OrphanedSpecBranch_LeftoverTempWorktreeSelfHeals pins the
-// panel round-1 Group 1 prune: a CRASHED prior run can leave the temporary
-// finalize worktree behind — still registered AND with the chore branch
-// checked out in it, which pre-fix failed WorktreeAdd with a raw git error
-// and additionally blocked the stale-branch delete (a checked-out branch
-// cannot be deleted). The retry must self-heal: prune the leftover, rebuild
-// from origin/main, and land the push.
+// TestFinalizeEpic_OrphanedSpecBranch_LeftoverTempWorktreeSelfHeals checks
+// that a retry removes a temporary checkout left by a crashed run, reuses
+// the existing carrier branch, updates its export, and pushes it.
 func TestFinalizeEpic_OrphanedSpecBranch_LeftoverTempWorktreeSelfHeals(t *testing.T) {
 	g, fake, dir := newRepoExecutor(t)
 	stubBeadExport(t)
@@ -272,7 +270,7 @@ func TestFinalizeEpic_OrphanedSpecBranch_LeftoverTempWorktreeSelfHeals(t *testin
 	}
 	runGitIn(t, dir, "worktree", "add", wtPath, "chore/finalize-077-test")
 
-	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+	result, err := g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true)
 	if err != nil {
 		t.Fatalf("a leftover temp finalize worktree must be self-healed, got: %v", err)
 	}
@@ -283,7 +281,7 @@ func TestFinalizeEpic_OrphanedSpecBranch_LeftoverTempWorktreeSelfHeals(t *testin
 		t.Fatal("chore/finalize-077-test must reach the remote despite the leftover worktree")
 	}
 	if !isAncestorIn(t, origin, "main", "chore/finalize-077-test") {
-		t.Error("the rebuilt chore branch must be a descendant of origin/main")
+		t.Error("the reused chore branch must be a descendant of origin/main")
 	}
 	if _, statErr := os.Stat(wtPath); !os.IsNotExist(statErr) {
 		t.Errorf("temporary finalize worktree %s should have been removed", wtPath)
@@ -316,7 +314,7 @@ func TestFinalizeEpic_OrphanFetchFailureFallsBackToBaseline(t *testing.T) {
 	var result FinalizeResult
 	var err error
 	stderr := captureStderrAround(t, func() {
-		result, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+		result, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true)
 	})
 	if err != nil {
 		t.Fatalf("a fetch failure must fall back to baseline behavior, got: %v", err)
@@ -359,7 +357,7 @@ func TestFinalizeEpic_OrphanChoreFailureStillPushesSpecBranch(t *testing.T) {
 
 	var err error
 	_ = captureStderrAround(t, func() {
-		_, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false)
+		_, err = g.FinalizeEpic("epic-1", "077-test", "spec/077-test", nil, "", false, true)
 	})
 	if err == nil {
 		t.Fatal("a chore-flow failure must surface as an error, got nil")

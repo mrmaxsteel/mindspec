@@ -19,18 +19,19 @@ import (
 var scanIntegrityFindingsFn = lifecycle.ScanIntegrityFindings
 
 // checkLifecycleIntegrity reports every lifecycle-divergence finding the
-// shared aggregate scan produces, in the same order the generated
-// `mindspec instruct` idle guidance renders them (AC-15):
+// shared aggregate scan produces. Existing findings keep the order used
+// by idle guidance. Ancestor diagnoses are also rendered here:
 //
 //   - outstanding chore/finalize-<specID> carriers (bug wu7t residue),
-//   - stale-OPEN beads (open in the tracker, work already landed as a
-//     bead→spec merge — the inverse of checkOrphanedBeads), each with a
-//     FixFunc that re-invokes `mindspec complete <id>` under --fix,
+//   - stale-open beads: valid merges give Info with no automatic close;
+//     other stale-open findings retain Error and their completion fix,
+//   - reverted naming merges on open beads: one Error with restore
+//     guidance and no automatic fix,
 //   - stale-committed-tracker epics (closed in bd, still non-terminal in
-//     main's committed .beads/issues.jsonl).
+//     main's committed .beads/issues.jsonl),
+//   - prerequisites with present work but no naming merge or binding, at Warn.
 //
-// One phase.Cache is created for this aggregate check (F1) — the scan's
-// entire bd cost is one epic list plus one children query per ACTIVE epic.
+// One phase.Cache supplies one epic list and one global open-bead list.
 func checkLifecycleIntegrity(r *Report, root string) {
 	findings := scanIntegrityFindingsFn(root, phase.NewCache())
 
@@ -39,15 +40,30 @@ func checkLifecycleIntegrity(r *Report, root string) {
 	}
 	for _, s := range findings.StaleOpen {
 		beadID := s.BeadID
-		r.Checks = append(r.Checks, Check{
+		check := Check{
 			Name:    fmt.Sprintf("stale-open bead: %s", idrender.Bead(beadID)),
 			Status:  Error,
 			Message: s.Message(),
 			FixFunc: func() error { return runMindspecCompleteFn(root, beadID) },
+		}
+		if s.ValidMerge {
+			check.Status = Info
+			check.FixFunc = nil
+		}
+		r.Checks = append(r.Checks, check)
+	}
+	for _, s := range findings.RevertedMerges {
+		r.Checks = append(r.Checks, Check{
+			Name:    fmt.Sprintf("reverted bead merge: %s", idrender.Bead(s.BeadID)),
+			Status:  Error,
+			Message: s.Message,
 		})
 	}
 	for _, o := range findings.StaleTrackers {
 		addFinalizeOrphanCheck(r, o)
+	}
+	for _, ancestor := range findings.Ancestors {
+		addAncestorCheck(r, ancestor)
 	}
 }
 

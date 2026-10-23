@@ -96,7 +96,7 @@ func panelAdvisory(beadID string, roots []string, w io.Writer) *panel.Registrati
 // gitutil. The default seams use a stateless MindspecExecutor — RevParseRef /
 // Status / IsRefNotFound take their workdir as an argument and ignore the
 // executor's Root, so a zero-value executor is a sufficient, thin, byte-
-// identical pass-through to gitutil.RevParseRef / gitutil.Status /
+// pass-through to gitutil.RevParseRef / gitutil.StatusNoRenamesWithStderr /
 // errors.Is(e, gitutil.ErrRefNotFound).
 var (
 	gateExecutor        executor.Executor = &executor.MindspecExecutor{}

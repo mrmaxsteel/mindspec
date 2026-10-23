@@ -48,7 +48,7 @@ func domainsRootLabel(root string) string {
 // domainsRootLabelAtRef is the ref-CONSISTENT sibling of
 // domainsRootLabel (spec 122 Bead 3, FX-2). The bead-time divergence
 // and per-bead doc-sync lanes enumerate ownership from a git ref
-// (ownerRef — beadHead / the spec-branch tip), NOT the ambient
+// (ownerRef — the landing tree / the spec-branch tip), NOT the ambient
 // checkout. If that ref's docs layout differs from the ambient working
 // tree (e.g. a flat ref while the local checkout is still canonical, or
 // vice versa), rendering the ambient domainsRootLabel(root) would send

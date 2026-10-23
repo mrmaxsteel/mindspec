@@ -1038,6 +1038,13 @@ func TestValidateDocsWorkingTreeIdiom(t *testing.T) {
 		if calls[0].Args[0] != wantBase || calls[0].Args[1] != wantHead {
 			t.Errorf("ChangedFiles(%v, %v), want (%q, %q)", calls[0].Args[0], calls[0].Args[1], wantBase, wantHead)
 		}
+		if wantBase == "" {
+			if len(calls[0].Args) != 2 {
+				t.Errorf("working-tree options = %v, want none", calls[0].Args[2:])
+			}
+		} else if len(calls[0].Args) != 3 || calls[0].Args[2] != (executor.ChangedFilesOptions{ExactPaths: true}) {
+			t.Errorf("range args = %v, want ExactPaths", calls[0].Args)
+		}
 	}
 
 	t.Run("ValidateDocs diffs working tree vs ref", func(t *testing.T) {

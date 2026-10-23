@@ -49,7 +49,7 @@ package phase
 // an adversarial-evasion guarantee.
 //
 // The literal string composed via fmt.Sprintf in spec.go's epic-CREATION
-// seed (`spec.go:84`, building a JSON string for `bd create --metadata`)
+// seed (ApproveSpec, building a JSON string for `bd create --metadata`)
 // is NOT a Go composite literal and is correctly invisible to this AST
 // walk — matching the spec's own stated exclusion for that seed (there is
 // no stored value to race when the epic does not exist yet).

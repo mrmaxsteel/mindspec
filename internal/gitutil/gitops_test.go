@@ -5,12 +5,147 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 )
+
+func TestFetchFinalizeTarget_ExactHeadAndRelease(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	root := initGitRepo(t)
+	remote := t.TempDir()
+	runGit(t, remote, "init", "--bare", "-b", "main")
+	runGit(t, root, "remote", "add", "origin", "file://"+remote)
+	runGit(t, root, "push", "origin", "HEAD:refs/heads/spec/010-test")
+	sha, release, err := FetchFinalizeTarget(root, "spec/010-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha != runGitOut(t, root, "rev-parse", "HEAD") {
+		t.Fatalf("fetched tip = %s", sha)
+	}
+	refs := runGitOut(t, root, "for-each-ref", "--format=%(refname)", "refs/mindspec/finalize/")
+	if !strings.HasPrefix(refs, "refs/mindspec/finalize/") {
+		t.Fatalf("temporary ref missing: %q", refs)
+	}
+	release()
+	if refs := runGitOut(t, root, "for-each-ref", "--format=%(refname)", "refs/mindspec/finalize/"); refs != "" {
+		t.Fatalf("temporary ref survived: %q", refs)
+	}
+}
+
+func TestFetchFinalizeTarget_RefusesBadOperandAndFetchFailure(t *testing.T) {
+	calls := swapExec(t, "fetch failed", 1)
+	if _, _, err := FetchFinalizeTarget("/repo", "--upload-pack=x"); err == nil || len(*calls) != 0 {
+		t.Fatalf("bad operand reached git: %v", err)
+	}
+	root := t.TempDir()
+	if _, release, err := FetchFinalizeTarget(root, "spec/010-test"); err == nil || release != nil {
+		t.Fatalf("fetch failure accepted: %v", err)
+	}
+	call := (*calls)[0]
+	if call.cmd.Dir != root || !strings.Contains(strings.Join(call.cmd.Env, "\n"), "GIT_TERMINAL_PROMPT=0") {
+		t.Fatal("fetch lost workdir or prompt control")
+	}
+	if len(call.args) != 4 || call.args[0] != "fetch" || call.args[1] != "--no-tags" || call.args[2] != "origin" || !strings.HasPrefix(call.args[3], "refs/heads/spec/010-test:refs/mindspec/finalize/") {
+		t.Fatalf("fetch argv: %q", call.args)
+	}
+
+}
+
+func TestDiffNameOnlyNoRenames_RenameListsBothPaths(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	dir := initGitRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("same\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "a")
+	runGit(t, dir, "commit", "-m", "before rename")
+	base := runGitOut(t, dir, "rev-parse", "HEAD")
+	runGit(t, dir, "mv", "a", "b")
+	runGit(t, dir, "commit", "-m", "rename")
+	paths, err := DiffNameOnlyNoRenames(dir, base, "HEAD")
+	if err != nil || !reflect.DeepEqual(paths, []string{"a", "b"}) {
+		t.Fatalf("rename paths = %q, %v", paths, err)
+	}
+}
+
+func TestDiffNameOnlyNoRenames_NULSeparated(t *testing.T) {
+	calls := swapMergeStateExec(t, "space name\x00line\nbreak\x00tab\tname\x00quote\"name\x00", 0)
+	paths, err := DiffNameOnlyNoRenames("/repo", "base", "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"space name", "line\nbreak", "tab\tname", "quote\"name"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("paths = %q, want %q", paths, want)
+	}
+	assertArgs(t, (*calls)[0].args, "-C", "/repo", "diff", "--no-renames", "--name-only", "-z", "base", "head", "--")
+}
+
+func TestMergeStateGitReads(t *testing.T) {
+	t.Run("later commits", func(t *testing.T) {
+		calls := swapMergeStateExec(t, "new\x00first second\x00subject\nold\x00parent\x00older\n", 0)
+		commits, err := FirstParentCommitsAfter("/repo", "base", "head")
+		if err != nil || len(commits) != 2 || commits[0].Subject != "subject" || len(commits[0].Parents) != 2 {
+			t.Fatalf("commits = %+v, %v", commits, err)
+		}
+		assertArgs(t, (*calls)[0].args, "-C", "/repo", "log", "--first-parent", "--topo-order", "--format=%H%x00%P%x00%s", "base..head", "--")
+	})
+	t.Run("path entry", func(t *testing.T) {
+		calls := swapMergeStateExec(t, "100644 blob oid\ta\x00", 0)
+		entry, err := TreePathEntry("/repo", "ref", "a")
+		if err != nil || string(entry) != "100644 blob oid\ta\x00" {
+			t.Fatalf("entry = %q, %v", entry, err)
+		}
+		assertArgs(t, (*calls)[0].args, "-C", "/repo", "ls-tree", "-z", "--full-tree", "ref", "--", "a")
+	})
+	t.Run("worktree path", func(t *testing.T) {
+		swapMergeStateExec(t, "worktree /main\x00HEAD abc\x00branch refs/heads/main\x00\x00worktree /spec path\x00HEAD def\x00branch refs/heads/spec/132-test\x00\x00", 0)
+		wt, err := WorktreeForBranch("/repo", "spec/132-test")
+		if err != nil || wt != "/spec path" {
+			t.Fatalf("worktree = %q, %v", wt, err)
+		}
+	})
+	t.Run("errors", func(t *testing.T) {
+		swapExec(t, "failure", 1)
+		if _, err := DiffNameOnlyNoRenames("/repo", "base", "head"); err == nil {
+			t.Error("diff read must fail")
+		}
+		if _, err := FirstParentCommitsAfter("/repo", "base", "head"); err == nil {
+			t.Error("commit read must fail")
+		}
+		if _, err := TreePathEntry("/repo", "head", "a"); err == nil {
+			t.Error("tree read must fail")
+		}
+		if _, err := WorktreeForBranch("/repo", "spec/132-test"); err == nil {
+			t.Error("worktree read must fail")
+		}
+	})
+}
+
+// The output file preserves NUL bytes without putting them in process argv.
+func swapMergeStateExec(t *testing.T, stdout string, exitCode int) *[]capturedCall {
+	t.Helper()
+	fixture := filepath.Join(t.TempDir(), "stdout")
+	if err := os.WriteFile(fixture, []byte(stdout), 0600); err != nil {
+		t.Fatal(err)
+	}
+	calls := &[]capturedCall{}
+	original := execCommand
+	t.Cleanup(func() { execCommand = original })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		cmd := exec.Command("/bin/sh", "-c", "cat \"$1\"; exit \"$2\"", "fake", fixture, itoa(exitCode))
+		*calls = append(*calls, capturedCall{name: name, args: append([]string(nil), args...), cmd: cmd})
+		return cmd
+	}
+	return calls
+}
 
 // TestRevParseRef_DistinguishesAbsentFromTransient pins the round-2 hardening
 // (Spec 093): a genuinely-absent ref returns ErrRefNotFound (exit 1), while a
@@ -911,7 +1046,7 @@ func TestDiffNameOnly_Empty(t *testing.T) {
 }
 
 func TestDiffNameOnlyRef_NoWorkdir(t *testing.T) {
-	calls := swapExec(t, "x.go\n", 0)
+	calls := swapMergeStateExec(t, "x.go\x00", 0)
 	files, err := DiffNameOnlyRef("", "HEAD~1")
 	if err != nil {
 		t.Fatal(err)
@@ -919,7 +1054,7 @@ func TestDiffNameOnlyRef_NoWorkdir(t *testing.T) {
 	if len(files) != 1 || files[0] != "x.go" {
 		t.Errorf("unexpected files: %v", files)
 	}
-	assertArgs(t, (*calls)[0].args, "diff", "--name-only", "HEAD~1", "--")
+	assertArgs(t, (*calls)[0].args, "diff", "--no-renames", "--name-only", "-z", "HEAD~1", "--")
 }
 
 func TestDiffPathspec_InsertsSeparator(t *testing.T) {
@@ -2257,5 +2392,50 @@ func TestFetchRemoteBranchIn_RealGitNarrowRefspecPoisonedTrackingRef(t *testing.
 	staleRef := runIn(clone, "rev-parse", "refs/remotes/origin/feature")
 	if staleRef != oldTip {
 		t.Fatalf("fixture sanity: expected the ambient tracking ref to remain poisoned at the OLD tip %q, got %q (narrow-refspec clone setup did not reproduce the poisoned-cache shape)", oldTip, staleRef)
+	}
+}
+
+func TestRemoteConfigured_WithRemote(t *testing.T) {
+	dir := initGitRepo(t)
+	cmd := exec.Command("git", "-C", dir, "remote", "add", "origin", "file:///unused.git")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("remote add: %v: %s", err, out)
+	}
+	testRemoteConfiguredIn(t, dir, true, false)
+}
+
+func TestRemoteConfigured_NoRemote(t *testing.T) {
+	testRemoteConfiguredIn(t, initGitRepo(t), false, false)
+}
+
+func TestRemoteConfigured_GitErrorReturnsError(t *testing.T) {
+	testRemoteConfiguredIn(t, t.TempDir(), false, true)
+}
+
+func testRemoteConfiguredIn(t *testing.T, dir string, want, wantError bool) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(old); err != nil {
+			t.Error(err)
+		}
+	})
+	got, err := RemoteConfigured()
+	if got != want || (err != nil) != wantError {
+		t.Fatalf("RemoteConfigured = (%v, %v), want (%v, error=%v)", got, err, want, wantError)
+	}
+}
+
+func TestPushProbe_EmptyFailureOutputNamesError(t *testing.T) {
+	swapExec(t, "", 1)
+	err := PushProbe("", "spec/077-test")
+	if err == nil || !strings.Contains(err.Error(), "exit status 1") {
+		t.Fatalf("probe must name process error: %v", err)
 	}
 }

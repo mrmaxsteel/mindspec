@@ -59,8 +59,6 @@ protected_branches:
   - main
   - master
 
-merge_strategy: auto    # auto | pr | direct
-
 worktree_root: .worktrees
 
 enforcement:
@@ -68,6 +66,9 @@ enforcement:
   cli_guards: true
   agent_hooks: true
 ```
+
+`impl approve` pushes the spec branch when a git remote exists. Otherwise,
+it merges locally. The config does not select this behavior.
 
 ## State File
 

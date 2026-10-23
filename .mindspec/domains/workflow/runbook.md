@@ -163,19 +163,24 @@ independent exact-second-parent git scan of the spec branch (resolved
 from the bead's epic linkage; pass `--spec-branch spec/<id>` only when
 the linkage is underivable) and writes the scan-derived SHAs plus a
 `mindspec_landed_reattest_*` audit record — inspect with
-`bd show <bead-id> --json`. It is fail-closed: on no owned exact merge
-it refuses and names the audited ADR-0035 `mindspec-q9ea` human
-attested-restore as the only exit (inspect
-`git log --first-parent --merges <spec-branch>`, VERIFY the candidate's
-diff, then `git branch bead/<id> <verified-second-parent-sha>` — never
-blind); on ambiguity, a contradicting datum, or reverted content it
-refuses and writes nothing. A merge whose subject names NO bead is not
-auto-identifiable anywhere (fail-closed by design — the binding alone is
-never an ownership authority), and `reattest` CANNOT recover it either:
-it too requires a subject-nominated merge. The honest recovery there is
-to re-merge the work under a bead-naming subject (mindspec's own merges
-always name the bead), or accept the safe fail-closed; the audited
-q9ea attested-restore above is the last-resort exit.
+`bd show <bead-id> --json`. Ambiguity, a contradictory tip, or reverted
+content refuses and writes nothing.
+
+When neither merge scan finds a candidate, reattest checks the bead's full
+work range. `ancestor-without-naming-merge` means the changes are present,
+but no merge names the prerequisite. A re-merge cannot help. A person must
+verify the work before using the printed override for each open dependent:
+`mindspec next <dependent> --allow-not-ready=MF-3 --evidence <file>`.
+With no dependent, it prints `mindspec doctor`. Doctor names the prerequisite
+at Warn and makes no automatic fix.
+
+`no-owned-exact-merge` with a history line means the tool cannot show that
+the changes remain present. An unknown base or another bead's exact tip
+also gets no override recommendation. An absent branch, a non-ancestor tip,
+or an empty range makes no history claim. The attested restore exit
+requires a person to verify the merge and its diff first. Only then restore
+the bead branch at the verified second parent. Re-run reattest after the
+restore. An anonymous merge cannot provide ownership by itself.
 
 Also: if `mindspec complete` refuses with "has landed … but the
 landed-merge commit could not be located by identity", that is the spec
@@ -241,7 +246,9 @@ enumeration):
    see `project-docs/user/guides/merge-safety.md` for the distinct
    POST-gate class (a merge conflict, a `bd close` failure), whose
    preserved-merge/forward-reconcile recovery (spec 127) is UNCHANGED by
-   this reorder.
+   this reorder. The artifact-sync snapshot check also runs in merge-only
+   mode. It disables rename detection and preserves exact filename bytes.
+   A user path stops completion before the artifact commit.
 2. **`mindspec repair phase` now refuses a backward move by default**
    (R3.3): moving an epic's stored phase backward in lifecycle order
    (`spec < plan < implement < review < done`) requires
@@ -362,3 +369,91 @@ enumeration):
   evolved-but-present content identifies while true reverts refuse, and
   the new `mindspec reattest <bead-id>` verb is the explicit audited
   recovery (troubleshooting entry above).
+
+## Resume implementation approval
+
+Read the state line after an approval failure. It shows the current epic status
+and the failed stage. Follow the final recovery commands in order. Resolve a
+merge when the recovery command includes `--resolve-merge`. A bare failure gives
+`mindspec impl approve <spec>` as its recovery command.
+
+An export or artifact-commit failure keeps pending files, worktrees, and
+branches. It stops before publication and cleanup. Fix the export or commit
+fault, then run the printed approval command again. An absent spec or pending
+bead worktree has no artifact commit to run. A pending bead branch can still
+merge through the spec worktree.
+
+A pending bead whose tip moved after its naming merge stops approval before
+any write. Use the printed follow-up recovery from `complete`. Approval cannot
+make a second naming merge for that bead.
+
+Re-run approval after the fault is fixed. It checks all pre-close gates again
+while the spec branch exists. New source changes must include their domain docs.
+After local branch deletion, `already landed` means the final publication tip and
+all lifecycle child bindings are ancestors of the target. A push path reads the
+remote spec branch, or remote main if the host deleted the spec branch. A fetch
+failure or missing ancestry retains the adopt recovery. A host squash or rebase
+merge needs that recovery too. A retry does not recreate a deleted remote head.
+
+After publication and its hooks, approval checks every scoped bead worktree and
+the spec worktree before forced removal of those worktrees. A retry after local spec-branch
+deletion checks all remaining worktrees too. Pending changes, an unreadable
+status, or a worktree inspection error stop cleanup. The state line names the
+cleanup stage. All remaining worktrees and branches survive. Preserve pending
+changes in a follow-up branch, or move them to a safe path. Leave the original
+worktree clean and readable. Then run `mindspec impl approve <spec>` again.
+
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. The check first confirms that the path is a
+registered worktree of this repository. An unregistered directory stays in place.
+Move that directory to a safe path, then retry approval.
+
+Status reads disable rename and copy detection before artifact checks.
+Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
+are exempt in this temporary checkout. Other pending changes or a status or stat
+read error stop removal. A registration read error also stops removal. The pending
+file, worktree, and carrier branch remain. The error gives an approval retry
+command. Preserve the changes at a safe path. Leave the worktree clean and
+readable, then retry approval.
+
+## Verify a merge before close
+
+Run `mindspec complete <bead> --merge-only`. Inspect the printed merge SHA
+and both parents. Run the verification commands on the spec branch.
+Then run `mindspec complete <bead>` until it exits 0.
+
+After close publication and its hooks, completion reads bead user changes again
+before removal. Tool artifacts stay exempt. The exemption preserves decoded
+filename whitespace. A lookalike path blocks the close.
+Status reads disable rename and copy detection.
+New user changes or a status or stat
+read error stop cleanup. The pending file, worktree, and branch remain. Preserve
+the changes at a safe path. Leave the worktree clean and readable, then run the
+printed completion command again.
+
+A bead can have only one naming merge. Send later fixes to a follow-up
+bead. If the tip moved, preserve the fix branch and use the printed
+reset-with-keep recovery. Re-panel the original tip when required.
+Close it before you add and claim the follow-up bead. Append the new
+Nth Bead heading and its work_chunks entry to plan.md on the spec branch.
+Give the new bead a concrete acceptance criterion and key_file_paths.
+The new bead needs its own panel.
+
+Do not revert a `--merge-only` merge by hand. If it was reverted, use the
+printed restore recovery. Inspect each listed commit; a revert undoes
+the whole commit. The path-scoped alternative applies only in a clean
+spec worktree. Restore and commit the named paths, then run complete
+until it exits 0. The restore commit keeps the one naming merge.
+
+A content gate on a committed merge measures that merge. A later doc
+commit cannot change it. When the merge is still the spec tip and has
+no landed binding, stage only the named ownership or doc repairs,
+amend the merge, clear the old merge-only SHA, and run complete again.
+The command also prints the impacted-domain and audited override exits.
+
+For a conflict, resolve and stage the files. Re-enter with
+`mindspec complete <bead> --merge-only --resolve-merge`. A pending
+merge-only call stays merge-only on a plain retry. After it records the
+merge, run complete again to close. To abandon pending mode before its
+merge, unset the `mindspec_merge_only` metadata key.

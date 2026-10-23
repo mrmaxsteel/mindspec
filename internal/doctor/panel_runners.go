@@ -18,6 +18,7 @@ const runnerProbeTimeout = 10 * time.Second
 
 // checkConfiguration shares one load across all config-dependent checks.
 func checkConfiguration(r *Report, root string, opts Options) {
+	checkLegacyMergeStrategy(r, root)
 	cfg, err := config.Load(root)
 	if err != nil {
 		message := err.Error()

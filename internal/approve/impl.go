@@ -113,27 +113,9 @@ var (
 	// exported by Bead 1 so this gate never re-implements it.
 	implGetMetadataFn      = bead.GetMetadata
 	implCheckObligationsFn = complete.CheckPendingObligations
-	// implWorkDestructionPreflightFn is the spec 127 R4(a) §1-phase seam
-	// (pointer-pinned default): performs REAL git I/O
-	// (lifecycle.EvaluateWorkDestructionPreflight ->
-	// gitutil.EvaluateWorkDestruction) over the spec branch and main.
-	// Tests that drive ApproveImpl without a real underlying repo must
-	// stub this too, or the real evaluation fails closed
-	// (DestructionEvidenceError) against non-existent refs.
-	implWorkDestructionPreflightFn = lifecycle.EvaluateWorkDestructionPreflight
-	// implHasRemoteFn is bead-6 fix round 1's applicability gate for the
-	// preflight immediately above (O1-1/O3-1, G1's ac5-pr-path-widening
-	// ruling): the §1 AC-5 preflight guards ONLY "the finalize merge"
-	// (R3b/AC-5's own text) — the no-remote DIRECT spec→main merge —
-	// never the PR-routed leg, which never attempts a local merge at
-	// all. exec.FinalizeEpic decides push-vs-direct via this identical
-	// probe (gitutil.HasRemote(), unconditionally, inside FinalizeEpic
-	// itself); consulting the SAME probe here, before the §1 call,
-	// keeps the two layers agreeing on APPLICABILITY rather than only on
-	// outcome (O1-1's required change). Routed through lifecycle.HasRemote
-	// (thin wrapper), the same ADR-0030 boundary reason as every other
-	// seam in this block.
-	implHasRemoteFn = lifecycle.HasRemote
+	// implHasRemoteFn makes the one remote decision for early merge guards,
+	// the push probe, and finalization. A probe error refuses before writes.
+	implHasRemoteFn = lifecycle.RemoteConfigured
 )
 
 // implContextLine renders the Req 8 worktree-context line for impl
@@ -182,7 +164,7 @@ type ImplOpts struct {
 
 	// AllowNetDeletion is the spec 127 R4(b) audited-override reason:
 	// "" means no override, so the finalize merge preflight (both the
-	// §1 evaluation below — the direct spec→main leg, AC-5 — and
+	// early evaluation of all pending merges below and
 	// FinalizeEpic's own live backstop at every producer call site)
 	// refuses on a DestructionSuperseded/DestructionStaleDeletion/
 	// DestructionEvidenceError outcome exactly as with no override
@@ -229,45 +211,14 @@ type ImplResult struct {
 // Enforcement logic (phase validation, epic closure, bead status checks) stays here.
 // Git operations (merge, push, cleanup) are delegated to the Executor.
 //
-// Spec 086 Bead 3 ordering contract — all gates run BEFORE every
-// mutating/terminal operation; the override metadata write runs AFTER
-// `exec.FinalizeEpic` returns nil:
-//
-//  1. readBeadStatus loop (bead-status verification, non-mutating)
-//  2. validate.ValidateDocs (doc-sync gate; honors AllowDocSkew override)
-//  3. validate.CheckADRDivergence (ADR-divergence gate; NOT covered by override)
-//  4. Spec 115 Bead 2: runOrphanObligationGate — the pre-terminal
-//     refusal gate (R1 orphan scan + the worktree-enumeration merge-
-//     prevention leg + R3 durable-obligation backstop), fail-closed on
-//     every cleanly-signaled infra error on all three legs; hatches
-//     bypass NOTHING here (this is a 4gsz-class lifecycle-bypass guard,
-//     not the panel-gate decision). A refusal here performs no epic
-//     close, no phase write, no merge, no push.
-//  5. implPhaseMetadataFn(epicID, mindspec_phase=<derived>) — Spec 092
-//     Req 1 deferred stale-phase reconcile; runs ONLY when the stored
-//     phase failed the review/done gate but the child-derived phase
-//     passed it, after the LAST pre-terminal gate (step 4) and before
-//     the first mutation (step 6); never after step 7's done write
-//  6. implRunBDCombinedFn("close", epicID) (EPIC CLOSE — first mutation)
-//  7. implPhaseMetadataFn(epicID, mindspec_phase=done) (PHASE METADATA)
-//  8. exec.CommitCount (pre-flight)
-//  9. exec.FinalizeEpic (TERMINAL MUTATION)
-//  10. implMergeMetadataFn(epicID, mindspec_impl_skew_*) — only if
-//     AllowDocSkew set AND FinalizeEpic returned nil
-//
-// ADR-0041 (gate-before-mutate): steps 1-4 above are this verb's PREFLIGHT
-// phase — the phase gate, the plan-bead gate, the doc-sync gate, the
-// ADR-divergence backstop, and the Spec 115 orphan/obligation gate all
-// resolve their facts and evaluate every derivable refusal before the first
-// mutation (step 5's deferred phase reconcile is itself idempotent and
-// still precedes step 6, the first hard mutation). The idempotent ADR-0034
-// migration (phase.EnsureMigrated, immediately below) is the ADR's named
-// exemption. Steps 6-9 are the COMMIT phase; step 9's exec.FinalizeEpic is
-// the terminal mutation chain, whose own internal stages are individually
-// classified KILL-TESTED / DOCUMENTED-FORWARD-SAFE in
-// internal/executor/finalize_fault_test.go (Spec 119 Bead 6, AC-26 i4).
-// This verb's own RECONCILE contract is bounded re-invocation converging to
-// completion or a clean named refusal — see internal/approve/impl_fault_test.go.
+// Preflight runs after the idempotent phase-migration exemptions. It makes
+// one remote decision before checking the spec branch. It reads the plan,
+// validates content, resolves the lifecycle allow-set, and checks obligations.
+// The early layout and destruction guards cover every pending local merge.
+// A push path also runs the push probe. These gates precede the placeholder
+// ADR write, stale-phase reconcile, epic close, and done-phase write.
+// FinalizeEpic consumes the same remote decision and repeats its live merge
+// guards. Override metadata is recorded only after finalization succeeds.
 func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) (*ImplResult, error) {
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
@@ -361,64 +312,40 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	specBranch, _ := workspace.SpecBranch(specID)
 	result.SpecBranch = specBranch
 
-	// Spec 127 R3a — §1 PREFLIGHT: branch-existence FACT, resolved
-	// before any merge-base or other git plumbing ever touches
-	// specBranch (the #218 step-1 wedge: exec.MergeBase below used to
-	// surface a raw `exit status 128` — a wrapped *exec.ExitError — when
-	// the branch was simply gone). Two legs, textually distinct
-	// (AC-4): a genuinely absent branch names the R1 adopt path in
-	// full; a probe FAILURE (existence INDETERMINATE) never collapses
-	// into "absent" and never names adopt (O2-r2-8) — it is its own
-	// fail-closed, retryable refusal. Bead 6 (R4) is INTENDED to extend
-	// this SAME §1 phase with the work-destruction preflight for the
-	// branch-present-but-stale leg (R3b) — sited here, as its own
-	// block, as an insertion seam ahead of any mutation/git-consuming
-	// code below, so that the extension CAN land as an addition rather
-	// than a reshuffle (C-r4-7's obligation). Bead 5's own diff/tests
-	// cannot establish whether a bead that does not yet exist actually
-	// meets that obligation — bead 6's own diff and tests are what
-	// settle it.
+	// Keep one decision through preflight and finalization, including a
+	// missing-branch refusal. A read error must never select a local merge.
+	hasRemote, remoteErr := implHasRemoteFn()
+	if remoteErr != nil {
+		return nil, guard.NewFailure(
+			"cannot tell whether a git remote is configured: "+termsafe.Escape(remoteErr.Error()),
+			"git remote -v",
+		)
+	}
+
 	switch exists, existsErr := implSpecBranchExistsFn(root, specBranch); {
 	case existsErr != nil:
 		return nil, implBranchIndeterminateRefusal(specID, specBranch, existsErr)
 	case !exists:
-		return nil, implBranchMissingRefusal(specID, specBranch)
-	}
-
-	// Spec 127 R3b/AC-5 — R4's §1-phase work-destruction preflight for
-	// this verb's OWN direct spec→main leg: the branch is confirmed to
-	// exist (above) but may be PRESENT-AND-STALE — a recreated branch at
-	// an old snapshot (the #218 step-2 shape) — which the bare existence
-	// check above cannot distinguish from a healthy branch. Evaluated
-	// HERE, before any epic close / phase write / other mutation below,
-	// so a refusal leaves state byte-identical to the pre-call state
-	// (O1-r2-2's siting).
-	//
-	// GATED on implHasRemoteFn (bead-6 fix round 1, O1-1/O3-1): R3b/AC-5's
-	// own text scopes this preflight to "the finalize merge" — the
-	// no-remote DIRECT spec→main merge exec.FinalizeEpic performs when
-	// gitutil.HasRemote() is false. When a remote IS configured,
-	// FinalizeEpic instead pushes specBranch for a PR and never local-
-	// merges it into main at all (the PR-routed leg relies on the Bead-3
-	// precondition + PR review instead). Evaluating this predicate
-	// unconditionally used to refuse the routine, non-adversarial "PR
-	// already merged, local main now reflects it" state — the exact state
-	// spec 121's own orphan/net-effect detection exists to handle
-	// gracefully — BEFORE FinalizeEpic's graceful handling ever ran (O3-1,
-	// reproduced with a real-git fixture: EvaluateWorkDestruction
-	// classifies that state DestructionSuperseded). Skipping the §1 call
-	// on the PR-routed leg does not weaken safety: the executor's OWN
-	// live consultation immediately before its gitutil.MergeBranch call
-	// (mindspec_executor.go, hoisted above its cleanup block) is the
-	// actual backstop that gates the mutation, and it is ITSELF gated on
-	// the identical `result.MergeStrategy == "direct"` condition — this
-	// is a convenience early-refusal for exactly the leg the executor's
-	// own preflight guards, not a claim that a second, unconditional
-	// backstop exists for the PR leg (there is none; see O1-1).
-	if !implHasRemoteFn() {
-		if err := implWorkDestructionPreflightFn(root, specBranch, "main", o.AllowNetDeletion, fmt.Sprintf("mindspec impl approve %s", specID)); err != nil {
-			return nil, err
+		status, statusErr := readBeadStatus(epicID)
+		if statusErr == nil && status == "closed" && phaseDetail.Stored == state.ModeDone {
+			children, childErr := phase.LifecycleChildIDsForEpic(epicID)
+			if childErr == nil {
+				fr, resumeErr := exec.ResumeFinalizedEpic(epicID, specID, children, hasRemote)
+				if resumeErr == nil {
+					result.Warnings = append(result.Warnings, "already landed")
+					result.Pushed = hasRemote
+					result.FinalizeBranch = fr.FinalizeBranch
+					result.EpicID = epicID
+					return result, nil
+				}
+				var failure *executor.FinalizeStageError
+				if errors.As(resumeErr, &failure) {
+					return nil, implFinalizeFailure(epicID, specID, failure.Stage, resumeErr)
+				}
+				return nil, fmt.Errorf("%s\n%w", termsafe.Escape(resumeErr.Error()), implBranchMissingRefusal(specID, specBranch))
+			}
 		}
+		return nil, implBranchMissingRefusal(specID, specBranch)
 	}
 
 	// Enforcement gate (1/3): verify all plan beads are closed.
@@ -556,6 +483,17 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, err
 	}
 
+	// Check all planned merges before placeholder, phase, or close writes.
+	// The executor repeats both guards at each merge with the current tips.
+	if err := exec.PreflightFinalizeMerges(epicID, specID, specBranch, lifecycleAllowSet, o.AllowNetDeletion, hasRemote); err != nil {
+		return nil, err
+	}
+	if hasRemote {
+		if err := exec.PushProbe(specBranch); err != nil {
+			return nil, err
+		}
+	}
+
 	// Pre-create the placeholder ADR FIRST when --supersede-adr is
 	// requested so the new file exists on disk even if a downstream
 	// step fails. Spec 087's pre-create-before-the-gate-skip-decision
@@ -627,11 +565,23 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 				fmt.Sprintf("mindspec repair phase %s", specID),
 			)
 		}
-		if _, err := implRunBDCombinedFn("close", epicID); err != nil {
-			if !isAlreadyClosedErr(err) {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("could not close lifecycle epic %s: %v", epicID, err))
+		epics, statusErr := phase.NewCache().AllEpics()
+		status := ""
+		for _, epic := range epics {
+			if epic.ID == epicID {
+				status = epic.Status
+				break
 			}
 		}
+		if statusErr != nil || status == "" {
+			return nil, implFinalizeFailure(epicID, specID, "close", fmt.Errorf("cannot read epic status: %v", statusErr))
+		}
+		if status != "closed" {
+			if _, err := implRunBDCombinedFn("close", epicID); err != nil && !isAlreadyClosedErr(err) {
+				return nil, implFinalizeFailure(epicID, specID, "close", err)
+			}
+		}
+
 		// MUTATION (2/3): Spec 080 phase metadata write. Runs after
 		// (and supersedes) the Req 1 reconcile above — the end state
 		// of a fully successful ApproveImpl is mindspec_phase=done.
@@ -648,7 +598,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 				"mindspec_done":  true,
 			}, nil
 		}); err != nil {
-			result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))))
+			return nil, implFinalizeFailure(epicID, specID, "phase", errors.New(phase.DescribeLockFailure(err, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))))
 		}
 	}
 
@@ -676,9 +626,14 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// MUTATION (3/3, terminal): delegate to executor for merge/push,
 	// scoped to lifecycleAllowSet (Spec 119 Bead 3, R6/P6) resolved
 	// above.
-	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet, o.AllowNetDeletion, o.ResolveMerge)
+	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet, o.AllowNetDeletion, o.ResolveMerge, hasRemote)
 	if err != nil {
-		return nil, fmt.Errorf("finalizing epic: %w", err)
+		stage := "finalize"
+		var failure *executor.FinalizeStageError
+		if errors.As(err, &failure) {
+			stage = failure.Stage
+		}
+		return nil, implFinalizeFailure(epicID, specID, stage, err)
 	}
 
 	// Spec 086 Bead 3: record doc-sync skew override ONLY after the
@@ -747,6 +702,32 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	}
 
 	return result, nil
+}
+
+// implFinalizeFailure reads state after a failed write. Inner recovery lines
+// retain their order and remain last. Escape each line to keep its structure.
+func implFinalizeFailure(epicID, specID, stage string, inner error) error {
+	status, err := readBeadStatus(epicID)
+	stateLine := "epic status unknown"
+	if err == nil {
+		stateLine = "epic still open"
+		if status == "closed" {
+			stateLine = "epic closed"
+		}
+	}
+	lines := strings.Split(inner.Error(), "\n")
+	hasRecovery := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "recovery:") {
+			hasRecovery = true
+		}
+		lines[i] = termsafe.Escape(line)
+	}
+	message := fmt.Sprintf("%s; finalize stage %s\n%s", stateLine, termsafe.Escape(stage), strings.Join(lines, "\n"))
+	if !hasRecovery {
+		return guard.NewFailure(message, fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+	}
+	return errors.New(message)
 }
 
 func readBeadStatus(id string) (string, error) {
@@ -1215,7 +1196,8 @@ func implLedgerPreflight(root, specID string, exec executor.Executor) error {
 	if err != nil {
 		return guard.NewFailure("could not verify panel ledgers are committed: "+termsafe.Escape(err.Error()), complete.LedgerCommitRecovery(wt, paths))
 	}
-	// Decode porcelain quoted paths and rename destinations. A collapsed untracked parent also contains dirt.
+	// Status lists rename endpoints separately. Decode quoted paths.
+	// A collapsed untracked parent also contains dirt.
 	for _, line := range strings.Split(status, "\n") {
 		dirty, err := panel.PorcelainPath(line)
 		if err != nil {

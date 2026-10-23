@@ -320,7 +320,12 @@ exclusively through eight new `Executor` interface methods
   against a bare tree OID (`-C workdir`, never a hardcoded root or the
   caller's cwd) — the tree-vs-tree leg the doc-sync/ADR-divergence gates
   use to measure `base..T` directly, so "committed tree ≡ measured tree"
-  is mechanical once materialization runs.
+  is mechanical once materialization runs. It uses
+  `--no-renames --name-only -z` to list both rename endpoints and preserve
+  exact filename bytes. Committed ranges through `ChangedFiles` with
+  `ExactPaths: true` and working-tree reads through `DiffNameOnlyRef`
+  use the same path rules.
+  `TreeDirsAtRef` also uses NUL separators for exact domain names.
 - **`MaterializeStageCommit(wtPath, tree, parent, stage, subject)`** builds
   a commit object via plumbing (`git commit-tree`, no hooks) carrying a
   pinned `Mindspec-Stage` trailer (`MindspecStageTrailerKey`,
@@ -358,7 +363,8 @@ clear) staged sequence (ADR-0041 §3(i)): `M` builds candidate commit `C`
 from `T` (`-p <tip>`); `R` refreshes the real index to `C`; `S` re-classifies
 the exact delta about to be committed — any path outside the named-artifact
 set REFUSES here, before the artifact-sync commit `D` is ever built — then
-builds `D` (`-p C`); `G` is the pre-existing preserved-merge machinery,
+builds `D` (`-p C`). Normal and merge-only completion use the same reader.
+`G` is the pre-existing preserved-merge machinery,
 untouched; `T` clears the marker on both the ordinary and landed-merge-
 reconcile completion paths. `MockExecutor` (`internal/executor/mock.go`)
 stubs all eight methods with configurable results/errors, defaulting to
@@ -395,3 +401,74 @@ paths a sandbox fixture must gitignore/tolerate alongside `session.json`
 the reordered materialization sequence end-to-end as fault-injection
 scenarios (the KILL-TESTED/DOCUMENTED-FORWARD-SAFE classification, ADR-0041
 §3, § M→R→S→G→T staged boundary, §3(i)).
+
+## Finalization preflight and remote decision
+
+The harness sandbox config sets protected branches, the worktree root and
+enforcement options. It does not write `merge_strategy`. The finalization
+scenario with a remote still tests the push path.
+
+Approval reads the remote configuration once through the error-returning
+`RemoteConfigured` query. A read error refuses before lifecycle writes.
+`FinalizeEpic` receives that value and does not probe again. Its `MergeStrategy`
+is `pr` for true and `direct` for false, regardless of later remote configuration.
+
+`PreflightFinalizeMerges` and `FinalizeEpic` use the same scoped candidate helper.
+The early check covers pending bead-to-spec merges on both paths. It also covers
+spec-to-main on the direct path. Layout, work-destruction, and existing
+naming-merge checks run without writes. A pending bead with an existing naming merge refuses with
+`complete`'s moved-tip text and follow-up recovery. Finalization checks all
+candidates before its first write and repeats the check before each live merge.
+Live guards read the tips after artifact commits and auto-merges. A passed early check cannot replace a live check.
+
+The push path runs `PushProbe` before the epic close. This probe skips hooks and
+disables terminal prompts. It uses the real push's remote and refspec. A missing
+credential helper alone does not refuse. Only a failed HTTP(S) authentication
+probe gets a credential-helper hint. The real push still runs pre-push hooks.
+
+## Final publication and stage resume
+
+`FinalizeEpic` records `mindspec_finalize_tip` after export and bead auto-merges,
+immediately before publication. It keeps `mindspec_pre_finalize_tip` as a separate
+routing checkpoint. An export or artifact-commit failure in the spec worktree
+or a pending bead returns `FinalizeStageError` with a runnable approval recovery.
+It stops publication and cleanup. Pending files, worktrees, and branches remain.
+An absent spec or pending bead worktree has no artifact commit to run. A pending
+bead branch can still merge through the spec worktree.
+A retry at the recorded tip with a clean spec checkout skips
+the export commit. Before it skips an already merged bead, it checks any remaining
+worktree. Pending changes or an unreadable status stop the run before cleanup.
+The branch and worktree remain. It does not create new artifacts on that bead.
+It skips a push when the remote has the same tip and skips a completed direct
+merge. The carrier branch is reused. A changed carrier head uses a lease on the
+remote SHA read just before the push. No PR is opened by the executor.
+
+`ResumeFinalizedEpic` handles a missing local spec branch. It checks the final tip
+and all lifecycle child binding SHAs against the target. Remote evidence comes
+from an exact head fetched into a temporary ref. A missing remote spec head
+selects remote main. A failed fetch or ancestry check stops cleanup. Cleanup
+repeats the destruction guard and requires branch-tip ancestry. Before removal,
+it checks all scoped bead worktrees and the spec worktree. `FinalizeEpic` runs
+this check after publication and its hooks. A dirty worktree, an unreadable
+status, or a worktree inspection error returns a cleanup-stage failure before
+the first removal. All remaining worktrees and branches survive. It can finish
+when a prior run removed a worktree but left its branch.
+
+The temporary finalization worktree has its own removal check. It runs after
+commit and push hooks, including failed publication attempts, and before removal
+of a leftover checkout on retry. The check first confirms that the path is a
+registered worktree of this repository. An unregistered directory stays in place.
+Move that directory to a safe path, then retry approval.
+
+Status reads disable rename and copy detection before artifact checks.
+Artifact checks preserve decoded filename whitespace. Lookalike paths are user work.
+Tool artifacts, including the regenerated `.beads/issues.jsonl` tracker export,
+are exempt in this temporary checkout. Other pending changes or a status or stat
+read error stop removal. A registration read error also stops removal. The pending
+file, worktree, and carrier branch remain. The error gives an approval retry
+command. Preserve the changes at a safe path. Leave the worktree clean and
+readable, then retry approval.
+
+`FinalizeStageError` carries the failed stage without changing the inner error.
+`SetFinalizeStepHookForTest` lets approval tests inject faults into real executor
+runs. Tests use temporary git repos, fake tracker commands, and file remotes.

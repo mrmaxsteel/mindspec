@@ -69,6 +69,8 @@ type namedInvocation struct {
 // invocation shape. Every row is resolved AND flag-checked by
 // TestNamedInvocations_ResolveAtLeafIdentity below.
 var namedInvocations = []namedInvocation{
+	{label: "mindspec complete --merge-only", path: []string{"complete"}, wantFlags: []string{"--merge-only"}},
+
 	{
 		// R1(a): "an explicit, operator-invoked surface ... every AC that
 		// names the invocation resolves it in full, including flags";

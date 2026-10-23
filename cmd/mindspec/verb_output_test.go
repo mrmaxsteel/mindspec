@@ -428,7 +428,6 @@ func verbOutputTestRepo(t *testing.T) string {
 		}
 	}
 	writeVerbFixtureFile(t, root, ".mindspec/config.yaml", `protected_branches: [main]
-merge_strategy: direct
 worktree_root: .worktrees
 enforcement:
   pre_commit_hook: true
@@ -839,7 +838,7 @@ func TestVerbOutput_Next(t *testing.T) {
 		if len(args) >= 2 && args[0] == "show" && args[1] == beadID {
 			// phase.FindEpicForBead's expected shape: a dependency edge
 			// to the epic, resolving GateReadiness's owning-spec lookup.
-			return []byte(`[{"title":"fixture","dependencies":[{"id":"` + epicID + `","issue_type":"epic"}]}]`), nil
+			return []byte(`[{"title":"fixture","dependencies":[{"id":"` + epicID + `","issue_type":"epic","dependency_type":"parent-child"}]}]`), nil
 		}
 		if len(args) >= 2 && args[0] == "show" {
 			return json.Marshal(epics)

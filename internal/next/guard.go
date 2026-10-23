@@ -24,8 +24,9 @@ import (
 // when an artifact path is dirty.
 //
 // statusPorcelainFn (newline `--porcelain`) backs CheckDirtyTree/
-// CheckDirtyTreeDetail only — unchanged. statusPorcelainZFn (`-z`,
-// round-1 panel G3/G6) backs CheckDirtyTreeProportional only. Both share
+// CheckDirtyTreeDetail only, with rename detection disabled.
+// statusPorcelainZFn (`-z`, round-1 panel G3/G6) backs
+// CheckDirtyTreeProportional only. Both share
 // exportBeadsFn for the artifact-normalization retry.
 var (
 	statusPorcelainFn  = defaultStatusPorcelain
@@ -273,10 +274,9 @@ func resolveContainingDirs(p string) string {
 }
 
 func defaultStatusPorcelain(cwd string) (string, error) {
-	// Use StatusWithStderr (CombinedOutput-based) so stderr is preserved on
-	// failure — a missing `-C` target or corrupt index otherwise exits with
-	// an opaque *ExitError whose message the caller cannot surface.
-	out, err := gitutil.StatusWithStderr(cwd)
+	// List source changes separately so an artifact destination cannot hide
+	// user dirt. Preserve stderr on failure.
+	out, err := gitutil.StatusNoRenamesWithStderr(cwd)
 	if err != nil {
 		return "", fmt.Errorf("checking working tree: %w", err)
 	}
@@ -286,7 +286,7 @@ func defaultStatusPorcelain(cwd string) (string, error) {
 // defaultStatusPorcelainZ is statusPorcelainZFn's default implementation
 // — the NUL-terminated `-z` form CheckDirtyTreeProportional parses
 // (round-1 panel G3/G6). CheckDirtyTree/CheckDirtyTreeDetail keep using
-// the newline form above unchanged.
+// the newline form above with rename detection disabled.
 func defaultStatusPorcelainZ(cwd string) (string, error) {
 	out, err := gitutil.StatusZWithStderr(cwd)
 	if err != nil {
@@ -297,10 +297,9 @@ func defaultStatusPorcelainZ(cwd string) (string, error) {
 
 // classifyDirty partitions a list of repo-relative dirty paths into co-managed
 // artifact dirt (safe to ignore per ADR-0025) and user dirt (must block).
-// Empty inputs are skipped.
+// Empty inputs are skipped. Decoded filename bytes, including whitespace, stay exact.
 func classifyDirty(paths []string, specsDir ...string) (artifactDirt, userDirt []string) {
 	for _, p := range paths {
-		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
@@ -342,8 +341,8 @@ func isArtifactPath(p string, specsDir ...string) bool {
 // (v1) output.
 //
 // Each non-empty line is "XY <path>" where XY is a 2-char status field.
-// Rename/copy entries are "XY orig -> new"; the new path is what matters for
-// classification. Git C-style quoted paths are decoded before classification,
+// The production reader disables rename/copy detection so each changed
+// endpoint has its own line. Git C-style quoted paths are decoded,
 // including non-ASCII bytes escaped by core.quotePath.
 func parsePorcelain(out string) []string {
 	var paths []string
@@ -360,7 +359,7 @@ func parsePorcelain(out string) []string {
 // per ADR-0025.
 //
 // Flow:
-//  1. Snapshot `git status --porcelain` at cwd.
+//  1. Snapshot `git status --porcelain --no-renames` at cwd.
 //  2. If any artifact path is dirty, run `bd export` from repoRoot to
 //     normalize the JSONL against stale throttled exports, then re-snapshot.
 //  3. Return the user-authored dirt that remains. Callers treat a non-empty
@@ -428,13 +427,11 @@ func parsePorcelainZ(out string) []dirtyEntry {
 }
 
 // classifyDirtyZ partitions parsed -z entries into co-managed artifact
-// dirt and user dirt, matching classifyDirty's exact-new-path-only rule
-// (a rename's OrigPath is not consulted for artifact classification —
-// unchanged scope from the pre-round-1 behavior; only entanglement
-// matching below considers both sides of a rename).
+// dirt and user dirt. A rename or copy is artifact dirt only when both
+// endpoints match artifact paths. Filename bytes stay exact.
 func classifyDirtyZ(entries []dirtyEntry, specsDir ...string) (artifactEntries, userEntries []dirtyEntry) {
 	for _, e := range entries {
-		if isArtifactPath(e.Path, specsDir...) {
+		if isArtifactPath(e.Path, specsDir...) && (e.OrigPath == "" || isArtifactPath(e.OrigPath, specsDir...)) {
 			artifactEntries = append(artifactEntries, e)
 		} else {
 			userEntries = append(userEntries, e)
@@ -495,8 +492,8 @@ func renderDirtyEntry(e dirtyEntry) string {
 // feeds ComputeEntangleablePaths' per-spec recording-path class
 // (round-1 panel G1/F1).
 //
-// The artifact/user-dirt classification itself is unchanged (ADR-0025);
-// this reclassifies what happens to the USER-dirt half: dirt on a path
+// Artifact classification uses exact paths (ADR-0025). Every rename or copy
+// endpoint must qualify for the exemption. User dirt on a path that
 // ComputeEntangleablePaths names is blockingDirt; every other user dirt
 // is ignoredDirt, so the caller can print an informational notice naming
 // it (Max's standing directive, 2026-09-02: visibility without the

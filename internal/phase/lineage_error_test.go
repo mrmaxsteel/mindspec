@@ -4,8 +4,7 @@ package phase
 // contract. A genuinely-no-lineage result (every lookup succeeded; the bead
 // has no discoverable epic lineage) wraps the typed ErrNoEpicLineage
 // sentinel; every REAL lookup failure — the bead `bd show`, its JSON
-// decode, the parent-epic `bd show` (previously SWALLOWED into "no epic
-// found"), and the title-fallback epic list (also previously swallowed) —
+// decode and the parent-epic `bd show` —
 // propagates as a plain error, never reclassified as "no lineage".
 // `mindspec complete` fails closed on the plain-error class and falls back
 // to legacy cwd resolution ONLY on the sentinel class.
@@ -19,8 +18,7 @@ import (
 
 // stubBeadShow installs runBDFn/listJSONFn stubs for one FindEpicForBead
 // scenario. showResponses maps a shown ID ("bead-1", "epic-x") to its JSON
-// payload or an error; epicListJSON / epicListErr drive the AllEpics
-// title-fallback leg.
+// payload or an error. epicListJSON and epicListErr drive the scoped epic scan.
 func stubBeadShow(t *testing.T, showResponses map[string]string, showErrs map[string]error, epicListJSON string, epicListErr error) {
 	t.Helper()
 	restoreRun := SetRunBDForTest(func(args ...string) ([]byte, error) {
@@ -77,10 +75,11 @@ func TestFindEpicForBead_BeadNotFoundIsNoLineage(t *testing.T) {
 // PROPAGATE — this was the pre-final-review inner swallow that let a
 // transient bd failure masquerade as an epic-less bead.
 func TestFindEpicForBead_DependentEpicLookupErrorPropagates(t *testing.T) {
-	beadJSON := `[{"title":"[119] some bead","dependencies":[{"id":"epic-x","issue_type":"epic"}]}]`
+	beadJSON := `[{"title":"[119] some bead","dependencies":[{"id":"epic-x","issue_type":"epic","dependency_type":"parent-child"}]}]`
+	lookupErr := errors.New("connection refused")
 	stubBeadShow(t,
 		map[string]string{"bead-1": beadJSON},
-		map[string]error{"epic-x": errors.New("connection refused")},
+		map[string]error{"epic-x": lookupErr},
 		"[]", nil)
 
 	_, _, err := FindEpicForBead("bead-1")
@@ -90,22 +89,11 @@ func TestFindEpicForBead_DependentEpicLookupErrorPropagates(t *testing.T) {
 	if errors.Is(err, ErrNoEpicLineage) {
 		t.Errorf("a parent-epic lookup failure must NOT read as ErrNoEpicLineage, got: %v", err)
 	}
+	if !errors.Is(err, lookupErr) {
+		t.Fatalf("parent lookup cause lost: %v", err)
+	}
 	if !strings.Contains(err.Error(), "epic-x") {
 		t.Errorf("error should name the failing epic, got: %v", err)
-	}
-}
-
-// The title-fallback epic list failing (cache.AllEpics) must propagate too.
-func TestFindEpicForBead_EpicListErrorPropagates(t *testing.T) {
-	beadJSON := `[{"title":"[119] some bead","dependencies":[]}]`
-	stubBeadShow(t, map[string]string{"bead-1": beadJSON}, nil, "", errors.New("bd list unavailable"))
-
-	_, _, err := FindEpicForBead("bead-1")
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if errors.Is(err, ErrNoEpicLineage) {
-		t.Errorf("an epic-list failure must NOT read as ErrNoEpicLineage, got: %v", err)
 	}
 }
 
@@ -126,8 +114,8 @@ func TestFindEpicForBead_NoMatchIsNoLineage(t *testing.T) {
 // The happy path is unchanged: an epic-typed dependency with spec metadata
 // resolves the lineage.
 func TestFindEpicForBead_ResolvesViaEpicDependency(t *testing.T) {
-	beadJSON := `[{"title":"[119] some bead","dependencies":[{"id":"epic-x","issue_type":"epic"}]}]`
-	epicJSON := `[{"id":"epic-x","title":"[SPEC 119-test] epic","status":"open","issue_type":"epic","metadata":{"spec_num":119,"spec_title":"test"}}]`
+	beadJSON := `[{"title":"[119] some bead","dependencies":[{"id":"epic-x","issue_type":"epic","dependency_type":"parent-child"}]}]`
+	epicJSON := `[{"id":"epic-x","title":"[SPEC 119-test] epic","status":"open","issue_type":"epic","dependency_type":"parent-child","metadata":{"spec_num":119,"spec_title":"test"}}]`
 	stubBeadShow(t, map[string]string{"bead-1": beadJSON, "epic-x": epicJSON}, nil, "[]", nil)
 
 	epicID, specID, err := FindEpicForBead("bead-1")
@@ -136,5 +124,28 @@ func TestFindEpicForBead_ResolvesViaEpicDependency(t *testing.T) {
 	}
 	if epicID != "epic-x" || specID != "119-test" {
 		t.Errorf("got (%q, %q), want (epic-x, 119-test)", epicID, specID)
+	}
+}
+
+func TestFindEpicForBead_AllEpicScanFailureIsRealError(t *testing.T) {
+	cause := errors.New("all-epic read failed")
+	stubBeadShow(t, map[string]string{
+		"bead-1": `[{"dependencies":[{"id":"epic-x","issue_type":"epic","dependency_type":"parent-child"}]}]`,
+		"epic-x": `[{"id":"epic-x","metadata":{"spec_id":"119-test"}}]`,
+	}, nil, "", cause)
+	epic, spec, err := FindEpicForBead("bead-1")
+	if epic != "epic-x" || spec != "119-test" || !errors.Is(err, cause) || errors.Is(err, ErrNoEpicLineage) {
+		t.Fatalf("all-epic scan must preserve cause and refuse fallback: %s %s %v", epic, spec, err)
+	}
+}
+
+func TestFindEpicForBead_DuplicateBindingIsRealError(t *testing.T) {
+	stubBeadShow(t, map[string]string{
+		"bead-1": `[{"dependencies":[{"id":"epic-x","issue_type":"epic","dependency_type":"parent-child"}]}]`,
+		"epic-x": `[{"id":"epic-x","metadata":{"spec_id":"119-test"}}]`,
+	}, nil, `[{"id":"epic-x","metadata":{"spec_id":"119-test"}},{"id":"epic-y","status":"closed","metadata":{"spec_id":"119-test"}}]`, nil)
+	epic, spec, _, err := FindEpicLineageWithCache(NewCache(), "bead-1")
+	if epic != "epic-x" || spec != "119-test" || err == nil || errors.Is(err, ErrNoEpicLineage) || !strings.Contains(err.Error(), "epic-x, epic-y") {
+		t.Fatalf("duplicate binding must refuse fallback: %s %s %v", epic, spec, err)
 	}
 }

@@ -160,7 +160,7 @@ func TestFinalizeEpic_BindingWriteFailure_SuppressesCleanupAndConverges(t *testi
 	mainHashBefore := refHash(t, dir, "main")
 	mergeBindingFn = func(string, map[string]interface{}) error { return errSimulatedBindingWrite }
 
-	_, err := g.FinalizeEpic("epic-1", "121-fin", "spec/121-fin", []string{"mindspec-fbind.1"}, "", false)
+	_, err := g.FinalizeEpic("epic-1", "121-fin", "spec/121-fin", []string{"mindspec-fbind.1"}, "", false, false)
 	if err == nil {
 		t.Fatal("expected the binding-write failure to abort finalize")
 	}
@@ -200,7 +200,7 @@ func TestFinalizeEpic_BindingWriteFailure_SuppressesCleanupAndConverges(t *testi
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 
-	result, err := g.FinalizeEpic("epic-1", "121-fin", "spec/121-fin", []string{"mindspec-fbind.1"}, "", false)
+	result, err := g.FinalizeEpic("epic-1", "121-fin", "spec/121-fin", []string{"mindspec-fbind.1"}, "", false, false)
 	if err != nil {
 		t.Fatalf("re-run must converge, got: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestFinalizeEpic_AlreadyMergedUnboundReRunBinds(t *testing.T) {
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil } // absent
 
-	result, err := g.FinalizeEpic("epic-1", "121-g2", "spec/121-g2", []string{"mindspec-g2.1"}, "", false)
+	result, err := g.FinalizeEpic("epic-1", "121-g2", "spec/121-g2", []string{"mindspec-g2.1"}, "", false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestFinalizeEpic_AlreadyMergedAlreadyBoundSkipsRewrite(t *testing.T) {
 		}, nil
 	}
 
-	if _, err := g.FinalizeEpic("epic-1", "121-g2b", "spec/121-g2b", []string{"mindspec-g2b.1"}, "", false); err != nil {
+	if _, err := g.FinalizeEpic("epic-1", "121-g2b", "spec/121-g2b", []string{"mindspec-g2b.1"}, "", false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if writeCalls != 0 {
@@ -399,7 +399,7 @@ func TestFinalizeEpic_StaleBindingMismatchRewritesCorrectBinding(t *testing.T) {
 		return map[string]interface{}{"mindspec_landed_merge_sha": "1111111111111111111111111111111111111111"}, nil
 	}
 
-	if _, err := g.FinalizeEpic("epic-1", "121-g31", "spec/121-g31", []string{"mindspec-g31.1"}, "", false); err != nil {
+	if _, err := g.FinalizeEpic("epic-1", "121-g31", "spec/121-g31", []string{"mindspec-g31.1"}, "", false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if writeCalls != 1 {
@@ -442,7 +442,7 @@ func TestFinalizeEpic_StaleBindingOverwriteFailurePreservesBranch(t *testing.T) 
 		return map[string]interface{}{"mindspec_landed_merge_sha": "1111111111111111111111111111111111111111"}, nil
 	}
 
-	_, err := g.FinalizeEpic("epic-1", "121-g31f", "spec/121-g31f", []string{"mindspec-g31f.1"}, "", false)
+	_, err := g.FinalizeEpic("epic-1", "121-g31f", "spec/121-g31f", []string{"mindspec-g31f.1"}, "", false, false)
 	if err == nil {
 		t.Fatal("expected the failed correcting overwrite to refuse")
 	}
@@ -512,7 +512,7 @@ func TestFinalizeEpic_SpecWorktreeMissing_MergedUnboundBindsBeforeCleanup(t *tes
 		return nil
 	}
 
-	result, err := g.FinalizeEpic("epic-1", "121-g11", "spec/121-g11", []string{"mindspec-g11.1"}, "", false)
+	result, err := g.FinalizeEpic("epic-1", "121-g11", "spec/121-g11", []string{"mindspec-g11.1"}, "", false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -553,7 +553,7 @@ func TestFinalizeEpic_SpecWorktreeMissing_UnmergedRefusesNotDestroyed(t *testing
 		return nil
 	}
 
-	_, err := g.FinalizeEpic("epic-1", "121-g11u", "spec/121-g11u", []string{"mindspec-g11u.1"}, "", false)
+	_, err := g.FinalizeEpic("epic-1", "121-g11u", "spec/121-g11u", []string{"mindspec-g11u.1"}, "", false, false)
 	if err == nil {
 		t.Fatal("expected the unmerged-bead-with-missing-worktree state to refuse")
 	}
@@ -617,7 +617,7 @@ func TestFinalizeEpic_IsAncestorFailure_AbortsBeforeBindOrCleanup(t *testing.T) 
 		return nil
 	}
 
-	_, err := g.FinalizeEpic("epic-1", "121-ancerr", "spec/121-ancerr", []string{"mindspec-ancerr.1"}, "", false)
+	_, err := g.FinalizeEpic("epic-1", "121-ancerr", "spec/121-ancerr", []string{"mindspec-ancerr.1"}, "", false, false)
 	if err == nil {
 		t.Fatal("expected the IsAncestor infra failure to abort finalize")
 	}
@@ -836,7 +836,7 @@ func TestFinalizeEpic_AlreadyAncestorDefaultSubjectBinds(t *testing.T) {
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 
-	result, err := g.FinalizeEpic("epic-1", "125-ac1c", "spec/125-ac1c", []string{"mindspec-ac1c.1"}, "", false)
+	result, err := g.FinalizeEpic("epic-1", "125-ac1c", "spec/125-ac1c", []string{"mindspec-ac1c.1"}, "", false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -898,7 +898,7 @@ func TestFinalizeEpic_AutoMergeLegPersistsBindingOnSuccess(t *testing.T) {
 	}
 	mergeBindingReadFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
 
-	result, err := g.FinalizeEpic("epic-1", "125-ac1c-auto", "spec/125-ac1c-auto", []string{"mindspec-ac1c-auto.1"}, "", false)
+	result, err := g.FinalizeEpic("epic-1", "125-ac1c-auto", "spec/125-ac1c-auto", []string{"mindspec-ac1c-auto.1"}, "", false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1198,7 +1198,7 @@ func TestFinalizeEpic_ExistingBindingEmptySecondParentRewrites(t *testing.T) {
 		}, nil
 	}
 
-	if _, err := g.FinalizeEpic("epic-1", "125-g21e", "spec/125-g21e", []string{"mindspec-g21e.1"}, "", false); err != nil {
+	if _, err := g.FinalizeEpic("epic-1", "125-g21e", "spec/125-g21e", []string{"mindspec-g21e.1"}, "", false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if writeCalls != 1 {
@@ -1260,7 +1260,7 @@ func TestFinalizeEpic_ExistingBindingWrongSecondParentRewrites(t *testing.T) {
 		}, nil
 	}
 
-	if _, err := g.FinalizeEpic("epic-1", "125-g21w", "spec/125-g21w", []string{"mindspec-g21w.1"}, "", false); err != nil {
+	if _, err := g.FinalizeEpic("epic-1", "125-g21w", "spec/125-g21w", []string{"mindspec-g21w.1"}, "", false, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if writeCalls != 1 {
@@ -1433,7 +1433,7 @@ func testLandedBindingProducer(t *testing.T, scenario string) {
 	}
 	var err error
 	if scenario == "finalize with setter" {
-		_, err = g.FinalizeEpic("epic-review", specID, "spec/"+specID, []string{beadID}, "", false)
+		_, err = g.FinalizeEpic("epic-review", specID, "spec/"+specID, []string{beadID}, "", false, false)
 	} else {
 		err = g.CompleteBead(beadID, "spec/"+specID, "", "", false)
 		if g.landedReview != nil {
@@ -1507,7 +1507,7 @@ func TestEnsureLandedBinding_FinalizeKeepsKeys(t *testing.T) {
 				return nil
 			}
 			g.SetLandedReview("unused-reviewed-sha", "unused-panel@r9")
-			_, err := g.FinalizeEpic("epic-keep-review", specID, "spec/"+specID, []string{beadID}, "", false)
+			_, err := g.FinalizeEpic("epic-keep-review", specID, "spec/"+specID, []string{beadID}, "", false, false)
 			if !errors.Is(err, stopAfterBinding) || writes != 1 {
 				t.Fatalf("expected one real FinalizeEpic re-bind: err=%v writes=%d", err, writes)
 			}

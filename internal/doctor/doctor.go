@@ -11,7 +11,7 @@ const (
 	Error          // something is wrong and needs action
 	Warn           // advisory, not a failure
 	Fixed          // was broken, auto-repaired by --fix
-	Info           // information, not a failure
+	Info           // information only; not a failure and never auto-repaired
 )
 
 // Check represents a single health check result.
@@ -125,6 +125,7 @@ func RunWithOptions(root string, opts Options) *Report {
 	// symbol the generated `mindspec instruct` guidance invokes
 	// (P8/AC-12/AC-15).
 	checkLifecycleIntegrity(r, root)
+	checkLineage(r, root)
 	checkBeadsConfigDrift(r, root, opts.Force)
 	checkStrayRootJSONL(r, root)
 	checkDurabilityRisk(r, root)
