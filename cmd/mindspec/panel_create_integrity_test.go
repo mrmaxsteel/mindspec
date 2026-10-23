@@ -74,7 +74,11 @@ func TestPanelCreate_RefusesSameRoundWithVerdicts(t *testing.T) {
 	for _, gate := range []string{"bead", "final_review", "adhoc", "plan_approve"} {
 		t.Run(gate, func(t *testing.T) {
 			root := setupCreateIntegrity(t)
-			args := []string{"create", "demo", "--gate", gate, "--target", "bead/probe-x.1"}
+			target := "bead/probe-x.1"
+			if panel.IsLifecycleGate(gate) {
+				target = "spec/900-demo"
+			}
+			args := []string{"create", "demo", "--gate", gate, "--target", target}
 			if gate != "adhoc" {
 				args = append(args, "--spec", "900-demo")
 			}
@@ -155,9 +159,9 @@ func TestPanelCreate_BeadTargetRefusals(t *testing.T) {
 		{"invalid id", "bead", "bead/probe/x", ""},
 		{"option id", "bead", "bead/-probe", ""},
 		{"mismatch", "bead", "bead/probe-x.1", "probe-y.1"},
-		{"spec gate", "spec_approve", "bead/probe-x.1", "probe-x.1"},
-		{"plan gate", "plan_approve", "bead/probe-x.1", "probe-x.1"},
-		{"final gate", "final_review", "bead/probe-x.1", "probe-x.1"},
+		{"spec gate", "spec_approve", "spec/900-demo", "probe-x.1"},
+		{"plan gate", "plan_approve", "spec/900-demo", "probe-x.1"},
+		{"final gate", "final_review", "spec/900-demo", "probe-x.1"},
 		{"adhoc gate", "adhoc", "bead/probe-x.1", "probe-x.1"},
 		{"omitted gate", "", "bead/probe-x.1", "probe-x.1"},
 	} {

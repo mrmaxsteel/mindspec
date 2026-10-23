@@ -144,6 +144,10 @@ func TestGate_SubjectTreeStaleness(t *testing.T) {
 				subjectGit(t, root, "init", "-q", "-b", "main")
 				reviewedSHA := subjectCommit(t, root, ".mindspec/specs/130/spec.md", "base")
 				target, beadID := "main", ""
+				if IsLifecycleGate(gate) {
+					target = "spec/130"
+					subjectGit(t, root, "switch", "-qc", target)
+				}
 				if gate == "bead" {
 					beadID = "mindspec-subject.1"
 					target = "bead/" + beadID

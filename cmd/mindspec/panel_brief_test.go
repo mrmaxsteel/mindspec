@@ -27,6 +27,7 @@ func newBriefFixture(t *testing.T, spec, cfg string) (string, string) {
 	subjectCLIGit(t, root, "commit", "-qm", "reviewed fixture")
 	sha := subjectCLIGit(t, root, "rev-parse", "HEAD")
 	subjectCLIGit(t, root, "branch", "bead/mindspec-brief.1")
+	subjectCLIGit(t, root, "branch", "spec/901-brief")
 	withTestChdir(t, root)
 	config.ResetCache()
 	t.Cleanup(config.ResetCache)
@@ -39,6 +40,9 @@ func runBriefCreate(t *testing.T, gate string) (string, error) {
 	resetPanelCreateFlags(t)
 	fileAtRefForPanelBriefFn = readAtRef
 	target := "HEAD"
+	if panel.IsLifecycleGate(gate) {
+		target = "spec/901-brief"
+	}
 	args := []string{"create", "p", "--gate", gate}
 	if gate != "adhoc" {
 		args = append(args, "--spec", "901-brief")

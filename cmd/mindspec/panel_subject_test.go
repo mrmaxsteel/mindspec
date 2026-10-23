@@ -82,6 +82,10 @@ func TestPanelConsumers_SubjectTreeParity(t *testing.T) {
 					subjectCLIGit(t, root, "add", "-A")
 					subjectCLIGit(t, root, "commit", "-qm", "base")
 					target := "main"
+					if panel.IsLifecycleGate(gate) {
+						target = "spec/130-example"
+						subjectCLIGit(t, root, "switch", "-qc", target)
+					}
 					bead := gate == "bead"
 					if bead || gate == "" || gateCase == "adhoc bead" || gateCase == "adhoc bead target" {
 						target = "bead/mindspec-subject.1"

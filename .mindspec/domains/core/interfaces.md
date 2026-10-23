@@ -493,3 +493,10 @@ A lettered ID keeps its letter. The numeric format applies only to the legacy pa
 `Cache.FindEpicBySpecID` checks all epics, including closed epics, before
 it stores a match. Duplicate bindings refuse that spec and name all matching
 epics. The cache stores these resolution errors. It retries I/O errors.
+
+### Panel presence policy
+
+`Enforcement.PanelPresence` accepts `warn` and `enforce`. The default is
+`warn`. Config load refuses other values and names
+`enforcement.panel_presence`. The policy controls only a missing panel.
+A registered panel with a failed decision leg still refuses.

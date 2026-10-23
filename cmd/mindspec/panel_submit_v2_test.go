@@ -50,7 +50,7 @@ func newCLIV2(t *testing.T) cliV2Fixture {
 	t.Cleanup(config.ResetCache)
 	stubNonBeadRevParse(t, func(string, string) (string, error) { return paneltest.ReviewedSHA, nil })
 	dir := filepath.Join(root, "review", "p")
-	in := panel.CreateInput{Spec: "900-test", Target: "main", Gate: "final_review", Round: 1, ReviewedHeadSHA: paneltest.ReviewedSHA, SubjectDigest: "sha256:test", Roster: []panel.RosterSlot{{Slot: "R1", Family: "harness", Model: "m", Lens: "one"}, {Slot: "R2", Family: "harness", Model: "m", Lens: "two"}}}
+	in := panel.CreateInput{Spec: "900-test", Target: "spec/900-test", Gate: "final_review", Round: 1, ReviewedHeadSHA: paneltest.ReviewedSHA, SubjectDigest: "sha256:test", Roster: []panel.RosterSlot{{Slot: "R1", Family: "harness", Model: "m", Lens: "one"}, {Slot: "R2", Family: "harness", Model: "m", Lens: "two"}}}
 	if err := panel.Create(dir, in); err != nil {
 		t.Fatal(err)
 	}

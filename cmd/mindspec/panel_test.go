@@ -113,7 +113,7 @@ func resetPanelCreateFlags(t *testing.T) {
 		spec, _ := panelCreateCmd.Flags().GetString("spec")
 		var listing strings.Builder
 		for _, specs := range []string{".mindspec/specs", ".mindspec/docs/specs", "docs/specs"} {
-			fmt.Fprintf(&listing, "100644 blob abc123\t%s/%s/spec.md\n", specs, spec)
+			fmt.Fprintf(&listing, "100644 blob abc123\t%s/%s/context.md\n", specs, spec)
 		}
 		return listing.String(), nil
 	}
@@ -1909,7 +1909,7 @@ func TestPanelCreate_GateStampsPerGateDefaults(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"panel", "create", "p113g", "--spec", "113-test", "--target", "spec/113-x", "--gate", "final_review"})
+	rootCmd.SetArgs([]string{"panel", "create", "p113g", "--spec", "113-test", "--target", "spec/113-test", "--gate", "final_review"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("panel create --gate final_review: %v\nstderr=%s", err, stderr.String())
 	}
@@ -2164,7 +2164,7 @@ func TestPanelCreate_GateAdvisoryReadThrough(t *testing.T) {
 	var createOut, createErr bytes.Buffer
 	rootCmd.SetOut(&createOut)
 	rootCmd.SetErr(&createErr)
-	rootCmd.SetArgs([]string{"panel", "create", "p113-advisory", "--spec", "113-test", "--target", "spec/113-x", "--gate", "final_review"})
+	rootCmd.SetArgs([]string{"panel", "create", "p113-advisory", "--spec", "113-test", "--target", "spec/113-test", "--gate", "final_review"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("panel create --gate final_review: %v\nstderr=%s", err, createErr.String())
 	}

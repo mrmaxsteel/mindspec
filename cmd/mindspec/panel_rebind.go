@@ -123,7 +123,7 @@ func panelRebindRunE(cmd *cobra.Command, args []string) error {
 		}
 	}
 	subject := panel.Subject(p.Gate, panel.PanelSpecDir(reg.Dir, filepath.Join(workspace.SpecsDir(root), p.Spec)))
-	digest, err := panel.SubjectTreeReader(exec.LsTree)(scanRoot, tip, subject)
+	digest, err := panelSubjectReader(scanRoot, p.Gate, panel.PanelSpecDir(reg.Dir, filepath.Join(workspace.SpecsDir(root), p.Spec)), exec.LsTree)(scanRoot, tip, subject)
 	if err != nil {
 		return refuse(err)
 	}

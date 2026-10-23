@@ -20,7 +20,7 @@ func createRoster(n int) []RosterSlot {
 	return slots
 }
 func roundCreateInput() CreateInput {
-	return CreateInput{Spec: "130", Target: "main", Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:fixture", Gate: "final_review", Roster: createRoster(4)}
+	return CreateInput{Spec: "130", Target: "spec/130", Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:fixture", Gate: "final_review", Roster: createRoster(4)}
 }
 func createMust(t *testing.T, dir string, in CreateInput) {
 	t.Helper()
