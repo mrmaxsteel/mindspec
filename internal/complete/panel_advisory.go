@@ -221,6 +221,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 		facts := panel.ResolveGateFacts(regs[i], beadID, scanRoot, panel.GateIO{
 			SpecDir:       filepath.Join(workspace.SpecsDir(root), regs[i].Panel.Spec),
 			SubjectTree:   gateSubjectTreeFn,
+			ArtifactTree:  gateExecutor.LsTree,
 			RevParse:      gateRevParseFn,
 			Status:        gateStatusFn,
 			IsRefNotFound: gateIsRefNotFoundFn,
