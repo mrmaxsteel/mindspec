@@ -184,35 +184,7 @@ func trackedPlanDeferralIDs(worktree, specID string, exec executor.Executor, ids
 }
 
 func planResolutionsSection(content string) string {
-	inSection := false
-	var section, block []string
-	end := 0
-	flush := func() {
-		if len(block) > 0 {
-			section = append(section, strings.Join(block, "\n"))
-			block = nil
-		}
-	}
-	for _, line := range panel.MarkdownLines(content) {
-		if line.Level > 0 && line.Level <= 2 {
-			flush()
-			inSection = line.Level == 2 && line.Heading == "Resolutions"
-			continue
-		}
-		if !inSection {
-			continue
-		}
-		// A blank line or a new item ends an incomplete inline construct.
-		gap := content[end:line.Offset]
-		raw := content[line.Offset:line.End]
-		if strings.ContainsAny(gap, "\r\n") || resolutionListItem.MatchString(raw) {
-			flush()
-		}
-		block = append(block, line.Text)
-		end = line.End
-	}
-	flush()
-	return resolutionBlocksText(section)
+	return resolutionDocumentText(content)
 }
 
 func resolutionNamesID(section, id string) bool {

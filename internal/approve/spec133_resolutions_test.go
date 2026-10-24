@@ -449,6 +449,14 @@ var resolutionInlineCorpus = []struct {
 	ids        []string
 	want       bool
 }{
+	{"boundary autolink label", "See [a <https://x/> b](plan-one) done.\n", []string{"plan-one"}, false},
+	{"boundary autolink bracket", "See [a <https://x/]> b](plan-one) done.\n", []string{"plan-one"}, false},
+	{"boundary html label", "See [a <b> c](plan-one).\n", []string{"plan-one"}, false},
+	{"boundary code label", "See [a `c` d](plan-one).\n", []string{"plan-one"}, false},
+	{"boundary unmatched backticks", "See ``[x](`plan-one) done.\n", []string{"plan-one"}, false},
+	{"boundary literal backticks control", "See ``[x](`u) plan-one done.\n", []string{"plan-one"}, true},
+	{"boundary lowercase declaration", "See <!plan-one> done.\n", []string{"plan-one"}, false},
+	{"boundary lowercase doctype", "See <!doctype plan-one> done.\n", []string{"plan-one"}, false},
 	{"grammar unicode full fold", "See ![plan-one][Straße].\n\n[STRASSE]: /u\n", []string{"plan-one"}, false},
 	{"grammar unicode simple fold", "See ![plan-one][Σ].\n\n[ς]: /u\n", []string{"plan-one"}, false},
 	{"grammar reference nonbreaking space", "See ![plan-one][a b].\n\n[a\u00a0b]: /u\n", []string{"plan-one"}, true},
@@ -495,7 +503,7 @@ var resolutionInlineCorpus = []struct {
 	{"grammar invalid angle newline", "[a](<b\nplan-one>)\n", []string{"plan-one"}, false},
 	{"grammar invalid bare newline", "[a](plan-one\nmore)\n", []string{"plan-one"}, true},
 	{"grammar invalid angle missing separator", "[a](<u>plan-one)\n", []string{"plan-one"}, true},
-	{"grammar autolink label bracket", "[a <https://x/]> b](plan-one)\n", []string{"plan-one"}, true},
+	{"grammar autolink label bracket", "[a <https://x/]> b](plan-one)\n", []string{"plan-one"}, false},
 	{"grammar reference normalization", "See [decision][ PLAN-ONE ].\n\n[plan-one]: /u\n", []string{"plan-one"}, false},
 	{"grammar collapsed image", "See ![plan-one][].\n\n[PLAN-ONE]: /u\n", []string{"plan-one"}, false},
 	{"grammar shortcut image", "See ![plan-one].\n\n[PLAN-ONE]: /u\n", []string{"plan-one"}, false},
@@ -603,39 +611,8 @@ func TestS133Resolutions_InlineApprovePlan(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		for _, tc := range resolutionInlineCorpus {
 			t.Run(policy+"/"+tc.name, func(t *testing.T) {
-				f := s133Document(t, policy, "plan_approve", "absent")
-				f.meta["plan_deferral_ids"] = tc.ids
 				content := strings.Replace(strings.ReplaceAll(validSingleBeadPlan, "042-test", s133DocID), "version: \"1.0\"", "version: \"1.0\"\nadr_citations: [ADR-0001]", 1)
-				f.writePlan(content + "\n## Resolutions\n\n" + tc.body)
-				f.commit("inline resolutions")
-				f.seed("plan_approve", "pass")
-				f.exec.commits = 0
-				f.mutations = nil
-				before := f.read("plan.md")
-				head := preflightGit(t, f.root, "rev-parse", "HEAD")
-				metadata, err := json.Marshal(f.meta)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, err = f.approve("plan_approve")
-				if tc.want {
-					if err != nil || f.creates != 1 {
-						t.Fatalf("visible ids refused: %v; creates=%d", err, f.creates)
-					}
-				} else {
-					if err == nil || !strings.Contains(err.Error(), "hidden text") || f.creates != 0 {
-						t.Fatalf("hidden ids did not refuse clearly: %v; creates=%d", err, f.creates)
-					}
-					afterMetadata, marshalErr := json.Marshal(f.meta)
-					if marshalErr != nil || string(metadata) != string(afterMetadata) || f.closes != 0 || f.exec.commits != 0 || len(f.mutations) != 0 || before != f.read("plan.md") || head != preflightGit(t, f.root, "rev-parse", "HEAD") {
-						t.Errorf("inline refusal changed lifecycle state: mutations=%v, metadata error=%v", f.mutations, marshalErr)
-					}
-					for _, id := range tc.ids {
-						if !strings.Contains(err.Error(), id) {
-							t.Errorf("refusal omits %s: %v", id, err)
-						}
-					}
-				}
+				checkResolutionApprovePlan(t, policy, content+"\n## Resolutions\n\n"+tc.body, tc.ids, tc.want)
 			})
 		}
 	}
@@ -709,5 +686,107 @@ func TestS133Resolutions_LinkTargetGrammar(t *testing.T) {
 				t.Fatalf("target end=%d, want %d", end, len(tc.target))
 			}
 		})
+	}
+}
+
+func checkResolutionApprovePlan(t *testing.T, policy, content string, ids []string, want bool) {
+	t.Helper()
+	f := s133Document(t, policy, "plan_approve", "absent")
+	f.meta["plan_deferral_ids"] = ids
+	f.writePlan(content)
+	f.commit("inline resolutions")
+	f.seed("plan_approve", "pass")
+	f.exec.commits = 0
+	f.mutations = nil
+	before := f.read("plan.md")
+	head := preflightGit(t, f.root, "rev-parse", "HEAD")
+	metadata, err := json.Marshal(f.meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.approve("plan_approve")
+	if want {
+		if err != nil || f.creates != 1 {
+			t.Fatalf("visible ids refused: %v; creates=%d", err, f.creates)
+		}
+	} else {
+		if err == nil || !strings.Contains(err.Error(), "hidden text") || f.creates != 0 {
+			t.Fatalf("hidden ids did not refuse clearly: %v; creates=%d", err, f.creates)
+		}
+		afterMetadata, marshalErr := json.Marshal(f.meta)
+		if marshalErr != nil || string(metadata) != string(afterMetadata) || f.closes != 0 || f.exec.commits != 0 || len(f.mutations) != 0 || before != f.read("plan.md") || head != preflightGit(t, f.root, "rev-parse", "HEAD") {
+			t.Errorf("inline refusal changed lifecycle state: mutations=%v, metadata error=%v", f.mutations, marshalErr)
+		}
+		for _, id := range ids {
+			if !strings.Contains(err.Error(), id) {
+				t.Errorf("refusal omits %s: %v", id, err)
+			}
+		}
+	}
+}
+
+var resolutionDocumentCorpus = []struct {
+	name, doc string
+	want      bool
+}{
+	{"boundary autolink label", "# P\n\n## Resolutions\n\nSee [a <https://x/> b](plan-one) done.\n", false},
+	{"boundary autolink bracket", "# P\n\n## Resolutions\n\nSee [a <https://x/]> b](plan-one) done.\n", false},
+	{"boundary unmatched backticks", "# P\n\n## Resolutions\n\nSee ``[x](`plan-one) done.\n", false},
+	{"boundary lowercase declaration", "# P\n\n## Resolutions\n\nSee <!plan-one> done.\n", false},
+	{"boundary lowercase doctype", "# P\n\n## Resolutions\n\nSee <!doctype plan-one> done.\n", false},
+	{"boundary definition before section", "# P\n\n[r]: /u\n\n## Resolutions\n\nSee ![plan-one][r].\n", false},
+	{"boundary definition after section", "# P\n\n## Resolutions\n\nSee ![plan-one][r].\n\n## Other\n\n[r]: /u\n", false},
+	{"boundary definition after heading", "# P\n\n## Resolutions\n\nSee ![plan-one][r].\n### H\n[r]: /u\n", false},
+	{"boundary definition after thematic break", "# P\n\n## Resolutions\n\nSee ![plan-one][r].\n***\n[r]: /u\n", false},
+	{"boundary definition in quote", "# P\n\n## Resolutions\n\nSee ![plan-one][r].\n\nintro\n> [r]: /u\n", false},
+	{"boundary paragraph definition control", "# P\n\n## Resolutions\n\nSee [plan-one][r].\nintro\n[r]: /u\n", true},
+	{"boundary quote interrupts", "# P\n\n## Resolutions\n\nSee [x](u\n> \"plan-one\")\n", true},
+	{"boundary plain control", "# P\n\n## Resolutions\n\n- plan-one: fixed.\n", true},
+	{"boundary suffix definition before", "# P\n\n[plan-one]: /u\n\n## Resolutions\n\nSee [decision][plan-one].\n", false},
+	{"boundary suffix definition after", "# P\n\n## Resolutions\n\nSee [decision][plan-one].\n\n## Other\n\n[plan-one]: /u\n", false},
+	{"boundary quote continuation control", "## Resolutions\n\n> See [x](u\n> \"plan-one\")\n", false},
+	{"boundary nested quote interrupts", "## Resolutions\n\n> See [x](u \"\n>> plan-one\")\n", true},
+	{"boundary quote ends", "## Resolutions\n\n> See [x](u \"\n\nplan-one\")\n", true},
+	{"boundary list interrupts", "## Resolutions\n\nSee [x](u \"\n- plan-one\")\n", true},
+	{"boundary quoted list interrupts", "## Resolutions\n\n> See [x](u \"\n> - plan-one\")\n", true},
+	{"boundary heading interrupts", "## Resolutions\n\nSee [x](u \"\n### H\nplan-one\")\n", true},
+	{"boundary thematic break interrupts", "## Resolutions\n\nSee [x](u \"\n***\nplan-one\")\n", true},
+	{"boundary fence interrupts", "## Resolutions\n\nSee [x](u \"\n```\nhidden\n```\nplan-one\")\n", true},
+	{"boundary quote blank definition", "## Resolutions\n\nSee ![plan-one][r].\n\n> intro\n>\n> [r]: /u\n", false},
+	{"boundary list definition", "## Resolutions\n\nSee ![plan-one][r].\n\nintro\n- [r]: /u\n", false},
+	{"boundary ordered paragraph control", "## Resolutions\n\nintro\n2. text\n[r]: /u\n\nSee ![plan-one][r].\n", true},
+	{"boundary fenced definition control", "```\n[r]: /u\n```\n\n## Resolutions\n\nSee ![plan-one][r].\n", true},
+	{"boundary definition after heading 1", "# H\n[r]: /u\n\n## Resolutions\n\nSee ![plan-one][r].\n", false},
+	{"boundary definition after heading 2", "## H\n[r]: /u\n\n## Resolutions\n\nSee ![plan-one][r].\n", false},
+	{"boundary definition after heading 4", "#### H\n[r]: /u\n\n## Resolutions\n\nSee ![plan-one][r].\n", false},
+	{"boundary definition after heading 5", "##### H\n[r]: /u\n\n## Resolutions\n\nSee ![plan-one][r].\n", false},
+	{"boundary definition after heading 6", "###### H\n[r]: /u\n\n## Resolutions\n\nSee ![plan-one][r].\n", false},
+	{"boundary nonbreaking blank control", "## Resolutions\n\nintro\n\u00a0\n[r]: /u\n\nSee ![plan-one][r].\n", true},
+	{"boundary nonbreaking thematic control", "## Resolutions\n\nintro\n\u00a0***\n[r]: /u\n\nSee ![plan-one][r].\n", true},
+	{"boundary ordered tab title control", "## Resolutions\n\nSee [x](u \"\n2.\tplan-one\")\n", false},
+	{"boundary ordered comment title control", "## Resolutions\n\nSee [x](u \"\n2. <!-- hidden -->plan-one\")\n", false},
+	{"boundary comment list interrupts", "## Resolutions\n\nSee [x](u \"\n- <!-- hidden -->- plan-one\")\n", true},
+	{"boundary comment quote interrupts", "## Resolutions\n\nSee [x](u \"\n> <!-- hidden -->> plan-one\")\n", true},
+}
+
+func TestS133Resolutions_DocumentCorpus(t *testing.T) {
+	for _, tc := range resolutionDocumentCorpus {
+		t.Run(tc.name, func(t *testing.T) {
+			section := planResolutionsSection(tc.doc)
+			if got := resolutionNamesID(section, "plan-one"); got != tc.want {
+				t.Fatalf("counts=%v, want %v; section=%q", got, tc.want, section)
+			}
+		})
+	}
+}
+
+func TestS133Resolutions_DocumentApprovePlan(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		for _, tc := range resolutionDocumentCorpus {
+			t.Run(policy+"/"+tc.name, func(t *testing.T) {
+				content := strings.Replace(strings.ReplaceAll(validSingleBeadPlan, "042-test", s133DocID), "version: \"1.0\"", "version: \"1.0\"\nadr_citations: [ADR-0001]", 1)
+				checkResolutionApprovePlan(t, policy, content+"\n"+tc.doc, []string{"plan-one"}, tc.want)
+			})
+		}
 	}
 }

@@ -5,9 +5,82 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
-var resolutionListItem = regexp.MustCompile(`^[ \t]*(?:[-+*]|[0-9]+[.)])(?:[ \t\r\n]|$)`)
+var resolutionContainerMarker = regexp.MustCompile(`^(?:>[ \t]?|(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]+|$))`)
+var resolutionHeading = regexp.MustCompile(`^ {0,3}#{1,6}(?:[ \t]|$)`)
+
+// Keep block boundaries before parsing inline text. Read definitions from all sections.
+func resolutionDocumentText(content string) string {
+	inSection := false
+	var all, section, block []string
+	end, quoteDepth := 0, 0
+	flush := func() {
+		if len(block) == 0 {
+			return
+		}
+		text := strings.Join(block, "\n")
+		all = append(all, text)
+		if inSection {
+			section = append(section, text)
+		}
+		block = nil
+	}
+	for _, line := range panel.MarkdownLines(content) {
+		raw := content[line.Offset:line.End]
+		depth, item := resolutionContainers(raw, line.Text)
+		gap := content[end:line.Offset]
+		separate := resolutionHeading.MatchString(line.Text) || resolutionThematicBreak(line.Text)
+		if strings.ContainsAny(gap, "\r\n") || depth != quoteDepth || item || separate || line.Level > 0 {
+			flush()
+		}
+		if line.Level > 0 && line.Level <= 2 {
+			inSection = line.Level == 2 && line.Heading == "Resolutions"
+			all = append(all, line.Text)
+		} else if strings.Trim(line.Text, " \t\r") == "" {
+			flush()
+		} else {
+			block = append(block, line.Text)
+		}
+		if separate || line.Level > 0 {
+			flush()
+		}
+		end, quoteDepth = line.End, depth
+	}
+	flush()
+	references := make(map[string]bool)
+	resolutionBlockBodies(all, references)
+	return resolutionRenderBlocks(resolutionBlockBodies(section, references), references)
+}
+
+// The block scanner removes container markers from Text. Count only that prefix.
+func resolutionContainers(raw, text string) (quotes int, item bool) {
+	// Keep markers literal while the block scanner expands tabs and removes comments.
+	// The four-column prefix preserves the source tab stops.
+	raw = panel.MarkdownLines("text" + raw)[0].Text[4:]
+	raw = strings.Trim(raw, " \t\r\n")
+	text = strings.Trim(text, " \t\r\n")
+	for raw != text {
+		marker := resolutionContainerMarker.FindString(raw)
+		if marker == "" {
+			break
+		}
+		if marker[0] == '>' {
+			quotes++
+		} else {
+			item = true
+		}
+		raw = strings.TrimLeft(raw[len(marker):], " \t")
+	}
+	return quotes, item
+}
+
+func resolutionThematicBreak(text string) bool {
+	text = strings.ReplaceAll(strings.ReplaceAll(strings.Trim(text, " \t\r\n"), " ", ""), "\t", "")
+	return len(text) >= 3 && strings.ContainsRune("-*_", rune(text[0])) && strings.Trim(text, text[:1]) == ""
+}
 
 // resolutionVisibleText keeps link labels and code spans.
 // It hides complete link targets, images, definitions and raw HTML tags.
@@ -18,6 +91,11 @@ func resolutionVisibleText(text string) string {
 // Collect definitions before scanning links. Definitions can follow their uses.
 func resolutionBlocksText(blocks []string) string {
 	references := make(map[string]bool)
+	bodies := resolutionBlockBodies(blocks, references)
+	return resolutionRenderBlocks(bodies, references)
+}
+
+func resolutionBlockBodies(blocks []string, references map[string]bool) []string {
 	bodies := make([]string, 0, len(blocks))
 	for _, text := range blocks {
 		i := 0
@@ -31,6 +109,10 @@ func resolutionBlocksText(blocks []string) string {
 		}
 		bodies = append(bodies, text[i:])
 	}
+	return bodies
+}
+
+func resolutionRenderBlocks(bodies []string, references map[string]bool) string {
 	for i, text := range bodies {
 		bodies[i] = resolutionInlineText(text, references)
 	}
@@ -62,13 +144,22 @@ func resolutionInlineText(text string, references map[string]bool) string {
 			i = end
 			continue
 		}
+		if text[i] == '`' {
+			// An unmatched run is literal in full. Do not start a span inside it.
+			end := i + 1
+			for end < len(text) && text[end] == '`' {
+				end++
+			}
+			visible = append(visible, text[i:end]...)
+			i = end
+			continue
+		}
 		if end := resolutionHTMLEnd(text, i); end > i {
 			i = end
 			continue
 		}
 		if end := resolutionAutolinkEnd(text, i); end > i {
 			visible = append(visible, text[i:end]...)
-			deactivateLinks()
 			i = end
 			continue
 		}
@@ -479,7 +570,7 @@ func resolutionAutolinkEnd(text string, start int) int {
 }
 
 // Match complete raw inline HTML. Autolinks do not match these forms.
-var resolutionHTML = regexp.MustCompile(`(?s)^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\r\n]*=[ \t\r\n]*(?:[^ \t\r\n"'=<>` + "`" + `]+|'[^']*'|"[^"]*"))?)*[ \t\r\n]*/?>|</[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>|<!--(?:[^-]|-[^-])*-->|<\?.*?\?>|<![A-Z]+[ \t\r\n]+[^>]*>|<!\[CDATA\[.*?\]\]>)`)
+var resolutionHTML = regexp.MustCompile(`(?s)^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\r\n]*=[ \t\r\n]*(?:[^ \t\r\n"'=<>` + "`" + `]+|'[^']*'|"[^"]*"))?)*[ \t\r\n]*/?>|</[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>|<!--(?:[^-]|-[^-])*-->|<\?.*?\?>|<![A-Za-z][^>]*>|<!\[CDATA\[.*?\]\]>)`)
 
 func resolutionHTMLEnd(text string, start int) int {
 	if text[start] != '<' {
