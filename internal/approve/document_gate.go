@@ -184,27 +184,81 @@ func trackedPlanDeferralIDs(worktree, specID string, exec executor.Executor, ids
 }
 
 func planResolutionsSection(content string) string {
-	inSection, fenced := false, false
+	inSection, inComment := false, false
+	var fenceByte byte
+	fenceLength := 0
 	var section []string
 	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			fenced = !fenced
+		if fenceLength > 0 {
+			char, length, rest := resolutionFence(line)
+			if char == fenceByte && length >= fenceLength && strings.Trim(rest, " \t\r") == "" {
+				fenceLength = 0
+			}
+			continue
 		}
-		if !fenced {
-			if trimmed == "## Resolutions" {
-				inSection = true
-				continue
-			}
-			if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "# ") {
-				inSection = false
-			}
+		line = resolutionCommentText(line, &inComment)
+		char, length, rest := resolutionFence(line)
+		if length >= 3 && (char != '`' || !strings.ContainsRune(rest, '`')) {
+			fenceByte, fenceLength = char, length
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "## Resolutions" {
+			inSection = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "# ") {
+			inSection = false
 		}
 		if inSection {
 			section = append(section, line)
 		}
 	}
 	return strings.Join(section, "\n")
+}
+
+// resolutionFence reads a fence after at most three leading spaces.
+func resolutionFence(line string) (char byte, length int, rest string) {
+	indent := 0
+	for indent < len(line) && line[indent] == ' ' {
+		indent++
+	}
+	if indent > 3 || indent == len(line) || (line[indent] != '`' && line[indent] != '~') {
+		return 0, 0, ""
+	}
+	line = line[indent:]
+	char = line[0]
+	for length < len(line) && line[length] == char {
+		length++
+	}
+	return char, length, line[length:]
+}
+
+// resolutionCommentText keeps visible text and separates words across comments.
+func resolutionCommentText(line string, inComment *bool) string {
+	var visible strings.Builder
+	for line != "" {
+		if *inComment {
+			end := strings.Index(line, "-->")
+			if end < 0 {
+				break
+			}
+			line = line[end+3:]
+			*inComment = false
+			visible.WriteByte(' ')
+			continue
+		}
+		start := strings.Index(line, "<!--")
+		if start < 0 {
+			visible.WriteString(line)
+			break
+		}
+		visible.WriteString(line[:start])
+		visible.WriteByte(' ')
+		line = line[start+4:]
+		*inComment = true
+	}
+	return visible.String()
 }
 
 func resolutionNamesID(section, id string) bool {

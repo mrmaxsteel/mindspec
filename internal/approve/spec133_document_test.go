@@ -295,6 +295,20 @@ func TestS133DocGate_PlanApproveBeforeFirstWrite(t *testing.T) {
 	}
 }
 
+func TestS133DocGate_PlanGateBeforeMigration(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		t.Run(policy, func(t *testing.T) {
+			f := s133Document(t, policy, "plan_approve", "reject")
+			delete(f.meta, "mindspec_phase")
+			delete(f.meta, phase.PhaseSemanticsV2MarkerKey)
+			f.unchanged("plan_approve", func() error { _, err := f.approve("plan_approve"); return err })
+			if _, err := os.Stat(filepath.Join(f.root, phase.PhaseLockRelPath)); !os.IsNotExist(err) {
+				t.Fatalf("document refusal reached migration lock: %v", err)
+			}
+		})
+	}
+}
+
 func TestS133DocGate_FailingLegs(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		for _, gate := range []string{"spec_approve", "plan_approve"} {

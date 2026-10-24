@@ -1,19 +1,22 @@
 package approve
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
+	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
 func TestS133Resolutions_ApprovalObligations(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
-		for _, state := range []string{"live", "abandoned", "deleted ledger", "replaced", "ledger only", "outside section", "id prefix", "all named"} {
+		for _, state := range []string{"live", "abandoned", "deleted ledger", "replaced", "ledger only", "outside section", "id prefix", "fenced ids", "comment ids", "all named"} {
 			t.Run(policy+"/"+state, func(t *testing.T) {
 				f := s133Document(t, policy, "spec_approve", "unresolved")
 				id := f.deferFinding(false)
@@ -70,6 +73,10 @@ func TestS133Resolutions_ApprovalObligations(t *testing.T) {
 					content += "Resolve `" + id + "` and `plan-epic-only`.\n"
 				} else if state == "id prefix" {
 					content += id + "-extra plan-epic-only-extra\n"
+				} else if state == "fenced ids" {
+					content += "````md\n```\n" + id + " plan-epic-only\n```\n````\n"
+				} else if state == "comment ids" {
+					content += "<!--\n" + id + " plan-epic-only\n-->\n"
 				} else {
 					content += "None.\n"
 				}
@@ -112,6 +119,143 @@ func TestS133Resolutions_SectionBoundary(t *testing.T) {
 	}
 	if !resolutionNamesID(planResolutionsSection("## Resolutions\n### Decision\nResolve `plan-one`.\n"), "plan-one") {
 		t.Fatal("nested resolution did not name id")
+	}
+}
+
+func TestS133Resolutions_HiddenMarkdown(t *testing.T) {
+	for _, tc := range []struct{ name, text string }{
+		{"shorter backticks", "````md\n```\n## Resolutions\nplan-one\n```\n````\n"},
+		{"different fence character", "~~~md\n```\n## Resolutions\nplan-one\n~~~\n"},
+		{"closing fence info", "```md\n```text\n## Resolutions\nplan-one\n```\n"},
+		{"indented closing fence", "```md\n    ```\n## Resolutions\nplan-one\n```\n"},
+		{"comment heading", "<!--\n## Resolutions\nplan-one\n-->\n"},
+		{"single line comment heading", "<!-- ## Resolutions plan-one -->\n"},
+		{"fenced id", "## Resolutions\n```\nplan-one\n```\n"},
+		{"tilde fenced id", "## Resolutions\n~~~\nplan-one\n~~~\n"},
+		{"comment id", "## Resolutions\n<!-- plan-one -->\n"},
+		{"multiline comment id", "## Resolutions\n<!--\nplan-one\n-->\n"},
+		{"comment boundary", "## Resolutions\n<!--\n## Appendix\n-->\nNone.\n"},
+		{"comment inside fence", "```\n<!--\n```\n## Appendix\nplan-one\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if resolutionNamesID(planResolutionsSection(tc.text), "plan-one") {
+				t.Fatalf("hidden id counted: %s", tc.text)
+			}
+			for _, control := range []string{"Resolve plan-one.\n", "- Resolve `plan-one`.\n"} {
+				text := tc.text + "\n## Resolutions\n" + control
+				if !resolutionNamesID(planResolutionsSection(text), "plan-one") {
+					t.Fatalf("visible control did not count: %s", text)
+				}
+			}
+		})
+	}
+	for _, text := range []string{
+		"````\n```\n````` \t\n## Resolutions\nplan-one\n",
+		"   ~~~md\n~~~\r\n## Resolutions\nplan-one\n",
+		"## Resolutions\n<!--\n## Appendix\n-->\nplan-one\n",
+		"## Resolutions\n<!-- hidden -->Resolve plan-one.\n",
+		"## Resolutions\n```bad`info\nplan-one\n",
+	} {
+		if !resolutionNamesID(planResolutionsSection(text), "plan-one") {
+			t.Fatalf("visible id did not count: %s", text)
+		}
+	}
+}
+
+func TestS133Resolutions_RefusalBeforeWrites(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		t.Run(policy, func(t *testing.T) {
+			f := s133Document(t, policy, "plan_approve", "abandoned")
+			f.children = []string{"old-one", "old-two"}
+			f.meta["plan_deferral_ids"] = []string{"plan-missing"}
+			delete(f.meta, "mindspec_phase")
+			delete(f.meta, phase.PhaseSemanticsV2MarkerKey)
+			migrations := 0
+			t.Cleanup(phase.SetMergeMetadataForTest(func(_ string, updates map[string]interface{}) error {
+				migrations++
+				f.mutations = append(f.mutations, "migration")
+				for key, value := range updates {
+					f.meta[key] = value
+				}
+				return nil
+			}))
+			before := f.read("plan.md")
+			head := preflightGit(t, f.root, "rev-parse", "HEAD")
+			metadata, err := json.Marshal(f.meta)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = f.approve("plan_approve")
+			if err == nil || !strings.Contains(err.Error(), "plan resolutions:") || !strings.Contains(err.Error(), "plan-missing") {
+				t.Fatalf("missing resolution did not refuse: %v", err)
+			}
+			if f.closes != 0 || f.creates != 0 || len(f.mutations) != 0 || migrations != 0 {
+				t.Errorf("resolution refusal wrote lifecycle: closes=%d creates=%d migrations=%d mutations=%v", f.closes, f.creates, migrations, f.mutations)
+			}
+			afterMetadata, err := json.Marshal(f.meta)
+			if err != nil || string(metadata) != string(afterMetadata) {
+				t.Errorf("resolution refusal changed metadata: %s -> %s (%v)", metadata, afterMetadata, err)
+			}
+			if _, err := os.Stat(filepath.Join(f.root, phase.PhaseLockRelPath)); !os.IsNotExist(err) {
+				t.Errorf("resolution refusal reached migration lock: %v", err)
+			}
+			if before != f.read("plan.md") || head != preflightGit(t, f.root, "rev-parse", "HEAD") || f.exec.commits != 0 {
+				t.Error("resolution refusal wrote the plan or made a commit")
+			}
+			if t.Failed() {
+				return
+			}
+
+			// The control proves that each pending write has a live path.
+			f.writePlan(before + "\nResolve plan-missing.\n")
+			f.commit("resolve finding")
+			f.exec.commits = 0
+			if _, err := f.approve("plan_approve"); err != nil {
+				t.Fatal(err)
+			}
+			if f.closes != 1 || f.creates != 1 || migrations == 0 || f.meta["panel_abandoned"] != true || f.meta["mindspec_migrated_at"] == nil {
+				t.Fatalf("control did not reach pending writes: closes=%d creates=%d migrations=%d metadata=%v", f.closes, f.creates, migrations, f.meta)
+			}
+		})
+	}
+}
+
+func TestS133Resolutions_TrackedRoundGate(t *testing.T) {
+	f := s133Document(t, "enforce", "spec_approve", "unresolved")
+	id := f.deferFinding(false)
+	lines, err := panel.ReadLedger(filepath.Join(f.dir, "reviews/spec_approve"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gate := range []string{"spec_approve", "plan_approve"} {
+		t.Run(gate, func(t *testing.T) {
+			var records [][]byte
+			for _, line := range lines {
+				var record map[string]interface{}
+				if err := json.Unmarshal(line, &record); err != nil {
+					t.Fatal(err)
+				}
+				if record["record"] == panel.RecordRound {
+					record["gate"] = gate
+				}
+				data, err := json.Marshal(record)
+				if err != nil {
+					t.Fatal(err)
+				}
+				records = append(records, data)
+			}
+			ids := map[string]bool{}
+			if err := collectPlanDeferralIDs(records, s133DocID, ids); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]bool{}
+			if gate == "spec_approve" {
+				want[id] = true
+			}
+			if !reflect.DeepEqual(ids, want) {
+				t.Fatalf("wrong obligations for round gate %s: got %v, want %v", gate, ids, want)
+			}
+		})
 	}
 }
 
