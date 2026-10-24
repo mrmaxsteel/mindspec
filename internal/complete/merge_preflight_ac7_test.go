@@ -77,10 +77,12 @@ func TestRun_AC7_AllowNetDeletionOverrideThreadsToCompleteBead(t *testing.T) {
 		"closed": {{ID: "bead-1", Title: "[IMPL 008-test.1] Done"}},
 	})
 
-	var recordedMeta map[string]interface{}
+	recordedMeta := map[string]interface{}{}
 	completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
 		if id == "bead-1" {
-			recordedMeta = updates
+			for key, value := range updates {
+				recordedMeta[key] = value
+			}
 		}
 		return nil
 	}
@@ -106,11 +108,14 @@ func TestRun_AC7_AllowNetDeletionOverrideThreadsToCompleteBead(t *testing.T) {
 	if overrideArg, ok := calls[0].Args[3].(string); !ok || overrideArg != "verified safe by inspection" {
 		t.Errorf("CompleteBead's overrideReason arg = %v, want %q", calls[0].Args[3], "verified safe by inspection")
 	}
-	if recordedMeta == nil {
+	if len(recordedMeta) == 0 {
 		t.Fatal("expected mindspec_net_deletion_override_* metadata to be recorded on the bead")
 	}
 	if recordedMeta["mindspec_net_deletion_override_reason"] != "verified safe by inspection" {
 		t.Errorf("recorded override reason = %v, want %q", recordedMeta["mindspec_net_deletion_override_reason"], "verified safe by inspection")
+	}
+	if recordedMeta["panel_absent"] != true || recordedMeta["panel_absent_gate"] != "bead" {
+		t.Errorf("absence audit must coexist with the override metadata, got %v", recordedMeta)
 	}
 }
 

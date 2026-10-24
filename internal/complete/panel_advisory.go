@@ -132,9 +132,8 @@ type PanelGateResult struct {
 //
 // Hatches (§7): the env-only skip (panel.SkipPanelEnv) and the
 // enforcement.panel_gate config toggle short-circuit to a silent pass; the
-// skip variable is NEVER named in any Block message (HC-7). Fail-open (§6):
-// no panel.json registering the bead → no registration → pass silently, so
-// the bead ACTUALLY completes (R2 dogfooding safety).
+// skip variable is NEVER named in any Block message (HC-7). With no
+// registration, enforcement.panel_presence selects a warning or a refusal.
 //
 // On a Block from any matched panel it returns a guard.NewFailure whose body
 // is the decision message (which already carries the raw-`git merge` fence,
@@ -172,7 +171,7 @@ type PanelGateResult struct {
 // the write fails, the refutation is NOT applied: this function returns a
 // Block (a genuine guard.NewFailure, not an abort-with-applied), so the RC
 // stays unresolved.
-func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bool, warnOut io.Writer) ([]PanelGateResult, error) {
+func panelGateWithPresence(beadID string, roots []string, wtPath string, panelGateEnabled bool, warnOut io.Writer, presence *beadPanelPresence) ([]PanelGateResult, error) {
 	if beadID == "" {
 		return nil, nil
 	}
@@ -186,8 +185,7 @@ func panelGate(beadID string, roots []string, wtPath string, panelGateEnabled bo
 	// We still scan so the matched registration flows to the audit writes.
 	regs := panel.ForBead(panelScanFn(roots...), beadID)
 	if len(regs) == 0 {
-		// Fail-open (§6): no registered panel → no gate, the bead completes.
-		return nil, nil
+		return nil, presence.check(beadID, panelGateEnabled, warnOut)
 	}
 
 	var matched []PanelGateResult

@@ -1221,6 +1221,22 @@ whose slot, round, id and hash match. Other gates do not use these entries to
 discharge findings. The implementation approval bead-deferral check reads only
 bead deferrals.
 
+### Bead panel presence
+
+`complete` applies `enforcement.panel_presence` when its bead gate finds no
+registration. The default `warn` policy prints one warning with the gate name
+and panel creation command. A successful completion records `panel_absent`,
+`panel_absent_gate` and `panel_absent_at` on the bead. The `enforce` policy
+refuses before close or merge. A failed registration refuses under both policies.
+
+A closed bead refusal keeps its status and the spec tip. Its recovery runs a
+panel at the bead tip, then retries completion. The non-flat cleanup guard
+still refuses when the bead worktree and registration are absent. Branchless
+reconciliation and busy-worktree refusals add no presence warning or audit.
+The skip and disabled hatches retain their rules. Refutation obligations still
+settle before close. A closed, unmerged bead shares its presence outcome with
+the merged completion handler, so the command prints only one absence warning.
+
 ### Lifecycle panel gate core
 
 `panel.DocumentSubjectDigest` computes the semantic subject for document and
