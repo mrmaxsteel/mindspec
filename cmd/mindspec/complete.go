@@ -108,6 +108,8 @@ The bead ID is required as the first argument.`,
 		// An explicit empty reason (`--allow-doc-skew=""`) is rejected
 		// at the CLI boundary per spec Req 12 — the override must
 		// always carry a recordable reason.
+		docOwner, _ := cmd.Flags().GetString("doc-owner")
+		noDocImpact, _ := cmd.Flags().GetStringArray("no-doc-impact")
 		allowDocSkew, _ := cmd.Flags().GetString("allow-doc-skew")
 		if cmd.Flags().Changed("allow-doc-skew") && strings.TrimSpace(allowDocSkew) == "" {
 			return fmt.Errorf("--allow-doc-skew requires a non-empty reason")
@@ -146,6 +148,8 @@ The bead ID is required as the first argument.`,
 		exec := newExecutor(root)
 		result, err := complete.Run(root, beadID, specID, commitMsg, exec, complete.CompleteOpts{
 			AllowDocSkew:     allowDocSkew,
+			DocOwner:         docOwner,
+			NoDocImpact:      noDocImpact,
 			OverrideADR:      overrideADR,
 			SupersedeADR:     supersedeADR,
 			AllowNetDeletion: allowNetDeletion,
@@ -256,7 +260,9 @@ func init() {
 	completeCmd.Flags().Bool("check", false, "Report all content gates without changing the bead or workspace; skip panel review")
 	completeCmd.Flags().Bool("merge-only", false, "Merge for verification and keep the bead open; run complete again to close it")
 	completeCmd.Flags().String("spec", "", "Target spec ID when multiple specs are active")
-	completeCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on bead metadata)")
+	completeCmd.Flags().String("allow-doc-skew", "", "Defer doc updates with a recorded reason and --doc-owner")
+	completeCmd.Flags().String("doc-owner", "", "Open bead in the same epic that will update the deferred docs")
+	completeCmd.Flags().StringArray("no-doc-impact", nil, "Declare <domain>: <reason> for a touched domain; can repeat")
 	completeCmd.Flags().String("override-adr", "", "Override the ADR-divergence gate with a recorded reason (records mindspec_adr_override_* on bead metadata)")
 	completeCmd.Flags().String("supersede-adr", "", "Pre-create a placeholder ADR (Status: Proposed) at the supplied ID and bypass the divergence gate (records mindspec_adr_supersede_* on bead metadata)")
 	completeCmd.Flags().String("allow-net-deletion", "", "Override the work-destruction preflight with a recorded reason (records mindspec_net_deletion_override_* on bead metadata)")

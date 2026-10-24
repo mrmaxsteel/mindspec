@@ -231,24 +231,20 @@ enumeration):
 
 ### Lifecycle-verb behaviour changes an operator will notice (spec 128)
 
-1. **A gate-refused `mindspec complete` converges on a plain retry** (R4,
-   #186): `complete`'s content gates (doc-sync, ADR-divergence) now run
-   against a prospective snapshot of the bead worktree BEFORE any
-   complete-authored commit exists. A refusal — e.g. doc-sync failing —
-   leaves the bead branch tip at `reviewed_head_sha`; re-running after
-   fixing the skew, or with the override for the gate that refused
-   (`--allow-doc-skew "<reason>"` for doc-sync, `--override-adr
-   "<reason>"` for ADR-divergence), is the recovery — the two gates run
-   sequentially, so overriding one can surface the other; neither
-   override is the whole recovery on its own (see merge-safety.md's
-   "Gate-refused `mindspec complete` converges on a plain retry" for the
-   full two-retry contract). This is the GATE-REFUSAL class specifically:
-   see `project-docs/user/guides/merge-safety.md` for the distinct
-   POST-gate class (a merge conflict, a `bd close` failure), whose
-   preserved-merge/forward-reconcile recovery (spec 127) is UNCHANGED by
-   this reorder. The artifact-sync snapshot check also runs in merge-only
-   mode. It disables rename detection and preserves exact filename bytes.
-   A user path stops completion before the artifact commit.
+1. **Retry after a content gate refusal.** Fix the affected docs, then run
+   `mindspec complete` again. To defer doc updates, use
+   `--allow-doc-skew "<reason>" --doc-owner <open-bead>`. The owner must be
+   another open bead in the same epic. It must update the deferred docs.
+   If the change has no doc impact, use
+   `--no-doc-impact "<domain>: <reason>"` instead. Repeat it for each domain.
+   Use `--override-adr "<reason>"` to record an architecture exception.
+   The content gates run in order. A retry can reveal another gate refusal.
+   A refusal leaves the reviewed bead tip unchanged.
+   For merge conflicts and close failures, follow the recovery in the refusal.
+   See `project-docs/user/guides/merge-safety.md` for these recovery paths.
+   The artifact check also runs in merge-only mode. It disables rename
+   detection and keeps exact filename bytes. A user path stops completion
+   before the artifact commit.
 2. **`mindspec repair phase` now refuses a backward move by default**
    (R3.3): moving an epic's stored phase backward in lifecycle order
    (`spec < plan < implement < review < done`) requires

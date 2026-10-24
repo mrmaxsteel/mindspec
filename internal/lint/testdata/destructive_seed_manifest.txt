@@ -147,6 +147,12 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+internal/approve/doc_declarations.go	implDocGate	arg1:unprovable
+internal/approve/doc_declarations.go	implDocGate	arg2:unprovable
+internal/complete/check.go	reportContentGates	arg2:unprovable
+internal/complete/doc_declarations.go	validateDocFlags	arg1:unprovable
+internal/complete/doc_declarations.go	prepareDocDeclarations	arg1:unprovable
+internal/complete/doc_declarations.go	prepareDocDeclarations	arg2:unprovable
 internal/approve/impl_final_gate.go	implBeadWorktreePreflight	arg1:unprovable
 internal/approve/impl_final_gate.go	implBeadWorktreePreflight	variadic-spread:recovery
 internal/approve/impl_final_gate.go	implFinalReviewGate	arg1:unprovable

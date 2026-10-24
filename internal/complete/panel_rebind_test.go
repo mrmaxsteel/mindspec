@@ -41,7 +41,7 @@ func TestComplete_CopiesRebinds(t *testing.T) {
 			closed := false
 			closeBeadFn = func(...string) error { closed = true; return nil }
 			ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-			_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: fixture"})
+			_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fixture"})
 			if variant == "write failure" {
 				if err == nil || closed || ex.completeCalled {
 					t.Fatalf("audit failure must refuse before close/merge: %v closed=%v merged=%v", err, closed, ex.completeCalled)

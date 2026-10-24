@@ -64,7 +64,7 @@ func s133CLIFixture(t *testing.T, policy, kind string) string {
 	s133CLIGit(t, root, "branch", "spec/999-check")
 	s133CLIGit(t, root, "checkout", "-qb", "bead/bead-1")
 	s133CLIWrite(t, root, "internal/core/core.go", "package core\nconst Value = 1\n")
-	if kind != "both" {
+	if kind != "both" && kind != "doc" {
 		s133CLIWrite(t, root, ".mindspec/domains/core/interfaces.md", "Core change.\n")
 	}
 	s133CLIGit(t, root, "add", "-A")

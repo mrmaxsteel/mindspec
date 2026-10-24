@@ -1734,7 +1734,7 @@ func TestBead6Leg_xxiii_AC6CompositeFlagship_DocSyncRefusalThenAllowDocSkewConve
 	// Run 2: --allow-doc-skew lets doc-sync's OWN gate class decide
 	// (and here, pass) — never re-routed through the panel's stale-SHA
 	// gate.
-	res, err := Run(root, beadID, specID, "", base, CompleteOpts{AllowDocSkew: "test: ac-6 flagship override"})
+	res, err := Run(root, beadID, specID, "", base, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: ac-6 flagship override"})
 	if err != nil {
 		t.Fatalf("expected --allow-doc-skew to let doc-sync decide (and converge), got: %v", err)
 	}

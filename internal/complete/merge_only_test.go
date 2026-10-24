@@ -174,7 +174,7 @@ func requireWindowRefusal(t *testing.T, err error, fragment string) {
 func TestComplete_MergeOnlyKeepsBeadOpen(t *testing.T) {
 	f := newWindowFixture(t)
 	m := f.mergedOnly()
-	if f.meta[mergeOnlySHAKey] != m || f.meta[mergeOnlyPendingKey] != nil || f.meta["mindspec_landed_merge_sha"] != nil {
+	if f.meta[mergeOnlySHAKey] != m || f.meta[mergeOnlyPendingKey] != nil || f.meta["mindspec_landed_merge_sha"] != nil || f.meta["mindspec_landed_second_parent"] != nil || f.meta["mindspec_landed_at"] != nil {
 		t.Fatalf("wrong metadata: %v", f.meta)
 	}
 	if _, err := os.Stat(f.beadWT); err != nil {
@@ -502,7 +502,7 @@ func TestComplete_ClosedBeadResumesAllSteps(t *testing.T) {
 			f := newWindowFixture(t)
 			m := f.mergedOnly()
 			ledger := f.registerLedger()
-			opts := CompleteOpts{AllowDocSkew: "reviewed docs", OverrideADR: "reviewed design"}
+			opts := CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "reviewed docs", OverrideADR: "reviewed design"}
 			orig := closingStepHook
 			t.Cleanup(func() { closingStepHook = orig })
 			closingStepHook = func(s int) error {
@@ -733,11 +733,11 @@ func TestComplete_OverrideRunRecoveryRepeatsFlag(t *testing.T) {
 				}
 				return nil
 			}
-			_, err := f.run(CompleteOpts{AllowDocSkew: "reviewed docs", OverrideADR: "reviewed design"})
+			_, err := f.run(CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "reviewed docs", OverrideADR: "reviewed design"})
 			requireWindowRefusal(t, err, "--allow-doc-skew 'reviewed docs'")
 			requireWindowRefusal(t, err, "--override-adr 'reviewed design'")
 			closingStepHook = nil
-			r, err := f.run(CompleteOpts{AllowDocSkew: "reviewed docs", OverrideADR: "reviewed design"})
+			r, err := f.run(CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "reviewed docs", OverrideADR: "reviewed design"})
 			if err != nil || !r.BeadClosed {
 				t.Fatalf("%+v %v", r, err)
 			}

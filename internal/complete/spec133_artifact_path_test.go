@@ -153,7 +153,7 @@ func TestS133ArtifactPath_Complete(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				result, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: fixture"})
+				result, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fixture"})
 				blocked := scenario == "absent" || scenario == "rebind" || scenario == "present unresolved" || scenario == "no field unresolved"
 				if blocked {
 					if err == nil || !strings.Contains(err.Error(), "unresolved REQUEST_CHANGES") || closed || ex.completeCalled || result != nil {

@@ -89,7 +89,7 @@ func TestRun_BeadScopeAdvisoryWarn_CrossDomain(t *testing.T) {
 		warnWriter = &buf
 		t.Cleanup(func() { warnWriter = origWarn })
 
-		_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "test setup"})
+		_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test setup"})
 		return buf.String(), err
 	}
 

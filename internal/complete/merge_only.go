@@ -78,6 +78,12 @@ func completionCommand(beadID string, opts CompleteOpts) string {
 	if opts.AllowDocSkew != "" {
 		cmd += " --allow-doc-skew " + ledgerShellArg(opts.AllowDocSkew)
 	}
+	if opts.DocOwner != "" {
+		cmd += " --doc-owner " + ledgerShellArg(opts.DocOwner)
+	}
+	for _, value := range opts.NoDocImpact {
+		cmd += " --no-doc-impact " + ledgerShellArg(value)
+	}
 	if opts.OverrideADR != "" {
 		cmd += " --override-adr " + ledgerShellArg(opts.OverrideADR)
 	}
@@ -121,11 +127,16 @@ func recordMergeOnly(root, beadID, specID string, row executor.MergeIdentity, op
 	fmt.Printf("merge: %s\nparents: %s\n", termsafe.Escape(row.SHA), strings.Join(termsafeEscapeEach(row.Parents), " "))
 	// Record the SHA before removing pending. A failed write leaves a durable
 	// mode hint, and the next run finds this same merge from git.
-	if err := completeMergeMetadataFn(beadID, map[string]interface{}{mergeOnlySHAKey: row.SHA}); err != nil {
+	if err := completeMergeMetadataFn(beadID, map[string]interface{}{
+		mergeOnlySHAKey: row.SHA,
+	}); err != nil {
 		return nil, completionFailure(beadID, opts, "recording merge-only commit "+row.SHA, err)
 	}
 	if err := deleteMergeOnlyKeys(beadID, mergeOnlyPendingKey); err != nil {
 		return nil, completionFailure(beadID, opts, "clearing pending merge-only mode", err)
+	}
+	if err := recordDocDeclarations(beadID, opts); err != nil {
+		return nil, completionFailure(beadID, opts, "recording doc-sync declarations", err)
 	}
 	return mergeOnlyResult(root, beadID, specID, row), nil
 }

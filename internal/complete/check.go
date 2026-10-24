@@ -124,19 +124,24 @@ func runSnapshotContentGates(in materializationInput, tree string) error {
 
 // reportContentGates reports every failure before the caller can mutate state.
 func reportContentGates(root, beadID string, opts CompleteOpts, docs, adrs *validate.Result, findings []validate.DivergenceFinding, out io.Writer) error {
+	var declarationErr error
+	docs, declarationErr = prepareDocDeclarations(beadID, opts, docs, out)
 	printResultWarnings(out, docs)
 	printResultWarnings(out, adrs)
 	var docErr error
 	if docs.HasFailures() && opts.AllowDocSkew == "" {
-		docErr = guard.NewFailure("doc-sync: "+joinResultErrorMessages(docs), "update the affected domain docs, then re-run mindspec complete "+idrender.Bead(beadID)+"; or re-run with --allow-doc-skew \"<reason>\" to record a deferral")
+		docErr = guard.NewFailure("doc-sync: "+joinResultErrorMessages(docs), "update the affected domain docs, then run "+completionCommand(beadID, opts), docSyncHint(beadID, opts))
 	}
 	adrOpts := opts
-	if docErr != nil || opts.workDestructionErr != nil {
+	if declarationErr != nil || docErr != nil || opts.workDestructionErr != nil {
 		// Report the ADR result, but do not create a placeholder on refusal.
 		adrOpts.SupersedeADR = ""
 	}
 	adrErr := handleADRGateOutcome(root, beadID, adrOpts, adrs, findings)
-	return errors.Join(docErr, adrErr, opts.workDestructionErr)
+	if adrErr != nil && (len(opts.NoDocImpact) > 0 || opts.DocOwner != "") {
+		adrErr = errors.New(strings.ReplaceAll(adrErr.Error(), "mindspec complete "+idrender.Bead(beadID), completionCommand(beadID, opts)))
+	}
+	return errors.Join(declarationErr, docErr, adrErr, opts.workDestructionErr)
 }
 
 func workDestructionReport(err error) error {

@@ -49,7 +49,7 @@ func s133Commit(t *testing.T, root, message string) {
 	preflightGit(t, root, "commit", "-qm", message)
 }
 
-func s133FinalFixtureNew(t *testing.T, policy string, count int, finalState string) *s133FinalFixture {
+func s133FinalFixtureNew(t *testing.T, policy string, count int, finalState string, beforeMerge ...func(*s133FinalFixture, []string)) *s133FinalFixture {
 	t.Helper()
 	f := &s133FinalFixture{rerunFixture: newRerunFixture(t, false, false)}
 	f.dir = filepath.Join(f.specWT, ".mindspec/specs/010-test/reviews/final")
@@ -95,6 +95,9 @@ func s133FinalFixtureNew(t *testing.T, policy string, count int, finalState stri
 	s133Write(t, wt, ".mindspec/specs/010-test/reviews/leftover/dispositions.jsonl", "")
 	s133Commit(t, wt, "tracked ledger baseline")
 	preflightGit(t, f.root, "worktree", "remove", wt)
+	for _, prepare := range beforeMerge {
+		prepare(f, ids)
+	}
 	// Each planned bead has a real naming merge and a passing bead panel.
 	for _, id := range ids {
 		s133SeedPanel(t, f, "bead", "bead/"+id, id, "pass", "bead-"+id)
@@ -157,8 +160,16 @@ if args[0] == 'show':
     row = records[args[1]].copy()
     if args[1] != 'epic-parent': row['dependencies'] = [{'id':'epic-parent','issue_type':'epic','dependency_type':'parent-child'}]
     print(json.dumps([row]))
+elif args[0] == 'close':
+    records[args[1]]['status'] = 'closed'
+    with open(path, 'w') as f: json.dump(records, f)
+elif args[:2] == ['dolt','commit']:
+    pass
 elif args[0] == 'update':
-    records[args[1]]['metadata'] = json.loads(args[args.index('--metadata')+1])
+    if '--metadata' in args:
+        records[args[1]]['metadata'] = json.loads(args[args.index('--metadata')+1])
+    for i, arg in enumerate(args):
+        if arg == '--unset-metadata': records[args[1]]['metadata'].pop(args[i+1], None)
     with open(path, 'w') as f: json.dump(records, f)
 elif args[0] == 'export':
     os.makedirs('.beads', exist_ok=True)

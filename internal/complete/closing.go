@@ -190,6 +190,9 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath st
 			}
 			err = mergeMissingMetadata(beadID, updates)
 		case 3:
+			if err := recordDocDeclarations(beadID, opts); err != nil {
+				return nil, completionFailure(beadID, opts, "recording doc-sync declarations", err)
+			}
 			for _, override := range []struct{ reason, key string }{
 				{opts.AllowDocSkew, "mindspec_doc_skew"}, {opts.OverrideADR, "mindspec_adr_override"}, {opts.AllowNetDeletion, "mindspec_net_deletion_override"},
 			} {
@@ -330,7 +333,7 @@ func mergedRangeFailure(root, beadID, specBranch, specWT string, row executor.Me
 		commands = append(commands, "mindspec complete "+idrender.Bead(beadID)+" --override-adr \"<reason>\"")
 	}
 	if docsync {
-		commands = append(commands, "mindspec complete "+idrender.Bead(beadID)+" --allow-doc-skew \"<reason>\"")
+		commands = append(commands, docSyncHint(beadID, opts))
 	}
 	// Gate failures are framework-formatted; inner errors are escaped at their seams.
 	return guard.NewFailure(text, commands...)

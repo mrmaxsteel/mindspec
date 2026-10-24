@@ -109,7 +109,7 @@ func runReadinessIsolationScenario(t *testing.T, specID, beadID, panelSlug strin
 	}
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: readiness isolation fixture"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: readiness isolation fixture"})
 
 	outcome := readinessIsolationOutcome{completeCalled: ex.completeCalled}
 	if res != nil {

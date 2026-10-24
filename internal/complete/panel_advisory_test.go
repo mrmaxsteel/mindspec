@@ -748,7 +748,7 @@ func TestCompleteRun_RegatesAlreadyClosedOrphan(t *testing.T) {
 	// Round 1: the unresolved REQUEST_CHANGES Blocks at the gate — BEFORE
 	// step-4's already-closed tolerance ever runs. Nothing mutates.
 	ex1 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err == nil {
+	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err == nil {
 		t.Fatal("expected the panel gate to Block on the unresolved round-1 REQUEST_CHANGES")
 	}
 	if ex1.completeCalled {
@@ -767,7 +767,7 @@ func TestCompleteRun_RegatesAlreadyClosedOrphan(t *testing.T) {
 	}, verdicts)
 
 	ex2 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	res, err := Run(root, beadID, specID, "", ex2, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	res, err := Run(root, beadID, specID, "", ex2, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err != nil {
 		t.Fatalf("expected success once the RC is durably refuted, got: %v", err)
 	}

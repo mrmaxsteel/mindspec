@@ -47,7 +47,7 @@ func TestFindLandedMerge_ReviewedTreeConfirms(t *testing.T) {
 		return nil
 	}
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "fixture has no domain docs"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "fixture has no domain docs"})
 	if err != nil || res == nil || !res.BeadClosed {
 		t.Fatalf("branch-less reviewed-tree reconcile must close: result=%+v err=%v", res, err)
 	}

@@ -408,13 +408,6 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// HasFailures() is false and the flow proceeds normally, and on
 	// the override/error paths.
 	printResultWarnings(warnWriter, docResult)
-	if docResult.HasFailures() {
-		if o.AllowDocSkew == "" {
-			return nil, fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason on the spec epic's metadata)", joinResultErrorMessages(docResult))
-		}
-		// Override path: fall through. Metadata write happens AFTER
-		// FinalizeEpic per panel CONSENSUS revision 4.
-	}
 
 	// Enforcement gate (3/3): Spec 087 Bead 2 fills the body; this
 	// backstop runs across the full spec branch. The
@@ -454,6 +447,19 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 			fmt.Sprintf("mindspec impl approve %s", specID),
 		)
 	}
+	docChildren, childErr := phase.FetchChildren(epicID)
+	if childErr != nil {
+		return nil, guard.NewFailure("doc-sync: cannot read epic doc obligations: "+termsafe.Escape(childErr.Error()), "mindspec impl approve "+idrender.Spec(specID))
+	}
+	docBeads := make([]string, 0, len(docChildren))
+	for _, child := range docChildren {
+		docBeads = append(docBeads, child.ID)
+	}
+	openDocDeferrals, docErr := implDocGate(root, base, specBranch, specID, exec, docBeads, docResult, o.AllowDocSkew)
+	if docErr != nil {
+		return nil, docErr
+	}
+
 	var lifecycleAllowSet []string
 	if planErr == nil {
 		lifecycleAllowSet = intersectIDs(beadIDs, lifecycleChildren)
@@ -656,6 +662,13 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// trail. Best-effort: a metadata-write failure becomes a warning.
 	if o.AllowDocSkew != "" && epicID != "" {
 		meta := buildImplSkewMetadata(o.AllowDocSkew)
+		if len(openDocDeferrals) > 0 {
+			var ids []string
+			for _, d := range openDocDeferrals {
+				ids = append(ids, d.ID)
+			}
+			meta["mindspec_impl_doc_deferrals"] = ids
+		}
 		if err := implMergeMetadataFn(epicID, meta); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not record impl-skew override metadata on %s: %v", epicID, err))
 		}

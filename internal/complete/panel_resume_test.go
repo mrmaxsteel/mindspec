@@ -440,7 +440,7 @@ func TestComplete_FreshRetryReconcilesDeferredAudit(t *testing.T) {
 			closeBeadFn = func(...string) error { return errors.New("injected close failure") }
 			fetchBeadByIDFn = func(id string) (next.BeadInfo, error) { return next.BeadInfo{ID: id, Status: "in_progress"}, nil }
 			first := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-			_, err = Run(root, beadID, specID, "", first, CompleteOpts{AllowDocSkew: "test fixture"})
+			_, err = Run(root, beadID, specID, "", first, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test fixture"})
 			if err == nil || !strings.Contains(err.Error(), "injected close failure") || first.completeCalled {
 				t.Fatalf("wrong first failure: %v merge=%v", err, first.completeCalled)
 			}
@@ -488,7 +488,7 @@ func TestComplete_FreshRetryReconcilesDeferredAudit(t *testing.T) {
 			closeBeadFn = func(...string) error { return nil }
 			fetchBeadByIDFn = func(id string) (next.BeadInfo, error) { return next.BeadInfo{ID: id, Status: "closed"}, nil }
 			retry := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-			result, err := Run(root, beadID, specID, "", retry, CompleteOpts{AllowDocSkew: "test fixture"})
+			result, err := Run(root, beadID, specID, "", retry, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test fixture"})
 			if discharge == "unchanged" {
 				if err == nil || !strings.Contains(err.Error(), "bd reopen") || retry.completeCalled {
 					t.Fatalf("retry without discharge must block: %v merge=%v", err, retry.completeCalled)

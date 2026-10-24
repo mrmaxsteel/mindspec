@@ -287,7 +287,7 @@ func TestGateTime_OpenBeadDeferralResolves(t *testing.T) {
 	core3Cover(t, reg)
 	core3Manifest(t, reg)
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	res, err := Run(root, "mindspec-core3.1", "130-core3", "", ex, CompleteOpts{AllowDocSkew: "test: fixture"})
+	res, err := Run(root, "mindspec-core3.1", "130-core3", "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fixture"})
 	if err != nil || !ex.completeCalled || res == nil || !res.BeadClosed {
 		t.Fatalf("open deferral must complete: %+v %v merge=%v", res, err, ex.completeCalled)
 	}
@@ -349,7 +349,7 @@ func TestGateTime_DeferThenCloseBlocks(t *testing.T) {
 				return orig(workdir, branch, target, overrideReason, rerun)
 			}
 			ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-			_, err = Run(root, "mindspec-core3.1", "130-core3", "", ex, CompleteOpts{AllowDocSkew: "test: fixture"})
+			_, err = Run(root, "mindspec-core3.1", "130-core3", "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fixture"})
 			finding := "ccr[0]"
 			if change == "closed slot" {
 				finding = "slot"
@@ -373,7 +373,7 @@ func TestGateTime_DeferThenCloseBlocks(t *testing.T) {
 				t.Fatalf("refute recovery: %v %s", err, out)
 			}
 			completeWorkDestructionPreflightFn = orig
-			res, err := Run(root, "mindspec-core3.1", "130-core3", "", ex, CompleteOpts{AllowDocSkew: "test: fixture"})
+			res, err := Run(root, "mindspec-core3.1", "130-core3", "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fixture"})
 			if err != nil || res == nil || !res.BeadClosed || !ex.completeCalled {
 				t.Fatalf("refute recovery must complete: %+v %v merge=%v", res, err, ex.completeCalled)
 			}

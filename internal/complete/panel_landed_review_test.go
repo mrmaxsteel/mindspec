@@ -106,7 +106,7 @@ func TestComplete_LandedReviewOnAllowOnly(t *testing.T) {
 			ex := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root)}
 			closed := false
 			closeBeadFn = func(...string) error { closed = true; return nil }
-			res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: source-only fixture"})
+			res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: source-only fixture"})
 			if scenario == "missing reviewed ref" {
 				if err == nil || !strings.Contains(err.Error(), "no landed merge commit") || !guard.HasFinalRecoveryLine(err.Error()) {
 					t.Fatalf("branch-less reconcile without landed evidence must refuse with recovery: result=%+v err=%v", res, err)
