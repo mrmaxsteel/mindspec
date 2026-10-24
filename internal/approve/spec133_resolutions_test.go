@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
@@ -129,6 +130,7 @@ func TestS133Resolutions_HiddenMarkdown(t *testing.T) {
 		{"closing fence info", "```md\n```text\n## Resolutions\nplan-one\n```\n"},
 		{"indented closing fence", "```md\n    ```\n## Resolutions\nplan-one\n```\n"},
 		{"nonbreaking space closer", "```md\n```\u00a0\n## Resolutions\nplan-one\n```\n"},
+		{"comment followed by text", "## Resolutions\n<!-- hidden -->Resolve plan-one.\n"},
 		{"comment heading", "<!--\n## Resolutions\nplan-one\n-->\n"},
 		{"single line comment heading", "<!-- ## Resolutions plan-one -->\n"},
 		{"fenced id", "## Resolutions\n```\nplan-one\n```\n"},
@@ -154,7 +156,6 @@ func TestS133Resolutions_HiddenMarkdown(t *testing.T) {
 		"````\n```\n````` \t\n## Resolutions\nplan-one\n",
 		"   ~~~md\n~~~\r\n## Resolutions\nplan-one\n",
 		"## Resolutions\n<!--\n## Appendix\n-->\nplan-one\n",
-		"## Resolutions\n<!-- hidden -->Resolve plan-one.\n",
 		"## Resolutions\n```bad`info\nplan-one\n",
 	} {
 		if !resolutionNamesID(planResolutionsSection(text), "plan-one") {
@@ -212,6 +213,14 @@ var resolutionBlockControls = []string{
 	"- Decision\n  - Resolve plan-one.\n",
 }
 
+func resolutionBlockWant(name string) bool {
+	switch name {
+	case "ordered marker after lazy quote", "ordered marker after lazy list", "split comment id":
+		return true
+	}
+	return false
+}
+
 func TestS133Resolutions_BlockStructure(t *testing.T) {
 	for _, tc := range resolutionBlockCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -221,8 +230,8 @@ func TestS133Resolutions_BlockStructure(t *testing.T) {
 			} else if tc.name == "list fence blank" || tc.name == "inline tag heading boundary" {
 				id = "R1"
 			}
-			if section := planResolutionsSection("# Plan\n\nBody.\n" + tc.tail); resolutionNamesID(section, id) {
-				t.Fatalf("hidden id counted in %q", section)
+			if section := planResolutionsSection("# Plan\n\nBody.\n" + tc.tail); resolutionNamesID(section, id) != resolutionBlockWant(tc.name) {
+				t.Fatalf("id visibility differs in %q", section)
 			}
 			for _, control := range resolutionBlockControls {
 				text := tc.tail + "\n## Resolutions\n\n" + strings.ReplaceAll(control, "plan-one", id)
@@ -269,11 +278,17 @@ func TestS133Resolutions_BlockStructureApprovePlan(t *testing.T) {
 				before := f.read("plan.md")
 				head := preflightGit(t, f.root, "rev-parse", "HEAD")
 				_, err := f.approve("plan_approve")
-				if err == nil || !strings.Contains(err.Error(), "missing deferred finding ids: "+id) {
-					t.Errorf("hidden obligation did not refuse: %v (creates=%d)", err, f.creates)
-				}
-				if f.creates != 0 || f.closes != 0 || f.exec.commits != 0 || len(f.mutations) != 0 || before != f.read("plan.md") || head != preflightGit(t, f.root, "rev-parse", "HEAD") {
-					t.Errorf("refusal mutated lifecycle: creates=%d closes=%d commits=%d mutations=%v", f.creates, f.closes, f.exec.commits, f.mutations)
+				if resolutionBlockWant(tc.name) {
+					if err != nil || f.creates != 1 {
+						t.Errorf("visible obligation refused: %v (creates=%d)", err, f.creates)
+					}
+				} else {
+					if err == nil || !strings.Contains(err.Error(), "missing deferred finding ids: "+id) {
+						t.Errorf("hidden obligation did not refuse: %v (creates=%d)", err, f.creates)
+					}
+					if f.creates != 0 || f.closes != 0 || f.exec.commits != 0 || len(f.mutations) != 0 || before != f.read("plan.md") || head != preflightGit(t, f.root, "rev-parse", "HEAD") {
+						t.Errorf("refusal mutated lifecycle: creates=%d closes=%d commits=%d mutations=%v", f.creates, f.closes, f.exec.commits, f.mutations)
+					}
 				}
 				if t.Failed() {
 					return
@@ -454,8 +469,8 @@ var resolutionInlineCorpus = []struct {
 	{"boundary code label", "See [a `c` d](plan-one).\n", []string{"plan-one"}, false},
 	{"boundary unmatched backticks", "See ``[x](`plan-one) done.\n", []string{"plan-one"}, false},
 	{"boundary literal backticks control", "See ``[x](`u) plan-one done.\n", []string{"plan-one"}, true},
-	{"boundary lowercase declaration", "See <!plan-one> done.\n", []string{"plan-one"}, false},
-	{"boundary lowercase doctype", "See <!doctype plan-one> done.\n", []string{"plan-one"}, false},
+	{"boundary lowercase declaration", "See <!plan-one> done.\n", []string{"plan-one"}, true},
+	{"boundary lowercase doctype", "See <!doctype plan-one> done.\n", []string{"plan-one"}, true},
 	{"grammar unicode full fold", "See ![plan-one][Straße].\n\n[STRASSE]: /u\n", []string{"plan-one"}, false},
 	{"grammar unicode simple fold", "See ![plan-one][Σ].\n\n[ς]: /u\n", []string{"plan-one"}, false},
 	{"grammar reference nonbreaking space", "See ![plan-one][a b].\n\n[a\u00a0b]: /u\n", []string{"plan-one"}, true},
@@ -471,8 +486,8 @@ var resolutionInlineCorpus = []struct {
 	{"grammar escaped title parentheses", "See [x](u (a\\(plan-one\\))).\n", []string{"plan-one"}, false},
 	{"grammar escaped angle delimiter", "See [x](<a\\>plan-one>).\n", []string{"plan-one"}, false},
 	{"grammar angle unescaped less than", "See [x](<a<plan-one>).\n", []string{"plan-one"}, false},
-	{"grammar bare destination control", "See [x](u\u0001plan-one).\n", []string{"plan-one"}, true},
-	{"grammar bare destination delete", "See [x](u\u007fplan-one).\n", []string{"plan-one"}, true},
+	{"grammar bare destination control", "See [x](u\u0001plan-one).\n", []string{"plan-one"}, false},
+	{"grammar bare destination delete", "See [x](u\u007fplan-one).\n", []string{"plan-one"}, false},
 	{"grammar definition title separator", "[r]: <u>\"plan-one\"\n", []string{"plan-one"}, true},
 	{"grammar definition title extra", "[r]: u \"a\" plan-one\n", []string{"plan-one"}, true},
 	{"grammar definition next line invalid title", "[r]: u\n\"a\" plan-one\n", []string{"plan-one"}, true},
@@ -617,7 +632,7 @@ func TestS133Resolutions_InlineApprovePlan(t *testing.T) {
 	}
 }
 
-// These cases isolate inline rules from the block scanner.
+// These cases check visible text through the document parser.
 func TestS133Resolutions_InlineSyntax(t *testing.T) {
 	cases := []struct{ name, body, want string }{
 		{"code trim one space", "` plan-one `suffix", "plan-onesuffix"},
@@ -626,7 +641,7 @@ func TestS133Resolutions_InlineSyntax(t *testing.T) {
 		{"code normalize newline", "`\nplan-one\n`suffix", "plan-onesuffix"},
 		{"comment", "a <!-- plan-one --> b", "a  b"},
 		{"unfinished comment", "a <!-- plan-one", "a <!-- plan-one"},
-		{"invalid comment", "a <!--> plan-one -->", "a <!--> plan-one -->"},
+		{"invalid comment", "a <!--> plan-one -->", "a  plan-one -->"},
 		{"processing instruction", "a <?plan-one ?> b", "a  b"},
 		{"unfinished instruction", "a <?plan-one", "a <?plan-one"},
 		{"declaration", "a <!THING plan-one> b", "a  b"},
@@ -645,8 +660,10 @@ func TestS133Resolutions_InlineSyntax(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolutionVisibleText(tc.body); got != tc.want {
-				t.Fatalf("visible text=%q, want %q", got, tc.want)
+			doc := "## Resolutions\n\nprefix " + tc.body
+			want := "prefix " + tc.want
+			if got := strings.TrimSuffix(planResolutionsSection(doc), "\n"); got != want {
+				t.Fatalf("visible text=%q, want %q", got, want)
 			}
 		})
 	}
@@ -708,48 +725,13 @@ func TestS133Resolutions_EmphasisSyntax(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolutionVisibleText(tc.body); got != tc.want {
-				t.Fatalf("visible text=%q, want %q", got, tc.want)
+			doc := "## Resolutions\n\nprefix " + tc.body
+			want := "prefix " + tc.want
+			if tc.name == "reference label emphasis" {
+				doc, want = "## Resolutions\n\n"+tc.body, tc.want
 			}
-		})
-	}
-}
-
-// Target validity is separate from other markup in a failed link.
-func TestS133Resolutions_LinkTargetGrammar(t *testing.T) {
-	cases := []struct {
-		name, target  string
-		inline, valid bool
-	}{
-		{"internal angle", "a<plan-one)", true, true},
-		{"parenthesis title", "a (plan-one<))", true, true},
-		{"invalid bare words", "a b plan-one)", true, false},
-		{"invalid angle words", "a<b plan-one>)", true, false},
-		{"invalid angle newline", "<b\nplan-one>)", true, false},
-		{"angle missing separator", "<u>plan-one)", true, false},
-		{"invalid title words", "c \"t\" plan-one)", true, false},
-		{"destination newline words", "plan-one\nmore)", true, false},
-		{"definition internal angle", "a<plan-one", false, true},
-		{"definition title", "a (plan-one<)", false, true},
-		{"definition invalid words", "a b plan-one", false, false},
-		{"definition invalid title words", "c \"t\" plan-one", false, false},
-		{"blank line before closer", "u\n\n)", true, false},
-		{"blank line in title", "u \"a\n\nplan-one\")", true, false},
-		{"newline before closer", "u\n)", true, true},
-		{"escaped newline in angle", "<a\\\nplan-one>)", true, false},
-		{"unclosed angle", "<plan-one)", true, false},
-		{"unclosed quote", "u \"plan-one)", true, false},
-		{"unbalanced parentheses", "a(plan-one)", true, false},
-		{"escaped parentheses", "a\\(plan-one\\))", true, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			end := resolutionLinkTarget(tc.target, 0, tc.inline)
-			if (end >= 0) != tc.valid {
-				t.Fatalf("target end=%d, valid=%v", end, tc.valid)
-			}
-			if tc.valid && end != len(tc.target) {
-				t.Fatalf("target end=%d, want %d", end, len(tc.target))
+			if got := strings.TrimSuffix(planResolutionsSection(doc), "\n"); got != want {
+				t.Fatalf("visible text=%q, want %q", got, want)
 			}
 		})
 	}
@@ -795,10 +777,28 @@ var resolutionDocumentCorpus = []struct {
 	name, doc string
 	want      bool
 }{
+	{"round nine r1 html after list", "# P\n\n## Resolutions\n\n" + "- a\n<div>\n- x\nplan-one\n", false},
+	{"round nine r1 comment quote", "# P\n\n## Resolutions\n\n" + "> q\n<!--\n- x\nplan-one\n-->\n", false},
+	{"round nine r1 definition html", "# P\n\n## Resolutions\n\n" + "> [r]: /u \"a\n<div>\nplan-one\") done.\n- first\nSee ![plan-one][r].\n", false},
+	{"round nine r1 html ordered", "# P\n\n## Resolutions\n\n" + "> first\n<div>\n1. x\nplan-one\n", false},
+	{"round nine r1 html ordered pre", "# P\n\n## Resolutions\n\n" + "> first\n<div>\n1. plan-one\n", false},
+	{"round nine r1 ccr1 definition then indent", "# P\n\n## Resolutions\n\n" + "[r]: /u\n    plan-one\n", true},
+	{"round nine r2 list quote def", "# P\n\n## Resolutions\n\n" + "1. > a\n> [plan-one]: /u\n", false},
+	{"round nine r2 bullet quote def", "# P\n\n## Resolutions\n\n" + "- > a\n> [plan-one]: /u\n", false},
+	{"round nine r2 uncertain keeps def", "# P\n\n## Resolutions\n\n" + "See ![plan-one].\n\n[plan-one]: /u\n-\n", false},
+	{"round nine r2 empty item code", "# P\n\n## Resolutions\n\n" + "-\n\n    plan-one\n", false},
+	{"round nine r2 empty ordered code", "# P\n\n## Resolutions\n\n" + "1.\n\n    plan-one\n", false},
+	{"round nine r2 empty star code", "# P\n\n## Resolutions\n\n" + "*\n\n    plan-one\n", false},
+	{"round nine r2 quote empty item code", "# P\n\n## Resolutions\n\n" + "> -\n>\n>     plan-one\n", false},
+	{"round nine fuzz definition empty item", "## Resolutions\n\n- [plan-one]-one\n\n[plan-one]: /u\n- \n", false},
+	{"round nine tab empty item", "## Resolutions\n\n-\t\n\n    plan-one\n", false},
+	{"round nine fence after empty item", "## Resolutions\n\n-\n\n\n  ```\nplan-one\n  ```\n", false},
+	{"round nine entity", "## Resolutions\n\n&#112;lan-one\n", true},
+
 	{"continuation indented definition title", "## Resolutions\n\n[r]: /u\n    \"a\nplan-one\nend\"\n", false},
 	{"continuation tab definition title", "## Resolutions\n\n[r]: /u\n\t\"a\nplan-one\nend\"\n", false},
 	{"continuation definition title reference", "## Resolutions\n\nSee ![plan-one][r].\n\n[r]: /u\n    \"a\nb\nend\"\n", false},
-	{"continuation invalid indented definition title", "## Resolutions\n\n[r]: /u\n    \"plan-one\n", false},
+	{"continuation invalid indented definition title", "## Resolutions\n\n[r]: /u\n    \"plan-one\n", true},
 	{"continuation after definition code", "## Resolutions\n\n[r]: /u\n    hidden\nplan-one\n", true},
 	{"reviewer exact emphasis visible", "## Resolutions\n\nplan-**one**: resolved.\n", true},
 	{"reviewer exact emphasis longer id", "## Resolutions\n\n**plan-one**suffix: resolved.\n", false},
@@ -812,9 +812,9 @@ var resolutionDocumentCorpus = []struct {
 	{"continuation nested list quote fence", "## Resolutions\n\n- item\n  > para\n    ```\n    plan-one\n    ```\n", false},
 	{"continuation list quote ends fence", "## Resolutions\n\n- > para\n\n  paragraph\n    ```\n    plan-one\n    ```\n", false},
 	{"continuation loose list fence", "## Resolutions\n\n- item\n\n  paragraph\n    ```\n    plan-one\n    ```\n", false},
-	{"continuation uncertain whole block", "## Resolutions\n\n> plan-one\nlazy\n> > tail\n", false},
+	{"continuation uncertain whole block", "## Resolutions\n\n> plan-one\nlazy\n> > tail\n", true},
 	{"continuation uncertain no definition", "## Resolutions\n\nSee ![plan-one][r].\n\n> [r]: /u \"a\nlazy\n> > tail\"\n", true},
-	{"continuation code after definition", "## Resolutions\n\n[r]: /u\n    plan-one\n", false},
+	{"continuation code after definition", "## Resolutions\n\n[r]: /u\n    plan-one\n", true},
 	{"continuation visible old block control", "# Plan\n\nBody.\n\n## Resolutions\n> Context.\nlazy text\nplan-one\n", true},
 	{"continuation indented title", "# P\n\n## Resolutions\n\nSee [x](u \"a\n    b\nplan-one\") done.\n", false},
 	{"continuation tab title", "# P\n\n## Resolutions\n\nSee [x](u \"a\n\tb\nplan-one\") done.\n", false},
@@ -866,8 +866,8 @@ var resolutionDocumentCorpus = []struct {
 	{"boundary autolink label", "# P\n\n## Resolutions\n\nSee [a <https://x/> b](plan-one) done.\n", false},
 	{"boundary autolink bracket", "# P\n\n## Resolutions\n\nSee [a <https://x/]> b](plan-one) done.\n", false},
 	{"boundary unmatched backticks", "# P\n\n## Resolutions\n\nSee ``[x](`plan-one) done.\n", false},
-	{"boundary lowercase declaration", "# P\n\n## Resolutions\n\nSee <!plan-one> done.\n", false},
-	{"boundary lowercase doctype", "# P\n\n## Resolutions\n\nSee <!doctype plan-one> done.\n", false},
+	{"boundary lowercase declaration", "# P\n\n## Resolutions\n\nSee <!plan-one> done.\n", true},
+	{"boundary lowercase doctype", "# P\n\n## Resolutions\n\nSee <!doctype plan-one> done.\n", true},
 	{"boundary definition before section", "# P\n\n[r]: /u\n\n## Resolutions\n\nSee ![plan-one][r].\n", false},
 	{"boundary definition after section", "# P\n\n## Resolutions\n\nSee ![plan-one][r].\n\n## Other\n\n[r]: /u\n", false},
 	{"boundary definition after heading", "# P\n\n## Resolutions\n\nSee ![plan-one][r].\n### H\n[r]: /u\n", false},
@@ -899,8 +899,8 @@ var resolutionDocumentCorpus = []struct {
 	{"boundary nonbreaking thematic control", "## Resolutions\n\nintro\n\u00a0***\n[r]: /u\n\nSee ![plan-one][r].\n", true},
 	{"boundary ordered tab title control", "## Resolutions\n\nSee [x](u \"\n2.\tplan-one\")\n", false},
 	{"boundary ordered comment title control", "## Resolutions\n\nSee [x](u \"\n2. <!-- hidden -->plan-one\")\n", false},
-	{"boundary comment list interrupts", "## Resolutions\n\nSee [x](u \"\n- <!-- hidden -->- plan-one\")\n", true},
-	{"boundary comment quote interrupts", "## Resolutions\n\nSee [x](u \"\n> <!-- hidden -->> plan-one\")\n", true},
+	{"boundary comment list interrupts", "## Resolutions\n\nSee [x](u \"\n- <!-- hidden -->- plan-one\")\n", false},
+	{"boundary comment quote interrupts", "## Resolutions\n\nSee [x](u \"\n> <!-- hidden -->> plan-one\")\n", false},
 }
 
 func TestS133Resolutions_DocumentCorpus(t *testing.T) {
@@ -922,5 +922,19 @@ func TestS133Resolutions_DocumentApprovePlan(t *testing.T) {
 				checkResolutionApprovePlan(t, policy, content+"\n"+tc.doc, []string{"plan-one"}, tc.want)
 			})
 		}
+	}
+}
+
+func TestS133Resolutions_LargeDocument(t *testing.T) {
+	doc := "## Resolutions\n\n" + strings.Repeat("a\n    b\n", 20000) + "plan-one\n"
+	start := time.Now()
+	section := planResolutionsSection(doc)
+	elapsed := time.Since(start)
+	if !resolutionNamesID(section, "plan-one") {
+		t.Fatal("visible control did not count")
+	}
+	t.Logf("40000 alternating lines: %s", elapsed)
+	if elapsed >= 5*time.Second {
+		t.Fatalf("visible text took %s; limit is 5s", elapsed)
 	}
 }

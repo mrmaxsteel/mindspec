@@ -126,12 +126,28 @@ func DocumentSubjectContent(name string, data []byte, specDir, gate string) ([]b
 	}
 	body := data
 	var fm map[string]any
-	if bytes.HasPrefix(data, []byte("---\n")) {
-		rest := data[4:]
-		end := bytes.Index(rest, []byte("\n---\n"))
-		blockEnd, bodyStart := end, end+5
-		if bytes.HasPrefix(rest, []byte("---\n")) {
-			blockEnd, bodyStart = 0, 4
+	if bytes.HasPrefix(data, []byte("---\n")) || bytes.HasPrefix(data, []byte("---\r\n")) {
+		rest := data[bytes.IndexByte(data, '\n')+1:]
+		blockEnd, bodyStart := -1, -1
+		for start := 0; start < len(rest); {
+			newline := bytes.IndexByte(rest[start:], '\n')
+			if newline < 0 {
+				break
+			}
+			next := start + newline + 1
+			line := rest[start:next]
+			if bytes.Equal(line, []byte("---\n")) || bytes.Equal(line, []byte("---\r\n")) {
+				blockEnd, bodyStart = start, next
+				// Keep the LF digest input unchanged.
+				if blockEnd > 0 {
+					blockEnd--
+					if blockEnd > 0 && rest[blockEnd-1] == '\r' {
+						blockEnd--
+					}
+				}
+				break
+			}
+			start = next
 		}
 		if blockEnd < 0 {
 			return nil, false, fmt.Errorf("unclosed document frontmatter")
@@ -152,7 +168,11 @@ func DocumentSubjectContent(name string, data []byte, specDir, gate string) ([]b
 			body = stripApproval(body)
 			// Appending the approval section supplies its own blank separator.
 			// Normalize that end padding when the section is absent as well.
-			body = []byte(strings.TrimRight(string(body), "\n"))
+			padding := "\n"
+			if bytes.Contains(body, []byte("\r\n")) {
+				padding = "\r\n"
+			}
+			body = []byte(strings.TrimRight(string(body), padding))
 		}
 	}
 	// Keep frontmatter and body in distinct fields to prevent representation

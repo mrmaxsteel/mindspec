@@ -308,3 +308,103 @@ func TestS133DocGate_EpicFailureReplaysDueAudit(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewerR7CRLFOwnWrites(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		t.Run(policy, func(t *testing.T) {
+			f := s133Document(t, policy, "spec_approve", "absent")
+			f.writeSpec(strings.ReplaceAll(f.read("spec.md"), "\n", "\r\n"))
+			f.commit("CRLF spec")
+			f.seed("spec_approve", "pass")
+			if _, err := f.approve("spec_approve"); err != nil {
+				t.Fatalf("initial approval: %v", err)
+			}
+			if _, err := f.approve("spec_approve"); err != nil {
+				t.Fatalf("own-write replay refused: %v", err)
+			}
+		})
+	}
+}
+
+func TestS133DocGate_CRLFPlanOwnWrites(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		t.Run(policy, func(t *testing.T) {
+			f := s133Document(t, policy, "plan_approve", "absent")
+			f.writePlan(strings.ReplaceAll(f.read("plan.md"), "\n", "\r\n"))
+			f.commit("CRLF plan")
+			f.seed("plan_approve", "pass")
+			if _, err := f.approve("plan_approve"); err != nil {
+				t.Fatalf("initial approval: %v", err)
+			}
+			f.verifyDocument("plan_approve")
+			if _, err := f.approve("plan_approve"); err != nil {
+				t.Fatalf("own-write replay refused: %v", err)
+			}
+		})
+	}
+}
+
+func TestS133DocGate_CRLFSpecBodyEdit(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		t.Run(policy, func(t *testing.T) {
+			f := s133Document(t, policy, "spec_approve", "absent")
+			f.writeSpec(strings.ReplaceAll(f.read("spec.md"), "\n", "\r\n"))
+			f.commit("CRLF spec")
+			f.seed("spec_approve", "pass")
+			if _, err := f.approve("spec_approve"); err != nil {
+				t.Fatalf("initial approval: %v", err)
+			}
+			f.verifyDocument("spec_approve")
+			f.writeSpec(strings.Replace(f.read("spec.md"), "## Approval", "Body edit.\r\n\r\n## Approval", 1))
+			f.commit("body edit after approval")
+			f.exec.commits = 0
+			f.mutations = nil
+			err := f.unchanged("spec_approve", func() error { _, err := f.approve("spec_approve"); return err })
+			if !strings.Contains(err.Error(), "commits landed after review") {
+				t.Fatalf("body edit did not refuse as stale: %v", err)
+			}
+		})
+	}
+}
+
+func TestS133DocGate_CRLFApprovalPadding(t *testing.T) {
+	for _, section := range []string{"absent", "draft", "appendix"} {
+		for _, ending := range []string{"", "\r\n", "\r\n\r\n"} {
+			t.Run(fmt.Sprintf("%s/padding=%d", section, len(ending)), func(t *testing.T) {
+				const dir = ".mindspec/specs/example"
+				body := "# Spec\r\n\r\nBody."
+				if section != "absent" {
+					body += "\r\n\r\n## Approval\r\n\r\n- **Status**: Draft\r\n- **Approved By**: -\r\n- **Approval Date**: -\r\n- **Notes**: -"
+				}
+				if section == "appendix" {
+					body += "\r\n\r\n## Appendix\r\nKeep."
+				}
+				data := []byte("---\r\ntitle: Example\r\nstatus: Draft\r\n---\r\n" + body + ending)
+				before, _, err := panel.DocumentSubjectContent(dir+"/spec.md", data, dir, "spec_approve")
+				if err != nil {
+					t.Fatal(err)
+				}
+				file := filepath.Join(t.TempDir(), "spec.md")
+				if err := os.WriteFile(file, data, 0644); err != nil {
+					t.Fatal(err)
+				}
+				if err := updateSpecApproval(file, "operator"); err != nil {
+					t.Fatal(err)
+				}
+				afterData, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				after, _, err := panel.DocumentSubjectContent(dir+"/spec.md", afterData, dir, "spec_approve")
+				if err != nil || string(before) != string(after) {
+					t.Fatalf("own writes changed digest: before %s; after %s; %v", before, after, err)
+				}
+				afterData = []byte(strings.Replace(string(afterData), "Body.", "Body edit.", 1))
+				edited, _, err := panel.DocumentSubjectContent(dir+"/spec.md", afterData, dir, "spec_approve")
+				if err != nil || string(edited) == string(after) {
+					t.Fatalf("body edit was omitted: %v", err)
+				}
+			})
+		}
+	}
+}

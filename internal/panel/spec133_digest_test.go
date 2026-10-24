@@ -78,6 +78,7 @@ func s133Digest(t *testing.T, dir, gate string, files map[string]string) string 
 	sort.Strings(names)
 	var listing strings.Builder
 	for _, name := range names {
+		checkDocumentSubjectLFCompatibility(t, name, []byte(files[name]), dir, gate)
 		fmt.Fprintf(&listing, "100644 blob %x\t%s\n", sha1.Sum([]byte(files[name])), name)
 	}
 	got, err := DocumentSubjectDigest(listing.String(), Subject(gate, dir), dir, gate, func(name string) ([]byte, error) { return []byte(files[name]), nil })
