@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,14 +73,51 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	if err != nil {
 		return nil, err
 	}
+	worktree := workspace.TreeRootForSpecDir(specDir)
+	var gateWarnings bytes.Buffer
+	outcome, err := runLifecycleGate(root, specID, "spec_approve", worktree, &gateWarnings)
+	if err != nil {
+		return nil, err
+	}
+	appendDocumentGateWarnings(&result.Warnings, gateWarnings.String())
 
 	specNum, _ := parseSpecID(specID)
-	existingEpicID, lookupErr := phase.FindEpicBySpecID(specID)
+	epicCache := phase.NewCache()
+	existingEpicID, lookupErr := epicCache.FindEpicBySpecID(specID)
 	if lookupErr != nil && !errors.Is(lookupErr, phase.ErrNoEpicForSpec) {
 		if errors.Is(lookupErr, phase.ErrSpecResolution) {
 			return nil, lookupErr
 		}
 		return nil, fmt.Errorf("%w\nrecovery: mindspec spec approve %s", next.RenderBDError(lookupErr), idrender.Spec(specID))
+	}
+
+	deferralIDs, err := specPlanDeferralIDs(root, worktree, specID, exec)
+	if err != nil {
+		return nil, err
+	}
+
+	if existingEpicID != "" && deferralIDs != nil {
+		epics, err := epicCache.AllEpics()
+		if err != nil {
+			return nil, err
+		}
+		ids := map[string]bool{}
+		for _, id := range deferralIDs {
+			ids[id] = true
+		}
+		for _, epic := range epics {
+			if epic.ID != existingEpicID {
+				continue
+			}
+			recorded, err := recordedPlanDeferralIDs(epic.Metadata)
+			if err != nil {
+				return nil, fmt.Errorf("%w\nrecovery: repair the epic plan_deferral_ids and run the same command again", err)
+			}
+			for _, id := range recorded {
+				ids[id] = true
+			}
+		}
+		deferralIDs = sortedDeferralIDs(ids)
 	}
 
 	// Step 2: Update spec frontmatter + markdown Approval section.
@@ -136,11 +174,15 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 				ID string `json:"id"`
 			}
 			if json.Unmarshal(out, &created) == nil && created.ID != "" {
+				existingEpicID = created.ID
 				// Push to Dolt so other agents see the epic immediately
 				_, _ = specRunBDFn("dolt", "push")
 			}
 		}
 	}
+	// Keep the audit failure until after the approval commits. A replay can
+	// then create the epic and persist the same due records.
+	auditErr := recordLifecycleGateAudit(existingEpicID, outcome, deferralIDs)
 
 	// Step 3b: Scaffold plan.md if it doesn't exist, so the agent has the exact
 	// structure that validation requires (frontmatter, sections, bead template).
@@ -178,6 +220,9 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 
 	if err := exec.IsTreeClean(specWtPath); err != nil {
 		return nil, fmt.Errorf("spec worktree has uncommitted changes after spec approval: %w\n\n%s && git status", err, containment.EmitCd(specWtPath))
+	}
+	if auditErr != nil {
+		return nil, fmt.Errorf("warning: %s\n%w", strings.Join(result.Warnings, "\nwarning: "), documentGateAuditFailure(auditErr))
 	}
 
 	// Step 4: Emit recording phase marker (best-effort)

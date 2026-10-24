@@ -500,6 +500,7 @@ func validVerbFixturePlanMD(specID string) string {
 // call (plan approve), exactly like a real bd epic would be.
 func stubApproveBeadsForVerbTest(t *testing.T) {
 	t.Helper()
+	t.Cleanup(approve.SetLifecycleMergeMetadataForTest(func(string, map[string]interface{}) error { return nil }))
 
 	var mu sync.Mutex
 	var epics []map[string]interface{}

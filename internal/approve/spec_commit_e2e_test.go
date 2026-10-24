@@ -52,6 +52,7 @@ func specE2EValidSpecMD(specID string) string {
 }
 
 func TestApproveSpec_RealExecutorCommitsAndLeavesClean(t *testing.T) {
+	stubDocumentGateAudit(t)
 	specE2EFakeBdOnPath(t)
 	root := t.TempDir()
 	specID := "990-approve-commit"
@@ -152,18 +153,18 @@ func TestApproveSpec_EpicCreateWarningHostileEscaped(t *testing.T) {
 		return nil, hostile
 	}))
 
-	result, err := ApproveSpec(root, specID, "test-user", &executor.MockExecutor{})
-	if err != nil {
-		t.Fatalf("ApproveSpec (epic-create failure is warn-and-continue): %v", err)
+	_, err := ApproveSpec(root, specID, "test-user", &executor.MockExecutor{})
+	if err == nil || !strings.HasSuffix(err.Error(), "recovery: run the same command again in the same environment") {
+		t.Fatalf("epic-create failure with an absence audit must refuse: %v", err)
 	}
 	var found string
-	for _, w := range result.Warnings {
+	for _, w := range strings.Split(err.Error(), "\n") {
 		if strings.Contains(w, "could not create lifecycle epic") {
 			found = w
 		}
 	}
 	if found == "" {
-		t.Fatalf("expected the epic-create warning, got: %v", result.Warnings)
+		t.Fatalf("expected the epic-create warning, got: %v", err)
 	}
 	if !strings.Contains(found, "depends_on_id") {
 		t.Errorf("the bd diagnostic must survive into the warning: %q", found)

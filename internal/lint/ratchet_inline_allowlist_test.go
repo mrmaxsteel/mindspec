@@ -51,11 +51,12 @@ var inlineCompositionAllowlist = map[string]inlineEntry{
 // joinWithIDAllowlist: audited filepath.Join-with-ID sites, each
 // naming its covering gate.
 var joinWithIDAllowlist = map[string]joinEntry{
-	"internal/complete/panel_ledger.go SpecLedgerPaths filepath.Join(...specID...)":      {Count: 1, Gate: "SpecDir(root, specID) validated the ID immediately above; its error returns before this flat-layout comparison Join (spec 130 R6.6)"},
-	"internal/contextpack/budgeter.go BuildBead filepath.Join(...specID...)":             {Count: 1, Gate: "in-func idvalidate.SpecID immediately before the Join - agent-writable bd-metadata spec_id provenance (round 6 O3), GATED, never allowlisted-with-a-false-gate"},
-	"internal/layout/mover.go Mover.specExists filepath.Join(...specID...)":              {Count: 1, Gate: "callers validate before specExists: panelSpec routes idvalidate.SpecID-before-specExists (round-5 O3) and routeReviewSlug's numeric fallback only sees listSpecIDs validate-and-drop IDs"},
-	"internal/spec/list.go List filepath.Join(...specID...)":                             {Count: 1, Gate: "in-func validate-and-skip: idvalidate.SpecID on each enumerated dir name before the Join (agent-creatable dir provenance)"},
-	"internal/validate/readiness/fixtures.go writeWorkspace filepath.Join(...specID...)": {Count: 1, Gate: "fixture-only: specID is a test-authored literal constant in fixtures.go, never agent/runtime input"},
+	"internal/approve/document_gate.go trackedPlanDeferralIDs filepath.Join(...specID...)": {Count: 1, Gate: "ApprovePlan validates specID with validate.SpecID before trackedPlanDeferralIDs; the join selects tracked ledger paths and performs no write"},
+	"internal/complete/panel_ledger.go SpecLedgerPaths filepath.Join(...specID...)":        {Count: 1, Gate: "SpecDir(root, specID) validated the ID immediately above; its error returns before this flat-layout comparison Join (spec 130 R6.6)"},
+	"internal/contextpack/budgeter.go BuildBead filepath.Join(...specID...)":               {Count: 1, Gate: "in-func idvalidate.SpecID immediately before the Join - agent-writable bd-metadata spec_id provenance (round 6 O3), GATED, never allowlisted-with-a-false-gate"},
+	"internal/layout/mover.go Mover.specExists filepath.Join(...specID...)":                {Count: 1, Gate: "callers validate before specExists: panelSpec routes idvalidate.SpecID-before-specExists (round-5 O3) and routeReviewSlug's numeric fallback only sees listSpecIDs validate-and-drop IDs"},
+	"internal/spec/list.go List filepath.Join(...specID...)":                               {Count: 1, Gate: "in-func validate-and-skip: idvalidate.SpecID on each enumerated dir name before the Join (agent-creatable dir provenance)"},
+	"internal/validate/readiness/fixtures.go writeWorkspace filepath.Join(...specID...)":   {Count: 1, Gate: "fixture-only: specID is a test-authored literal constant in fixtures.go, never agent/runtime input"},
 }
 
 // rootEnumerationAllowlist: audited scan (f) sites whose enumerated

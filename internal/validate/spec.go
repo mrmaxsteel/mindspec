@@ -14,6 +14,7 @@ import (
 )
 
 // requiredSpecSections lists sections that must exist and have content.
+// Approval is optional: spec approval creates that section as an own write.
 var requiredSpecSections = []string{
 	"Goal",
 	"Impacted Domains",
@@ -21,7 +22,6 @@ var requiredSpecSections = []string{
 	"Requirements",
 	"Scope",
 	"Acceptance Criteria",
-	"Approval",
 }
 
 // ValidateSpec checks the structural quality of a spec.md file.

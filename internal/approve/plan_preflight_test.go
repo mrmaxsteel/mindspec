@@ -143,6 +143,7 @@ func assertPlanUnchangedAndNoMutation(t *testing.T, planPath string, original []
 // test doesn't repeat the stub inline.
 func noopStubPhaseMergeMetadataForTest(t *testing.T) {
 	t.Helper()
+	stubDocumentGateAudit(t)
 	t.Cleanup(phase.SetMergeMetadataForTest(func(string, map[string]interface{}) error { return nil }))
 }
 
