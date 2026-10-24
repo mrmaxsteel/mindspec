@@ -136,3 +136,31 @@ under the reverted resolver.
   now consumes `Executor.ChangedFiles` for its diff input.
 - [ADR-0011](ADR-0011.md) — lifecycle states that doc-sync errors now
   gate (`complete`, `approve impl`).
+
+## Amendment (Spec 133)
+
+`complete --no-doc-impact "<domain>: <reason>"` satisfies doc-sync for that
+domain on that bead. The flag can repeat. The reason must not be empty.
+The change must touch the domain. The bead records the domain, reason,
+actor and time.
+
+`complete --allow-doc-skew "<reason>"` requires `--doc-owner <bead>`.
+The owner must be another open bead in the same epic. Both beads record
+the deferral id, domains, owner, reason, actor and time. The owner must
+land doc updates for each deferred domain. It can transfer the deferral
+with a new owner and reason. The deferral keeps its id.
+
+`complete --check` validates these flags and reports each covered domain.
+It writes no record. Recovery commands retain each declaration and owner.
+
+The branch-wide doc-sync check accepts a domain with doc updates. It also
+accepts a domain when every source change came through a landed bead merge
+with a recorded no-doc-impact declaration for that domain. A source commit
+on the spec branch gets no exemption.
+
+`impl approve` lists and refuses each open doc deferral. An owner resolves
+it when its landed change updates the deferred domain docs.
+`impl approve --allow-doc-skew "<reason>"` needs no owner. It overrides the
+branch-wide doc-sync check and each open deferral. The epic records each
+open deferral id and the override reason. An old skew record with no owner
+stays under the branch-wide doc-sync check.

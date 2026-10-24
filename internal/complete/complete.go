@@ -284,6 +284,9 @@ type CompleteOpts struct {
 	Check              bool
 	workDestructionErr error
 	AllowDocSkew       string
+	DocOwner           string
+	NoDocImpact        []string
+	docAudit           *docCompletionAudit
 
 	// MergeOnly merges for verification and keeps the bead open.
 	MergeOnly              bool
@@ -592,6 +595,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		)
 	}
 
+	opts.docAudit = &docCompletionAudit{}
+	if err := validateDocFlags(beadID, opts); err != nil {
+		return nil, err
+	}
 	if opts.Check {
 		return runCheck(root, beadID, specID, exec, opts)
 	}
@@ -1096,6 +1103,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, errors.Join(opts.workDestructionErr, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr))
 		}
 	}
+	// A resumed materialization still needs the declarations for this run's
+	// audit. Rebuild them from the immutable committed candidate before close.
+	if resumeStage != "" && (len(opts.NoDocImpact) > 0 || opts.AllowDocSkew != "") {
+		if err := runCommittedRangeGate(root, beadID, beadHead, specDir, base, exec, opts, warnWriter); err != nil {
+			return nil, err
+		}
+	}
 	if reconcile != nil {
 		if err := runRangeGateWithOwner(root, beadID, beadHead, specDir, base, beadHead, exec, opts, warnWriter); err != nil {
 			return nil, err
@@ -1431,7 +1445,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			// final instead of stacking a redundant generic one.
 			return nil, errors.New(msg)
 		}
-		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s%s", safeBeadID, rerunSuffix))
+		return nil, guard.NewFailure(msg, completionCommand(beadID, opts))
+	}
+
+	if err := recordDocDeclarations(beadID, opts); err != nil {
+		return nil, completionFailure(beadID, opts, "recording doc-sync declarations", err)
 	}
 
 	// The bead merge succeeded; persist all matched ledgers in the spec checkout.

@@ -1316,3 +1316,23 @@ bead must be open, have a branch and have no pending merge-only run. Check refus
 `--allow-net-deletion`. Completion also reports all failing content gates.
 A file that no domain owns gives a warning and retains its structured finding.
 An undeclared owner, an attribution failure or missing ADR coverage still refuses.
+
+### Domain doc declarations and owners
+
+`complete --no-doc-impact "<domain>: <reason>"` declares no doc impact for
+one touched domain. The flag can repeat. Completion records each domain,
+reason, actor and time on the bead. Other domain errors still refuse.
+
+`complete --allow-doc-skew "<reason>" --doc-owner <bead>` defers missing
+domain docs to another open bead in the same epic. Both beads carry the
+record. An owner must land the domain doc updates or transfer the record
+to a new owner. Recovery commands retain the owner and each declaration.
+The content check validates the same flags, names each covered domain and
+writes no record.
+
+Implementation approval checks every source-changing step on the spec
+branch. A domain with no doc update passes only when each source change
+came through a landed declaring bead merge. A direct source commit on the
+spec branch has no declaration exemption. Approval lists each open doc
+deferral. Its doc-skew override records the open deferral ids and reason
+on the epic. Old ownerless skew records remain subject to branch doc-sync.

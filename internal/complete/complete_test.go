@@ -84,6 +84,14 @@ func saveAndRestore(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chdir(origWd) })
 	}
 
+	origDocOwner := docOwnerScopeFn
+	docOwnerScopeFn = func(id, owner string) error {
+		if owner == "fixture-doc-owner" {
+			return nil
+		}
+		return validateDocOwner(id, owner)
+	}
+	t.Cleanup(func() { docOwnerScopeFn = origDocOwner })
 	origClose := closeBeadFn
 	origWtList := worktreeListFn
 	origRunBD := runBDFn
@@ -2651,7 +2659,7 @@ func TestRun_CommitMsgWithArtifactDirtBuildsBothStages(t *testing.T) {
 	closeBeadFn = func(ids ...string) error { return nil }
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
-	_, err := Run(root, "bead-1", "", "implement the thing", mock, CompleteOpts{AllowDocSkew: "test fixture has no doc tree"})
+	_, err := Run(root, "bead-1", "", "implement the thing", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test fixture has no doc tree"})
 	if err != nil {
 		t.Fatalf("commit-msg + surviving artifact dirt must never block, got: %v", err)
 	}
@@ -3063,7 +3071,7 @@ func TestCompleteAllowsOverride(t *testing.T) {
 	}
 	gitUserEmailFn = func() string { return "override-user@example.invalid" }
 
-	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "doc PR in flight"})
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "doc PR in flight"})
 	if err != nil {
 		t.Fatalf("expected override to allow completion, got: %v", err)
 	}
@@ -3187,15 +3195,15 @@ func TestOverrideUnblocks(t *testing.T) {
 		serveRefFromDisk(probeMock, root)
 		probeMock.MergeBaseResult = "merge-base-sha"
 		probeMock.ChangedFilesResult = []string{"internal/core/foo.go"}
-		_, err := Run(root, "bead-1", "", "", probeMock, CompleteOpts{AllowDocSkew: "test setup"})
+		_, err := Run(root, "bead-1", "", "", probeMock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test setup"})
 		if err == nil || !strings.Contains(err.Error(), "adr-divergence-uncovered") || strings.Contains(err.Error(), "adr-divergence-unowned") {
 			t.Fatalf("baseline: expected adr-divergence error without override, got: %v", err)
 		}
 	}
 
 	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{
-		AllowDocSkew: "test setup",
-		OverrideADR:  "wip — core ADR coming in followup",
+		DocOwner: "fixture-doc-owner", AllowDocSkew: "test setup",
+		OverrideADR: "wip — core ADR coming in followup",
 	})
 	if err != nil {
 		t.Fatalf("override should allow completion, got: %v", err)
@@ -3272,7 +3280,7 @@ func TestSupersedeUnblocks(t *testing.T) {
 	gitUserEmailFn = func() string { return "supersede-user@example.invalid" }
 
 	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{
-		AllowDocSkew: "test setup",
+		DocOwner: "fixture-doc-owner", AllowDocSkew: "test setup",
 		SupersedeADR: "ADR-0099",
 	})
 	if err != nil {
@@ -3349,7 +3357,7 @@ func TestSupersedeRejectsExistingID(t *testing.T) {
 	}
 
 	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{
-		AllowDocSkew: "test setup",
+		DocOwner: "fixture-doc-owner", AllowDocSkew: "test setup",
 		SupersedeADR: "ADR-9001",
 	})
 	if err == nil {
@@ -3402,8 +3410,8 @@ func TestOverrideMetadataGoesThroughSeam(t *testing.T) {
 	}
 
 	if _, err := Run(root, "bead-1", "", "", mock, CompleteOpts{
-		AllowDocSkew: "test setup",
-		OverrideADR:  "captured via seam",
+		DocOwner: "fixture-doc-owner", AllowDocSkew: "test setup",
+		OverrideADR: "captured via seam",
 	}); err != nil {
 		t.Fatalf("override should allow completion, got: %v", err)
 	}
@@ -3441,7 +3449,7 @@ func TestSkewMetadataWrittenAfterSuccess(t *testing.T) {
 		return nil
 	}
 
-	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "doc PR in flight"})
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "doc PR in flight"})
 	if err == nil {
 		t.Fatal("expected closeBeadFn failure to propagate")
 	}
@@ -3783,7 +3791,7 @@ func TestADRDivergenceFailure_RepairFirstLadder(t *testing.T) {
 	// Source touch attributed to the uncovered "core" domain.
 	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
 
-	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "test setup"})
+	_, err := Run(root, "bead-1", "", "", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test setup"})
 	if err == nil {
 		t.Fatal("expected adr-divergence failure, got nil")
 	}
@@ -3843,18 +3851,20 @@ func TestADRDivergenceFailure_RepairFirstLadder(t *testing.T) {
 	if len(recoveries) != 3 {
 		t.Fatalf("want 3 recovery lines (re-run + 2 bypasses), got %d: %q", len(recoveries), msg)
 	}
-	if !strings.HasPrefix(recoveries[0], "mindspec complete bead-1 ") || strings.Contains(recoveries[0], "--") {
-		t.Errorf("first recovery must be the plain re-run: %q", recoveries[0])
+	baseRecovery := "mindspec complete bead-1 --allow-doc-skew 'test setup' --doc-owner 'fixture-doc-owner'"
+	if !strings.HasPrefix(recoveries[0], baseRecovery) || strings.Contains(recoveries[0], "--override-adr") || strings.Contains(recoveries[0], "--supersede-adr") {
+		t.Errorf("first recovery must retain doc flags without an ADR bypass: %q", recoveries[0])
 	}
-	if want := `mindspec complete bead-1 --override-adr "<reason>"`; recoveries[1] != want {
+	if want := baseRecovery + ` --override-adr "<reason>"`; recoveries[1] != want {
 		t.Errorf("second recovery = %q, want %q", recoveries[1], want)
 	}
-	if want := "mindspec complete bead-1 --supersede-adr ADR-NNNN"; recoveries[2] != want {
+	if want := baseRecovery + " --supersede-adr ADR-NNNN"; recoveries[2] != want {
 		t.Errorf("final recovery = %q, want %q", recoveries[2], want)
 	}
-	if got := finalRecoveryCommand(t, msg); got != "mindspec complete bead-1 --supersede-adr ADR-NNNN" {
+	if got := finalRecoveryCommand(t, msg); got != baseRecovery+" --supersede-adr ADR-NNNN" {
 		t.Errorf("finalRecoveryCommand = %q", got)
 	}
+
 }
 
 // --- mindspec-aqey / mindspec-perm: per-bead gate anchoring tests ---
@@ -3931,7 +3941,7 @@ func TestPerBeadGatesAnchorOwnershipRefAndRangeToBeadHead(t *testing.T) {
 	// also runs its ref reads; the run may still block on uncovered core
 	// (the fixture's ADR covers execution, not core) — that does not
 	// matter here. We assert ONLY the anchoring of the recorded args.
-	_, _ = Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "anchor probe"})
+	_, _ = Run(root, "bead-1", "", "", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "anchor probe"})
 
 	cfCalls := mock.CallsTo("ChangedFiles")
 	if len(cfCalls) == 0 {

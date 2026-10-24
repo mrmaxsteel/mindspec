@@ -49,7 +49,7 @@ func s133Commit(t *testing.T, root, message string) {
 	preflightGit(t, root, "commit", "-qm", message)
 }
 
-func s133FinalFixtureNew(t *testing.T, policy string, count int, finalState string) *s133FinalFixture {
+func s133FinalFixtureNew(t *testing.T, policy string, count int, finalState string, beforeMerge ...func(*s133FinalFixture, []string)) *s133FinalFixture {
 	t.Helper()
 	f := &s133FinalFixture{rerunFixture: newRerunFixture(t, false, false)}
 	f.dir = filepath.Join(f.specWT, ".mindspec/specs/010-test/reviews/final")
@@ -95,6 +95,9 @@ func s133FinalFixtureNew(t *testing.T, policy string, count int, finalState stri
 	s133Write(t, wt, ".mindspec/specs/010-test/reviews/leftover/dispositions.jsonl", "")
 	s133Commit(t, wt, "tracked ledger baseline")
 	preflightGit(t, f.root, "worktree", "remove", wt)
+	for _, prepare := range beforeMerge {
+		prepare(f, ids)
+	}
 	// Each planned bead has a real naming merge and a passing bead panel.
 	for _, id := range ids {
 		s133SeedPanel(t, f, "bead", "bead/"+id, id, "pass", "bead-"+id)

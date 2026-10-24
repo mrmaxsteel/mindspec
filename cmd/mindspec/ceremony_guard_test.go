@@ -135,10 +135,11 @@ func TestCeremonyNonInflation_HelpFlags(t *testing.T) {
 			// no-new-flag claim was scoped to spec 122 alone). Baseline
 			// updated deliberately, in this same change, rather than
 			// silently widened.
-			// The read-only content check is an explicit completion surface.
+			// The read-only content check and domain doc declaration flags are
+			// explicit completion surfaces.
 			name: "mindspec complete",
 			path: []string{"complete"},
-			want: setOf("--allow-doc-skew", "--allow-net-deletion", "--check", "--help", "--merge-only", "--override-adr", "--resolve-merge", "--spec", "--supersede-adr", "--trace"),
+			want: setOf("--allow-doc-skew", "--allow-net-deletion", "--check", "--doc-owner", "--no-doc-impact", "--help", "--merge-only", "--override-adr", "--resolve-merge", "--spec", "--supersede-adr", "--trace"),
 		},
 		{
 			// Same spec 127 R4(b)/R5(d) additions as "mindspec complete" above.
