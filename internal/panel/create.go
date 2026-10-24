@@ -15,7 +15,8 @@ import (
 )
 
 // briefHeaderOpen/briefHeaderClose delimit the managed region refreshed by
-// default. An explicit BriefFile replaces the whole brief instead.
+// default. An explicit BriefFile replaces the authored body
+// below a refreshed managed header.
 const (
 	briefHeaderOpen  = "<!-- mindspec:panel-header -->"
 	briefHeaderClose = "<!-- /mindspec:panel-header -->"

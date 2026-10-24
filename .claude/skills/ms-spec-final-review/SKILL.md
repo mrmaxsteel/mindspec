@@ -18,7 +18,7 @@ Record the changed paths, totals, merged commits and known fixer deviations.
 First write the brief to an absolute scratch file with Summary, Files in Scope,
 Prior-Round Asks and Lens assignments per slot. Include the PR link, cumulative
 context and fixer deviations. Pass its path as `brief_file` to `/ms-panel-run`.
-The binary creates the registration and copies the filled brief to BRIEF.md.
+The binary creates the registration and writes the filled brief as the authored body of BRIEF.md, below the managed header.
 3. Use `mindspec panel checkout <panel-slug> --slot <slot>` for isolated reviewer work.
 Run tests and mutations in that slot's `tree/`. Use the slot directory for scratch.
 The adapter uses `panel prompt` and dispatches the configured model for each slot.

@@ -106,10 +106,14 @@ async function dispatch(slot) {
   const submit = buildCommand(SUBMIT, { slotDir, attempt });
   const options = { label: slot.slot };
   if (slot.model !== slot.family) options.model = slot.model;
-  await agent(prompt.stdout + "\nSave your verdict JSON with shell redirection to the absolute file in this command. " +
-    "Do not use the Write tool on a verdict path. Submit through this exact command:\n" + submit, {
-    ...options,
-  });
+  try {
+    await agent(prompt.stdout + "\nSave your verdict JSON with shell redirection to the absolute file in this command. " +
+      "Do not use the Write tool on a verdict path. Submit through this exact command:\n" + submit, {
+      ...options,
+    });
+  } catch {
+    // Reviewer failure follows the same verify-and-retry path as a silent return.
+  }
 }
 
 async function runSlot(initial) {
@@ -134,9 +138,16 @@ async function runSlot(initial) {
         // A quota handoff exits nonzero but verify records its next runner.
         let next;
         try { next = (await roster()).slots.find(s => s.slot === slot.slot); } catch {}
-        if (!next?.handoff_pending || next.kind !== "harness") return { ...slot, error: failure("launch", launched) };
-        slot = next; acted = false; retried = false;
-        continue;
+        if (next?.handoff_pending && next.kind === "harness") {
+          slot = next; acted = false; retried = false;
+          continue;
+        }
+        const error = failure("launch", launched);
+        if (next?.kind === "process" && ["draft", "unsubmitted", "void", "launch_failed", "malformed"].includes(next.status)) {
+          slot = { ...next, error }; acted = true;
+          continue;
+        }
+        return { ...(next || slot), error };
       }
     } else if (slot.kind === "harness") {
       if (slot.status === "damaged" || slot.status === "quota_wall" && !slot.handoff_pending) return slot;
@@ -145,7 +156,7 @@ async function runSlot(initial) {
       try {
         await dispatch(slot);
       } catch (error) {
-        return { ...slot, error: error.message };
+        return { ...slot, error: String(error?.message ?? error) };
       }
       if (acted) retried = true;
     } else {

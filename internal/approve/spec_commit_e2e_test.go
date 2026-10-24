@@ -240,6 +240,10 @@ func prepareApprovalLedger(t *testing.T, root, specID, state string) string {
 	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, file)), 0755); err != nil {
 		t.Fatal(err)
 	}
+	// Registration presence is the same ownership rule used by panel.Scan.
+	if err := os.WriteFile(filepath.Join(root, filepath.Dir(file), "panel.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if state == "tracked" {
 		if err := os.WriteFile(filepath.Join(root, file), []byte("before\n"), 0644); err != nil {
 			t.Fatal(err)

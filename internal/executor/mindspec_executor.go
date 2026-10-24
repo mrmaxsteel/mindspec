@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -1733,9 +1734,13 @@ func pendingWorktreeChanges(path string, toolArtifacts bool) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	ledgers, err := panelLedgerPaths(path)
+	if err != nil {
+		return nil, err
+	}
 	var pending []string
 	for _, entry := range entries {
-		if panel.IsLedgerArtifactPath(entry.Path, workspace.SpecsDir(path)) || toolArtifacts && panel.IsToolArtifactPath(entry.Path, workspace.SpecsDir(path)) {
+		if slices.Contains(ledgers, entry.Path) || toolArtifacts && entry.Path == panel.TrackerArtifactPath {
 			continue
 		}
 		pending = append(pending, fmt.Sprintf("%c%c %s", entry.Index, entry.Worktree, termsafe.Escape(entry.Path)))
@@ -2354,7 +2359,11 @@ func (g *MindspecExecutor) commitWithExport(path, msg string) error {
 	if err := execBeadExportFn(exportDir); err != nil {
 		return fmt.Errorf("refreshing .beads/issues.jsonl: %w", err)
 	}
-	return gitutil.CommitAll(path, msg, panel.LedgerArtifactPaths(workspace.SpecsDir(exportDir))...)
+	ledgers, err := panelLedgerPaths(exportDir)
+	if err != nil {
+		return err
+	}
+	return gitutil.CommitAll(exportDir, msg, ledgers...)
 }
 
 // mergeReentryHint renders the generic re-entry pointer commitWithExport's
@@ -2824,4 +2833,8 @@ func (g *MindspecExecutor) PublishBeadClose(workdir string, paths []string) erro
 		return err
 	}
 	return gitutil.CommitPaths(workdir, "chore: publish bead close", paths)
+}
+
+func (g *MindspecExecutor) PanelLedgerPaths(path string) ([]string, error) {
+	return panelLedgerPaths(path)
 }

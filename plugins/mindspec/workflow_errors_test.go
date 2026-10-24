@@ -101,3 +101,44 @@ func TestWorkflowVerifyObjectError(t *testing.T) {
 	workflowUnit(t, `cli=async()=>({stdout:JSON.stringify({error:{reason:'bad\n\x1b[31m'}}),exit:2});
  try{await roster();throw Error('accepted error')}catch(e){if(e.message.includes('[object Object]') || !e.message.includes('reason') || e.message.includes('\x1b') || e.message.length>230)throw e;}`)
 }
+
+func TestWorkflowProcessLaunchRetry(t *testing.T) {
+	for _, status := range []string{"launch_failed", "draft", "unsubmitted", "void", "malformed"} {
+		for _, failsAgain := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secondFails=%t", status, failsAgain), func(t *testing.T) {
+				workflowUnit(t, fmt.Sprintf(`let launches=0;
+ const slot={slot:'R1',kind:'process',status:'missing'};
+ cli=async()=>{launches++;return {exit:launches===1 || %t ? 1:0,stderr:'reviewer failed'}};
+ roster=async()=>({slots:[{...slot,status:launches===1 || %t ? %q:'final'}]});
+ const result=await runSlot(slot);
+ if(launches!==2 || result.status!==( %t ? %q:'final') || (%t && !result.error?.includes('reviewer failed')))throw Error(JSON.stringify({launches,result}));`, failsAgain, failsAgain, status, failsAgain, status, failsAgain))
+			})
+		}
+	}
+}
+func TestWorkflowReviewerRejectionRetry(t *testing.T) {
+	for _, rejected := range []bool{false, true} {
+		t.Run(fmt.Sprint(rejected), func(t *testing.T) {
+			workflowUnit(t, fmt.Sprintf(`args={slug:'p',target:'main'};
+ let reviewers=0;
+ // Keep the real setup/binding path.
+ cli=async(verb)=>({exit:0,stdout:verb===CHECKOUT?'/slot':buildCommand(SUBMIT,{slotDir:'/slot',attempt:1})});
+ agent=async()=>{reviewers++;if(%t)throw 'reviewer crash';};
+ roster=async()=>({slots:[{slot:'R1',kind:'harness',status:reviewers===2?'final':'unsubmitted'}]});
+ const result=await runSlot({slot:'R1',kind:'harness',status:'missing'});
+ if(reviewers!==2 || result.status!=='final')throw Error(JSON.stringify({reviewers,result}));`, rejected))
+		})
+	}
+	workflowUnit(t, `dispatch=async()=>{throw 'setup failed'};
+ const result=await runSlot({slot:'R1',kind:'harness',status:'missing'});
+ if(result.error!=='setup failed')throw Error(JSON.stringify(result));`)
+}
+
+func TestWorkflowSubmitBindingFailure(t *testing.T) {
+	workflowUnit(t, `args={slug:'p',target:'main'};
+ let commands=0,reviewers=0;
+ cli=async(verb)=>{commands++;return {exit:0,stdout:verb===CHECKOUT?'/slot':'no bound command'}};
+ agent=async()=>{reviewers++};
+ const result=await runSlot({slot:'R1',kind:'harness',status:'missing'});
+ if(commands!==2 || reviewers!==0 || !result.error?.includes('one bound submission'))throw Error(JSON.stringify({commands,reviewers,result}));`)
+}

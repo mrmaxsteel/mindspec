@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -61,8 +62,14 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 		}
 		return nil, guard.NewFailure("spec worktree is busy: a merge is in progress at "+termsafe.Escape(state.MergeHead)+". Resolve or complete that merge directly before you retry.", commands...)
 	}
+	ledgers, err := exec.PanelLedgerPaths(specWT)
+	if err != nil {
+		return nil, completionFailure(beadID, opts, "resolving local panel ledgers", err)
+	}
+	// Staged ledgers remain busy: only the tracker may be staged here.
+	// This deliberately keeps the closing gate stricter than local-ledger status checks.
 	for _, path := range state.StagedPaths {
-		if panel.IsLedgerArtifactPath(path, workspace.SpecsDir(specWT)) || !panel.IsToolArtifactPath(path, workspace.SpecsDir(specWT)) {
+		if slices.Contains(ledgers, path) || path != panel.TrackerArtifactPath {
 			return nil, guard.NewFailure("spec worktree is busy: staged user change: "+termsafe.Escape(path),
 				"git -C "+ledgerShellArg(specWT)+" restore --staged -- "+ledgerShellArg(path), completionCommand(beadID, opts))
 		}
@@ -189,7 +196,7 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath st
 			var done bool
 			done, err = closePublicationDone(beadID, specBranch, exec)
 			if err == nil && !done {
-				paths := []string{".beads/issues.jsonl"}
+				paths := []string{panel.TrackerArtifactPath}
 				err = exec.PublishBeadClose(specWT, paths)
 			}
 		case 5:
@@ -318,7 +325,7 @@ func mergedRangeFailure(root, beadID, specBranch, specWT string, row executor.Me
 // closePublicationDone uses the committed tracker close.
 // Later metadata-marker cleanup does not invalidate a published close.
 func closePublicationDone(beadID, specBranch string, exec executor.Executor) (bool, error) {
-	data, present, err := exec.FileAtRefOrAbsent(specBranch, ".beads/issues.jsonl")
+	data, present, err := exec.FileAtRefOrAbsent(specBranch, panel.TrackerArtifactPath)
 	if err != nil || !present {
 		return false, err
 	}

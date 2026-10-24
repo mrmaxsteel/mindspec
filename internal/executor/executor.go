@@ -284,6 +284,9 @@ type Executor interface {
 	// to zero values so a pre-existing test that never configures them
 	// exercises the "nothing to materialize" (both stages elide) path.
 
+	// PanelLedgerPaths resolves registered local ledgers, including deleted HEAD paths.
+	PanelLedgerPaths(path string) ([]string, error)
+
 	// SnapshotWorktreeTree builds a candidate tree T from wtPath's
 	// PROSPECTIVE content (tracked + untracked + deletions, exactly what
 	// `git add -A` would stage), seeded from wtPath's own HEAD tip first so

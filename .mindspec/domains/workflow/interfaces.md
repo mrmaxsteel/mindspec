@@ -238,7 +238,9 @@ Its proportional claim check exempts a rename or copy only when both endpoints
 match artifact paths. It names both endpoints of user renames and copies.
 Normal and merge-only completion read the artifact-sync snapshot delta with
 rename detection off and NUL separators. Filename bytes stay exact.
-Disposition ledgers are local review artifacts. Init ignores them and removes the
+Disposition ledgers are local review artifacts. Init ignores `.mindspec/specs/*/reviews/` and `.mindspec/reviews/`;
+legacy-layout ledgers are left out of lifecycle commits but Git shows them as untracked.
+Init removes the
 formerly shipped ledger negations by exact line, preserving other bytes. Files
 already tracked stay tracked. Completion and implementation approval read the
 working ledger for gate decisions without checking ignore or commit status and

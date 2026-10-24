@@ -3,6 +3,8 @@ package executor
 import (
 	"errors"
 	"sync"
+
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
 // LsFiles records the tracked-path query.
@@ -567,4 +569,8 @@ func (m *MockExecutor) PublishBeadClose(workdir string, paths []string) error {
 		return m.PublishBeadCloseFn(workdir, paths)
 	}
 	return nil
+}
+
+func (m *MockExecutor) PanelLedgerPaths(path string) ([]string, error) {
+	return panel.ResolveLedgerArtifacts(path, nil, nil), nil
 }

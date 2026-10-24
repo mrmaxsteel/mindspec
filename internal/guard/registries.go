@@ -132,7 +132,7 @@ type DestructiveGuidanceAllowlistEntry struct {
 // The broad restore classifier also catches this path-scoped index-only
 // recovery. It preserves working data and does not discard the staged edit.
 var DestructiveGuidanceAllowlist = []DestructiveGuidanceAllowlistEntry{
-	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "git -C � restore", Family: FamilyGitRestore, Rationale: "This command always includes --staged -- and one shell-quoted path; it only removes that entry from the index and preserves working bytes.", Obligation: "TestComplete_StagedLedgerBusy pins the exact recovery command and verifies both index and working data remain unchanged on refusal."},
+	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "git -C � restore", Family: FamilyGitRestore, Rationale: "Ownership-resolved local ledgers remain busy. This command always includes --staged -- and one shell-quoted path; it only removes that entry from the index and preserves working bytes.", Obligation: "TestComplete_StagedLedgerBusy pins the exact recovery command and verifies both index and working data remain unchanged on refusal."},
 }
 
 // OpaqueOperandEntry is one call-site operand the scan cannot fold to

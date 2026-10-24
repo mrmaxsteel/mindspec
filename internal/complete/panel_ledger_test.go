@@ -1,10 +1,12 @@
 package complete
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
@@ -74,7 +76,7 @@ func TestMaterialize_LedgerStaysLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 	realExec := &executor.MindspecExecutor{}
-	tree, err := realExec.SnapshotWorktreeTree(wt, panel.ToolArtifactPaths(filepath.Join(wt, ".mindspec", "specs")))
+	tree, err := realExec.SnapshotWorktreeTree(wt, append([]string{".beads/issues.jsonl"}, panel.ResolveLedgerArtifacts(wt, nil, nil)...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,16 +93,15 @@ func TestMaterialize_LedgerStaysLocal(t *testing.T) {
 	}
 	checkDirtyTreeFn = func(string, string) ([]string, []string, error) { return []string{ledger}, nil, nil }
 	mock.SnapshotWorktreeTreeFn = func(_ string, excludes []string) (string, error) {
-		if len(excludes) == 2 {
-			want := []string{".beads/issues.jsonl", ".mindspec/specs/*/reviews/*/dispositions.jsonl"}
-			if !reflect.DeepEqual(excludes, want) {
-				t.Fatalf("wrong M-stage exclusion paths: %v", excludes)
+		ledgers := panel.ResolveLedgerArtifacts(wt, nil, nil)
+		if len(excludes) > 0 && excludes[0] == ".beads/issues.jsonl" {
+			if !reflect.DeepEqual(excludes, append([]string{".beads/issues.jsonl"}, ledgers...)) {
+				t.Fatalf("wrong M-stage exclusions: %v", excludes)
 			}
-			return "without-ledger", nil
+		} else if !reflect.DeepEqual(excludes, ledgers) {
+			t.Fatalf("wrong S-stage exclusions: %v", excludes)
 		}
-		if !reflect.DeepEqual(excludes, panel.LedgerArtifactPaths(filepath.Join(wt, ".mindspec", "specs"))) {
-			t.Fatalf("S-stage must exclude local ledgers: %v", excludes)
-		}
+
 		return "without-ledger", nil
 	}
 	mock.ChangedFilesTreeFn = func(_, _, tree string) ([]string, error) {
@@ -162,5 +163,53 @@ func TestComplete_LocalLedgers(t *testing.T) {
 				t.Fatal("completion committed dirty ledger")
 			}
 		})
+	}
+}
+
+func TestComplete_TrackedLocalLedgerWithCommitMessage(t *testing.T) {
+	for _, name := range []string{".mindspec/reviews/adhoc/dispositions.jsonl", "review/legacy/dispositions.jsonl"} {
+		for _, conflict := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/conflict=%t", name, conflict), func(t *testing.T) {
+				var f *windowFixture
+				if conflict {
+					f = ownershipWindow(t)
+				} else {
+					f = newWindowFixture(t)
+				}
+				writeFile(t, f.beadWT, filepath.ToSlash(filepath.Join(filepath.Dir(name), "panel.json")), "{}\n")
+				writeFile(t, f.beadWT, name, "before\n")
+				gitRun(t, f.beadWT, "add", "--", filepath.Dir(name))
+				gitRun(t, f.beadWT, "commit", "-qm", "tracked panel ledger")
+				fixtureTip := gateRevParse(t, f.root, "bead/"+closingBead)
+				writeFile(t, f.beadWT, name, "local edit\n")
+				// Preserve the bead checkout to assert its local bytes after completion.
+				f.ex.WorktreeOps = noopWorktreeOps{}
+				writeFile(t, f.beadWT, "README.md", "materialize this change\n")
+				result, err := Run(f.root, closingBead, closingSpec, "materialize user edit", f.ex, CompleteOpts{MergeOnly: conflict})
+				if conflict {
+					requireWindowRefusal(t, err, "--resolve-merge")
+				} else if err != nil || !result.BeadClosed {
+					t.Fatalf("completion: %+v %v", result, err)
+				}
+				commits, err := exec.Command("git", "-C", f.root, "rev-list", fixtureTip+"..bead/"+closingBead).Output()
+				if err != nil || len(commits) == 0 {
+					t.Fatalf("no materialized commits: %s %v", commits, err)
+				}
+				for _, ref := range strings.Fields(string(commits)) {
+					blob, err := exec.Command("git", "-C", f.root, "show", ref+":"+name).Output()
+					if err != nil || string(blob) != "before\n" {
+						t.Fatalf("generated commit captured local ledger: %q %v", blob, err)
+					}
+				}
+				out, err := exec.Command("git", "-C", f.root, "show", "bead/"+closingBead+":"+name).Output()
+				if err != nil || string(out) != "before\n" {
+					t.Fatalf("branch ledger changed: %q %v", out, err)
+				}
+				out, err = os.ReadFile(filepath.Join(f.beadWT, name))
+				if err != nil || string(out) != "local edit\n" {
+					t.Fatalf("local edit lost: %q %v", out, err)
+				}
+			})
+		}
 	}
 }

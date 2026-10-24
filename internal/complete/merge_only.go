@@ -10,7 +10,6 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
-	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -233,7 +232,7 @@ func materializeConflictedOwnership(in materializationInput, conflict *Ownership
 		}
 		currentTip = c
 	}
-	_, preUserDirt, dErr := checkDirtyTreeFn(wtPath, wtPath)
+	_, preUserDirt, dErr := checkMaterializationDirt(exec, wtPath)
 	if dErr != nil {
 		return fmt.Errorf("checking working tree (S-exit contract): %w", dErr)
 	}
@@ -241,7 +240,11 @@ func materializeConflictedOwnership(in materializationInput, conflict *Ownership
 		return sExitGenuineDirtRefusal(beadID, preUserDirt)
 	}
 
-	tree2, err := exec.SnapshotWorktreeTree(wtPath, panel.LedgerArtifactPaths(workspace.SpecsDir(wtPath)))
+	ledgers, err := exec.PanelLedgerPaths(wtPath)
+	if err != nil {
+		return fmt.Errorf("resolving local panel ledgers: %w", err)
+	}
+	tree2, err := exec.SnapshotWorktreeTree(wtPath, ledgers)
 	if err != nil {
 		return fmt.Errorf("snapshotting bead worktree %s (artifact-sync leg): %w", wtPath, err)
 	}

@@ -826,3 +826,21 @@ func TestParsePorcelain_QuotedNamesAndRenames(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckDirtyTreeDetail_LegacyLedgerRemainsUserDirt(t *testing.T) {
+	root := t.TempDir()
+	name := "review/local/dispositions.jsonl"
+	dir := filepath.Join(root, "review", "local")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "panel.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g := &fakeGuard{porcelainResponses: []string{" M " + name + "\n"}}
+	g.install(t)
+	artifact, user, err := CheckDirtyTreeDetail(root, root)
+	if err != nil || len(artifact) != 0 || !reflect.DeepEqual(user, []string{name}) || g.exportCalled {
+		t.Fatalf("guard expanded its safety exemption: artifact=%v user=%v export=%v err=%v", artifact, user, g.exportCalled, err)
+	}
+}

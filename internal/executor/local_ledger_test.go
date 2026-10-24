@@ -23,6 +23,9 @@ func TestCommitAll_LeavesPanelLedgerLocal(t *testing.T) {
 					if err := os.WriteFile(path, []byte("before\n"), 0644); err != nil {
 						t.Fatal(err)
 					}
+					if err := os.WriteFile(filepath.Join(filepath.Dir(path), "panel.json"), []byte("{}"), 0644); err != nil {
+						t.Fatal(err)
+					}
 					tracked := state == "dirty-tracked" || state == "staged-tracked"
 					if tracked {
 						runGitIn(t, root, "add", "--", file)

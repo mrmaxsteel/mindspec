@@ -183,6 +183,9 @@ func mergeSpecDir(root, specBranch string) (string, error) {
 
 // MergeRestoreOutcome reads user changes without writes. Only a clean
 // checkout permits path restoration. All other outcomes omit that choice.
+// Keep the narrower co-managed artifact set here: adding local adhoc/legacy
+// ledgers would change a destruction gate from stale-deletion to clean and offer
+// path restoration in a checkout currently refused by this safety check.
 func MergeRestoreOutcome(specWorktree, specDir string) guard.DestructionOutcome {
 	status, err := gitutil.StatusZWithStderr(specWorktree)
 	if err != nil {

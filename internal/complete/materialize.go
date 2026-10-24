@@ -19,6 +19,7 @@ package complete
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/executor"
@@ -409,7 +410,7 @@ func runMaterialization(in materializationInput) error {
 		)
 	}
 	if in.resumeStage == "" {
-		_, userDirt, dirtErr := checkDirtyTreeFn(wtPath, wtPath)
+		_, userDirt, dirtErr := checkMaterializationDirt(exec, wtPath)
 		if dirtErr != nil {
 			return fmt.Errorf("checking working tree: %w", dirtErr)
 		}
@@ -429,7 +430,11 @@ func runMaterialization(in materializationInput) error {
 	currentTip := ""
 	if in.resumeStage == "" {
 		// --- Normal run: snapshot once, gate, then materialize. -------
-		tree, err := exec.SnapshotWorktreeTree(wtPath, panel.ToolArtifactPaths(workspace.SpecsDir(wtPath)))
+		ledgers, err := exec.PanelLedgerPaths(wtPath)
+		if err != nil {
+			return fmt.Errorf("resolving local panel ledgers: %w", err)
+		}
+		tree, err := exec.SnapshotWorktreeTree(wtPath, append([]string{panel.TrackerArtifactPath}, ledgers...))
 		if err != nil {
 			return fmt.Errorf("snapshotting bead worktree %s: %w", wtPath, err)
 		}
@@ -509,7 +514,7 @@ func runMaterialization(in materializationInput) error {
 	// HERE, before the S-stage's own `add -A` snapshot could otherwise
 	// silently sweep it into D alongside the artifact refresh. Only a
 	// clean-except-artifact worktree proceeds to the snapshot below.
-	_, preUserDirt, dErr := checkDirtyTreeFn(wtPath, wtPath)
+	_, preUserDirt, dErr := checkMaterializationDirt(exec, wtPath)
 	if dErr != nil {
 		return fmt.Errorf("checking working tree (S-exit contract): %w", dErr)
 	}
@@ -525,7 +530,11 @@ func runMaterialization(in materializationInput) error {
 	// this snapshot runs — no second export is needed here. Nothing else
 	// in the worktree is dirty (preUserDirt was empty, just checked), so
 	// this add -A snapshot captures the artifact's refresh alone.
-	tree2, err := exec.SnapshotWorktreeTree(wtPath, panel.LedgerArtifactPaths(workspace.SpecsDir(wtPath)))
+	ledgers, err := exec.PanelLedgerPaths(wtPath)
+	if err != nil {
+		return fmt.Errorf("resolving local panel ledgers: %w", err)
+	}
+	tree2, err := exec.SnapshotWorktreeTree(wtPath, ledgers)
 	if err != nil {
 		return fmt.Errorf("snapshotting bead worktree %s (artifact-sync leg): %w", wtPath, err)
 	}
@@ -603,7 +612,7 @@ func runMaterialization(in materializationInput) error {
 // `missing-source-globs`, ... — never a dotted/snake_case one-off), and
 // its paths are termsafe-escaped like every other dirt render.
 func sExitContract(in materializationInput, wtPath, beadID string) error {
-	artifactDirt, userDirt, err := checkDirtyTreeFn(wtPath, wtPath)
+	artifactDirt, userDirt, err := checkMaterializationDirt(in.exec, wtPath)
 	if err != nil {
 		return fmt.Errorf("checking working tree (S-exit contract): %w", err)
 	}
@@ -681,4 +690,27 @@ func materializationResetRefusal(beadID string, cause error) error {
 		fmt.Sprintf("bead %s's post-materialization index refresh failed: %v — the branch tip already advanced; refusing rather than leaving a stale index.", idrender.Bead(beadID), cause),
 		fmt.Sprintf("mindspec complete %s   (re-run — the write-ahead marker converges the retry)", idrender.Bead(beadID)),
 	)
+}
+
+// Materialization preserves registered local ledgers at HEAD. The next guard
+// remains stricter; remove only ownership-resolved ledgers from its dirt here.
+func checkMaterializationDirt(exec executor.Executor, path string) ([]string, []string, error) {
+	artifacts, user, err := checkDirtyTreeFn(path, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	ledgers, err := exec.PanelLedgerPaths(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	keep := func(paths []string) []string {
+		var out []string
+		for _, name := range paths {
+			if !slices.Contains(ledgers, name) {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	return keep(artifacts), keep(user), nil
 }

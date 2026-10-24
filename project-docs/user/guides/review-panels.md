@@ -10,7 +10,8 @@ An adhoc panel uses `.mindspec/reviews/<panel-slug>/` on a flat layout.
 Other layouts use `review/<panel-slug>/`.
 
 The directory holds `panel.json`, `BRIEF.md`, `dispositions.jsonl` and submitted verdict files.
-Review artifacts, including the disposition ledger, are local and ignored by default.
+Review artifacts in the two `.mindspec` layouts above, including the disposition ledger, are local and ignored by default.
+Legacy-layout ledgers are left out of lifecycle commits, but Git shows them as untracked.
 Already-tracked ledgers stay tracked. Their changes are the user's own commit to make;
 completion and implementation approval read the working ledger without committing it
 or requiring it to be committed. Run `mindspec init` to remove older ledger exceptions.
