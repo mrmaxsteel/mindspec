@@ -11,6 +11,7 @@ package complete
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
@@ -176,7 +177,7 @@ func TestRun_SStageMarkerReadErrorAbortsBeforePublish(t *testing.T) {
 		return "c-sha", nil
 	}
 	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
-		if len(exclude) > 0 {
+		if slices.Contains(exclude, ".beads/issues.jsonl") {
 			return "tree-without-artifact", nil
 		}
 		return "tree-with-artifact", nil

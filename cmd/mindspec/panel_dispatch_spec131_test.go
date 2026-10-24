@@ -38,6 +38,7 @@ func newDispatchFixture(t *testing.T) slotFixture {
 	if err != nil || reg.Err != nil {
 		t.Fatalf("registration: %v %v", err, reg.Err)
 	}
+	slotWrite(t, filepath.Join(reg.Dir, "BRIEF.md"), "Review this fixture.\n")
 	resetV2Flags(t)
 	v := paneltest.Verdict("APPROVE")
 	v.Slot, v.Model, v.ReviewedSHA = "R2", reg.Panel.Roster[1].Model, reg.Panel.ReviewedHeadSHA

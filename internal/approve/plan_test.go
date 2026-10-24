@@ -1658,3 +1658,122 @@ func TestPlanApprove_BeadsCarrySpecID(t *testing.T) {
 		t.Fatalf("expected two checked bead creates, got %d, %v", creates, ids)
 	}
 }
+
+func TestApprovePlan_LocalLedger(t *testing.T) {
+	for _, state := range []string{"tracked", "old-ignore-untracked"} {
+		t.Run(state, func(t *testing.T) {
+			specE2EFakeBdOnPath(t)
+			noopStubPhaseMergeMetadataForTest(t)
+			tmp := t.TempDir()
+			specID := "042-test"
+			specDir := filepath.Join(tmp, ".mindspec", "specs", specID)
+			if err := os.MkdirAll(specDir, 0755); err != nil {
+				t.Fatalf("mkdir spec dir: %v", err)
+			}
+
+			planContent := `---
+status: Approved
+spec_id: "042-test"
+version: "1.0"
+---
+
+# Plan
+
+## ADR Fitness
+
+No ADRs touched.
+
+## Testing Strategy
+
+Go unit tests.
+
+## Bead 1: First thing
+
+**Steps**
+1. Step one
+2. Step two
+3. Step three
+
+**Verification**
+- [ ] ` + "`go test ./...`" + ` passes
+
+**Acceptance Criteria**
+- First bead works
+
+**Depends on**
+None
+`
+			if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planContent), 0644); err != nil {
+				t.Fatalf("write plan: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# Spec\n"), 0644); err != nil {
+				t.Fatalf("write spec: %v", err)
+			}
+
+			// Stub phase.FindEpicBySpecID via listJSONFn → returns epic with matching
+			// spec_num/spec_title so SpecIDFromMetadata(42, "test") == "042-test".
+			epicJSON := []byte(`[{"id":"epic-42","title":"[SPEC 042-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":42,"spec_title":"test","mindspec_phase":"plan"}}]`)
+			// PERF-1: cache.AllEpics issues a single `--type=epic --status=open,in_progress,closed`
+			// call; stub returns the epic whenever a --type=epic query is seen.
+			restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+				for _, a := range args {
+					if a == "--type=epic" {
+						return epicJSON, nil
+					}
+				}
+				return []byte(`[]`), nil
+			})
+			defer restoreList()
+
+			// Validation's checkPlanApprovalGateConsistency calls phase.DerivePhase →
+			// runBDFn("show", epicID, "--json"). Stub it too so the test doesn't
+			// depend on a real bd binary being present in $PATH.
+			restoreRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+				if len(args) > 0 && args[0] == "show" {
+					return epicJSON, nil
+				}
+				return []byte(`[]`), nil
+			})
+			defer restoreRunBD()
+
+			restoreMerge := SetPlanMergeMetadataForTest(func(string, map[string]interface{}) error { return nil })
+			defer restoreMerge()
+
+			restoreBD := SetPlanRunBDForTest(func(args ...string) ([]byte, error) {
+				if len(args) > 0 && args[0] == "create" {
+					return []byte(`{"id":"bead-1"}`), nil
+				}
+				if len(args) > 0 && args[0] == "dep" {
+					return nil, nil
+				}
+				return []byte(`[]`), nil
+			})
+			defer restoreBD()
+
+			// planListJSONFn — used by handleExistingBeads to query children; none exist.
+			origList := planListJSONFn
+			defer func() { planListJSONFn = origList }()
+			planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
+
+			restoreCombined := SetPlanRunBDCombinedForTest(func(args ...string) ([]byte, error) {
+				return nil, nil
+			})
+			defer restoreCombined()
+
+			adoptGitRun(t, tmp, "init", "-q", "-b", "main")
+			adoptGitRun(t, tmp, "config", "user.email", "test@example.invalid")
+			adoptGitRun(t, tmp, "config", "user.name", "test")
+			adoptGitRun(t, tmp, "config", "commit.gpgsign", "false")
+			adoptGitRun(t, tmp, "add", "-A")
+			adoptGitRun(t, tmp, "commit", "-qm", "plan fixture")
+			adoptGitRun(t, tmp, "branch", "spec/"+specID)
+			wt := filepath.Join(tmp, ".worktrees", "worktree-spec-"+specID)
+			adoptGitRun(t, tmp, "worktree", "add", wt, "spec/"+specID)
+			file := prepareApprovalLedger(t, wt, specID, state)
+			if _, err := ApprovePlan(tmp, specID, "tester", &executor.MindspecExecutor{Root: tmp}); err != nil {
+				t.Fatal(err)
+			}
+			assertApprovalLedger(t, wt, file, state)
+		})
+	}
+}

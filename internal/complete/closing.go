@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -62,19 +62,16 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 		}
 		return nil, guard.NewFailure("spec worktree is busy: a merge is in progress at "+termsafe.Escape(state.MergeHead)+". Resolve or complete that merge directly before you retry.", commands...)
 	}
-	ledgerWT, ledgers, err := SpecLedgerPaths(root, specID, beadID)
+	ledgers, err := exec.PanelLedgerPaths(specWT)
 	if err != nil {
-		return nil, completionFailure(beadID, opts, "reading panel ledger paths", err)
+		return nil, completionFailure(beadID, opts, "resolving local panel ledgers", err)
 	}
-	_ = ledgerWT
-	allowed := map[string]bool{".beads/issues.jsonl": true}
-	for _, path := range ledgers {
-		allowed[path] = true
-	}
+	// Staged ledgers remain busy: only the tracker may be staged here.
+	// This deliberately keeps the closing gate stricter than local-ledger status checks.
 	for _, path := range state.StagedPaths {
-		if !allowed[path] {
-			return nil, guard.NewFailure("spec worktree is busy: staged change outside the export and panel ledger: "+termsafe.Escape(path),
-				"git -C "+ledgerShellArg(specWT)+" status", completionCommand(beadID, opts))
+		if slices.Contains(ledgers, path) || path != panel.TrackerArtifactPath {
+			return nil, guard.NewFailure("spec worktree is busy: staged user change: "+termsafe.Escape(path),
+				"git -C "+ledgerShellArg(specWT)+" restore --staged -- "+ledgerShellArg(path), completionCommand(beadID, opts))
 		}
 	}
 	if tip != row.Parents[1] {
@@ -145,10 +142,10 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 	if err := reconcilePendingRefutations(beadID); err != nil {
 		return nil, err
 	}
-	return closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath, row, decisions, ledgers, closed, exec, opts)
+	return closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath, row, decisions, closed, exec, opts)
 }
 
-func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath string, row executor.MergeIdentity, decisions []PanelGateResult, ledgers []string, closed bool, exec executor.Executor, opts CompleteOpts) (*Result, error) {
+func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath string, row executor.MergeIdentity, decisions []PanelGateResult, closed bool, exec executor.Executor, opts CompleteOpts) (*Result, error) {
 	for step := 1; step <= 6; step++ {
 		if closingStepHook != nil {
 			if err := closingStepHook(step); err != nil {
@@ -197,9 +194,9 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath st
 			}
 		case 4:
 			var done bool
-			done, err = closePublicationDone(beadID, specBranch, specWT, ledgers, exec)
+			done, err = closePublicationDone(beadID, specBranch, exec)
 			if err == nil && !done {
-				paths := append([]string{".beads/issues.jsonl"}, ledgers...)
+				paths := []string{panel.TrackerArtifactPath}
 				err = exec.PublishBeadClose(specWT, paths)
 			}
 		case 5:
@@ -325,10 +322,10 @@ func mergedRangeFailure(root, beadID, specBranch, specWT string, row executor.Me
 	return guard.NewFailure(text, commands...)
 }
 
-// closePublicationDone uses the committed close and current ledger bytes.
+// closePublicationDone uses the committed tracker close.
 // Later metadata-marker cleanup does not invalidate a published close.
-func closePublicationDone(beadID, specBranch, specWT string, ledgers []string, exec executor.Executor) (bool, error) {
-	data, present, err := exec.FileAtRefOrAbsent(specBranch, ".beads/issues.jsonl")
+func closePublicationDone(beadID, specBranch string, exec executor.Executor) (bool, error) {
+	data, present, err := exec.FileAtRefOrAbsent(specBranch, panel.TrackerArtifactPath)
 	if err != nil || !present {
 		return false, err
 	}
@@ -351,18 +348,10 @@ func closePublicationDone(beadID, specBranch, specWT string, ledgers []string, e
 	if !closed {
 		return false, nil
 	}
-	for _, path := range ledgers {
-		committed, present, err := exec.FileAtRefOrAbsent(specBranch, path)
-		if err != nil || !present {
-			return false, err
-		}
-		current, err := os.ReadFile(filepath.Join(specWT, path))
-		if err != nil {
-			return false, err
-		}
-		if !bytes.Equal(committed, current) {
-			return false, nil
-		}
-	}
 	return true, nil
+}
+
+// ledgerShellArg quotes an operand for a POSIX shell, escaping display controls.
+func ledgerShellArg(s string) string {
+	return "'" + strings.ReplaceAll(termsafe.Escape(s), "'", "'\"'\"'") + "'"
 }

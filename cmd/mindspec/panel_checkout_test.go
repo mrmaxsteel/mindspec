@@ -96,6 +96,11 @@ type slotFixture struct {
 
 func newCheckoutFixture(t *testing.T, isolation string) slotFixture {
 	t.Helper()
+	for _, name := range []string{"spec", "slot", "all", "dispatch", "replace", "fixer", "prune"} {
+		flag := panelCheckoutCmd.Flags().Lookup(name)
+		_ = flag.Value.Set(flag.DefValue)
+		flag.Changed = false
+	}
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +122,7 @@ func newCheckoutFixture(t *testing.T, isolation string) slotFixture {
 		t.Fatal(err)
 	}
 	paneltest.Fixture{Dir: dir, Panel: p}.Round(t, 2)
+	slotWrite(t, filepath.Join(dir, "BRIEF.md"), "Review this fixture.\n")
 	withTestChdir(t, root)
 	stubWorktreeListEmpty(t)
 	return slotFixture{root, dir, isolation, p}

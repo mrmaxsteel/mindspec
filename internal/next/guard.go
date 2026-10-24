@@ -329,6 +329,10 @@ func escapeLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// This dirty guard deliberately keeps the smaller co-managed artifact set.
+// Expanding it to adhoc/legacy ledgers changes the next claim gate's decision
+// about user dirt and normalization. Completion separately filters registered
+// local ledgers through the ownership resolver before materialization.
 func isArtifactPath(p string, specsDir ...string) bool {
 	dir := ""
 	if len(specsDir) > 0 {

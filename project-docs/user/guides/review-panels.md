@@ -10,6 +10,11 @@ An adhoc panel uses `.mindspec/reviews/<panel-slug>/` on a flat layout.
 Other layouts use `review/<panel-slug>/`.
 
 The directory holds `panel.json`, `BRIEF.md`, `dispositions.jsonl` and submitted verdict files.
+Review artifacts in the two `.mindspec` layouts above, including the disposition ledger, are local and ignored by default.
+Legacy-layout ledgers are left out of lifecycle commits, but Git shows them as untracked.
+Already-tracked ledgers stay tracked. Their changes are the user's own commit to make;
+completion and implementation approval read the working ledger without committing it
+or requiring it to be committed. Run `mindspec init` to remove older ledger exceptions.
 `panel.json` records the roster, round, reviewed SHA and subject digest.
 Every new round uses verdict schema v2. Historical rounds keep their file-based rules.
 
@@ -80,8 +85,13 @@ The top-level `runner` selects the orchestration adapter:
 
 ## Dispatch and isolation
 
+Write a filled brief to an absolute scratch file first. Include Summary, Files in
+Scope, Prior-Round Asks (or "none"), and Lens assignments per slot. For the workflow,
+invoke `/ms-panel` with `{slug, spec, gate, target, bead_id, round, brief_file}`,
+where `brief_file` is that absolute path. For CLI dispatch, pass `--brief-file`:
+
 ```bash
-mindspec panel create <slug> --spec <id> --gate bead --target bead/<id> --bead <id>
+mindspec panel create <slug> --spec <id> --gate bead --target bead/<id> --bead <id> --brief-file <absolute-brief-file>
 mindspec panel verify <slug> --json
 # Harness slot:
 mindspec panel checkout <slug> --slot R1 --dispatch
@@ -92,6 +102,13 @@ mindspec panel submit --file <absolute-slot-dir>/attempt-1/verdict.json
 mindspec panel launch <slug> R2
 mindspec panel recover <slug> R2 --reason '<why>'
 ```
+
+`--brief-file` replaces the authored body below the managed header on creation
+and on a round bump; the old round's brief is archived. The file must be regular,
+absolute, and free of unfilled `<!-- TODO(skill)` stubs and managed-header markers.
+The header retains the reviewed commit, acceptance criteria, conduct rules, verdict
+contract, roster and prior-round consolidation. Without that flag, fill the generated BRIEF.md before dispatch: prompt and
+launch refuse an unfinished brief and name its path.
 
 Slot clones and scratch live under `.mindspec-scratch` by default.
 The slot contains `slot.json`, `tree/` and `attempt-<k>/` directories.

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -1456,13 +1457,13 @@ func checkMergedFinalizeWorktree(path, specID string) error {
 		return nil
 	}
 	if _, statErr := os.Stat(path); statErr == nil {
-		status, statusErr := gitutil.Status(path)
+		pending, statusErr := pendingWorktreeChanges(path, false)
 		if statusErr != nil {
-			return guard.NewFailure("cannot read already merged worktree status: "+termsafe.Escape(statusErr.Error()),
-				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+			return guard.NewFailure("cannot read already merged worktree status: "+termsafe.Escape(statusErr.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 		}
-		if strings.TrimSpace(status) != "" {
-			return guard.NewFailure("already merged worktree has pending changes at "+termsafe.Escape(path)+":\n"+escapeLines(strings.TrimSpace(status)),
+
+		if len(pending) > 0 {
+			return guard.NewFailure("already merged worktree has pending changes at "+termsafe.Escape(path)+":\n"+escapeLines(strings.Join(pending, "\n")),
 				"preserve the pending changes in a follow-up branch, then leave this worktree clean",
 				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 		}
@@ -1504,20 +1505,14 @@ func checkTemporaryFinalizeWorktree(root, wtPath, specID string) error {
 		return guard.NewFailure("temporary finalization path is not a registered worktree of this repository: "+termsafe.Escape(wtPath),
 			"move the directory to a safe path, then retry approval", retry)
 	}
-	status, err := gitutil.StatusNoRenamesWithStderr(wtPath)
+	pending, err := pendingWorktreeChanges(wtPath, true)
 	if err != nil {
 		return guard.NewFailure("cannot read temporary finalization worktree status: "+termsafe.Escape(err.Error()), retry)
 	}
-	for _, line := range strings.Split(status, "\n") {
-		p, parseErr := panel.PorcelainPath(line)
-		if parseErr != nil {
-			return guard.NewFailure("cannot read temporary finalization worktree status: "+termsafe.Escape(parseErr.Error()), retry)
-		}
-		if p != "" && !panel.IsToolArtifactPath(p, workspace.SpecsDir(wtPath)) {
-			return guard.NewFailure("temporary finalization worktree has pending changes at "+termsafe.Escape(wtPath)+":\n"+escapeLines(status),
-				"preserve the changes at a safe path, then leave this worktree clean", retry)
-		}
+	if len(pending) > 0 {
+		return guard.NewFailure("temporary finalization worktree has pending changes at "+termsafe.Escape(wtPath)+":\n"+strings.Join(pending, "\n"), "preserve the changes at a safe path, then leave this worktree clean", retry)
 	}
+
 	return nil
 }
 
@@ -1533,20 +1528,14 @@ func checkBeadCleanupWorktree(wtPath, beadID string) error {
 	} else if err != nil {
 		return guard.NewFailure("cannot inspect bead worktree: "+termsafe.Escape(err.Error()), retry)
 	}
-	status, err := gitutil.StatusNoRenamesWithStderr(wtPath)
+	pending, err := pendingWorktreeChanges(wtPath, true)
 	if err != nil {
 		return guard.NewFailure("cannot read bead worktree status: "+termsafe.Escape(err.Error()), retry)
 	}
-	for _, line := range strings.Split(status, "\n") {
-		p, parseErr := panel.PorcelainPath(line)
-		if parseErr != nil {
-			return guard.NewFailure("cannot read bead worktree status: "+termsafe.Escape(parseErr.Error()), retry)
-		}
-		if p != "" && !panel.IsToolArtifactPath(p, workspace.SpecsDir(wtPath)) {
-			return guard.NewFailure("bead worktree has uncommitted user changes at "+termsafe.Escape(wtPath)+":\n"+escapeLines(status),
-				"preserve the pending changes, then leave this worktree clean", retry)
-		}
+	if len(pending) > 0 {
+		return guard.NewFailure("bead worktree has uncommitted user changes at "+termsafe.Escape(wtPath)+":\n"+strings.Join(pending, "\n"), "preserve the pending changes, then leave this worktree clean", retry)
 	}
+
 	return nil
 }
 
@@ -1734,17 +1723,39 @@ func (g *MindspecExecutor) Cleanup(specID string, force bool) error {
 	return nil
 }
 
-// IsTreeClean returns nil if the workspace at path has no uncommitted changes.
+// pendingWorktreeChanges uses the same ledger home as the commit funnel.
+// Gate classification remains separate; cleanup may also exempt tool artifacts.
+func pendingWorktreeChanges(path string, toolArtifacts bool) ([]string, error) {
+	status, err := gitutil.StatusNoRenamesZWithStderr(path)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := panel.ParseStatusZ(status)
+	if err != nil {
+		return nil, err
+	}
+	ledgers, err := panelLedgerPaths(path)
+	if err != nil {
+		return nil, err
+	}
+	var pending []string
+	for _, entry := range entries {
+		if slices.Contains(ledgers, entry.Path) || toolArtifacts && entry.Path == panel.TrackerArtifactPath {
+			continue
+		}
+		pending = append(pending, fmt.Sprintf("%c%c %s", entry.Index, entry.Worktree, termsafe.Escape(entry.Path)))
+	}
+	return pending, nil
+}
+
+// IsTreeClean ignores only local ledgers excluded by the commit funnel.
 func (g *MindspecExecutor) IsTreeClean(path string) error {
-	out, err := gitutil.Status(path)
+	pending, err := pendingWorktreeChanges(path, false)
 	if err != nil {
 		return fmt.Errorf("checking worktree status: %w", err)
 	}
-	if strings.TrimSpace(out) != "" {
-		// R4: each porcelain line names an agent-writable file path —
-		// escape per-line so a hostile filename cannot forge extra lines
-		// or control bytes into the terminal-facing message.
-		return fmt.Errorf("workspace has uncommitted changes:\n%s", escapeLines(strings.TrimSpace(out)))
+	if len(pending) > 0 {
+		return fmt.Errorf("workspace has uncommitted changes:\n%s", strings.Join(pending, "\n"))
 	}
 	return nil
 }
@@ -2348,7 +2359,11 @@ func (g *MindspecExecutor) commitWithExport(path, msg string) error {
 	if err := execBeadExportFn(exportDir); err != nil {
 		return fmt.Errorf("refreshing .beads/issues.jsonl: %w", err)
 	}
-	return gitutil.CommitAll(path, msg)
+	ledgers, err := panelLedgerPaths(exportDir)
+	if err != nil {
+		return err
+	}
+	return gitutil.CommitAll(exportDir, msg, ledgers...)
 }
 
 // mergeReentryHint renders the generic re-entry pointer commitWithExport's
@@ -2765,7 +2780,7 @@ func (g *MindspecExecutor) FirstParentMerges(ref string) ([]MergeIdentity, error
 // CompletionState does not change the index or refs.
 func (g *MindspecExecutor) CompletionState(workdir, base, head string) (CompletionState, error) {
 	var state CompletionState
-	status, err := gitutil.StatusZWithStderr(workdir)
+	status, err := gitutil.StatusNoRenamesZWithStderr(workdir)
 	if err != nil {
 		return state, err
 	}
@@ -2773,28 +2788,16 @@ func (g *MindspecExecutor) CompletionState(workdir, base, head string) (Completi
 	if err != nil && !errors.Is(err, gitutil.ErrRefNotFound) {
 		return state, err
 	}
-	fields := strings.Split(status, "\x00")
-	for i := 0; i < len(fields); i++ {
-		line := fields[i]
-		if line == "" {
-			continue
-		}
-		if len(line) < 4 {
-			return state, fmt.Errorf("invalid worktree status record")
-		}
-		if line[0] != ' ' && line[0] != '?' {
-			state.StagedPaths = append(state.StagedPaths, line[3:])
-		}
-		if strings.ContainsAny(line[:2], "RC") {
-			i++
-			if i >= len(fields) || fields[i] == "" {
-				return state, fmt.Errorf("invalid rename status record")
-			}
-			if line[0] != ' ' && line[0] != '?' {
-				state.StagedPaths = append(state.StagedPaths, fields[i])
-			}
+	entries, err := panel.ParseStatusZ(status)
+	if err != nil {
+		return state, err
+	}
+	for _, entry := range entries {
+		if entry.Index != ' ' && entry.Index != '?' {
+			state.StagedPaths = append(state.StagedPaths, entry.Path)
 		}
 	}
+
 	if base != "" && head != "" {
 		rows, err := gitutil.FirstParentCommitsAfter(g.Root, base, head)
 		if err != nil {
@@ -2830,4 +2833,8 @@ func (g *MindspecExecutor) PublishBeadClose(workdir string, paths []string) erro
 		return err
 	}
 	return gitutil.CommitPaths(workdir, "chore: publish bead close", paths)
+}
+
+func (g *MindspecExecutor) PanelLedgerPaths(path string) ([]string, error) {
+	return panelLedgerPaths(path)
 }

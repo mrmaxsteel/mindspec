@@ -519,7 +519,7 @@ func mustRevParse(t *testing.T, dir, ref string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func TestSnapshotWorktreeTree_LedgerGlobMatchesArtifactMatcher(t *testing.T) {
+func TestSnapshotWorktreeTree_ResolvedLedgerPaths(t *testing.T) {
 	dir := initGitRepo(t)
 	reviews := ".mindspec/specs/130-test/reviews/p/"
 	ledger := reviews + "dispositions.jsonl"
@@ -528,7 +528,7 @@ func TestSnapshotWorktreeTree_LedgerGlobMatchesArtifactMatcher(t *testing.T) {
 	for _, file := range []string{ledger, nested, registration} {
 		mustWrite(t, dir, file, "{}\n")
 	}
-	tree, err := SnapshotWorktreeTree(dir, panel.ToolArtifactPaths(filepath.Join(dir, ".mindspec", "specs")))
+	tree, err := SnapshotWorktreeTree(dir, panel.ResolveLedgerArtifacts(dir, nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}

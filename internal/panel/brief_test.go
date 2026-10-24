@@ -65,3 +65,23 @@ func TestBrief_EscapeText(t *testing.T) {
 		})
 	}
 }
+
+func TestFilledBriefStubBody(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		refuse bool
+	}{
+		{"<!--TODO(skill): fill -->", true}, {"<!--  todo(skill): fill -->", true}, {"<!--\nToDo(skill): fill -->", true},
+		{"Mention TODO(skill) in prose.", false}, {"Mention todo(skill) in prose.", false},
+	} {
+		file := filepath.Join(t.TempDir(), "BRIEF.md")
+		text := briefHeaderOpen + "\nQuoted <!-- TODO(skill): example -->\n" + briefHeaderClose + "\n\n" + tc.body
+		if err := os.WriteFile(file, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ReadFilledBrief(file)
+		if (err != nil) != tc.refuse {
+			t.Fatalf("body %q: %v", tc.body, err)
+		}
+	}
+}

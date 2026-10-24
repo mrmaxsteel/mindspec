@@ -259,7 +259,8 @@ Run `mindspec complete <bead-id> --merge-only` to merge for verification.
 The command prints the merge SHA and both parents. It keeps the bead open
 and retains its branch and worktree. After verification, run
 `mindspec complete <bead-id>` until it exits 0. The closing call publishes
-the tracker export and panel ledger before it removes the workspace.
+the tracker export before it removes the workspace. The disposition ledger
+remains local; completion reads it without committing its changes.
 After publication and its hooks, it reads bead user changes again before removal.
 Tool artifacts stay exempt. The exemption preserves filename whitespace.
 A lookalike path with a whitespace suffix blocks the close. Move the file to a

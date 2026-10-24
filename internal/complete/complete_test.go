@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -2316,7 +2317,7 @@ func TestRun_AutoCommitMaterializesViaSnapshot(t *testing.T) {
 	// result for every SnapshotWorktreeTree/ChangedFilesTree call
 	// (regardless of stage) is not realistic enough to survive G1.
 	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
-		if len(exclude) > 0 {
+		if slices.Contains(exclude, ".beads/issues.jsonl") {
 			return "tree-with-user-work", nil
 		}
 		return "tree-post-materialize", nil
@@ -2546,7 +2547,7 @@ func TestRun_ArtifactOnlyDirtSucceeds(t *testing.T) {
 	// make ONLY the artifact-including tree read as changed — modeling
 	// "only the artifact differs from tip".
 	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
-		if len(exclude) > 0 {
+		if slices.Contains(exclude, ".beads/issues.jsonl") {
 			return "tree-without-artifact", nil
 		}
 		return "tree-with-artifact", nil
@@ -2623,7 +2624,7 @@ func TestRun_CommitMsgWithArtifactDirtBuildsBothStages(t *testing.T) {
 		return []string{".beads/issues.jsonl"}, nil, nil
 	}
 	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
-		if len(exclude) > 0 {
+		if slices.Contains(exclude, ".beads/issues.jsonl") {
 			return "tree-without-artifact", nil
 		}
 		return "tree-with-artifact", nil
@@ -2743,7 +2744,7 @@ func TestRun_ArtifactSyncCommitFailureAborts(t *testing.T) {
 		return "c-sha", nil
 	}
 	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
-		if len(exclude) > 0 {
+		if slices.Contains(exclude, ".beads/issues.jsonl") {
 			return "tree-without-artifact", nil
 		}
 		return "tree-with-artifact", nil
@@ -2847,7 +2848,7 @@ func TestRun_SExitContract_ResidualArtifactDirtWarns(t *testing.T) {
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
 	mock := newMockExec()
 	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
-		if len(exclude) > 0 {
+		if slices.Contains(exclude, ".beads/issues.jsonl") {
 			return "tree-without-artifact", nil
 		}
 		return "tree-with-artifact", nil
@@ -2920,7 +2921,7 @@ func TestRun_SExitContract_ResidualUserDirtRefuses(t *testing.T) {
 	stubPhaseEpic(t, "008-test", "mol-parent-1")
 	mock := newMockExec()
 	mock.SnapshotWorktreeTreeFn = func(wtPath string, exclude []string) (string, error) {
-		if len(exclude) > 0 {
+		if slices.Contains(exclude, ".beads/issues.jsonl") {
 			return "tree-without-artifact", nil
 		}
 		return "tree-with-artifact", nil

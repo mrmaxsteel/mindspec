@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Upgrade:** run `mindspec init` after upgrading to remove the two old ledger ignore exceptions. Local disposition ledgers are excluded from lifecycle commits in every supported panel layout.
+- **Panel disposition ledgers are local** — `mindspec init` removes the former ledger ignore exceptions. Completion and implementation approval read the working ledger without committing it or requiring a ledger commit. Already-tracked files stay tracked; users own any commits of those changes.
+
+### Fixed
+- **Panel dispatch diagnostics and briefs** — verify errors retain their message, slot setup failures report a reason without using a reviewer retry, and prompt and launch refuse unfinished briefs. `panel create --brief-file <absolute-path>` copies the authored body beneath the managed review header; the panel workflow requires its path as `brief_file`.
+
 ## [0.18.0] - 2026-10-22
 
 Two specs and one fix PR since v0.17.0. The theme is **the binary runs the panel and finishes the landing**. PR #271 moves panel execution into the binary: reviewers submit verdicts through `mindspec panel submit`, the binary launches and recovers reviewer processes, and runners, lenses and acceptance questions are config. PR #270 makes the lifecycle verbs finish safely after a partial failure: `impl approve` refuses early for failures it can predict and converges on a re-run, `complete --merge-only` lets you verify a merge before you close the bead, and bead titles no longer decide lineage. PR #269 tells subagents to skip the session-start steps. Not a pure drop-in. Read **Changed** and **Removed** before you upgrade: every new panel round needs submitted v2 verdicts, every reviewer family needs a runner, `panel.substitution` and `merge_strategy` are gone, a bead needs a parent-child edge to its epic, and `spec create` refuses new lettered spec IDs.

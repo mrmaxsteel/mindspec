@@ -999,8 +999,9 @@ func ExactSecondParentMerges(workdir, branch, tip string) ([]MergeCommit, error)
 // CommitAll stages all changes in workdir and commits with the given message.
 // Used for auto-commits at lifecycle boundaries (spec-init, approvals) to ensure
 // artifacts are on the branch before downstream worktrees branch from it.
-// Returns nil if there are no changes to commit.
-func CommitAll(workdir, message string) error {
+// Optional exact exclusions stay outside staging and the partial commit, including
+// any excluded content already in the index. Returns nil when only exclusions differ.
+func CommitAll(workdir, message string, excludePaths ...string) error {
 	statusCmd := execCommand("git", "-C", workdir, "status", "--porcelain")
 	statusOut, err := statusCmd.Output()
 	if err != nil {
@@ -1010,7 +1011,19 @@ func CommitAll(workdir, message string) error {
 		return nil // nothing to commit
 	}
 
-	addCmd := execCommand("git", "-C", workdir, "add", "-A")
+	paths := []string{"."}
+	for _, name := range excludePaths {
+		paths = append(paths, ":(exclude,literal)"+name)
+	}
+	addArgs := []string{"-C", workdir, "add", "-A"}
+	if len(excludePaths) > 0 {
+		exclusions, err := addArtifactExclusions(workdir, excludePaths)
+		if err != nil {
+			return err
+		}
+		addArgs = append(append(addArgs, "--", "."), exclusions...)
+	}
+	addCmd := execCommand("git", addArgs...)
 	if out, err := addCmd.CombinedOutput(); err != nil {
 		// R4: git's CombinedOutput can echo back agent-writable repo content
 		// (e.g. a hostile pathspec/filename) — escape per-line before it
@@ -1018,7 +1031,20 @@ func CommitAll(workdir, message string) error {
 		return fmt.Errorf("staging changes: %s", escapeLines(strings.TrimSpace(string(out))))
 	}
 
-	commitCmd := execCommand("git", "-C", workdir, "commit", "-m", message)
+	commitArgs := []string{"-C", workdir, "commit", "-m", message}
+	if len(excludePaths) > 0 {
+		diffArgs := append([]string{"-C", workdir, "diff", "--cached", "--quiet", "--"}, paths...)
+		if err := execCommand("git", diffArgs...).Run(); err == nil {
+			return nil
+		} else {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+				return fmt.Errorf("checking staged changes: %w", err)
+			}
+		}
+		commitArgs = append(append(commitArgs, "--only", "--"), paths...)
+	}
+	commitCmd := execCommand("git", commitArgs...)
 	if out, err := commitCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("committing: %s", escapeLines(strings.TrimSpace(string(out))))
 	}
@@ -1734,6 +1760,19 @@ func StatusNoRenamesWithStderr(workdir string) (string, error) {
 	return stdout.String(), nil
 }
 
+// StatusNoRenamesZWithStderr preserves exact path bytes and reports renames as
+// separate additions and deletions before any ledger exemption is applied.
+func StatusNoRenamesZWithStderr(workdir string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("status --porcelain -z --no-renames: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
 // StatusZWithStderr runs `git status --porcelain -z` and returns stdout
 // on success, with stderr folded into the error on failure. The
 // NUL-terminated `-z` form is unambiguous where the newline form is not:
@@ -2405,4 +2444,34 @@ func splitLines(s string) []string {
 		}
 	}
 	return out
+}
+
+// Git reports an ignored, untracked literal exclusion as an explicit ignored
+// operand. Such a file already stays outside add -A; omit only that redundant
+// add operand. Keep HEAD-tracked paths excluded even after a staged deletion.
+func addArtifactExclusions(workdir string, paths []string) ([]string, error) {
+	var specs []string
+	for _, name := range paths {
+		if err := CheckIgnore(workdir, name); err == nil {
+			if _, err := RevParseRef(workdir, "HEAD"); errors.Is(err, ErrRefNotFound) {
+				continue
+			} else if err != nil {
+				return nil, err
+			}
+			entry, err := TreePathEntry(workdir, "HEAD", name)
+			if err != nil {
+				return nil, err
+			}
+			if len(entry) == 0 {
+				continue
+			}
+		} else {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+				return nil, fmt.Errorf("checking artifact ignore status: %w", err)
+			}
+		}
+		specs = append(specs, ":(exclude,literal)"+name)
+	}
+	return specs, nil
 }

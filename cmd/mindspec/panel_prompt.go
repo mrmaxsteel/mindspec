@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -125,9 +124,9 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 		return in, err
 	}
 	in.SlotDir, in.Tree = layout.Dir, layout.Tree
-	brief, err := os.ReadFile(filepath.Join(reg.Dir, "BRIEF.md"))
+	brief, err := panel.ReadFilledBrief(filepath.Join(reg.Dir, "BRIEF.md"))
 	if err != nil {
-		return in, guard.NewFailure("cannot read panel brief: "+termsafe.Escape(err.Error()), "run panel create to render the brief")
+		return in, guard.NewFailure(err.Error(), "run panel create to render the brief")
 	}
 	in.Brief = string(brief)
 	if runner.Kind == "process" {

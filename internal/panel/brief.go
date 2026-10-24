@@ -2,6 +2,9 @@ package panel
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -235,4 +238,110 @@ func scanMarkdownLines(s string, fn func(int, string)) {
 		}
 		offset = end + 1
 	}
+}
+
+// ReadFilledBrief refuses unfinished review instructions before dispatch.
+func ReadFilledBrief(file string) ([]byte, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read panel brief %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	if containsBriefStub(authoredBriefBody(string(data))) {
+		return nil, fmt.Errorf("panel brief %s contains TODO(skill) stubs; fill it or pass --brief-file to mindspec panel create", termsafe.Escape(file))
+	}
+	return data, nil
+}
+
+func readBriefFile(file string) ([]byte, error) {
+	if !filepath.IsAbs(file) {
+		return nil, fmt.Errorf("brief file must be an absolute path: %s", termsafe.Escape(file))
+	}
+	f, err := openBriefFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read brief file %s (must be a regular file): %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("brief file must be a regular file: %s", termsafe.Escape(file))
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	hasHeader := false
+	scanNonFenceLines(string(data), func(_ int, line string) {
+		if suppliedHeaderMarker.MatchString(strings.TrimSpace(line)) {
+			hasHeader = true
+		}
+	})
+	if hasHeader {
+		return nil, fmt.Errorf("brief file %s contains managed-header markers; supply only the authored body", termsafe.Escape(file))
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return nil, fmt.Errorf("brief file %s has empty review instructions; fill them", termsafe.Escape(file))
+	}
+	if containsBriefStub(string(data)) {
+		return nil, fmt.Errorf("brief file %s contains unfilled TODO(skill) stubs; fill them", termsafe.Escape(file))
+	}
+	return data, nil
+}
+
+var briefStub = regexp.MustCompile(`(?i)<!--\s*TODO\(skill\)`)
+var suppliedHeaderMarker = regexp.MustCompile(`(?i)^<!--\s*/?\s*mindspec:panel-header\s*-->$`)
+
+func containsBriefStub(body string) bool {
+	var prose strings.Builder
+	scanNonFenceLines(body, func(_ int, line string) {
+		prose.WriteString(withoutInlineCode(line))
+		prose.WriteByte('\n')
+	})
+	return briefStub.MatchString(prose.String())
+}
+
+// Matched backtick runs quote examples; an unmatched run remains literal text.
+func withoutInlineCode(line string) string {
+	var out strings.Builder
+	for len(line) > 0 {
+		start := strings.IndexByte(line, '`')
+		if start < 0 {
+			out.WriteString(line)
+			break
+		}
+		out.WriteString(line[:start])
+		line = line[start:]
+		n := len(line) - len(strings.TrimLeft(line, "`"))
+		end := -1
+		for i := n; i < len(line); {
+			next := strings.IndexByte(line[i:], '`')
+			if next < 0 {
+				break
+			}
+			i += next
+			run := len(line[i:]) - len(strings.TrimLeft(line[i:], "`"))
+			if run == n {
+				end = i + run
+				break
+			}
+			i += run
+		}
+		if end < 0 {
+			out.WriteString(line)
+			break
+		}
+		out.WriteByte(' ')
+		line = line[end:]
+	}
+	return out.String()
+}
+
+func authoredBriefBody(brief string) string {
+	opens, closes := findMarkerLines(brief, briefHeaderOpen), findMarkerLines(brief, briefHeaderClose)
+	if len(opens) == 1 && len(closes) == 1 && closes[0] > opens[0] {
+		return brief[:opens[0]] + brief[closes[0]+len(briefHeaderClose):]
+	}
+	return brief
 }
