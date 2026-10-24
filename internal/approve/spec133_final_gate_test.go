@@ -160,8 +160,16 @@ if args[0] == 'show':
     row = records[args[1]].copy()
     if args[1] != 'epic-parent': row['dependencies'] = [{'id':'epic-parent','issue_type':'epic','dependency_type':'parent-child'}]
     print(json.dumps([row]))
+elif args[0] == 'close':
+    records[args[1]]['status'] = 'closed'
+    with open(path, 'w') as f: json.dump(records, f)
+elif args[:2] == ['dolt','commit']:
+    pass
 elif args[0] == 'update':
-    records[args[1]]['metadata'] = json.loads(args[args.index('--metadata')+1])
+    if '--metadata' in args:
+        records[args[1]]['metadata'] = json.loads(args[args.index('--metadata')+1])
+    for i, arg in enumerate(args):
+        if arg == '--unset-metadata': records[args[1]]['metadata'].pop(args[i+1], None)
     with open(path, 'w') as f: json.dump(records, f)
 elif args[0] == 'export':
     os.makedirs('.beads', exist_ok=True)

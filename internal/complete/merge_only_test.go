@@ -174,7 +174,7 @@ func requireWindowRefusal(t *testing.T, err error, fragment string) {
 func TestComplete_MergeOnlyKeepsBeadOpen(t *testing.T) {
 	f := newWindowFixture(t)
 	m := f.mergedOnly()
-	if f.meta[mergeOnlySHAKey] != m || f.meta[mergeOnlyPendingKey] != nil || f.meta["mindspec_landed_merge_sha"] != m || f.meta["mindspec_landed_second_parent"] != f.tip {
+	if f.meta[mergeOnlySHAKey] != m || f.meta[mergeOnlyPendingKey] != nil || f.meta["mindspec_landed_merge_sha"] != nil || f.meta["mindspec_landed_second_parent"] != nil || f.meta["mindspec_landed_at"] != nil {
 		t.Fatalf("wrong metadata: %v", f.meta)
 	}
 	if _, err := os.Stat(f.beadWT); err != nil {

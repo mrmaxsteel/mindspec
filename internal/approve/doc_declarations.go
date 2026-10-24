@@ -91,9 +91,11 @@ func implDocGate(root, base, branch, specID string, exec executor.Executor, ids 
 				return nil, fmt.Errorf("doc-sync: landed change has no parent")
 			}
 			result := validate.ValidateDocsRange(root, commit.Parents[0], commit.SHA, branch, exec)
-			// Attribution errors are not an exemption. The branch gate remains the
-			// authority for all other doc-sync lanes.
+			// A failed diff cannot establish a doc exemption.
 			if result.DocImpact == nil {
+				if result.HasFailures() {
+					return nil, guard.NewFailure("doc-sync: "+joinResultErrorMessages(result), "git fsck", "mindspec impl approve "+idrender.Spec(specID))
+				}
 				continue
 			}
 			id := declaringMergeBead(commit, landings)

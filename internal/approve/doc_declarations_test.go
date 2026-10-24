@@ -3,11 +3,13 @@ package approve
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/complete"
+	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
@@ -281,9 +283,15 @@ func TestS133NoDocImpact_MergeOnlyKeepsExemption(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		t.Run(policy, func(t *testing.T) {
 			f := s133DocFinalChangesFixture(t, policy, 1, nil, false, "", false, false)
-			if err := f.metadata("bead-1", map[string]interface{}{"mindspec_landed_merge_sha": "", "mindspec_landed_second_parent": ""}); err != nil {
-				t.Fatal(err)
+			records := f.read()
+			bead := records["bead-1"]
+			bead.Status = "in_progress"
+			for _, key := range []string{"mindspec_landed_merge_sha", "mindspec_landed_second_parent", "mindspec_landed_at"} {
+				delete(bead.Metadata, key)
 			}
+			records["bead-1"] = bead
+			f.write(records)
+			f.beadWorktree()
 			r, err := complete.Run(f.root, "bead-1", "010-test", "", f.exec, complete.CompleteOpts{
 				MergeOnly: true, NoDocImpact: []string{"workflow: internal only"}, OverrideADR: "fixture architecture context",
 			})
@@ -291,8 +299,28 @@ func TestS133NoDocImpact_MergeOnlyKeepsExemption(t *testing.T) {
 				t.Fatalf("merge-only failed: %+v %v", r, err)
 			}
 			meta := f.read()["bead-1"].Metadata
-			if meta["mindspec_landed_merge_sha"] != r.MergeSHA || meta["mindspec_landed_second_parent"] != r.MergeParents[1] {
-				t.Fatalf("merge-only lost landing binding: %+v", meta)
+			for _, key := range []string{"mindspec_landed_merge_sha", "mindspec_landed_second_parent", "mindspec_landed_at"} {
+				if meta[key] != nil {
+					t.Fatalf("merge-only wrote %s while the bead is open: %+v", key, meta)
+				}
+			}
+			rows, err := validate.ReadDocRecords[validate.DocDeclaration](meta, validate.NoDocImpactKey)
+			if err != nil || len(rows) != 1 || rows[0].Domain != "workflow" || rows[0].Reason != "internal only" || rows[0].By == "" || rows[0].At == "" {
+				t.Fatalf("merge-only lost declaration: %+v %v", rows, err)
+			}
+			if f.read()["bead-1"].Status != "in_progress" {
+				t.Fatal("merge-only closed the bead")
+			}
+			closed, err := complete.Run(f.root, "bead-1", "010-test", "", f.exec, complete.CompleteOpts{
+				NoDocImpact: []string{"workflow: internal only"}, OverrideADR: "fixture architecture context",
+			})
+			if err != nil || closed == nil || !closed.BeadClosed || f.read()["bead-1"].Status != "closed" {
+				t.Fatalf("closing complete failed: %+v %v", closed, err)
+			}
+			f.worktrees.entries = nil
+			meta = f.read()["bead-1"].Metadata
+			if meta["mindspec_landed_merge_sha"] != r.MergeSHA || meta["mindspec_landed_second_parent"] != r.MergeParents[1] || meta["mindspec_landed_at"] == nil {
+				t.Fatalf("close lost the merge-only landing: %+v", meta)
 			}
 			s133SeedPanel(t, f, "final_review", "spec/010-test", "", "pass", "final")
 			s133Commit(t, f.specWT, "final review ledger")
@@ -301,5 +329,102 @@ func TestS133NoDocImpact_MergeOnlyKeepsExemption(t *testing.T) {
 			}
 			f.assertConverged()
 		})
+	}
+}
+
+func TestS133NoDocImpact_UnownedSourceStillBlocksImpl(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		for _, unowned := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/unowned=%t", policy, unowned), func(t *testing.T) {
+				f := s133FinalFixtureNew(t, policy, 1, "absent", func(f *s133FinalFixture, ids []string) {
+					wt := filepath.Join(f.root, ".worktrees", "source-work")
+					preflightGit(t, f.root, "worktree", "add", wt, "bead/bead-1")
+					s133Write(t, wt, "internal/widget/source.go", "package widget\n")
+					if unowned {
+						s133Write(t, wt, "internal/unowned/source.go", "package unowned\n")
+					}
+					s133Commit(t, wt, "source work")
+					preflightGit(t, f.root, "worktree", "remove", wt)
+					if err := f.metadata("bead-1", map[string]interface{}{validate.NoDocImpactKey: []validate.DocDeclaration{{Domain: "workflow", Reason: "internal only", By: "actor", At: "now"}}}); err != nil {
+						t.Fatal(err)
+					}
+				})
+				s133SeedPanel(t, f, "final_review", "spec/010-test", "", "pass", "final")
+				s133Commit(t, f.specWT, "final review ledger")
+				// Keep review records in the diff base. The measured change has no docs.
+				paths := preflightGit(t, f.root, "ls-tree", "-r", "--name-only", "spec/010-test", ".mindspec/specs/010-test/reviews")
+				for _, path := range strings.Fields(paths) {
+					data, err := os.ReadFile(filepath.Join(f.specWT, path))
+					if err != nil {
+						t.Fatal(err)
+					}
+					s133Write(t, f.root, path, string(data))
+				}
+				s133Commit(t, f.root, "review evidence in the base")
+				preflightGit(t, f.specWT, "merge", "--no-ff", "-m", "shared review evidence", "main")
+				base, err := f.exec.MergeBase("main", "spec/010-test")
+				if err != nil {
+					t.Fatal(err)
+				}
+				docs := validate.ValidateDocsRange(f.root, base, "spec/010-test", "spec/010-test", f.exec)
+				if docs.DocImpact == nil || len(docs.DocImpact.Docs) != 0 || docs.DocImpact.Sources["internal/widget/source.go"] != "workflow" {
+					t.Fatalf("fixture must change owned source with no docs: %+v", docs)
+				}
+				if unowned {
+					if domain, ok := docs.DocImpact.Sources["internal/unowned/source.go"]; !ok || domain != "" {
+						t.Fatalf("fixture source is not unowned: %+v", docs.DocImpact.Sources)
+					}
+					f.refuse("source files changed but no documentation files updated", ImplOpts{})
+				} else {
+					if _, err := f.approve(); err != nil {
+						t.Fatal(err)
+					}
+					f.assertConverged()
+				}
+			})
+		}
+	}
+}
+
+type s133DiffFailureExecutor struct {
+	executor.Executor
+	failedHead string
+	calls      int
+}
+
+func (e *s133DiffFailureExecutor) ChangedFiles(base, head string, opts ...executor.ChangedFilesOptions) ([]string, error) {
+	if head == e.failedHead {
+		e.calls++
+		return nil, fmt.Errorf("injected landed diff failure")
+	}
+	return e.Executor.ChangedFiles(base, head, opts...)
+}
+
+func TestS133NoDocImpact_LandedDiffErrorRefusesImpl(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		for _, override := range []string{"", "reviewed doc debt"} {
+			name := "no-override"
+			if override != "" {
+				name = "override"
+			}
+			t.Run(policy+"/"+name, func(t *testing.T) {
+				f := s133DocFinalChangesFixture(t, policy, 1, []string{"bead-1"}, false, "", true, false)
+				head := preflightGit(t, f.specWT, "rev-parse", "HEAD")
+				s133SeedPanel(t, f, "final_review", "spec/010-test", "", "pass", "final")
+				s133Commit(t, f.specWT, "final review ledger")
+				ex := &s133DiffFailureExecutor{Executor: f.exec, failedHead: head}
+				before := f.snapshot()
+				_, err := ApproveImpl(f.root, "010-test", ex, ImplOpts{AllowDocSkew: override})
+				if ex.calls == 0 || err == nil || !strings.Contains(err.Error(), "doc-sync:") || !strings.Contains(err.Error(), "injected landed diff failure") {
+					t.Fatalf("landed diff error did not refuse: calls=%d, err=%v", ex.calls, err)
+				}
+				if !guard.HasFinalRecoveryLine(err.Error()) {
+					t.Fatal(err)
+				}
+				if before != f.snapshot() {
+					t.Fatal("diff error mutated lifecycle state")
+				}
+			})
+		}
 	}
 }

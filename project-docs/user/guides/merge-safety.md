@@ -38,7 +38,8 @@ panel-staleness block or masked dirt.
     isn't, the same gate refuses again with the same message.
   - To defer doc updates, use `--allow-doc-skew "<reason>"` with
     `--doc-owner <open-bead>`. The owner must be another open bead in the
-    same epic. That bead must update the deferred docs.
+    same epic. The owner must update the deferred docs or transfer the task.
+    The new owner must be another open bead in the same epic.
     If the change has no doc impact, use
     `--no-doc-impact "<domain>: <reason>"` instead. Repeat it for each domain.
     Use `--override-adr "<reason>"` to record an architecture exception.

@@ -476,7 +476,7 @@ func TestS133DocOwner_TransferOnlyMissingDomains(t *testing.T) {
 	}
 }
 
-func TestS133NoDocImpact_MergeOnlyRecordsLandingBinding(t *testing.T) {
+func TestS133NoDocImpact_MergeOnlyBindsOnClose(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		for _, merged := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/merged=%t", policy, merged), func(t *testing.T) {
@@ -489,10 +489,23 @@ func TestS133NoDocImpact_MergeOnlyRecordsLandingBinding(t *testing.T) {
 					t.Fatalf("merge-only failed: %+v %v", r, err)
 				}
 				meta := stores[closingBead]
-				if meta["mindspec_landed_merge_sha"] != r.MergeSHA || meta["mindspec_landed_second_parent"] != r.MergeParents[1] {
-					t.Fatalf("merge-only lost landing binding: %+v", meta)
+				for _, key := range []string{"mindspec_landed_merge_sha", "mindspec_landed_second_parent", "mindspec_landed_at"} {
+					if meta[key] != nil {
+						t.Fatalf("merge-only wrote %s while the bead is open: %+v", key, meta)
+					}
 				}
 				rows, err := validate.ReadDocRecords[validate.DocDeclaration](meta, validate.NoDocImpactKey)
+				if err != nil || len(rows) != 1 || rows[0].Domain != "widget" || rows[0].By == "" || rows[0].At == "" {
+					t.Fatalf("merge-only lost declaration: %+v %v", rows, err)
+				}
+				closed, err := f.run(CompleteOpts{NoDocImpact: []string{"widget: internal only"}})
+				if err != nil || closed == nil || !closed.BeadClosed || !f.closed {
+					t.Fatalf("closing complete failed: %+v %v", closed, err)
+				}
+				if meta["mindspec_landed_merge_sha"] != r.MergeSHA || meta["mindspec_landed_second_parent"] != r.MergeParents[1] || meta["mindspec_landed_at"] == nil {
+					t.Fatalf("close lost the merge-only landing: %+v", meta)
+				}
+				rows, err = validate.ReadDocRecords[validate.DocDeclaration](meta, validate.NoDocImpactKey)
 				if err != nil || len(rows) != 1 || rows[0].Domain != "widget" {
 					t.Fatalf("merge-only lost declaration: %+v %v", rows, err)
 				}
@@ -522,5 +535,66 @@ func TestS133NoDocImpact_ReconcileRecordsLandingBinding(t *testing.T) {
 				t.Fatalf("reconcile lost declaration: %+v %v", rows, err)
 			}
 		})
+	}
+}
+
+func TestS133NoDocImpact_MergeOnlyDocSyncFailureKeepsAmendExit(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		t.Run(policy, func(t *testing.T) {
+			f, _, _ := s133DocFixture(t, policy, "doc", false)
+			if _, err := f.run(CompleteOpts{MergeOnly: true, NoDocImpact: []string{"widget: internal only"}}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := f.run(CompleteOpts{})
+			requireWindowRefusal(t, err, "doc-sync:")
+			for _, command := range []string{"commit --amend --no-edit", "--unset-metadata mindspec_merge_only_sha"} {
+				if !strings.Contains(err.Error(), command) {
+					t.Fatalf("missing amend exit %q: %v", command, err)
+				}
+			}
+			if f.closed {
+				t.Fatal("doc-sync refusal closed the bead")
+			}
+		})
+	}
+}
+
+func TestS133NoDocImpact_UnownedSourceStillBlocksComplete(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		for _, unowned := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/unowned=%t", policy, unowned), func(t *testing.T) {
+				f, _, _ := s133DocFixture(t, policy, "doc", false)
+				writeFile(t, f.beadWT, "README.md", "before\n")
+				if unowned {
+					writeFile(t, f.beadWT, "internal/unowned/source.go", "package unowned\n")
+				}
+				gitRun(t, f.beadWT, "add", "-A")
+				gitRun(t, f.beadWT, "commit", "-qm", "source-only change")
+				f.tip = gateRevParse(t, f.root, "bead/"+closingBead)
+				base, err := f.ex.MergeBase("spec/"+closingSpec, "bead/"+closingBead)
+				if err != nil {
+					t.Fatal(err)
+				}
+				docs := validate.ValidateDocsRange(f.root, base, "bead/"+closingBead, "spec/"+closingSpec, f.ex)
+				if docs.DocImpact == nil || len(docs.DocImpact.Docs) != 0 || docs.DocImpact.Sources["internal/widget/widget.go"] != "widget" {
+					t.Fatalf("fixture must change owned source with no docs: %+v", docs)
+				}
+				if unowned {
+					if domain, ok := docs.DocImpact.Sources["internal/unowned/source.go"]; !ok || domain != "" {
+						t.Fatalf("fixture source is not unowned: %+v", docs.DocImpact.Sources)
+					}
+				}
+				f.registerLedger()
+				_, err = f.run(CompleteOpts{NoDocImpact: []string{"widget: internal only"}})
+				if unowned {
+					requireWindowRefusal(t, err, "source files changed but no documentation files updated")
+					if f.closed {
+						t.Fatal("unowned source was exempt")
+					}
+				} else if err != nil || !f.closed {
+					t.Fatalf("owned-only control failed: %v", err)
+				}
+			})
+		}
 	}
 }
