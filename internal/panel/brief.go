@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -245,7 +246,7 @@ func ReadFilledBrief(file string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read panel brief %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
 	}
-	if strings.Contains(string(data), "TODO(skill)") {
+	if containsBriefStub(authoredBriefBody(string(data))) {
 		return nil, fmt.Errorf("panel brief %s contains TODO(skill) stubs; fill it or pass --brief-file to mindspec panel create", termsafe.Escape(file))
 	}
 	return data, nil
@@ -255,12 +256,40 @@ func readBriefFile(file string) ([]byte, error) {
 	if !filepath.IsAbs(file) {
 		return nil, fmt.Errorf("brief file must be an absolute path: %s", termsafe.Escape(file))
 	}
-	info, err := os.Lstat(file)
+	f, err := openBriefFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+		return nil, fmt.Errorf("cannot read brief file %s (must be a regular file): %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("brief file must be a regular file: %s", termsafe.Escape(file))
 	}
-	return ReadFilledBrief(file)
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	if strings.Contains(string(data), briefHeaderOpen) || strings.Contains(string(data), briefHeaderClose) || suppliedHeaderMarker.Match(data) {
+		return nil, fmt.Errorf("brief file %s contains managed-header markers; supply only the authored body", termsafe.Escape(file))
+	}
+	if containsBriefStub(string(data)) {
+		return nil, fmt.Errorf("brief file %s contains unfilled TODO(skill) stubs; fill them", termsafe.Escape(file))
+	}
+	return data, nil
+}
+
+var briefStub = regexp.MustCompile(`(?i)<!--\s*TODO\(skill\)`)
+var suppliedHeaderMarker = regexp.MustCompile(`(?i)<!--\s*/?\s*mindspec:panel-header\s*-->`)
+
+func containsBriefStub(body string) bool { return briefStub.MatchString(body) }
+
+func authoredBriefBody(brief string) string {
+	opens, closes := findMarkerLines(brief, briefHeaderOpen), findMarkerLines(brief, briefHeaderClose)
+	if len(opens) == 1 && len(closes) == 1 && closes[0] > opens[0] {
+		return brief[:opens[0]] + brief[closes[0]+len(briefHeaderClose):]
+	}
+	return brief
 }

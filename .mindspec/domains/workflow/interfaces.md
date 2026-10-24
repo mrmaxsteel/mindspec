@@ -846,7 +846,7 @@ Core 3 runs in `complete` before materialization for every required matched regi
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
 | `mindspec config show` | Print the effective config (panel/models/loop/runner + retained keys), with no `merge_strategy` row; read-only |
-| `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--brief-file <absolute-path>` copies a filled regular file to BRIEF.md, replacing it on a round bump. Prompt and launch refuse `TODO(skill)` stubs. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
+| `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--brief-file <absolute-path>` copies a filled regular file below the managed BRIEF.md header, replacing only the authored body on a round bump. Prompt, launch and dispatch refuse unfilled `<!-- TODO(skill)` stubs in that body. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + rule line + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved defaults: slots, expected reviewer count, and raw `approve_threshold`. Output is text or JSON. The `substitution` member is removed. This command is read-only. |
@@ -884,29 +884,22 @@ Core 3 runs in `complete` before materialization for every required matched regi
   control bytes and are shell-quoted. `brief_file` must be absolute; `round` must
   be a positive integer. The binary checks the brief content before writing.
 
-  **`buildCommand(verb, ...values)`** is the sole command-construction
-  chokepoint: `verb` must be one of the four identifiers destructured from
-  the static `ALLOWED_CLI` array (`mindspec panel create`, the sandboxed
-  `codex exec --sandbox read-only --skip-git-repo-check`, `mindspec panel
-  verify`, `mindspec panel tally`), and every value is rejected if it starts
-  with `-` (argument-injection guard). The lifecycle merge-terminal command
-  appears nowhere in the file.
-  **Fan-out (R3/R3b):** `mix` flattens into `{slotId, family, lens}`
-  descriptors (`slotId` from a fixed `R1, R2, …` enumeration, never from
-  args), fanned out via `pipeline()`. A `claude` slot is a single `agent()`
-  step that writes its verdict to `<panel-dir>/<slot>-round-<N>.json`. A
-  `codex` slot is a **wrapper agent**: it execs the sandboxed codex command,
-  persists codex's raw stdout verbatim to `<slot>-round-<N>.codex.log`, and
-  writes the verdict itself — codex never writes a file, sandbox-enforced by
-  the `--sandbox read-only` pin. A rendered-but-malformed verdict is
-  re-prompted to the **same** reviewer exactly once (a re-serialize, never a
-  fresh review); still unparseable after that single retry fails CLOSED to a
-  MISSING slot — never substituted.
-  **Substitution (R4):** reserved exclusively for a quota wall with **no**
-  verdict ever rendered. When `claude_sub_on_quota === true`, a `claude`
-  agent substitutes for that slot keeping the slot id, with `reviewer_id:
-  "<slot> claude-sub"`; when false (the fail-closed default when the field is
-  absent), the slot is left missing.
+  **Command allowlist:** `buildCommand` accepts exactly eight panel verbs:
+  `create`, `verify`, `tally`, `launch`, `checkout`, `prompt`, `submit` and
+  `recover`. Values are validated and shell-quoted. The command agent returns
+  stdout, stderr and exit status; refusals retain an escaped, bounded diagnostic.
+  **Roster and dispatch:** `verify --json` supplies the binary-resolved slots,
+  models, lenses and runner kinds. `pipeline(initial.slots, runSlot)` dispatches
+  each slot independently. A process slot uses `launch`, or `recover` for
+  damaged recorded output. Both failures return the slot and its reason.
+  A harness slot uses `checkout --dispatch`, then `prompt`; the reviewer saves
+  JSON to the bound attempt file and runs the exact `submit` command from the
+  prompt. Checkout and prompt failures return a reason without spending a
+  reviewer retry. A silent harness response may be retried once.
+  **Quota handoff:** the binary records configured runner substitution after
+  a quota wall. A slot with `handoff_pending` receives its first harness
+  dispatch with a fresh retry budget. A quota wall without a pending handoff
+  remains visible in the slot result. A missing recovered slot is an error.
   **Return (R5):** the workflow's single structured result carries `mindspec
   panel verify` + `mindspec panel tally` stdout verbatim (unmodified) plus
   the per-slot outcomes; it never runs the lifecycle merge-terminal command,

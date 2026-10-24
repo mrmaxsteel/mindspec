@@ -375,7 +375,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	header := renderCreateBriefHeader(filepath.Base(dir), p, prior, in.BriefRegions)
 	var newBrief string
 	if in.BriefFile != "" {
-		newBrief = string(suppliedBrief)
+		newBrief = header + "\n\n" + string(suppliedBrief)
 	} else if briefExists {
 		newBrief, err = spliceBriefHeader(string(existing), header)
 		if err != nil {

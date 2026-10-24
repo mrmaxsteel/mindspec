@@ -8,7 +8,8 @@ import (
 // ToolArtifactPaths is the single home for co-managed tool artifacts (R4.6).
 // specDir is the workspace-resolved specs root or spec directory.
 func ToolArtifactPaths(specDir string) []string {
-	return append([]string{".beads/issues.jsonl"}, LedgerArtifactPaths(specDir)...)
+	specs := strings.TrimSuffix(Subject("", specDir).Exclusions[0], "/*/reviews/**")
+	return []string{".beads/issues.jsonl", specs + "/*/reviews/*/dispositions.jsonl"}
 }
 
 // IsToolArtifactPath matches repository-relative paths with stdlib path.Match.
@@ -23,8 +24,20 @@ func IsToolArtifactPath(name, specDir string) bool {
 
 // LedgerArtifactPaths identifies local ledgers to preserve at HEAD in snapshots.
 func LedgerArtifactPaths(specDir string) []string {
-	specs := strings.TrimSuffix(Subject("", specDir).Exclusions[0], "/*/reviews/**")
-	return []string{specs + "/*/reviews/*/dispositions.jsonl"}
+	return []string{
+		".mindspec/specs/*/reviews/*/dispositions.jsonl",
+		".mindspec/docs/specs/*/reviews/*/dispositions.jsonl",
+		"docs/specs/*/reviews/*/dispositions.jsonl",
+		".mindspec/reviews/*/dispositions.jsonl",
+		"review/*/dispositions.jsonl",
+		// Scan accepts both segment spellings under repository, MindSpec and
+		// spec roots, including registrations left by older layouts.
+		"reviews/*/dispositions.jsonl",
+		".mindspec/review/*/dispositions.jsonl",
+		".mindspec/specs/*/review/*/dispositions.jsonl",
+		".mindspec/docs/specs/*/review/*/dispositions.jsonl",
+		"docs/specs/*/review/*/dispositions.jsonl",
+	}
 }
 
 // IsLedgerArtifactPath matches local ledger names without exempting the tracker export.

@@ -950,6 +950,9 @@ func TestComplete_MergedTrackedLedgerStaysLocal(t *testing.T) {
 			}
 			if staged {
 				gitRun(t, f.specWT, "add", "--", ledger)
+				_, err := f.run(CompleteOpts{})
+				requireWindowRefusal(t, err, "spec worktree is busy")
+				gitRun(t, f.specWT, "restore", "--staged", "--", ledger)
 			}
 			result, err := f.run(CompleteOpts{})
 			if err != nil || !result.BeadClosed {
@@ -964,5 +967,28 @@ func TestComplete_MergedTrackedLedgerStaysLocal(t *testing.T) {
 				t.Fatalf("ledger changes lost: %s %v", current, err)
 			}
 		})
+	}
+}
+
+func TestComplete_StagedLedgerBusy(t *testing.T) {
+	f := newWindowFixture(t)
+	f.mergedOnly()
+	name := ".mindspec/specs/010-test/reviews/p/dispositions.jsonl"
+	writeFile(t, f.specWT, name, "local ledger\n")
+	gitRun(t, f.specWT, "add", "-f", "--", name)
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "spec worktree is busy")
+	want := "git -C " + ledgerShellArg(f.specWT) + " restore --staged -- " + ledgerShellArg(name)
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("missing recovery %q: %v", want, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(f.specWT, name)); err != nil || string(data) != "local ledger\n" {
+		t.Fatalf("working data changed: %q %v", data, err)
+	}
+	if f.closed {
+		t.Fatal("closed busy bead")
+	}
+	if got, err := (&executor.MindspecExecutor{Root: f.root}).CompletionState(f.specWT, "", ""); err != nil || len(got.StagedPaths) != 1 || got.StagedPaths[0] != name {
+		t.Fatal("staged ledger was modified")
 	}
 }

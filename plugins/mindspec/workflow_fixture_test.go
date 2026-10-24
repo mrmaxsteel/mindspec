@@ -96,10 +96,10 @@ const silent=silentArg==='true'; let agents=0, creates=0, tallies=0;
 const commands=[];
 function execute(command) {
   commands.push(command);
-  if(command.startsWith('mindspec panel create ')){creates++;if(!command.includes(' --bead ')||!command.includes(' --gate bead'))throw Error('bead create needs --gate bead');return {stdout:'registered',exit:0};}
+  if(command.startsWith('mindspec panel create ')){creates++;if(!command.includes(' --bead ')||!command.includes(' --gate bead'))throw Error('bead create needs --gate bead');return {stdout:'registered',stderr:'',exit:0};}
   if(command.startsWith('mindspec panel tally ')) tallies++;
-  try {return {stdout:cp.execSync(command.replace(/^mindspec /,"'"+bin+"' "),{cwd:root,encoding:'utf8',stdio:['pipe','pipe','pipe']}),exit:0};}
-  catch(e){return {stdout:String(e.stdout||''),exit:e.status||1};}
+  try {return {stdout:cp.execSync(command.replace(/^mindspec /,"'"+bin+"' "),{cwd:root,encoding:'utf8',stdio:['pipe','pipe','pipe']}),stderr:'',exit:0};}
+  catch(e){return {stdout:String(e.stdout||''),stderr:String(e.stderr||''),exit:e.status||1};}
 }
 async function agent(prompt,options){
   if(options.label==='panel-command')return execute(prompt.split('\n').at(-1));
@@ -248,7 +248,7 @@ async function agent(prompt, options) {
   const command = prompt.split('\n').at(-1);
   commands.push(command);
   if (commands.length > 20) throw Error('workflow did not stop after refusal');
-  if (command.startsWith('mindspec panel create ')) return {stdout:'registered',exit:0};
+  if (command.startsWith('mindspec panel create ')) return {stdout:'registered',stderr:'',exit:0};
   if (command.startsWith('mindspec panel verify ')) return {stdout:JSON.stringify([slot]),exit:1};
   if (command.startsWith('mindspec panel launch ') || command.startsWith('mindspec panel checkout ')) {
     return {stdout:'slot already has a final submission',exit:1};
@@ -331,7 +331,7 @@ const [source,gate,bin,root]=process.argv.slice(1); let created;
 const agent=async(prompt,options)=>{
  assert.equal(options.label,'panel-command');
  const command=prompt.split('\n').at(-1);
- if(command.startsWith('mindspec panel create ')){created=command;return {stdout:'registered',exit:0};}
+ if(command.startsWith('mindspec panel create ')){created=command;return {stdout:'registered',stderr:'',exit:0};}
  if(command.startsWith('mindspec panel verify '))return {stdout:'[]',exit:0};
  if(command.startsWith('mindspec panel tally '))return {stdout:'PASS',exit:0};
  throw Error('unexpected command: '+command);

@@ -1,6 +1,7 @@
 package pluginmindspec
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -38,7 +39,7 @@ func TestWorkflowDispatchFailure(t *testing.T) {
  args={slug:'p',target:'main'};
  const slots=[{slot:'R1',kind:'harness',status:'missing'},{slot:'R2',kind:'harness',status:'final'}];
  let checkouts=0, reviewers=0;
- cli=async(verb)=>{if(verb===CHECKOUT)checkouts++; if(verb===`+verb+`)return {exit:2,stdout:'disk unavailable'}; return {exit:0,stdout:'/slot'};};
+ cli=async(verb)=>{if(verb===CHECKOUT)checkouts++; if(verb===`+verb+`)return {exit:2,stdout:'',stderr:'disk unavailable\n\x1b[31m'+ 'x'.repeat(500)}; return {exit:0,stdout:'/slot'};};
  agent=async()=>{reviewers++};
  roster=async()=>({slots});
  const results=await Promise.all(slots.map(runSlot));
@@ -56,4 +57,47 @@ func TestWorkflowBriefRequired(t *testing.T) {
 	}
 	workflowUnit(t, `args={slug:'p',target:'main',round:1,brief_file:"/absolute/it's filled.md"};
  if(!buildCommand(CREATE).includes(' --brief-file '+quote(args.brief_file)))throw Error('brief file not passed');`)
+}
+
+// Exercise the entry point, rather than only the command builder.
+func TestWorkflowEntryBriefGuard(t *testing.T) {
+	for _, value := range []string{"undefined", "'relative.md'"} {
+		script := `let calls=0; const args={slug:'p',target:'main',round:1,brief_file:` + value + `};
+ const agent=async()=>{calls++;throw Error('agent called')};
+ async function workflow(){` + WorkflowFiles()["ms-panel.js"] + `}
+ workflow().then(()=>{throw Error('guard accepted input')},e=>{
+ if(calls!==0 || !e.message.includes('brief_file must be an absolute path'))throw e;
+ }).catch(e=>{console.error(e);process.exit(1)});`
+		if out, err := exec.Command("node", "-e", script).CombinedOutput(); err != nil {
+			t.Fatalf("entry guard: %v %s", err, out)
+		}
+	}
+}
+func TestWorkflowCreateRefusal(t *testing.T) {
+	script := `const args={slug:'p',target:'main',round:1,brief_file:'/brief.md'};let calls=0;
+ const agent=async(prompt,options)=>{calls++;if(!prompt.includes('stderr') || !options.schema.required.includes('stderr'))throw Error('stderr contract absent');return {stdout:'',stderr:'brief contains TODO(skill)\n\x1b[31m'+ 'x'.repeat(500),exit:2}};
+ async function workflow(){` + WorkflowFiles()["ms-panel.js"] + `}
+ workflow().then(result=>{if(calls!==1 || !result.createOutput.includes('TODO(skill)') || !result.createOutput.includes('exit 2') || result.createOutput.includes('\x1b') || result.createOutput.length>260)throw Error(JSON.stringify(result))}).catch(e=>{console.error(e);process.exit(1)});`
+	if out, err := exec.Command("node", "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("create refusal: %v %s", err, out)
+	}
+}
+func TestWorkflowProcessFailures(t *testing.T) {
+	for _, verb := range []string{"LAUNCH", "RECOVER"} {
+		status := "missing"
+		if verb == "RECOVER" {
+			status = "damaged"
+		}
+		workflowUnit(t, fmt.Sprintf(`const slot={slot:'R1',kind:'process',status:%q};
+ cli=async()=>({exit:2,stdout:'',stderr:'refused\n\x1b[31m'+ 'x'.repeat(500)});
+ const result=await runSlot(slot);
+ if(result.slot!=='R1' || !result.error.includes('refused') || !result.error.includes(%q) || result.error.includes('\x1b') || result.error.length>260)throw Error(JSON.stringify(result));`, status, strings.ToLower(verb)))
+	}
+	workflowUnit(t, `cli=async()=>({exit:0,stdout:'',stderr:''}); roster=async()=>({slots:[]});
+ const result=await runSlot({slot:'R1',kind:'process',status:'damaged'});
+ if(result.slot!=='R1' || !result.error?.includes('disappeared'))throw Error(JSON.stringify(result));`)
+}
+func TestWorkflowVerifyObjectError(t *testing.T) {
+	workflowUnit(t, `cli=async()=>({stdout:JSON.stringify({error:{reason:'bad\n\x1b[31m'}}),exit:2});
+ try{await roster();throw Error('accepted error')}catch(e){if(e.message.includes('[object Object]') || !e.message.includes('reason') || e.message.includes('\x1b') || e.message.length>230)throw e;}`)
 }

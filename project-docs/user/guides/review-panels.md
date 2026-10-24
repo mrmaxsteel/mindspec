@@ -102,9 +102,11 @@ mindspec panel launch <slug> R2
 mindspec panel recover <slug> R2 --reason '<why>'
 ```
 
-`--brief-file` replaces BRIEF.md on creation and on a round bump; the old round's
-brief is archived. The file must be regular, absolute, and free of `TODO(skill)`
-stubs. Without that flag, fill the generated BRIEF.md before dispatch: prompt and
+`--brief-file` replaces the authored body below the managed header on creation
+and on a round bump; the old round's brief is archived. The file must be regular,
+absolute, and free of unfilled `<!-- TODO(skill)` stubs and managed-header markers.
+The header retains the reviewed commit, acceptance criteria, conduct rules, verdict
+contract, roster and prior-round consolidation. Without that flag, fill the generated BRIEF.md before dispatch: prompt and
 launch refuse an unfinished brief and name its path.
 
 Slot clones and scratch live under `.mindspec-scratch` by default.

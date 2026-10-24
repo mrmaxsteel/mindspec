@@ -1756,6 +1756,19 @@ func StatusNoRenamesWithStderr(workdir string) (string, error) {
 	return stdout.String(), nil
 }
 
+// StatusNoRenamesZWithStderr preserves exact path bytes and reports renames as
+// separate additions and deletions before any ledger exemption is applied.
+func StatusNoRenamesZWithStderr(workdir string) (string, error) {
+	cmd := execCommand("git", gitArgs(workdir, "status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("status --porcelain -z --no-renames: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
 // StatusZWithStderr runs `git status --porcelain -z` and returns stdout
 // on success, with stderr folded into the error on failure. The
 // NUL-terminated `-z` form is unambiguous where the newline form is not:

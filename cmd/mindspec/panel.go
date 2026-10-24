@@ -100,7 +100,8 @@ BRIEF-round-N.md without overwriting an existing archive. The new header
 includes the prior round's consolidation and keeps the authored body unless
 --brief-file is supplied.
 --brief-file requires an absolute path to a regular file without TODO(skill)
-stubs. Its content replaces BRIEF.md, including on a round bump.
+stubs or managed-header markers. Its content replaces the authored body below
+the managed header, including on a round bump.
 
 --gate selects spec_approve, plan_approve, bead, final_review or adhoc.
 Without --gate, the roster uses adhoc defaults and the gate stays omitted.
@@ -439,7 +440,7 @@ func init() {
 	panelVerifyCmd.Flags().Bool("json", false, "Print the slot roster and statuses as JSON")
 	panelVerifyCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
 	panelTallyCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
-	panelCreateCmd.Flags().String("brief-file", "", "Absolute path to a filled brief; replaces BRIEF.md, including on a new round")
+	panelCreateCmd.Flags().String("brief-file", "", "Absolute path to a filled authored body; preserves the managed header on every round")
 	panelCreateCmd.Flags().String("spec", "", "Owning spec ID")
 	panelCreateCmd.Flags().String("target", "", "Reviewed ref (e.g. bead/<id>)")
 	panelCreateCmd.Flags().String("bead", "", "Optional bead ID; requires --gate bead and must match --target bead/<id>")
@@ -660,6 +661,9 @@ func panelCreateFailure(err error, slug string, in panel.CreateInput) error {
 	command := fmt.Sprintf("mindspec panel create %s --round %d --target %s", shellQuoteTarget(slug), round, shellQuoteTarget(escapeConfigValue(in.Target))) + panelCreateScope(in.Spec, in.Gate)
 	if in.Gate != "" && in.Gate != "adhoc" {
 		command += " --gate " + shellQuoteTarget(in.Gate)
+	}
+	if in.BriefFile != "" {
+		command += " --brief-file " + shellQuoteTarget(escapeConfigValue(in.BriefFile))
 	}
 	recovery := "repair the registration or BRIEF if needed, then " + command
 	if conflict != nil {

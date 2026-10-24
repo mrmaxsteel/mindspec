@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -782,6 +783,16 @@ test "$(git -C tree rev-parse HEAD)" = '`+f.p.ReviewedHeadSHA+`'`, 0)
 	if out, err := launchRun(t, panelLaunchCmd, "adapter", "R1"); err != nil {
 		t.Fatalf("adapter launch %v %s", err, out)
 	}
+	layout, err := panel.NewSlotLayout(f.root, f.isolation, "", "adapter", 1, "R1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := slotRead(t, filepath.Join(layout.AttemptDir(1), "prompt.md"))
+	for _, text := range []string{f.p.ReviewedHeadSHA, "<!-- mindspec:acceptance -->", "<!-- mindspec:conduct -->", "<!-- mindspec:verdict-contract -->", "<!-- mindspec:spec-acs -->", "<!-- mindspec:prior-round -->", "## Reviewer roster", "Review the adapter fixture."} {
+		if !bytes.Contains(prompt, []byte(text)) {
+			t.Errorf("launch prompt missing %q", text)
+		}
+	}
 	f.status(t, "final")
 	if out, err := launchRun(t, panelVerifyCmd, "adapter"); err != nil {
 		t.Fatalf("adapter final verify %v %s", err, out)
@@ -922,6 +933,7 @@ func TestPanelLaunch_RoundSchemaGuard(t *testing.T) {
 	if err := paneltest.CreateV1(f.dir, panel.CreateInput{Gate: "adhoc", Target: "main", Round: 1, ReviewedHeadSHA: f.p.ReviewedHeadSHA, SubjectDigest: f.p.SubjectDigest, Roster: f.p.Roster}); err != nil {
 		t.Fatal(err)
 	}
+	slotWrite(t, filepath.Join(f.dir, "BRIEF.md"), "Review this legacy fixture.\n")
 	before := slotRead(t, filepath.Join(f.dir, "dispositions.jsonl"))
 	old := panelLaunchProcessFn
 	defer func() { panelLaunchProcessFn = old }()
@@ -1406,11 +1418,15 @@ func TestPanelLaunch_RetryDetailBound(t *testing.T) {
 func TestPanelLaunch_UnfilledBriefRefused(t *testing.T) {
 	f := newLaunchFixture(t)
 	slotWrite(t, filepath.Join(f.dir, "BRIEF.md"), "<!-- TODO(skill): fill summary -->\n")
+	before := briefFileSnapshot(t, f.root)
 	out, err := f.run(t, false)
 	if err == nil || !strings.Contains(err.Error(), filepath.Join(f.dir, "BRIEF.md")) || !strings.Contains(err.Error(), "fill") || !strings.Contains(err.Error(), "--brief-file") {
 		t.Fatalf("unfinished launch brief accepted: %v %s", err, out)
 	}
 	if events := f.events(t); len(events) != 0 {
 		t.Fatalf("started process with unfinished brief: %+v", events)
+	}
+	if !reflect.DeepEqual(before, briefFileSnapshot(t, f.root)) {
+		t.Fatal("refused launch wrote a slot tree or attempt")
 	}
 }

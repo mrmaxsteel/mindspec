@@ -57,10 +57,20 @@ function buildCommand(verb, value = {}) {
 }
 
 async function cli(verb, value) {
-  return agent("Run exactly this command. Return its stdout and exit code.\n" + buildCommand(verb, value), {
+  return agent("Run exactly this command. Return its stdout, stderr and exit code.\n" + buildCommand(verb, value), {
     label: "panel-command",
-    schema: { type: "object", required: ["stdout", "exit"], properties: { stdout: { type: "string" }, exit: { type: "integer" } } },
+    schema: { type: "object", required: ["stdout", "stderr", "exit"], properties: { stdout: { type: "string" }, stderr: { type: "string" }, exit: { type: "integer" } } },
   });
+}
+
+// Bound after escaping so control characters cannot expand the diagnostic.
+function diagnostic(value) {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return JSON.stringify(text ?? "").slice(0, 200);
+}
+
+function failure(verb, result) {
+  return "panel " + verb + " failed (exit " + result.exit + "): " + diagnostic(result.stderr || result.stdout);
 }
 
 async function roster() {
@@ -69,10 +79,10 @@ async function roster() {
   try {
     slots = JSON.parse(result.stdout);
   } catch {
-    throw new Error("panel verify returned non-JSON stdout (exit " + result.exit + "): " + JSON.stringify(result.stdout.slice(0, 160)));
+    throw new Error("panel verify returned non-JSON stdout (exit " + result.exit + "): " + diagnostic(result.stderr || result.stdout));
   }
   if (slots && typeof slots === "object" && !Array.isArray(slots) && "error" in slots) {
-    throw new Error("panel verify: " + slots.error);
+    throw new Error("panel verify: " + diagnostic(slots.error));
   }
   if (!Array.isArray(slots)) throw new Error("panel verify did not return a slot roster (exit " + result.exit + ")");
   return { slots, result };
@@ -80,10 +90,10 @@ async function roster() {
 
 async function dispatch(slot) {
   const checkout = await cli(CHECKOUT, { slot: slot.slot });
-  if (checkout.exit !== 0) throw new Error("panel checkout failed (exit " + checkout.exit + "): " + JSON.stringify(checkout.stdout.slice(0, 160)));
+  if (checkout.exit !== 0) throw new Error(failure("checkout", checkout));
   const slotDir = checkout.stdout.trim();
   const prompt = await cli(PROMPT, { slot: slot.slot });
-  if (prompt.exit !== 0) throw new Error("panel prompt failed (exit " + prompt.exit + "): " + JSON.stringify(prompt.stdout.slice(0, 160)));
+  if (prompt.exit !== 0) throw new Error(failure("prompt", prompt));
   const attempts = [];
   for (const line of prompt.stdout.split("\n")) {
     const match = line.match(/\/attempt-(\d+)\/verdict\.json/);
@@ -111,13 +121,23 @@ async function runSlot(initial) {
     if (slot.kind === "process") {
       if (slot.status === "running" || slot.status === "quota_wall") return slot;
       if (slot.status === "damaged") {
-        await cli(RECOVER, { slot: slot.slot });
-        return (await roster()).slots.find(s => s.slot === slot.slot);
+        const recovered = await cli(RECOVER, { slot: slot.slot });
+        if (recovered.exit !== 0) return { ...slot, error: failure("recover", recovered) };
+        const next = (await roster()).slots.find(s => s.slot === slot.slot);
+        return next || { ...slot, error: "recovered slot disappeared from verify" };
       }
       if (!["missing", "draft", "unsubmitted", "void", "launch_failed", "malformed"].includes(slot.status)) return slot;
       if (acted) { if (retried) return slot; retried = true; }
       // The command agent waits for this background workflow branch.
-      await cli(LAUNCH, { slot: slot.slot });
+      const launched = await cli(LAUNCH, { slot: slot.slot });
+      if (launched.exit !== 0) {
+        // A quota handoff exits nonzero but verify records its next runner.
+        let next;
+        try { next = (await roster()).slots.find(s => s.slot === slot.slot); } catch {}
+        if (!next?.handoff_pending || next.kind !== "harness") return { ...slot, error: failure("launch", launched) };
+        slot = next; acted = false; retried = false;
+        continue;
+      }
     } else if (slot.kind === "harness") {
       if (slot.status === "damaged" || slot.status === "quota_wall" && !slot.handoff_pending) return slot;
       if (!["missing", "running", "draft", "unsubmitted", "void", "launch_failed", "malformed", "quota_wall"].includes(slot.status)) return slot;
@@ -147,7 +167,7 @@ quote(args.target);
 if (typeof args.brief_file !== "string" || !args.brief_file.startsWith("/")) throw new Error("brief_file must be an absolute path");
 quote(args.brief_file);
 const created = await cli(CREATE);
-if (created.exit !== 0) return { createOutput: created.stdout };
+if (created.exit !== 0) return { createOutput: failure("create", created) };
 const initial = await roster();
 const slotResults = await pipeline(initial.slots, runSlot);
 const final = await roster();

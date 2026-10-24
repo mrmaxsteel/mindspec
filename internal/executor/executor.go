@@ -140,8 +140,8 @@ type Executor interface {
 
 	// --- Query methods ---
 
-	// IsTreeClean returns nil if the workspace at path has no uncommitted
-	// changes, or an error describing the dirty files.
+	// IsTreeClean returns nil when only local ledger dirt remains. It exempts
+	// the same paths as lifecycle commits; other dirt produces an error.
 	IsTreeClean(path string) error
 
 	// DiffStat returns a short diffstat summary between two refs.

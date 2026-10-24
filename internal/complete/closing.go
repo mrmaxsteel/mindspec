@@ -62,9 +62,9 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 		return nil, guard.NewFailure("spec worktree is busy: a merge is in progress at "+termsafe.Escape(state.MergeHead)+". Resolve or complete that merge directly before you retry.", commands...)
 	}
 	for _, path := range state.StagedPaths {
-		if !panel.IsToolArtifactPath(path, workspace.SpecsDir(specWT)) {
+		if panel.IsLedgerArtifactPath(path, workspace.SpecsDir(specWT)) || !panel.IsToolArtifactPath(path, workspace.SpecsDir(specWT)) {
 			return nil, guard.NewFailure("spec worktree is busy: staged user change: "+termsafe.Escape(path),
-				"git -C "+ledgerShellArg(specWT)+" status", completionCommand(beadID, opts))
+				"git -C "+ledgerShellArg(specWT)+" restore --staged -- "+ledgerShellArg(path), completionCommand(beadID, opts))
 		}
 	}
 	if tip != row.Parents[1] {
