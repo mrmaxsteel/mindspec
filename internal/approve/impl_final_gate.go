@@ -45,7 +45,8 @@ func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec
 		}
 	}
 	if os.IsNotExist(statErr) {
-		wt = workspace.TreeRootForSpecDir(specDir)
+		return Outcome{Gate: "final_review"}, false, guard.NewFailure("gate final_review: spec worktree is absent",
+			fmt.Sprintf("re-create the spec worktree at spec/%s, then run a final-review panel", idrender.Spec(specID)))
 	}
 	o, err := runLifecycleGate(root, specID, "final_review", wt, warnWriter)
 	return o, false, err
@@ -67,7 +68,11 @@ func implPublishedSubject(root, specID, epicID, specDir string, exec executor.Ex
 		return lifecycleExecutorFn(workdir).FileAtRef(ref, name)
 	})
 	var digests [2]string
-	for i, ref := range []string{"refs/heads/spec/" + specID, tip} {
+	branch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return refuse(err.Error())
+	}
+	for i, ref := range []string{"refs/heads/" + branch, tip} {
 		digests[i], err = reader(root, ref, panel.Subject("final_review", specDir))
 		if err != nil {
 			return refuse(err.Error())
@@ -155,7 +160,7 @@ func implEnsurePlaceholder(root, id, title string, opts adr.CreateOpts) error {
 		return err
 	}
 	info, err := os.Lstat(name)
-	if err == nil && info.Mode().IsRegular() && info.Mode().Perm() == 0644 {
+	if err == nil && info.Mode().IsRegular() {
 		file, err := safefile.Open(name)
 		if err != nil {
 			return err

@@ -34,10 +34,8 @@ func (e fiFakeErr) Error() string { return string(e) }
 // adrID, with the given bead IDs.
 func writeSpecWithDomain(t *testing.T, root, specID, domain, adrID string, beadIDs []string) {
 	t.Helper()
+	writeSpecDir(t, root, specID)
 	specDir := filepath.Join(root, "docs", "specs", specID)
-	if err := os.MkdirAll(specDir, 0o755); err != nil {
-		t.Fatalf("mkdir spec dir: %v", err)
-	}
 	spec := "# Spec " + specID + "\n\n## Impacted Domains\n\n- " + domain + "\n"
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0o644); err != nil {
 		t.Fatalf("write spec.md: %v", err)

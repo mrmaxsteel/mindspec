@@ -155,6 +155,9 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/approve/impl_final_gate.go", Func: "implFinalReviewGate", Detail: "arg1:unprovable",
+		Rationale:  "The missing-worktree recovery asks for a spec worktree and a final-review panel. Its spec operand uses idrender.Spec.",
+		Obligation: "internal/approve TestS133FinalGate_MissingWorktreeRefusesUnpublishedSubject checks the exact recovery and refusal before any write. TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor checks the current template."},
 	{File: "internal/approve/impl_final_gate.go", Func: "implPublishedSubject", Detail: "arg1:unprovable",
 		Rationale: "The recovery asks for a spec worktree and a final-review panel. Its spec operand uses idrender.Spec.", Obligation: mindspecVerbTemplateObligation},
 	{File: "internal/approve/impl_final_gate.go", Func: "implBeadWorktreePreflight", Detail: "arg1:unprovable",

@@ -147,6 +147,10 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+internal/approve/impl_final_gate.go	implBeadWorktreePreflight	arg1:unprovable
+internal/approve/impl_final_gate.go	implBeadWorktreePreflight	variadic-spread:recovery
+internal/approve/impl_final_gate.go	implFinalReviewGate	arg1:unprovable
+internal/approve/impl_final_gate.go	implPublishedSubject	arg1:unprovable
 cmd/mindspec/panel_defer.go	runPanelDefer	arg1:unprovable
 internal/approve/impl.go	implFinalizeFailure	arg1:unprovable
 internal/lifecycle/merge_state.go	RestoreMergeRecovery	variadic-spread:commands

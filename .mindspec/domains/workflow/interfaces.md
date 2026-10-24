@@ -1259,7 +1259,11 @@ requires a commit or discard before completion. A moved tip requires a follow-up
 bead and a new final-review round. Clean merged worktrees pass.
 
 An exact generated placeholder is an own write. A retry accepts it without a
-second create. Any other placeholder content stays in the subject. With no spec
+second create. It must be a regular file, not a symlink. Its permissions do not
+affect this check. Any other placeholder content stays in the subject. With no spec
 branch, the existing publication checks decide replay. With a closed epic, done
 phase and no spec worktree, approval compares the current subject to the final
 publication tip. A changed subject requires a spec worktree and a new panel.
+In all other cases with a spec branch and no spec worktree, approval refuses
+under both presence policies. Re-create the spec worktree and run a final-review
+panel. The subject dirt check runs only in the spec worktree.
