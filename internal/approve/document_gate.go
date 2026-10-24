@@ -128,7 +128,7 @@ func checkPlanResolutions(worktree, specID, content string, metadata map[string]
 		}
 	}
 	if len(missing) > 0 {
-		return refuse("missing deferred finding ids: " + strings.Join(missing, ", "))
+		return refuse("missing deferred finding ids: " + strings.Join(missing, ", ") + "; ids must appear in visible text; hidden text, including link destinations and titles, does not count")
 	}
 	return nil
 }
@@ -184,23 +184,34 @@ func trackedPlanDeferralIDs(worktree, specID string, exec executor.Executor, ids
 }
 
 func planResolutionsSection(content string) string {
-	inSection, ambiguous := false, false
-	var section []string
-	for _, line := range panel.MarkdownLines(content) {
-		if line.Level > 0 && line.Level <= 2 {
-			inSection = line.Level == 2 && line.Heading == "Resolutions"
-			ambiguous = false
-			continue
-		}
-		// Link destinations and titles are not visible text. Leave ambiguous
-		// inline markup out until the next section, including its continuations.
-		if strings.ContainsAny(line.Text, "[]") {
-			ambiguous = true
-		}
-		if inSection && !ambiguous {
-			section = append(section, line.Text)
+	inSection := false
+	var section, block []string
+	end := 0
+	flush := func() {
+		if len(block) > 0 {
+			section = append(section, resolutionVisibleText(strings.Join(block, "\n")))
+			block = nil
 		}
 	}
+	for _, line := range panel.MarkdownLines(content) {
+		if line.Level > 0 && line.Level <= 2 {
+			flush()
+			inSection = line.Level == 2 && line.Heading == "Resolutions"
+			continue
+		}
+		if !inSection {
+			continue
+		}
+		// A blank line or a new item ends an incomplete inline construct.
+		gap := content[end:line.Offset]
+		raw := content[line.Offset:line.End]
+		if strings.ContainsAny(gap, "\r\n") || resolutionListItem.MatchString(raw) {
+			flush()
+		}
+		block = append(block, line.Text)
+		end = line.End
+	}
+	flush()
 	return strings.Join(section, "\n")
 }
 

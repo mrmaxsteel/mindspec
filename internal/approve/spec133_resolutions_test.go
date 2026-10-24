@@ -164,6 +164,9 @@ func TestS133Resolutions_HiddenMarkdown(t *testing.T) {
 }
 
 var resolutionBlockCases = []struct{ name, tail string }{
+	{"lazy continuation ids", "\n## Resolutions\n> Context.\nlazy text\nplan-one\n"},
+	{"empty bullet heading", "\n-\n  ## Resolutions\n  plan-one\n"},
+	{"empty ordered heading", "\n1.\n   ## Resolutions\n   plan-one\n"},
 	{"list fence blank", "\n## Plan\n- item\n  ```\n  code\n\n  ## Resolutions\n  R1 resolved\n  ```\n"},
 	{"inline tag heading boundary", "\n## Resolutions\n\nR2 resolved\n\n## Bead 1: handle `<id>` input\n\nR1 resolved.\n"},
 	{"list fence", "\n## Resolutions\n\n- item\n    ```\n    plan-one\n    ```\n"},
@@ -438,5 +441,83 @@ func TestS133Resolutions_QuoteFenceBlankControl(t *testing.T) {
 	text := "> ```\n> code\n\n## Resolutions\nR1 resolved\n"
 	if !resolutionNamesID(planResolutionsSection(text), "R1") {
 		t.Fatal("blank line did not end quote fence")
+	}
+}
+
+var resolutionInlineCorpus = []struct {
+	name, body string
+	ids        []string
+	want       bool
+}{
+	{"after lazy paragraph", "> Context.\nlazy text\n\nplan-one: fixed.\n", []string{"plan-one"}, true},
+	{"checkbox", "- [x] Resolve plan-one and plan-epic-only.\n", []string{"plan-one", "plan-epic-only"}, true},
+	{"after link", "- See [the ADR](x.md).\n- plan-one: resolved.\n", []string{"plan-one"}, true},
+	{"bracket code same line", "- plan-one: returns `[]string` now.\n- plan-two: fixed.\n", []string{"plan-one"}, true},
+	{"bracket code later line", "- plan-one: returns `[]string` now.\n- plan-two: fixed.\n", []string{"plan-two"}, true},
+	{"after apostrophe destination", "- See [decision](path'part). plan-one: fixed.\n", []string{"plan-one"}, true},
+	{"angle destination", "- See [decision](<path).plan-one>).\n", []string{"plan-one"}, false},
+	{"parenthesis title", "- See [decision](x.md (plan-one)).\n", []string{"plan-one"}, false},
+	{"link destination", "- see [decision](plan-one)\n", []string{"plan-one"}, false},
+	{"link title", "- see [decision](x.md \"plan-one\")\n", []string{"plan-one"}, false},
+	{"plain", "- plan-one: fixed.\n", []string{"plan-one"}, true},
+	{"nested link label", "- [[plan-one]: fixed](x.md)\n", []string{"plan-one"}, true},
+	{"link label suffix", "- [plan-one](x.md)-extra\n", []string{"plan-one"}, false},
+	{"link label", "- [plan-one](x.md): fixed.\n", []string{"plan-one"}, true},
+	{"after title", "- see [decision](x.md \"hidden\")\n- plan-one: fixed.\n", []string{"plan-one"}, true},
+	{"reference definition", "[decision]: x.md \"plan-one\"\n", []string{"plan-one"}, false},
+	{"after reference definition", "[decision]: x.md\nplan-one: fixed.\n", []string{"plan-one"}, true},
+	{"reference continuation title", "[decision]: x.md\n\"plan-one\"\n", []string{"plan-one"}, false},
+	{"after reference title", "[decision]: x.md\n\"hidden title\"\nplan-one: fixed.\n", []string{"plan-one"}, true},
+	{"reference chained destination", "[one]: x.md\n[two]: plan-one\n", []string{"plan-one"}, false},
+	{"reference chained label", "[one]: x.md\n[plan-one]: y.md\n", []string{"plan-one"}, false},
+	{"reference multiline title", "[decision]: x.md \"title\nplan-one\nend\"\n", []string{"plan-one"}, false},
+	{"after reference multiline title", "[decision]: x.md \"title\nhidden\nend\"\nplan-one: fixed.\n", []string{"plan-one"}, true},
+	{"reference suffix", "[decision][plan-one]\n", []string{"plan-one"}, false},
+	{"multiline title", "[decision](x.md\n\"plan-one\")\n", []string{"plan-one"}, false},
+	{"incomplete target next item", "- [decision](unfinished\n- plan-one: fixed.\n", []string{"plan-one"}, true},
+	{"incomplete bracket next line", "[unfinished\nplan-one: fixed.\n", []string{"plan-one"}, true},
+	{"incomplete target next paragraph", "[decision](unfinished\n\nplan-one: fixed.\n", []string{"plan-one"}, true},
+}
+
+func TestS133Resolutions_InlineCorpus(t *testing.T) {
+	for _, tc := range resolutionInlineCorpus {
+		t.Run(tc.name, func(t *testing.T) {
+			section := planResolutionsSection("# T\n\n## Resolutions\n\n" + tc.body + "\n## Next\n")
+			for _, id := range tc.ids {
+				if got := resolutionNamesID(section, id); got != tc.want {
+					t.Errorf("id %s counts=%v, want %v; section=%q", id, got, tc.want, section)
+				}
+			}
+		})
+	}
+}
+
+func TestS133Resolutions_InlineApprovePlan(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		for _, tc := range resolutionInlineCorpus {
+			t.Run(policy+"/"+tc.name, func(t *testing.T) {
+				f := s133Document(t, policy, "plan_approve", "absent")
+				f.meta["plan_deferral_ids"] = tc.ids
+				content := strings.Replace(strings.ReplaceAll(validSingleBeadPlan, "042-test", s133DocID), "version: \"1.0\"", "version: \"1.0\"\nadr_citations: [ADR-0001]", 1)
+				f.writePlan(content + "\n## Resolutions\n\n" + tc.body)
+				f.commit("inline resolutions")
+				f.seed("plan_approve", "pass")
+				_, err := f.approve("plan_approve")
+				if tc.want {
+					if err != nil || f.creates != 1 {
+						t.Fatalf("visible ids refused: %v; creates=%d", err, f.creates)
+					}
+				} else {
+					if err == nil || !strings.Contains(err.Error(), "hidden text") || f.creates != 0 {
+						t.Fatalf("hidden ids did not refuse clearly: %v; creates=%d", err, f.creates)
+					}
+					for _, id := range tc.ids {
+						if !strings.Contains(err.Error(), id) {
+							t.Errorf("refusal omits %s: %v", id, err)
+						}
+					}
+				}
+			})
+		}
 	}
 }

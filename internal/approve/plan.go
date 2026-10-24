@@ -173,6 +173,9 @@ func resolvePlanApprovePreflight(root, planPath, specID string) (*planPreflightF
 	planContent := string(data)
 
 	sections := validate.ParseBeadSections(planContent)
+	if err := checkBeadSectionContents(planContent, sections); err != nil {
+		return nil, err
+	}
 
 	var workChunks []validate.WorkChunk
 	var workChunksParseErr error
@@ -563,6 +566,9 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, []s
 	planContent := string(data)
 
 	sections := validate.ParseBeadSections(planContent)
+	if err := checkBeadSectionContents(planContent, sections); err != nil {
+		return nil, nil, err
+	}
 	if len(sections) == 0 {
 		return nil, nil, nil
 	}
@@ -610,6 +616,9 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, []s
 // the historical silent `continue`.
 func createBeadsFromParsed(specDir, specID, parentID, planContent string, sections []validate.BeadSection, workChunks []validate.WorkChunk) ([]string, []string, error) {
 	var warnings []string
+	if err := checkBeadSectionContents(planContent, sections); err != nil {
+		return nil, nil, err
+	}
 
 	// --- Assemble shared context from spec.md ---
 	specContent := readFileOrEmpty(filepath.Join(specDir, "spec.md"))
@@ -1456,6 +1465,20 @@ func buildDesignField(specDir, requirements string, adrCitationIDs []string) str
 	return strings.Join(parts, "\n\n")
 }
 
+// checkBeadSectionContents checks every description before any bead is created.
+func checkBeadSectionContents(content string, sections []validate.BeadSection) error {
+	contents := extractBeadSectionContents(content)
+	for _, section := range sections {
+		if strings.TrimSpace(contents[section.Heading]) == "" {
+			return guard.NewFailure(
+				fmt.Sprintf("plan section %q has no extracted content", termsafe.Escape(section.Heading)),
+				"give each task section a body and run the same command again",
+			)
+		}
+	}
+	return nil
+}
+
 // extractBeadSectionContents extracts the raw markdown content for each ## Bead section.
 // Returns a map from heading text (e.g., "Bead 1: Populate Fields") to section content.
 func extractBeadSectionContents(content string) map[string]string {
@@ -1471,7 +1494,9 @@ func extractBeadSectionContents(content string) map[string]string {
 			currentHeading = ""
 		}
 		if line.Level == 2 && strings.HasPrefix(line.Heading, "Bead ") {
-			currentHeading, start = line.Heading, line.End
+			// Keep the source key used by ParseBeadSections.
+			currentHeading = strings.TrimPrefix(strings.TrimSuffix(content[line.Offset:line.End], "\n"), "## ")
+			start = line.End
 		}
 	}
 	if currentHeading != "" {

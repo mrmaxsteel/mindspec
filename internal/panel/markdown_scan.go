@@ -31,6 +31,7 @@ func MarkdownLines(content string) []MarkdownLine {
 	fenceLength := 0
 	inComment, inHTML := false, false
 	paragraph := false
+	uncertainContainer := false
 	paragraphStart := 0
 	htmlEnd := ""
 	frontmatter := strings.HasPrefix(content, "---\n") || strings.HasPrefix(content, "---\r")
@@ -81,7 +82,7 @@ func MarkdownLines(content string) []MarkdownLine {
 			paragraph = false
 			continue
 		}
-		if !inComment && markdownIndent(text) >= 4 {
+		if !inComment && (markdownIndent(text) >= 4 || (uncertainContainer && matched == len(containers) && len(containers) > 0)) {
 			continue
 		}
 		hadComment := inComment || markdownCommentStart(line) >= 0
@@ -92,14 +93,13 @@ func MarkdownLines(content string) []MarkdownLine {
 				opensFence := length >= 3 && (char != '`' || !strings.ContainsRune(rest, '`'))
 				sibling := !containers[matched].quote && markdownListIndent(text, false) > 0 && containers[matched].marker == markdownListMarker(text)
 				if paragraph && !sibling && level == 0 && !opensFence && !markdownThematicBreak(text) && markdownListIndent(text, true) == 0 {
-					// A lazy continuation has no explicit container prefix.
-					// End the accepted section instead of guessing its scope.
-					entry.Level = 2
-					result = append(result, entry)
-					paragraph = false
+					// Hide this uncertain container. Keep later sections and
+					// paragraphs when the container ends.
+					uncertainContainer = true
 					continue
 				}
 				paragraph = false
+				uncertainContainer = false
 			}
 			containers = containers[:matched]
 			for markdownIndent(text) <= 3 {

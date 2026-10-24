@@ -165,3 +165,35 @@ func TestMarkdownHTMLBlockOpeners(t *testing.T) {
 		}
 	}
 }
+
+func TestMarkdownEmptyListItemHeading(t *testing.T) {
+	for _, tc := range []struct{ marker, indent string }{{"-", "  "}, {"- ", "  "}, {"1.", "   "}} {
+		t.Run(tc.marker, func(t *testing.T) {
+			text := tc.marker + "\n" + tc.indent + "## Resolutions\n" + tc.indent + "plan-one\n\n## After\n"
+			var headings []string
+			for _, line := range MarkdownLines(text) {
+				if line.Level > 0 {
+					headings = append(headings, line.Heading)
+				}
+			}
+			if strings.Join(headings, ",") != "After" {
+				t.Fatalf("list-contained heading became top-level: %v", headings)
+			}
+		})
+	}
+}
+
+func TestMarkdownLazyContinuationScope(t *testing.T) {
+	text := "## Resolutions\n> Context.\nlazy text\nhidden-id\n\nvisible-id\n"
+	var visible []string
+	for _, line := range MarkdownLines(text) {
+		visible = append(visible, line.Text)
+		if line.Level > 0 && line.Heading != "Resolutions" {
+			t.Errorf("lazy text ended the section: %+v", line)
+		}
+	}
+	got := strings.Join(visible, "\n")
+	if strings.Contains(got, "hidden-id") || !strings.Contains(got, "visible-id") {
+		t.Fatalf("lazy paragraph scope changed: %q", got)
+	}
+}

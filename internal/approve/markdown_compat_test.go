@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
 
 func frozenUpsertSpecApprovalSection(content, approvedBy string, now time.Time) string {
@@ -133,6 +135,11 @@ func TestBeadSectionTrackedPlans(t *testing.T) {
 		}
 		plans++
 		got, want := extractBeadSectionContents(text), frozenExtractBeadSectionContents(text)
+		for _, section := range validate.ParseBeadSections(text) {
+			if _, ok := got[section.Heading]; !ok {
+				t.Errorf("parsed heading %q has no content entry in %s", section.Heading, name)
+			}
+		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("bead sections differ: %s (got %d, want %d)", name, len(got), len(want))
 		}
