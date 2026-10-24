@@ -19,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -1459,34 +1460,22 @@ func buildDesignField(specDir, requirements string, adrCitationIDs []string) str
 // Returns a map from heading text (e.g., "Bead 1: Populate Fields") to section content.
 func extractBeadSectionContents(content string) map[string]string {
 	result := make(map[string]string)
-	lines := strings.Split(content, "\n")
-
 	var currentHeading string
-	var currentLines []string
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "## Bead ") {
-			// Save previous section
-			if currentHeading != "" {
-				result[currentHeading] = strings.TrimSpace(strings.Join(currentLines, "\n"))
-			}
-			currentHeading = strings.TrimPrefix(line, "## ")
-			currentLines = nil
-			continue
-		}
-		// A non-bead ## heading ends the current bead section
-		if strings.HasPrefix(line, "## ") && currentHeading != "" {
-			result[currentHeading] = strings.TrimSpace(strings.Join(currentLines, "\n"))
-			currentHeading = ""
-			currentLines = nil
+	start := 0
+	for _, line := range panel.MarkdownLines(content) {
+		if line.Level == 0 || line.Level > 2 {
 			continue
 		}
 		if currentHeading != "" {
-			currentLines = append(currentLines, line)
+			result[currentHeading] = strings.TrimSpace(content[start:line.Offset])
+			currentHeading = ""
+		}
+		if line.Level == 2 && strings.HasPrefix(line.Heading, "Bead ") {
+			currentHeading, start = line.Heading, line.End
 		}
 	}
 	if currentHeading != "" {
-		result[currentHeading] = strings.TrimSpace(strings.Join(currentLines, "\n"))
+		result[currentHeading] = strings.TrimSpace(content[start:])
 	}
 
 	return result

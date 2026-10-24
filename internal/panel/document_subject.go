@@ -176,21 +176,23 @@ func DocumentSubjectContent(name string, data []byte, specDir, gate string) ([]b
 func stripApproval(body []byte) []byte {
 	text := string(body)
 	start, end := -1, len(text)
-	scanMarkdownLines(text, func(offset int, line string) {
-		if start < 0 && line == "## Approval" {
-			start = offset
-			return
+	for _, line := range MarkdownLines(text) {
+		if start < 0 && line.Level == 2 && line.Heading == "Approval" && strings.TrimRight(text[line.Offset:line.End], "\r\n") == "## Approval" {
+			start = line.Offset
+			continue
 		}
-		if start >= 0 && offset > start && strings.HasPrefix(line, "## ") && end == len(text) {
-			end = offset
+		if start >= 0 && line.Offset > start && line.Level > 0 && line.Level <= 2 {
+			end = line.Offset
+			break
 		}
-	})
+	}
+
 	if start < 0 {
 		return body
 	}
 	seen := map[string]bool{}
 	for _, line := range strings.Split(text[start:end], "\n")[1:] {
-		if strings.TrimSpace(line) == "" {
+		if strings.Trim(line, " \t\r") == "" {
 			continue
 		}
 		matched := false

@@ -30,17 +30,19 @@ type BriefRule struct {
 // its heading. Headings inside code fences do not delimit the section.
 func AcceptanceCriteriaSection(spec string) string {
 	start, end := -1, len(spec)
-	scanMarkdownLines(spec, func(offset int, line string) {
+	for _, line := range MarkdownLines(spec) {
 		if start < 0 {
-			if strings.TrimSpace(line) == "## Acceptance Criteria" {
-				start = offset
+			if line.Level == 2 && line.Heading == "Acceptance Criteria" {
+				start = line.Offset
 			}
-			return
+			continue
 		}
-		if end == len(spec) && (strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ")) {
-			end = offset
+		if line.Level > 0 && line.Level <= 2 {
+			end = line.Offset
+			break
 		}
-	})
+	}
+
 	if start < 0 {
 		return "no acceptance criteria section found"
 	}
@@ -207,32 +209,7 @@ func ValidateBriefRegions(r BriefRegions, fileAtRef func(string) ([]byte, bool, 
 // scanMarkdownLines visits lines outside backtick and tilde fences. A nested
 // shorter fence cannot close the fence used to quote an acceptance section.
 func scanMarkdownLines(s string, fn func(int, string)) {
-	var fenceByte byte
-	fenceLength := 0
-	for offset := 0; offset < len(s); {
-		end := strings.IndexByte(s[offset:], '\n')
-		if end < 0 {
-			end = len(s)
-		} else {
-			end += offset
-		}
-		line := strings.TrimSuffix(s[offset:end], "\r")
-		trimmed := strings.TrimSpace(line)
-		run := 0
-		if len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
-			for run < len(trimmed) && trimmed[run] == trimmed[0] {
-				run++
-			}
-		}
-		if fenceLength == 0 {
-			if run >= 3 {
-				fenceByte, fenceLength = trimmed[0], run
-			} else {
-				fn(offset, line)
-			}
-		} else if run >= fenceLength && trimmed[0] == fenceByte && strings.TrimSpace(trimmed[run:]) == "" {
-			fenceLength = 0
-		}
-		offset = end + 1
+	for _, line := range MarkdownLines(s) {
+		fn(line.Offset, strings.TrimSuffix(strings.TrimSuffix(s[line.Offset:line.End], "\n"), "\r"))
 	}
 }

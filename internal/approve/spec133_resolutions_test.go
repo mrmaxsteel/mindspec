@@ -128,6 +128,7 @@ func TestS133Resolutions_HiddenMarkdown(t *testing.T) {
 		{"different fence character", "~~~md\n```\n## Resolutions\nplan-one\n~~~\n"},
 		{"closing fence info", "```md\n```text\n## Resolutions\nplan-one\n```\n"},
 		{"indented closing fence", "```md\n    ```\n## Resolutions\nplan-one\n```\n"},
+		{"nonbreaking space closer", "```md\n```\u00a0\n## Resolutions\nplan-one\n```\n"},
 		{"comment heading", "<!--\n## Resolutions\nplan-one\n-->\n"},
 		{"single line comment heading", "<!-- ## Resolutions plan-one -->\n"},
 		{"fenced id", "## Resolutions\n```\nplan-one\n```\n"},
@@ -158,6 +159,124 @@ func TestS133Resolutions_HiddenMarkdown(t *testing.T) {
 	} {
 		if !resolutionNamesID(planResolutionsSection(text), "plan-one") {
 			t.Fatalf("visible id did not count: %s", text)
+		}
+	}
+}
+
+var resolutionBlockCases = []struct{ name, tail string }{
+	{"list fence", "\n## Resolutions\n\n- item\n    ```\n    plan-one\n    ```\n"},
+	{"quote fence", "\n## Resolutions\n\n> ```\n> plan-one\n> ```\n"},
+	{"indented heading", "\n    ## Resolutions\n    plan-one\n"},
+	{"indented text", "\n## Resolutions\n\n    plan-one\n"},
+	{"list heading", "\n- item\n  ## Resolutions\n  plan-one\n"},
+	{"list heading on marker", "\n- ## Resolutions\n  plan-one\n"},
+	{"quote heading", "\n> ## Resolutions\n> plan-one\n"},
+	{"list fence in quote", "\n## Resolutions\n\n> - item\n>     ```\n>     plan-one\n>     ```\n"},
+	{"quote fence in list", "\n## Resolutions\n\n- item\n  > ~~~\n  > plan-one\n  > ~~~\n"},
+	{"nested list fence", "\n## Resolutions\n\n- item\n  - child\n    ~~~~\n    plan-one\n    ~~~~\n"},
+	{"ordered list fence", "\n## Resolutions\n\n10. item\n    ```\n    plan-one\n    ```\n"},
+	{"ordered marker in paragraph", "\n## Resolutions\n\nParagraph.\n2. prose\n\n    ```\n    plan-one\n    ```\n"},
+	{"ordered marker after continuation", "\n## Resolutions\n\nParagraph.\n    continuation\n2. prose\n\n    ```\n    plan-one\n    ```\n"},
+	{"nonbreaking space in paragraph", "\n## Resolutions\n\nParagraph.\n\u00a0\n2. prose\n\n    plan-one\n"},
+	{"ordered marker after lazy quote", "\n## Resolutions\n\n> Paragraph.\n2. prose\n\n    plan-one\n"},
+	{"ordered marker after lazy list", "\n## Resolutions\n\n- Paragraph.\n2. prose\n\n    plan-one\n"},
+	{"fence on list marker", "\n## Resolutions\n\n- ```\n  plan-one\n  ```\n"},
+	{"code with list marker", "\n## Resolutions\n\n    - plan-one\n"},
+	{"code with quote marker", "\n## Resolutions\n\n    > plan-one\n"},
+	{"code in list", "\n## Resolutions\n\n- item\n\n      plan-one\n"},
+	{"code after thematic break", "\n## Resolutions\n\n- - -\n\n    plan-one\n"},
+	{"tab code", "\n## Resolutions\n\n\tplan-one\n"},
+	{"tab heading", "\n\t## Resolutions\n\tplan-one\n"},
+	{"carriage return code", "\r## Resolutions\r\r    plan-one\r"},
+	{"comment list marker", "\n## Resolutions\n<!--\n- item\n-->\n    plan-one\n"},
+	{"list comment before fence", "\n## Resolutions\n\n- <!-- hidden -->\n    ```\n  plan-one\n    ```\n"},
+	{"split comment id", "\n## Resolutions\nA-<!-- -->1\n"},
+	{"tab section boundary", "\n## Resolutions\nNone.\n##\tAppendix\nplan-one\n"},
+	{"empty section boundary", "\n## Resolutions\nNone.\n##\nplan-one\n"},
+	{"closing hashes boundary", "\n## Resolutions\nNone.\n## Appendix ##\nplan-one\n"},
+	{"setext boundary", "\n## Resolutions\n\nAppendix\n--------\nplan-one\n"},
+	{"link destination", "\n## Resolutions\n\n[decision](plan-one)\n"},
+	{"multiline link destination", "\n## Resolutions\n\n[decision](\nplan-one\n)\n"},
+	{"script heading after blank", "\n<script>\n\n## Resolutions\nplan-one\n</script>\n"},
+	{"preformatted text after blank", "\n## Resolutions\n\n<pre>\n\nplan-one\n</pre>\n"},
+}
+
+var resolutionBlockControls = []string{
+	"Resolve plan-one.\n",
+	"- Resolve `plan-one`.\n",
+	"- Decision\n  - Resolve plan-one.\n",
+}
+
+func TestS133Resolutions_BlockStructure(t *testing.T) {
+	for _, tc := range resolutionBlockCases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := "plan-one"
+			if tc.name == "split comment id" {
+				id = "A-1"
+			}
+			if section := planResolutionsSection("# Plan\n\nBody.\n" + tc.tail); resolutionNamesID(section, id) {
+				t.Fatalf("hidden id counted in %q", section)
+			}
+			for _, control := range resolutionBlockControls {
+				text := tc.tail + "\n## Resolutions\n\n" + strings.ReplaceAll(control, "plan-one", id)
+				if !resolutionNamesID(planResolutionsSection(text), id) {
+					t.Fatalf("visible control did not count: %s", text)
+				}
+			}
+		})
+	}
+	for _, text := range []string{
+		"## Resolutions\n~~old~~\nResolve plan-one.\n",
+		"   ## Resolutions ###\nResolve plan-one.\n",
+		"##\tResolutions\r\nResolve plan-one.\r\n",
+	} {
+		if !resolutionNamesID(planResolutionsSection(text), "plan-one") {
+			t.Fatalf("visible id did not count: %s", text)
+		}
+	}
+}
+
+func TestS133Resolutions_BlockStructureApprovePlan(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		for i, tc := range resolutionBlockCases {
+			t.Run(policy+"/"+tc.name, func(t *testing.T) {
+				f := s133Document(t, policy, "plan_approve", "absent")
+				id := "plan-one"
+				if tc.name == "split comment id" {
+					id = "A-1"
+				}
+				f.meta["plan_deferral_ids"] = []string{id}
+				content := strings.Replace(strings.ReplaceAll(validSingleBeadPlan, "042-test", s133DocID), "version: \"1.0\"", "version: \"1.0\"\nadr_citations: [ADR-0001]", 1)
+				f.writePlan(content + tc.tail)
+				f.commit("block structure refusal")
+				f.seed("plan_approve", "pass")
+				f.exec.commits = 0
+				f.mutations = nil
+				before := f.read("plan.md")
+				head := preflightGit(t, f.root, "rev-parse", "HEAD")
+				_, err := f.approve("plan_approve")
+				if err == nil || !strings.Contains(err.Error(), "missing deferred finding ids: "+id) {
+					t.Errorf("hidden obligation did not refuse: %v (creates=%d)", err, f.creates)
+				}
+				if f.creates != 0 || f.closes != 0 || f.exec.commits != 0 || len(f.mutations) != 0 || before != f.read("plan.md") || head != preflightGit(t, f.root, "rev-parse", "HEAD") {
+					t.Errorf("refusal mutated lifecycle: creates=%d closes=%d commits=%d mutations=%v", f.creates, f.closes, f.exec.commits, f.mutations)
+				}
+				if t.Failed() {
+					return
+				}
+				control := strings.ReplaceAll(resolutionBlockControls[i%len(resolutionBlockControls)], "plan-one", id)
+				f = s133Document(t, policy, "plan_approve", "absent")
+				f.meta["plan_deferral_ids"] = []string{id}
+				f.writePlan(content + tc.tail + "\n## Resolutions\n\n" + control)
+				f.commit("visible block structure control")
+				f.seed("plan_approve", "pass")
+				if _, err := f.approve("plan_approve"); err != nil {
+					t.Fatalf("visible control refused: %v", err)
+				}
+				if f.creates != 1 {
+					t.Fatalf("visible control created %d beads, want 1", f.creates)
+				}
+			})
 		}
 	}
 }

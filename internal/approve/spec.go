@@ -353,18 +353,17 @@ func upsertSpecFrontmatterApproval(content, approvedBy string, now time.Time) (s
 }
 
 func upsertSpecApprovalSection(content, approvedBy string, now time.Time) string {
-	lines := strings.Split(content, "\n")
-
-	approvalStart := -1
-	approvalEnd := len(lines)
-	for i, line := range lines {
-		if strings.HasPrefix(line, "## Approval") {
-			approvalStart = i
+	approvalStart, approvalEnd := -1, len(content)
+	for _, line := range panel.MarkdownLines(content) {
+		if line.Level == 0 || line.Level > 2 {
 			continue
 		}
-		if approvalStart >= 0 && strings.HasPrefix(line, "## ") {
-			approvalEnd = i
+		if approvalStart >= 0 {
+			approvalEnd = line.Offset
 			break
+		}
+		if line.Level == 2 && line.Heading == "Approval" && strings.TrimRight(content[line.Offset:line.End], "\r\n") == "## Approval" {
+			approvalStart = line.Offset
 		}
 	}
 
@@ -385,11 +384,7 @@ func upsertSpecApprovalSection(content, approvedBy string, now time.Time) string
 		return base + "\n\n" + strings.Join(newApproval, "\n") + "\n"
 	}
 
-	var result []string
-	result = append(result, lines[:approvalStart]...)
-	result = append(result, newApproval...)
-	result = append(result, lines[approvalEnd:]...)
-	return strings.Join(result, "\n")
+	return content[:approvalStart] + strings.Join(newApproval, "\n") + "\n" + content[approvalEnd:]
 }
 
 // scaffoldPlan generates a plan.md skeleton with the exact structure that
