@@ -504,6 +504,43 @@ func TestS133FinalGate_FaultsAndReruns(t *testing.T) {
 	}
 }
 
+func TestS133FinalGate_PlaceholderPermissionsRerun(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		t.Run(policy, func(t *testing.T) {
+			f := s133FinalFixtureNew(t, policy, 1, "pass")
+			opts := ImplOpts{SupersedeADR: "ADR-9800"}
+			var placeholder string
+			implCreateWithIDFn = func(root, id, title string, opts adr.CreateOpts) (string, error) {
+				name, err := adr.CreateWithID(root, id, title, opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				placeholder = name
+				return name, errors.New("fault after placeholder write")
+			}
+			if _, err := ApproveImpl(f.root, "010-test", f.exec, opts); err == nil || !strings.Contains(err.Error(), "fault after placeholder write") {
+				t.Fatalf("fault did not follow a real placeholder write: %v", err)
+			}
+			// Set permissions explicitly so the retry does not depend on the process umask.
+			if err := os.Chmod(placeholder, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(placeholder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0o600 {
+				t.Fatalf("placeholder permissions = %o, want 600", info.Mode().Perm())
+			}
+			implCreateWithIDFn = adr.CreateWithID
+			if _, err := ApproveImpl(f.root, "010-test", f.exec, opts); err != nil {
+				t.Fatalf("same run did not converge with private placeholder permissions: %v", err)
+			}
+			f.assertConverged()
+		})
+	}
+}
+
 func TestS133FinalGate_PlaceholderContentStales(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		t.Run(policy, func(t *testing.T) {
