@@ -25,10 +25,18 @@ func TestS133DeferToPlan_DeferralPreflightIgnoresPlanEntries(t *testing.T) {
 			}
 			config.ResetCache()
 			t.Cleanup(config.ResetCache)
-			// Every other panel is passing; the final-review fixture is present
-			// even though this branch has not added its presence gate yet.
+			// Keep the final-review target and head current while this fixture
+			// isolates plan entries from bead-deferral checks.
 			final := core3Fixture(t, root, "final", "final_review", false, "010-test")
 			core3Manifest(t, final)
+			oldExecutor := lifecycleExecutorFn
+			t.Cleanup(func() { lifecycleExecutorFn = oldExecutor })
+			lifecycleExecutorFn = func(string) executor.Executor {
+				return &executor.MockExecutor{
+					RevParseRefResult: final.Panel.ReviewedHeadSHA,
+					LsTreeResult:      "100644 blob 0000000000000000000000000000000000000000\tfixture.txt\n",
+				}
+			}
 			reg := core3Fixture(t, root, "deferred", "spec_approve", false, "010-test")
 			v := panel.FindingVerdict{Verdict: panel.VerdictRequestChanges, ConcreteChangesRequired: []string{"plan the test"}}
 			core3JSON(t, reg.Dir, "R1-round-1.json", v)

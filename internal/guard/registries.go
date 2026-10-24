@@ -155,6 +155,16 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/approve/impl_final_gate.go", Func: "implFinalReviewGate", Detail: "arg1:unprovable",
+		Rationale:  "The missing-worktree recovery asks for a spec worktree and a final-review panel. Its spec operand uses idrender.Spec.",
+		Obligation: "internal/approve TestS133FinalGate_MissingWorktreeRefusesUnpublishedSubject checks the exact recovery and refusal before any write. TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor checks the current template."},
+	{File: "internal/approve/impl_final_gate.go", Func: "implPublishedSubject", Detail: "arg1:unprovable",
+		Rationale: "The recovery asks for a spec worktree and a final-review panel. Its spec operand uses idrender.Spec.", Obligation: mindspecVerbTemplateObligation},
+	{File: "internal/approve/impl_final_gate.go", Func: "implBeadWorktreePreflight", Detail: "arg1:unprovable",
+		Rationale: "The retry uses mindspec impl approve with an idrender.Spec operand.", Obligation: mindspecVerbTemplateObligation},
+	{File: "internal/approve/impl_final_gate.go", Func: "implBeadWorktreePreflight", Detail: "variadic-spread:recovery",
+		Rationale:  "Recovery lists preserve changes before completion. Bead and spec operands use idrender; the displayed worktree path uses termsafe.Escape.",
+		Obligation: "internal/approve TestS133FinalGate_MergedDirtyWorktreesAndRecovery checks the actual recovery order, the export-only command and the follow-up panel command. TestOpaqueOperandRegistry_MindspecVerbTemplatesAgainstFloor checks these functions' current templates."},
 	{File: "cmd/mindspec/panel_defer.go", Func: "runPanelDefer", Detail: "arg1:unprovable", Rationale: "CheckDeferral builds a non-destructive dependency command from validated IDs; no destructive constructor applies.", Obligation: "TestPanelDefer_RefusalListsEveryMissingRequirement pins the dependency command and finding text."},
 	{File: "cmd/mindspec/reattest.go", Func: "reattestRefusalFailure", Detail: "variadic-spread:recovery", Rationale: "The ancestor reader renders each dependent ID with idrender.Bead. The default recovery inspects first-parent merges for no-owned and unknown-base refusals or runs doctor for other diagnoses.", Obligation: mindspecVerbTemplateObligation},
 	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.finalizeBeadWorktrees", Detail: "arg1:unprovable",

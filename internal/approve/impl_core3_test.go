@@ -49,6 +49,7 @@ func core3Fixture(t *testing.T, root, slug, gate string, rc bool, specIDs ...str
 		Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "architecture"}}}
 	if len(specIDs) > 0 {
 		p.Spec = specIDs[0]
+		p.Target = "spec/" + p.Spec
 	}
 	if gate == "bead" {
 		p.BeadID = &id

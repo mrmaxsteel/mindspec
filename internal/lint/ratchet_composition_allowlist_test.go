@@ -9,6 +9,8 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/approve/impl_final_gate.go implFinalReviewGate workspace.SpecWorktreePath":                                {Count: 1, Gate: "SpecWorktreePath validates the spec ID and configured path before the gate checks worktree presence; ApproveImpl validates the ID at ingress."},
+	"internal/approve/impl_final_gate.go implPublishedSubject workspace.SpecBranch":                                     {Count: 1, Gate: "SpecBranch validates the spec ID before the published-subject comparison reads the branch; an error refuses the gate."},
 	"internal/approve/lifecycle_gate.go runLifecycleGate workspace.SpecDir":                                             {Count: 1, Gate: "SpecDir validates specID before path composition and returns an error on invalid IDs"},
 	"internal/panel/paneltest/lifecycle.go Lifecycle workspace.SpecBranch":                                              {Count: 1, Gate: "SpecBranch validates the fixture spec ID before branch composition; an error fails the fixture"},
 	"internal/instruct/panelstate.go gatherPanelState workspace.SpecBranch":                                             {Count: 1, Gate: "SpecBranch validates the registered spec ID before live subject resolution"},

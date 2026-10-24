@@ -475,11 +475,18 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, err
 	}
 
-	if err := implPanelCore3Preflight(root, specID, warnWriter); err != nil {
+	if err := implBeadWorktreePreflight(root, specID, lifecycleAllowSet, exec); err != nil {
 		return nil, err
 	}
 
+	if err := implPanelCore3Preflight(root, specID, warnWriter); err != nil {
+		return nil, err
+	}
 	if err := implPanelDeferralPreflight(root, specID); err != nil {
+		return nil, err
+	}
+	gateOutcome, _, err := implFinalReviewGate(root, specID, epicID, phaseDetail.Stored, specDir, exec)
+	if err != nil {
 		return nil, err
 	}
 
@@ -511,7 +518,11 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 			}
 		}
 		title := "Placeholder for " + o.SupersedeADR
-		if _, err := implCreateWithIDFn(root, o.SupersedeADR, title, adr.CreateOpts{Domains: seedDomains}); err != nil {
+		writeRoot := workspace.TreeRootForSpecDir(specDir)
+		if writeRoot == "" {
+			writeRoot = root
+		}
+		if err := implEnsurePlaceholder(writeRoot, o.SupersedeADR, title, adr.CreateOpts{Domains: seedDomains}); err != nil {
 			return nil, fmt.Errorf("--supersede-adr: %w", err)
 		}
 		supersedeNewID = o.SupersedeADR
@@ -520,6 +531,9 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if o.OverrideADR == "" && o.SupersedeADR == "" && adrResult.HasFailures() {
 		return nil, fmt.Errorf("adr-divergence: %s\nhint: re-run with --override-adr \"<reason>\" or --supersede-adr ADR-NNNN to bypass",
 			joinResultErrorMessages(adrResult))
+	}
+	if err := recordLifecycleGateAudit(epicID, gateOutcome, nil); err != nil {
+		return nil, guard.NewFailure("cannot record final_review panel audit: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 	}
 
 	// Spec 092 Req 1: deferred forward reconcile of the stale phase
