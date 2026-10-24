@@ -16,24 +16,71 @@ var resolutionHeading = regexp.MustCompile(`^ {0,3}#{1,6}(?:[ \t]|$)`)
 func resolutionDocumentText(content string) string {
 	inSection := false
 	var all, section, block []string
-	end, quoteDepth := 0, 0
+	end, quoteDepth, listIndent := 0, 0, 0
+	uncertain := false
+	titleAt := -1
 	flush := func() {
 		if len(block) == 0 {
 			return
 		}
 		text := strings.Join(block, "\n")
+		if titleAt >= 0 {
+			uncertain = uncertain || !resolutionDefinitionCovers(text, titleAt)
+			titleAt = -1
+		}
+		if uncertain {
+			block = nil
+			uncertain = false
+			return
+		}
 		all = append(all, text)
 		if inSection {
 			section = append(section, text)
 		}
 		block = nil
 	}
+	// A skipped source line can still continue the current paragraph.
+	readGap := func(gap string) {
+		for gap != "" {
+			end := strings.IndexAny(gap, "\r\n")
+			if end < 0 {
+				end = len(gap)
+			}
+			raw := gap[:end]
+			next := end
+			if next < len(gap) {
+				next++
+				if gap[end] == '\r' && next < len(gap) && gap[next] == '\n' {
+					next++
+				}
+			}
+			gap = gap[next:]
+			text, interrupts, unsure := resolutionContinuationLine(raw, quoteDepth, listIndent)
+			paragraph := resolutionParagraphOpen(block)
+			if !paragraph && len(block) > 0 && text != "" && strings.ContainsRune("\"'(", rune(text[0])) {
+				// A definition can have an indented title on the next line.
+				titleAt = len(strings.Join(block, "\n")) + 1
+				paragraph = true
+			}
+			if strings.Trim(text, " \t") == "" || interrupts || !paragraph {
+				flush()
+				continue
+			}
+			uncertain = uncertain || unsure
+			block = append(block, text)
+		}
+	}
 	for _, line := range panel.MarkdownLines(content) {
 		raw := content[line.Offset:line.End]
-		depth, item := resolutionContainers(raw, line.Text)
-		gap := content[end:line.Offset]
+		depth, item, indent := resolutionContainers(raw, line.Text)
+		readGap(content[end:line.Offset])
+		if item {
+			listIndent = indent
+		} else if depth != quoteDepth || len(block) == 0 {
+			listIndent = min(listIndent, indent)
+		}
 		separate := resolutionHeading.MatchString(line.Text) || resolutionThematicBreak(line.Text)
-		if strings.ContainsAny(gap, "\r\n") || depth != quoteDepth || item || separate || line.Level > 0 {
+		if depth != quoteDepth || item || separate || line.Level > 0 {
 			flush()
 		}
 		if line.Level > 0 && line.Level <= 2 {
@@ -49,20 +96,106 @@ func resolutionDocumentText(content string) string {
 		}
 		end, quoteDepth = line.End, depth
 	}
+	readGap(content[end:])
 	flush()
 	references := make(map[string]bool)
 	resolutionBlockBodies(all, references)
 	return resolutionRenderBlocks(resolutionBlockBodies(section, references), references)
 }
 
+// Definitions do not open a paragraph. They can precede one in the same block.
+func resolutionParagraphOpen(block []string) bool {
+	text := strings.Join(block, "\n")
+	for text != "" {
+		end, _ := resolutionDefinition(text, 0)
+		if end < 0 {
+			return true
+		}
+		text = text[end:]
+	}
+	return false
+}
+
+// A restored title must be part of a complete definition.
+func resolutionDefinitionCovers(text string, position int) bool {
+	for i := 0; i < len(text); {
+		end, _ := resolutionDefinition(text, i)
+		if end < 0 {
+			return false
+		}
+		if end > position {
+			return true
+		}
+		i = end
+	}
+	return false
+}
+
+// Read omitted paragraph text without changing the shared block scanner.
+func resolutionContinuationLine(raw string, quotes, listIndent int) (text string, interrupts, uncertain bool) {
+	var expanded strings.Builder
+	column := 0
+	for _, r := range raw {
+		if r == '\t' {
+			width := 4 - column%4
+			expanded.WriteString(strings.Repeat(" ", width))
+			column += width
+		} else {
+			expanded.WriteRune(r)
+			column++
+		}
+	}
+	text = expanded.String()
+	for n := 0; ; n++ {
+		spaces := len(text) - len(strings.TrimLeft(text, " "))
+		remove := min(spaces, listIndent)
+		text = text[remove:]
+		listIndent -= remove
+		if n == quotes {
+			break
+		}
+		trimmed := strings.TrimLeft(text, " ")
+		if len(text)-len(trimmed) > 3 || !strings.HasPrefix(trimmed, ">") {
+			break
+		}
+		text = strings.TrimPrefix(trimmed[1:], " ")
+	}
+	trimmed := strings.TrimLeft(text, " ")
+	indent := len(text) - len(trimmed)
+	if indent <= 3 {
+		// Fences and HTML block types one through six interrupt paragraphs.
+		if resolutionInterruptingHTML.MatchString(trimmed) {
+			return "", true, false
+		}
+		if len(trimmed) >= 3 && (trimmed[0] == '`' || trimmed[0] == '~') {
+			width := 1
+			for width < len(trimmed) && trimmed[width] == trimmed[0] {
+				width++
+			}
+			if width >= 3 && (trimmed[0] != '`' || !strings.ContainsRune(trimmed[width:], '`')) {
+				return "", true, false
+			}
+		}
+		// The scanner can hide later lines of an uncertain container.
+		// Discard that whole block if a new container or block cannot be placed.
+		uncertain = resolutionContainerMarker.MatchString(trimmed) || resolutionHeading.MatchString(trimmed) || resolutionThematicBreak(trimmed)
+	}
+	return trimmed, false, uncertain
+}
+
+var resolutionInterruptingHTML = regexp.MustCompile(`(?i)^(?:<(?:script|pre|style|textarea)(?:[ \t>]|$)|<!--|<\?|<![A-Za-z]|<!\[CDATA\[|</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t]|/?>|$))`)
+
 // The block scanner removes container markers from Text. Count only that prefix.
-func resolutionContainers(raw, text string) (quotes int, item bool) {
+func resolutionContainers(raw, text string) (quotes int, item bool, indent int) {
 	// Keep markers literal while the block scanner expands tabs and removes comments.
 	// The four-column prefix preserves the source tab stops.
 	raw = panel.MarkdownLines("text" + raw)[0].Text[4:]
-	raw = strings.Trim(raw, " \t\r\n")
+	raw = strings.TrimRight(raw, " \t\r\n")
 	text = strings.Trim(text, " \t\r\n")
-	for raw != text {
+	for strings.TrimLeft(raw, " \t") != text {
+		trimmed := strings.TrimLeft(raw, " \t")
+		indent += len(raw) - len(trimmed)
+		raw = trimmed
 		marker := resolutionContainerMarker.FindString(raw)
 		if marker == "" {
 			break
@@ -71,10 +204,12 @@ func resolutionContainers(raw, text string) (quotes int, item bool) {
 			quotes++
 		} else {
 			item = true
+			indent += len(marker)
 		}
-		raw = strings.TrimLeft(raw[len(marker):], " \t")
+		raw = raw[len(marker):]
 	}
-	return quotes, item
+	indent += len(raw) - len(strings.TrimLeft(raw, " \t"))
+	return quotes, item, indent
 }
 
 func resolutionThematicBreak(text string) bool {
@@ -123,9 +258,18 @@ func resolutionInlineText(text string, references map[string]bool) string {
 	type opener struct {
 		source, output int
 		image, active  bool
+		bottom         *resolutionDelimiter
 	}
 	var brackets []opener
 	var visible []byte
+	omit := make(map[int]bool)
+	// The sentinel precedes every real output position.
+	root := &resolutionDelimiter{output: -1}
+	top := root
+	processEmphasis := func(bottom *resolutionDelimiter) {
+		resolutionProcessEmphasis(bottom, omit)
+		top = bottom
+	}
 	deactivateLinks := func() {
 		for n := range brackets {
 			if !brackets[n].image {
@@ -159,13 +303,26 @@ func resolutionInlineText(text string, references map[string]bool) string {
 			continue
 		}
 		if end := resolutionAutolinkEnd(text, i); end > i {
+			visible = append(visible, text[i+1:end-1]...)
+			i = end
+			continue
+		}
+		if text[i] == '*' || text[i] == '_' {
+			end := i + 1
+			for end < len(text) && text[end] == text[i] {
+				end++
+			}
+			open, close := resolutionDelimiterFlanks(text, i, end)
+			delim := &resolutionDelimiter{output: len(visible), length: end - i, original: end - i, char: text[i], open: open, close: close, previous: top}
+			top.next = delim
+			top = delim
 			visible = append(visible, text[i:end]...)
 			i = end
 			continue
 		}
 		image := text[i] == '!' && i+1 < len(text) && text[i+1] == '['
 		if text[i] == '[' || image {
-			brackets = append(brackets, opener{i, len(visible), image, true})
+			brackets = append(brackets, opener{i, len(visible), image, true, top})
 			if image {
 				visible = append(visible, '!')
 				i++
@@ -210,11 +367,18 @@ func resolutionInlineText(text string, references map[string]bool) string {
 			}
 		}
 		if end >= 0 {
+			// A formed link bounds emphasis within its label.
+			processEmphasis(open.bottom)
 			if open.image {
 				visible = visible[:open.output]
+				for position := range omit {
+					if position >= open.output {
+						delete(omit, position)
+					}
+				}
 			} else {
-				// Remove the opening bracket. Keep the parsed label text.
-				visible = append(visible[:open.output], visible[open.output+1:]...)
+				// Keep output positions stable until all delimiters are processed.
+				omit[open.output] = true
 				deactivateLinks()
 			}
 			i = end
@@ -224,7 +388,122 @@ func resolutionInlineText(text string, references map[string]bool) string {
 		visible = append(visible, ']')
 		i++
 	}
-	return string(visible)
+	processEmphasis(root)
+	var result strings.Builder
+	for i, b := range visible {
+		if !omit[i] {
+			result.WriteByte(b)
+		}
+	}
+	return result.String()
+}
+
+// Delimiters keep stable output positions. Removed markup leaves the text intact.
+type resolutionDelimiter struct {
+	previous, next           *resolutionDelimiter
+	output, length, original int
+	char                     byte
+	open, close              bool
+}
+
+func resolutionDelimiterFlanks(text string, start, end int) (open, close bool) {
+	before, after := rune(' '), rune(' ')
+	if start > 0 {
+		before, _ = utf8.DecodeLastRuneInString(text[:start])
+	}
+	if end < len(text) {
+		after, _ = utf8.DecodeRuneInString(text[end:])
+	}
+	space := func(r rune) bool {
+		return unicode.Is(unicode.Zs, r) || r == '\t' || r == '\n' || r == '\f' || r == '\r'
+	}
+	punct := func(r rune) bool {
+		return (r >= '!' && r <= '/') || (r >= ':' && r <= '@') || (r >= '[' && r <= '`') || (r >= '{' && r <= '~') || unicode.IsPunct(r) || unicode.IsSymbol(r)
+	}
+	left := !space(after) && (!punct(after) || space(before) || punct(before))
+	right := !space(before) && (!punct(before) || space(after) || punct(after))
+	if text[start] == '_' {
+		return left && (!right || punct(before)), right && (!left || punct(after))
+	}
+	return left, right
+}
+
+// Process closers in source order. A formed pair removes intervening delimiters.
+func resolutionProcessEmphasis(bottom *resolutionDelimiter, omit map[int]bool) {
+	var lower [2][2][3]int
+	for typ := range lower {
+		for open := range lower[typ] {
+			for mod := range lower[typ][open] {
+				lower[typ][open][mod] = -1
+			}
+		}
+	}
+	unlink := func(d *resolutionDelimiter) {
+		d.previous.next = d.next
+		if d.next != nil {
+			d.next.previous = d.previous
+		}
+	}
+	for closer := bottom.next; closer != nil; {
+		if !closer.close {
+			closer = closer.next
+			continue
+		}
+		typ, canOpen := 0, 0
+		if closer.char == '_' {
+			typ = 1
+		}
+		if closer.open {
+			canOpen = 1
+		}
+		bound := &lower[typ][canOpen][closer.original%3]
+		var opener *resolutionDelimiter
+		for candidate := closer.previous; candidate != bottom && candidate.output > *bound; candidate = candidate.previous {
+			if candidate.char != closer.char || !candidate.open {
+				continue
+			}
+			// A dual-purpose run obeys the rule of three.
+			if (candidate.close || closer.open) && (candidate.original+closer.original)%3 == 0 && (candidate.original%3 != 0 || closer.original%3 != 0) {
+				continue
+			}
+			opener = candidate
+			break
+		}
+		if opener == nil {
+			*bound = closer.previous.output
+			next := closer.next
+			if !closer.open {
+				unlink(closer)
+			}
+			closer = next
+			continue
+		}
+		use := 1
+		if opener.length >= 2 && closer.length >= 2 {
+			use = 2
+		}
+		for d := opener.next; d != closer; {
+			next := d.next
+			unlink(d)
+			d = next
+		}
+		opener.length -= use
+		for i := 0; i < use; i++ {
+			omit[opener.output+opener.length+i] = true
+			omit[closer.output+i] = true
+		}
+		closer.output += use
+		closer.length -= use
+		if opener.length == 0 {
+			unlink(opener)
+		}
+		if closer.length == 0 {
+			next := closer.next
+			unlink(closer)
+			closer = next
+		}
+	}
+	bottom.next = nil
 }
 
 func resolutionEscape(text string, i int) bool {
@@ -250,7 +529,11 @@ func resolutionCodeSpan(text string, start int) (int, string) {
 			end++
 		}
 		if end-i == width {
-			return end, strings.ReplaceAll(text[start+width:i], "\n", " ")
+			body := strings.ReplaceAll(text[start+width:i], "\n", " ")
+			if strings.HasPrefix(body, " ") && strings.HasSuffix(body, " ") && strings.Trim(body, " ") != "" {
+				body = body[1 : len(body)-1]
+			}
+			return end, body
 		}
 		i = end
 	}
