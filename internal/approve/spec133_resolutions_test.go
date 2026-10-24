@@ -252,64 +252,6 @@ func TestS133Resolutions_BlockStructure(t *testing.T) {
 	}
 }
 
-func TestS133Resolutions_BlockStructureApprovePlan(t *testing.T) {
-	for _, policy := range []string{"warn", "enforce"} {
-		for i, tc := range resolutionBlockCases {
-			t.Run(policy+"/"+tc.name, func(t *testing.T) {
-				f := s133Document(t, policy, "plan_approve", "absent")
-				id := "plan-one"
-				if tc.name == "split comment id" {
-					id = "A-1"
-				} else if tc.name == "list fence blank" || tc.name == "inline tag heading boundary" {
-					id = "R1"
-				}
-				f.meta["plan_deferral_ids"] = []string{id}
-				content := strings.Replace(strings.ReplaceAll(validSingleBeadPlan, "042-test", s133DocID), "version: \"1.0\"", "version: \"1.0\"\nadr_citations: [ADR-0001]", 1)
-				tail := tc.tail
-				if tc.name == "inline tag heading boundary" {
-					content = strings.Replace(content, "## Bead 1: First thing", "## Resolutions\nR2 resolved\n\n## Bead 1: handle `<id>` input\n\nR1 resolved\n", 1)
-					tail = ""
-				}
-				f.writePlan(content + tail)
-				f.commit("block structure refusal")
-				f.seed("plan_approve", "pass")
-				f.exec.commits = 0
-				f.mutations = nil
-				before := f.read("plan.md")
-				head := preflightGit(t, f.root, "rev-parse", "HEAD")
-				_, err := f.approve("plan_approve")
-				if resolutionBlockWant(tc.name) {
-					if err != nil || f.creates != 1 {
-						t.Errorf("visible obligation refused: %v (creates=%d)", err, f.creates)
-					}
-				} else {
-					if err == nil || !strings.Contains(err.Error(), "missing deferred finding ids: "+id) {
-						t.Errorf("hidden obligation did not refuse: %v (creates=%d)", err, f.creates)
-					}
-					if f.creates != 0 || f.closes != 0 || f.exec.commits != 0 || len(f.mutations) != 0 || before != f.read("plan.md") || head != preflightGit(t, f.root, "rev-parse", "HEAD") {
-						t.Errorf("refusal mutated lifecycle: creates=%d closes=%d commits=%d mutations=%v", f.creates, f.closes, f.exec.commits, f.mutations)
-					}
-				}
-				if t.Failed() {
-					return
-				}
-				control := strings.ReplaceAll(resolutionBlockControls[i%len(resolutionBlockControls)], "plan-one", id)
-				f = s133Document(t, policy, "plan_approve", "absent")
-				f.meta["plan_deferral_ids"] = []string{id}
-				f.writePlan(content + tail + "\n## Resolutions\n\n" + control)
-				f.commit("visible block structure control")
-				f.seed("plan_approve", "pass")
-				if _, err := f.approve("plan_approve"); err != nil {
-					t.Fatalf("visible control refused: %v", err)
-				}
-				if f.creates != 1 {
-					t.Fatalf("visible control created %d beads, want 1", f.creates)
-				}
-			})
-		}
-	}
-}
-
 func TestS133Resolutions_RefusalBeforeWrites(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		t.Run(policy, func(t *testing.T) {
@@ -621,17 +563,6 @@ func TestS133Resolutions_InlineCorpus(t *testing.T) {
 	}
 }
 
-func TestS133Resolutions_InlineApprovePlan(t *testing.T) {
-	for _, policy := range []string{"warn", "enforce"} {
-		for _, tc := range resolutionInlineCorpus {
-			t.Run(policy+"/"+tc.name, func(t *testing.T) {
-				content := strings.Replace(strings.ReplaceAll(validSingleBeadPlan, "042-test", s133DocID), "version: \"1.0\"", "version: \"1.0\"\nadr_citations: [ADR-0001]", 1)
-				checkResolutionApprovePlan(t, policy, content+"\n## Resolutions\n\n"+tc.body, tc.ids, tc.want)
-			})
-		}
-	}
-}
-
 // These cases check visible text through the document parser.
 func TestS133Resolutions_InlineSyntax(t *testing.T) {
 	cases := []struct{ name, body, want string }{
@@ -719,8 +650,8 @@ func TestS133Resolutions_EmphasisSyntax(t *testing.T) {
 		{"link label bounds after", "[one*](u)two*", "one*two*"},
 		{"emphasis around link", "*[one](u)*", "one"},
 		{"failed link allows pair", "*[one*](u bad)", "[one](u bad)"},
-		{"image label cannot close", "*![one*](u)", "*"},
-		{"image label cannot open", "![*one](u)*", "*"},
+		{"image label cannot close", "*![one*](u)", "* "},
+		{"image label cannot open", "![*one](u)*", " *"},
 		{"reference label emphasis", "[r]: /u\n[plan-**one**][r]", "plan-one"},
 	}
 	for _, tc := range cases {
@@ -737,9 +668,18 @@ func TestS133Resolutions_EmphasisSyntax(t *testing.T) {
 	}
 }
 
-func checkResolutionApprovePlan(t *testing.T, policy, content string, ids []string, want bool) {
+func checkResolutionApprovePlan(t *testing.T, f *s133DocumentFixture, content string, ids []string, want bool) {
 	t.Helper()
-	f := s133Document(t, policy, "plan_approve", "absent")
+	f.meta = map[string]interface{}{"spec_id": s133DocID, "mindspec_phase": "plan", phase.PhaseSemanticsV2MarkerKey: "v2"}
+	f.creates, f.closes = 0, 0
+	panelDir := filepath.Join(f.dir, "reviews", "plan_approve")
+	if _, err := os.Stat(panelDir); err == nil {
+		if err := os.Rename(panelDir, filepath.Join(t.TempDir(), "previous-panel")); err != nil {
+			t.Fatal(err)
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
 	f.meta["plan_deferral_ids"] = ids
 	f.writePlan(content)
 	f.commit("inline resolutions")
@@ -901,6 +841,52 @@ var resolutionDocumentCorpus = []struct {
 	{"boundary ordered comment title control", "## Resolutions\n\nSee [x](u \"\n2. <!-- hidden -->plan-one\")\n", false},
 	{"boundary comment list interrupts", "## Resolutions\n\nSee [x](u \"\n- <!-- hidden -->- plan-one\")\n", false},
 	{"boundary comment quote interrupts", "## Resolutions\n\nSee [x](u \"\n> <!-- hidden -->> plan-one\")\n", false},
+	{"round ten frontmatter hidden", "---\nstatus: Draft\n## Resolutions\nnote: plan-one\n\n---\n\n# Plan\n\n## Resolutions\n\nNone.\n", false},
+	{"round ten frontmatter hidden crlf", "---\r\nstatus: Draft\r\n## Resolutions\r\nnote: plan-one\r\n\r\n---\r\n\r\n# Plan\r\n\r\n## Resolutions\r\n\r\nNone.\r\n", false},
+	{"round ten frontmatter fence", "---\nstatus: Draft\nnotes: |\n  ```\n  x\n---\n\n# Plan\n\n## Resolutions\n\nResolve plan-one.\n", true},
+	{"round ten frontmatter fence crlf", "---\r\nstatus: Draft\r\nnotes: |\r\n  ```\r\n  x\r\n---\r\n\r\n# Plan\r\n\r\n## Resolutions\r\n\r\nResolve plan-one.\r\n", true},
+	{"round ten frontmatter body", "---\nstatus: Draft\n---\n# Plan\n## Resolutions\nplan-one\n", true},
+	{"round ten probe fm heading", "---\nstatus: Draft\n## Resolutions\nnote: plan-one\n\n---\n\n# Plan\n", false},
+	{"round ten probe fm crlf", "---\r\nstatus: Draft\r\n## Resolutions\r\nnote: plan-one\r\n\r\n---\r\n\r\n# Plan\r\n", false},
+	{"round ten br", "## Resolutions\n\nplan<br>-one\n", false},
+	{"round ten br upper", "## Resolutions\n\nplan<BR/>-one\n", false},
+	{"round ten br attribute", "## Resolutions\n\nplan<br class=x>-one\n", false},
+	{"round ten raw image", "## Resolutions\n\nplan<img src=x>-one\n", false},
+	{"round ten image", "## Resolutions\n\nplan![a](u)-one\n", false},
+	{"round ten comment", "## Resolutions\n\nplan<!-- c -->-one\n", true},
+	{"round ten span", "## Resolutions\n\nplan<span>-one</span>\n", true},
+	{"round ten br spaced", "## Resolutions\n\nplan<br />-one\n", false},
+	{"round ten br multiline", "## Resolutions\n\nplan<bR\ndata-x=\"a > b\"/>-one\n", false},
+	{"round ten br tab", "## Resolutions\n\nplan<br\tclass=x>-one\n", false},
+	{"round ten raw image upper", "## Resolutions\n\nplan<IMG src=x/>-one\n", false},
+	{"round ten reference image", "## Resolutions\n\nplan![a][r]-one\n\n[r]: /u\n", false},
+	{"round ten empty image", "## Resolutions\n\nplan![](u)-one\n", false},
+	{"round ten image link", "## Resolutions\n\nplan[![a](u)](v)-one\n", false},
+	{"round ten longer tag", "## Resolutions\n\nplan<bright>-one</bright>\n", true},
+	{"round ten longer image tag", "## Resolutions\n\nplan<img-extra>-one</img-extra>\n", true},
+	{"round ten closing break tag", "## Resolutions\n\nplan</br>-one\n", true},
+	{"round ten escaped break", "## Resolutions\n\nplan&lt;br&gt;-one\n", false},
+	{"round ten inline declaration", "## Resolutions\n\nplan<!THING x>-one\n", true},
+	{"round ten inline instruction", "## Resolutions\n\nplan<?x ?>-one\n", true},
+	{"round ten inline cdata", "## Resolutions\n\nplan<![CDATA[x]]>-one\n", true},
+	{"round ten h1 appendix", "## Resolutions\n\nNone.\n\n# Appendix\n\nplan-one\n", false},
+	{"round ten setext appendix", "## Resolutions\n\nNone.\n\nAppendix\n========\nplan-one\n", false},
+	{"round ten probe br", "# P\n\n## Resolutions\n\nplan<br>-one\n", false},
+	{"round ten probe img", "# P\n\n## Resolutions\n\nplan<img src=x>-one\n", false},
+	{"round ten probe comment", "# P\n\n## Resolutions\n\nplan<!-- c -->-one\n", true},
+	{"round ten probe h1close", "# P\n\n## Resolutions\n\nNone.\n\n# Appendix\n\nplan-one\n", false},
+	{"round ten probe setext", "# P\n\n## Resolutions\n\nNone.\n\nAppendix\n========\nplan-one\n", false},
+	{"round ten unclosed lf", "---\nstatus: Draft\n## Resolutions\nplan-one\n", false},
+	{"round ten dots lf", "---\nstatus: Draft\n...\n## Resolutions\nplan-one\n", true},
+	{"round ten unclosed crlf", "---\r\nstatus: Draft\r\n## Resolutions\r\nplan-one\r\n", false},
+	{"round ten dots crlf", "---\r\nstatus: Draft\r\n...\r\n## Resolutions\r\nplan-one\r\n", true},
+	{"round ten unclosed cr", "---\rstatus: Draft\r## Resolutions\rplan-one\r", false},
+	{"round ten dots cr", "---\rstatus: Draft\r...\r## Resolutions\nplan-one\n", true},
+	{"round ten padded opener", "--- \n## Resolutions\nplan-one\n", true},
+	{"round ten padded closer", "---\nstatus: Draft\n--- \n## Resolutions\nplan-one\n", false},
+	{"round ten closer eof", "---\nstatus: Draft\n## Resolutions\nplan-one\n---", false},
+	{"round ten frontmatter reference", "---\nstatus: Draft\nnotes: |\n  [r]: /u\n---\n## Resolutions\nSee ![plan-one][r].\n", true},
+	{"round ten body reference", "---\nstatus: Draft\n---\n[r]: /u\n\n## Resolutions\nSee ![plan-one][r].\n", false},
 }
 
 func TestS133Resolutions_DocumentCorpus(t *testing.T) {
@@ -914,15 +900,53 @@ func TestS133Resolutions_DocumentCorpus(t *testing.T) {
 	}
 }
 
+// Keep one approval case for each parser mechanism. Unit tables keep all inputs.
 func TestS133Resolutions_DocumentApprovePlan(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
-		for _, tc := range resolutionDocumentCorpus {
-			t.Run(policy+"/"+tc.name, func(t *testing.T) {
-				content := strings.Replace(strings.ReplaceAll(validSingleBeadPlan, "042-test", s133DocID), "version: \"1.0\"", "version: \"1.0\"\nadr_citations: [ADR-0001]", 1)
-				checkResolutionApprovePlan(t, policy, content+"\n"+tc.doc, []string{"plan-one"}, tc.want)
-			})
-		}
+		t.Run(policy, func(t *testing.T) {
+			f := s133Document(t, policy, "plan_approve", "absent")
+			for _, name := range []string{
+				"boundary plain control",
+				"round ten br",
+				"round ten frontmatter hidden",
+				"round ten frontmatter fence crlf",
+				"boundary definition after section",
+				"round ten h1 appendix",
+			} {
+				t.Run(name, func(t *testing.T) {
+					for _, tc := range resolutionDocumentCorpus {
+						if tc.name == name {
+							content := resolutionApprovalDocument(t, tc.doc)
+							checkResolutionApprovePlan(t, f, content, []string{"plan-one"}, tc.want)
+							return
+						}
+					}
+					t.Fatalf("missing corpus row %q", name)
+				})
+			}
+		})
 	}
+}
+
+func resolutionApprovalDocument(t *testing.T, doc string) string {
+	t.Helper()
+	crlf := strings.Contains(doc, "\r\n")
+	doc = strings.ReplaceAll(doc, "\r\n", "\n")
+	content := strings.Replace(strings.ReplaceAll(validSingleBeadPlan, "042-test", s133DocID), "version: \"1.0\"", "version: \"1.0\"\nadr_citations: [ADR-0001]", 1)
+	if rest, ok := strings.CutPrefix(doc, "---\n"); ok {
+		metadata, body, closed := strings.Cut(rest, "\n---\n")
+		if !closed {
+			t.Fatal("approval fixture needs closed frontmatter")
+		}
+		metadata = strings.TrimPrefix(metadata, "status: Draft\n")
+		content = strings.Replace(content, "\n---\n", "\n"+metadata+"\n---\n", 1)
+		doc = body
+	}
+	content += "\n" + doc
+	if crlf {
+		content = strings.ReplaceAll(content, "\n", "\r\n")
+	}
+	return content
 }
 
 func TestS133Resolutions_LargeDocument(t *testing.T) {

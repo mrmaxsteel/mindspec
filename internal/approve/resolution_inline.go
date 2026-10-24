@@ -12,9 +12,9 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-// Parse the whole document so references resolve across section boundaries.
+// Parse the whole body so references resolve across section boundaries.
 func resolutionDocumentText(content string) string {
-	source := []byte(content)
+	source := []byte(resolutionMarkdownBody(content))
 	document := goldmark.New().Parser().Parse(text.NewReader(source))
 	var section strings.Builder
 	inSection := false
@@ -30,6 +30,34 @@ func resolutionDocumentText(content string) string {
 	return section.String()
 }
 
+// Use the frontmatter delimiters from panel.MarkdownLines. An unclosed block
+// has no visible body. Keep the body bytes for reference resolution.
+func resolutionMarkdownBody(content string) string {
+	if !strings.HasPrefix(content, "---\n") && !strings.HasPrefix(content, "---\r") {
+		return content
+	}
+	for offset := 0; offset < len(content); {
+		end := strings.IndexAny(content[offset:], "\r\n")
+		if end < 0 {
+			end = len(content)
+		} else {
+			end += offset
+		}
+		next := end
+		if next < len(content) {
+			next++
+			if content[end] == '\r' && next < len(content) && content[next] == '\n' {
+				next++
+			}
+		}
+		if offset > 0 && (content[offset:end] == "---" || content[offset:end] == "...") {
+			return content[next:]
+		}
+		offset = next
+	}
+	return ""
+}
+
 // Use the renderer's text rules. Omit hidden nodes before decoding HTML escapes.
 func resolutionNodeText(root ast.Node, source []byte) string {
 	var escaped bytes.Buffer
@@ -42,7 +70,17 @@ func resolutionNodeText(root ast.Node, source []byte) string {
 			return ast.WalkContinue, nil
 		}
 		switch n := node.(type) {
-		case *ast.Image, *ast.RawHTML, *ast.HTMLBlock, *ast.CodeBlock, *ast.FencedCodeBlock:
+		case *ast.Image:
+			_ = writer.WriteByte(' ')
+			return ast.WalkSkipChildren, nil
+		case *ast.RawHTML:
+			raw := n.Segments.Value(source)
+			end := bytes.IndexAny(raw, " \t\r\n\f/>")
+			if end >= 0 && (bytes.EqualFold(raw[:end], []byte("<br")) || bytes.EqualFold(raw[:end], []byte("<img"))) {
+				_ = writer.WriteByte(' ')
+			}
+			return ast.WalkSkipChildren, nil
+		case *ast.HTMLBlock, *ast.CodeBlock, *ast.FencedCodeBlock:
 			return ast.WalkSkipChildren, nil
 		case *ast.CodeSpan:
 			for child := n.FirstChild(); child != nil; child = child.NextSibling() {
