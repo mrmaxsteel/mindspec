@@ -519,6 +519,9 @@ func contains(args []string, s string) bool {
 // restores them via t.Cleanup.
 func saveAndRestore(t *testing.T) {
 	t.Helper()
+	origLifecycleMerge := lifecycleMergeMetadataFn
+	t.Cleanup(func() { lifecycleMergeMetadataFn = origLifecycleMerge })
+	lifecycleMergeMetadataFn = func(string, map[string]interface{}) error { return nil }
 	origRunBD := implRunBDFn
 	origRunBDCombined := implRunBDCombinedFn
 	origMergeMeta := implMergeMetadataFn
@@ -1170,7 +1173,7 @@ func TestApproveImplCallOrder_OrphanGatePrecedesSupersedePlaceholder(t *testing.
 				if orphanGatePos == 0 {
 					orphanGatePos = call.Pos()
 				}
-			case "implCreateWithIDFn":
+			case "implEnsurePlaceholder":
 				if supersedePos == 0 {
 					supersedePos = call.Pos()
 				}
@@ -1183,7 +1186,7 @@ func TestApproveImplCallOrder_OrphanGatePrecedesSupersedePlaceholder(t *testing.
 		t.Fatal("runOrphanObligationGate call not found in ApproveImpl body")
 	}
 	if supersedePos == 0 {
-		t.Fatal("implCreateWithIDFn call not found in ApproveImpl body")
+		t.Fatal("implEnsurePlaceholder call not found in ApproveImpl body")
 	}
 	if !(orphanGatePos < supersedePos) {
 		t.Errorf("runOrphanObligationGate (pos %d) must precede the --supersede-adr placeholder write implCreateWithIDFn (pos %d)", orphanGatePos, supersedePos)

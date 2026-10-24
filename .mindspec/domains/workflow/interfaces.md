@@ -830,7 +830,7 @@ and no `--bead`. Every panel subcommand, including disposition leaves, sets
 | `newExecutorFn` (`root.go`) | Package-level `Executor`-constructing seam every verb's `RunE` composes with, letting `verb_output_test.go` drive real `RunE` functions against `executor.MockExecutor`. |
 | `mutatingVerbRows` / `mutatingVerbAliases` / `nonMutatingAllowlist` (`verb_output_test.go`) | The total-classification tables the cobra-tree walk checks every runnable command against — an unclassified new command, or one misclassified as mutating without a row, is red. |
 
-Core 3 runs in `complete` before materialization for every required matched registration whose returned panel gate decision is Allow. Warn registrations (abandoned, missing ref, git error) skip coverage with one advisory line; legacy registrations pass with one advisory. `impl approve` checks every required spec registration, final review included, without running a gate decision. It checks legacy markers and snapshot/ledger integrity before skipping abandoned or legacy registrations; a hand-set abandoned flag blocks. Directories without `panel.json` are not registrations. Both Core 3 legs honour `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`; the orphan/obligation refusal retains its no-hatch rule.
+Core 3 runs in `complete` before materialization for every required matched registration whose returned panel gate decision is Allow. Warn registrations (abandoned, missing ref, git error) skip coverage with one advisory line; legacy registrations pass with one advisory. `impl approve` checks coverage for every required spec registration. Its final-review gate also runs the full gate decision. It checks legacy markers and snapshot/ledger integrity before skipping abandoned or legacy registrations; a hand-set abandoned flag blocks. Directories without `panel.json` are not registrations. Both Core 3 legs honour `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`; the orphan/obligation refusal retains its no-hatch rule.
 
 ## Consumed Interfaces
 
@@ -1242,3 +1242,24 @@ through a metadata merge. It records skip, abandonment and absence with their
 times. Absence includes `panel_absent_gate`. It writes the accepted IDs to
 `plan_deferral_ids`. A nil list writes no deferral key. Call it after epic
 resolution. A failed write returns an error.
+
+### Implementation final-review gate
+
+`impl approve` runs `final_review` before the placeholder write, phase reconcile,
+epic audit, close and finalization. The gate applies with any plan bead count.
+It reads the subject at `spec/<id>`. The shared lifecycle gate records absence,
+skip and abandonment on the epic. The ledger-persistence preflight stays active
+under each policy and hatch.
+
+Before these writes, approval checks each plan-scoped bead worktree from the
+tracker worktree list. Any tracked or untracked change refuses. This check has
+no subject exclusions and no hatch. It names the bead and each path. Export or
+panel-ledger dirt directs the operator to `mindspec complete <bead>`. Other dirt
+requires a commit or discard before completion. A moved tip requires a follow-up
+bead and a new final-review round. Clean merged worktrees pass.
+
+An exact generated placeholder is an own write. A retry accepts it without a
+second create. Any other placeholder content stays in the subject. With no spec
+branch, the existing publication checks decide replay. With a closed epic, done
+phase and no spec worktree, approval compares the current subject to the final
+publication tip. A changed subject requires a spec worktree and a new panel.
