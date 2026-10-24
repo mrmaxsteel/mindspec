@@ -280,7 +280,10 @@ var (
 // discipline. If CompleteBead fails, the metadata is not written —
 // the failure itself is the audit trail.
 type CompleteOpts struct {
-	AllowDocSkew string
+	// Check runs content gates without changing lifecycle or workspace state.
+	Check              bool
+	workDestructionErr error
+	AllowDocSkew       string
 
 	// MergeOnly merges for verification and keeps the bead open.
 	MergeOnly              bool
@@ -349,6 +352,7 @@ type reconcileState struct {
 
 // Result summarizes what mindspec complete did.
 type Result struct {
+	Check           bool
 	BeadID          string
 	BeadClosed      bool
 	WorktreeRemoved bool
@@ -586,6 +590,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			fmt.Sprintf("resolving bead %s's epic lineage failed: %s — refusing before any mutation rather than falling back to cwd-derived spec resolution.", safeBeadID, termsafe.Escape(lineageErr.Error())),
 			fmt.Sprintf("mindspec complete %s   (re-run once bd/Dolt is reachable; lineage resolution will retry)", safeBeadID),
 		)
+	}
+
+	if opts.Check {
+		return runCheck(root, beadID, specID, exec, opts)
 	}
 
 	// R6.6 runs before migration, marker clearing, materialization or close.
@@ -1042,8 +1050,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// backstop that actually gates the mutation regardless of whether
 	// this check ran or observed stale state.
 	if reconcile == nil {
-		if err := completeWorkDestructionPreflightFn(root, beadHead, specBranch, opts.AllowNetDeletion, fmt.Sprintf("mindspec complete %s", beadID)); err != nil {
-			return nil, err
+		opts.workDestructionErr = workDestructionReport(completeWorkDestructionPreflightFn(root, beadHead, specBranch, opts.AllowNetDeletion, fmt.Sprintf("mindspec complete %s", beadID)))
+		if resumeStage != "" && opts.workDestructionErr != nil {
+			return nil, opts.workDestructionErr
 		}
 	}
 
@@ -1075,7 +1084,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// see that a worktree-less bead could possibly hold anyway.
 	specDir, sdErr := workspace.SpecDir(root, specID)
 	if sdErr != nil {
-		return nil, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr)
+		return nil, errors.Join(opts.workDestructionErr, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr))
 	}
 	var base string
 	if reconcile != nil {
@@ -1084,7 +1093,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		var mbErr error
 		base, mbErr = exec.MergeBase(specBranch, beadHead)
 		if mbErr != nil {
-			return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
+			return nil, errors.Join(opts.workDestructionErr, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr))
 		}
 	}
 	if reconcile != nil {
@@ -1637,6 +1646,9 @@ func completeSyncPhase(root, epicID, nextMode, beadID string) error {
 
 // FormatResult returns a human-readable summary of the completion.
 func FormatResult(r *Result) string {
+	if r != nil && r.Check {
+		return "Content gates passed.\n"
+	}
 	if r != nil && r.MergeOnly {
 		var out strings.Builder
 		fmt.Fprintf(&out, "Bead %s is merged for verification. The bead stays open.\n", idrender.Bead(r.BeadID))
@@ -1907,10 +1919,10 @@ func runCommittedRangeGate(root, beadID, beadHead, specDir, base string, exec ex
 	ownerRef, err := ownershipLandingTree(root, specDir, beadHead, beadHead, exec)
 	if err != nil {
 		var conflict *OwnershipLandingConflict
-		if errors.As(err, &conflict) && opts.deferOwnershipConflict {
+		if errors.As(err, &conflict) && opts.deferOwnershipConflict && opts.workDestructionErr == nil {
 			return nil
 		}
-		return &landingOwnershipError{beadID: beadID, cause: err}
+		return errors.Join(opts.workDestructionErr, &landingOwnershipError{beadID: beadID, cause: err})
 	}
 	return runRangeGateWithOwner(root, beadID, beadHead, specDir, base, ownerRef, exec, opts, warnWriter)
 }
@@ -1919,18 +1931,11 @@ func runRangeGateWithOwner(root, beadID, beadHead, specDir, base, ownerRef strin
 	docResult := validate.ValidateDocsRange(root, base, beadHead, ownerRef, exec)
 	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
 	// failure decision so they print on every run.
-	printResultWarnings(warnWriter, docResult)
-	if docResult.HasFailures() && opts.AllowDocSkew == "" {
-		return fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
-	}
-	// The gate runs EXACTLY ONCE. Same bead-branch anchoring as doc-sync
-	// above: base..beadHead. Ownership uses the landing tree.
 	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead, ownerRef)
-	printResultWarnings(warnWriter, adrResult)
-	// Spec 119 R11 (mindspec-jli8): advisory, non-fatal per-bead scope
-	// WARN — never affects the pass/fail decision.
-	beadScopeWarnAdvisory(exec, root, specDir, beadID, beadHead, base, beadHead, warnWriter)
-	return handleADRGateOutcome(root, beadID, opts, adrResult, adrFindings)
+	if !opts.Check {
+		beadScopeWarnAdvisory(exec, root, specDir, beadID, beadHead, base, beadHead, warnWriter)
+	}
+	return reportContentGates(root, beadID, opts, docResult, adrResult, adrFindings, warnWriter)
 }
 
 // handleADRGateOutcome is the shared ADR-divergence gate outcome handler

@@ -46,6 +46,9 @@ The bead ID is required as the first argument.`,
 		// directory BEFORE any auto-chdir. `complete` removes the bead
 		// worktree the shell may be sitting in; the cd-back NOTE at the
 		// end is the only channel that can repair the shell's cwd.
+		if err := validateCompleteCheckFlags(cmd); err != nil {
+			return err
+		}
 		invocationCwd := captureInvocationCwd()
 
 		root, err := findRoot()
@@ -138,6 +141,7 @@ The bead ID is required as the first argument.`,
 		// Spec 127 R5(d): --resolve-merge re-entry flag.
 		resolveMerge, _ := cmd.Flags().GetBool("resolve-merge")
 		mergeOnly, _ := cmd.Flags().GetBool("merge-only")
+		check, _ := cmd.Flags().GetBool("check")
 
 		exec := newExecutor(root)
 		result, err := complete.Run(root, beadID, specID, commitMsg, exec, complete.CompleteOpts{
@@ -147,6 +151,7 @@ The bead ID is required as the first argument.`,
 			AllowNetDeletion: allowNetDeletion,
 			ResolveMerge:     resolveMerge,
 			MergeOnly:        mergeOnly,
+			Check:            check,
 		})
 		if completeOutput(os.Stdout, os.Stderr, root, invocationCwd, result, err, completeInstructFn(result)) != nil {
 			os.Exit(1)
@@ -174,7 +179,7 @@ var resolveContextFromDirFn = phase.ResolveContextFromDir
 // the summary already carries the next-bead line, cd, and STOP guidance,
 // and implement guidance would tell the agent to claim a bead.
 func completeTailDir(r *complete.Result) (dir string, ok bool) {
-	if r == nil || r.MergeOnly || r.NextMode == state.ModeImplement || r.SpecWorktree == "" {
+	if r == nil || r.Check || r.MergeOnly || r.NextMode == state.ModeImplement || r.SpecWorktree == "" {
 		return "", false
 	}
 	if fi, err := os.Stat(r.SpecWorktree); err != nil || !fi.IsDir() {
@@ -200,6 +205,10 @@ func emitCompleteTail(root string, r *complete.Result) error {
 // completeOutput preserves the normal tail after a completed merge even when
 // Run reported a ledger failure. Other errors keep their early-exit behavior.
 func completeOutput(stdout, stderr io.Writer, root, invocationCwd string, result *complete.Result, runErr error, instructFn func(string) error) error {
+	if result != nil && result.Check {
+		fmt.Fprint(stdout, complete.FormatResult(result))
+		return runErr
+	}
 	var reported *complete.ReportedError
 	alreadyReported := errors.As(runErr, &reported)
 	if runErr == nil || (alreadyReported && result != nil) {
@@ -244,6 +253,7 @@ func completeTail(stdout, stderr io.Writer, root, invocationCwd string, result *
 }
 
 func init() {
+	completeCmd.Flags().Bool("check", false, "Report all content gates without changing the bead or workspace; skip panel review")
 	completeCmd.Flags().Bool("merge-only", false, "Merge for verification and keep the bead open; run complete again to close it")
 	completeCmd.Flags().String("spec", "", "Target spec ID when multiple specs are active")
 	completeCmd.Flags().String("allow-doc-skew", "", "Override the doc-sync gate with a recorded reason (records reason+by+at on bead metadata)")
@@ -251,4 +261,18 @@ func init() {
 	completeCmd.Flags().String("supersede-adr", "", "Pre-create a placeholder ADR (Status: Proposed) at the supplied ID and bypass the divergence gate (records mindspec_adr_supersede_* on bead metadata)")
 	completeCmd.Flags().String("allow-net-deletion", "", "Override the work-destruction preflight with a recorded reason (records mindspec_net_deletion_override_* on bead metadata)")
 	completeCmd.Flags().Bool("resolve-merge", false, "Resume a preserved bead→spec merge conflict: re-print resolution steps if unresolved, or complete it once the index is resolved and staged")
+}
+
+// validateCompleteCheckFlags rejects explicit flags before any external preflight.
+func validateCompleteCheckFlags(cmd *cobra.Command) error {
+	check, _ := cmd.Flags().GetBool("check")
+	if !check {
+		return nil
+	}
+	for _, name := range []string{"merge-only", "resolve-merge", "override-adr", "supersede-adr", "allow-net-deletion"} {
+		if cmd.Flags().Changed(name) {
+			return fmt.Errorf("--check cannot be used with --%s\nrecovery: remove --%s and run complete --check again", name, name)
+		}
+	}
+	return nil
 }

@@ -32,6 +32,7 @@ func landingFixture(t *testing.T, claimAtBase bool) (root, specDir, base string,
 	writeADRDivergenceFixture(t, root, "132-landing")
 	specDir = filepath.Join(root, ".mindspec/docs/specs/132-landing")
 	writeFile(t, root, ".mindspec/docs/adr/ADR-9001.md", "# ADR-9001: Ownership\n\n- **Status**: Accepted\n- **Domain(s)**: core\n\n## Decision\nOwn core.\n")
+	writeFile(t, root, ".mindspec/docs/domains/other/OWNERSHIP.yaml", "paths:\n  - internal/core/**\n")
 	manifest := ".mindspec/docs/domains/core/OWNERSHIP.yaml"
 	if claimAtBase {
 		writeFile(t, root, manifest, "paths:\n  - internal/core/**\n")

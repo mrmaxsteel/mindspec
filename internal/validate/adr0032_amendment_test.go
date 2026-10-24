@@ -43,7 +43,14 @@ func TestADR0032Amendment_ThirdAmendmentAnchorsPresent(t *testing.T) {
 		// preamble + 3 amendments = 4 pieces after the split.
 		t.Fatalf("expected ADR-0032 to carry 3 '## Amendment' sections (tri-state, spec-100, spec-122), found %d", len(sections)-1)
 	}
-	thirdAmendment := sections[len(sections)-1]
+	var thirdAmendment string
+	for _, section := range sections[1:] {
+		header, _, _ := strings.Cut(section, "\n")
+		if strings.Contains(header, "spec 122") {
+			thirdAmendment = section
+			break
+		}
+	}
 
 	if !strings.Contains(thirdAmendment, "spec 122") {
 		t.Error("the third amendment section header does not cite spec 122")

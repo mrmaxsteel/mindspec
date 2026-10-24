@@ -266,3 +266,17 @@ harmless in the tree.
   consumes `Executor.ChangedFiles` and `MergeBase` for divergence input.
 - [ADR-0031](ADR-0031-doc-sync-gate.md) — doc-sync override pattern; F1
   mirrors the same enforcement+override+metadata discipline.
+
+## Amendment (Spec 133)
+
+A changed file that no domain claims gives an `adr-divergence-unowned` Warn.
+The warning names the file and the domains root. The findings slice retains
+its `unowned` entry and path. Bead completion and implementation approval continue.
+A file claimed by a domain outside the spec's Impacted Domains stays an Error.
+Attribution failures (`adr-divergence-attribute`) and missing ADR coverage
+(`adr-divergence-uncovered`) stay Errors.
+
+`complete --check` runs the content gates on the same range and landing tree as
+completion. It skips panel review and coverage. It writes no lifecycle or
+workspace state. Completion and check report each failing content gate with its
+recovery. Check refuses merge, resolution and destructive override flags.

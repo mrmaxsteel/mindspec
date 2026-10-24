@@ -1504,6 +1504,7 @@ func TestApproveImpl_WholeBranchOwnershipFromRef(t *testing.T) {
 	changed := []string{
 		"internal/widget/foo.go",
 		".mindspec/docs/domains/widget/OWNERSHIP.yaml",
+		".mindspec/docs/domains/z-other/architecture.md",
 	}
 
 	t.Run("branch-tip claim passes", func(t *testing.T) {
@@ -1521,6 +1522,9 @@ func TestApproveImpl_WholeBranchOwnershipFromRef(t *testing.T) {
 			ChangedFilesResult: changed,
 			// Claim lives only at the diffed ref (spec-branch tip).
 			FileAtRefOrAbsentFn: func(_ref, p string) ([]byte, bool, error) {
+				if p == ".mindspec/docs/domains/z-other/OWNERSHIP.yaml" {
+					return []byte("paths:\n  - internal/widget/**\n"), true, nil
+				}
 				if p == ".mindspec/docs/domains/widget/OWNERSHIP.yaml" {
 					return []byte("paths:\n  - internal/widget/**\n"), true, nil
 				}
@@ -1528,10 +1532,16 @@ func TestApproveImpl_WholeBranchOwnershipFromRef(t *testing.T) {
 			},
 			TreeDirsAtRefFn: func(_ref, dir string) ([]string, error) {
 				if dir == ".mindspec/docs/domains" {
-					return []string{"widget"}, nil
+					return []string{"widget", "z-other"}, nil
 				}
 				return nil, nil
 			},
+		}
+		if err := os.MkdirAll(filepath.Join(tmp, ".mindspec/docs/domains/z-other"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmp, ".mindspec/docs/domains/z-other/OWNERSHIP.yaml"), []byte("paths:\n  - internal/widget/**\n"), 0644); err != nil {
+			t.Fatal(err)
 		}
 		if _, err := ApproveImpl(tmp, specID, mock); err != nil {
 			t.Fatalf("a branch-tip OWNERSHIP claim must satisfy the whole-branch gate with no override; got: %v", err)
@@ -1564,11 +1574,24 @@ func TestApproveImpl_WholeBranchOwnershipFromRef(t *testing.T) {
 			ChangedFilesResult: changed,
 			// ref reads: absent everywhere (default zero values).
 		}
+		mock.TreeDirsAtRefFn = func(_ref, dir string) ([]string, error) {
+			if dir == ".mindspec/docs/domains" {
+				return []string{"other"}, nil
+			}
+			return nil, nil
+		}
+		mock.FileAtRefOrAbsentFn = func(_ref, p string) ([]byte, bool, error) {
+			if p == ".mindspec/docs/domains/other/OWNERSHIP.yaml" {
+				return []byte("paths:\n  - internal/widget/**\n"), true, nil
+			}
+			return nil, false, nil
+		}
+
 		_, err := ApproveImpl(tmp, specID, mock, ImplOpts{AllowDocSkew: "isolate the ADR lane"})
 		if err == nil {
 			t.Fatal("a claim absent at the diffed ref must NOT satisfy the gate (read follows the ref)")
 		}
-		if !strings.Contains(err.Error(), "adr-divergence-unowned") {
+		if !strings.Contains(err.Error(), "adr-divergence-unowned") || !strings.Contains(err.Error(), "not in the spec") {
 			t.Errorf("expected adr-divergence-unowned block, got: %v", err)
 		}
 		if len(mock.CallsTo("FinalizeEpic")) != 0 {
@@ -2556,11 +2579,24 @@ func TestApproveImpl_ScenarioImplApproveCoverageTriple(t *testing.T) {
 			// No OWNERSHIP claim at the ref (default absent) -> done.go is
 			// unowned -> the gate blocks.
 		}
+		mock.TreeDirsAtRefFn = func(_ref, dir string) ([]string, error) {
+			if dir == ".mindspec/docs/domains" {
+				return []string{"other"}, nil
+			}
+			return nil, nil
+		}
+		mock.FileAtRefOrAbsentFn = func(_ref, p string) ([]byte, bool, error) {
+			if p == ".mindspec/docs/domains/other/OWNERSHIP.yaml" {
+				return []byte("paths:\n  - done.go\n"), true, nil
+			}
+			return nil, false, nil
+		}
+
 		_, err := ApproveImpl(tmp, specID, mock)
 		if err == nil {
 			t.Fatal("a committed root source with no ownership coverage must trip adr-divergence-unowned (the RED state)")
 		}
-		if !strings.Contains(err.Error(), "adr-divergence-unowned") {
+		if !strings.Contains(err.Error(), "adr-divergence-unowned") || !strings.Contains(err.Error(), "not in the spec") {
 			t.Errorf("expected adr-divergence-unowned block, got: %v", err)
 		}
 		if len(mock.CallsTo("FinalizeEpic")) != 0 {
@@ -2597,6 +2633,9 @@ func TestApproveImpl_ScenarioImplApproveCoverageTriple(t *testing.T) {
 			// domain) is present at the diffed ref — the manifest half of
 			// the triple committed pre-fork in the harness.
 			FileAtRefOrAbsentFn: func(_ref, p string) ([]byte, bool, error) {
+				if p == ".mindspec/docs/domains/z-other/OWNERSHIP.yaml" {
+					return []byte("paths:\n  - done.go\n"), true, nil
+				}
 				if p == ".mindspec/docs/domains/sandbox/OWNERSHIP.yaml" {
 					return []byte("paths:\n  - done.go\n"), true, nil
 				}
@@ -2604,10 +2643,16 @@ func TestApproveImpl_ScenarioImplApproveCoverageTriple(t *testing.T) {
 			},
 			TreeDirsAtRefFn: func(_ref, dir string) ([]string, error) {
 				if dir == ".mindspec/docs/domains" {
-					return []string{"sandbox"}, nil
+					return []string{"sandbox", "z-other"}, nil
 				}
 				return nil, nil
 			},
+		}
+		if err := os.MkdirAll(filepath.Join(tmp, ".mindspec/docs/domains/z-other"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmp, ".mindspec/docs/domains/z-other/OWNERSHIP.yaml"), []byte("paths:\n  - done.go\n"), 0644); err != nil {
+			t.Fatal(err)
 		}
 		if _, err := ApproveImpl(tmp, specID, mock); err != nil {
 			t.Fatalf("the ownership + Accepted-ADR-0001 + plan adr_citations triple must satisfy the gate with no override; got: %v", err)

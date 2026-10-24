@@ -1305,3 +1305,14 @@ user edits.
 Doctor reports `enforcement.panel_presence: warn` at Info. It reports each
 in-flight spec in Plan or Implement mode with `panel_absent` metadata at Warn,
 under both presence policies. These checks do not change approval state.
+
+### Content check before completion
+
+`mindspec complete <bead> --check` reports doc-sync, ADR and work-destruction
+failures on the same candidate and landing tree as completion. It skips panel
+review and coverage. It leaves git, worktrees and bead records unchanged. The
+bead must be open, have a branch and have no pending merge-only run. Check refuses
+`--merge-only`, `--resolve-merge`, `--override-adr`, `--supersede-adr` and
+`--allow-net-deletion`. Completion also reports all failing content gates.
+A file that no domain owns gives a warning and retains its structured finding.
+An undeclared owner, an attribution failure or missing ADR coverage still refuses.

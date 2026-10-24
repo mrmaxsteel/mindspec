@@ -17,6 +17,7 @@ package complete
 // string constants (duplicated below instead).
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -26,7 +27,6 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
-	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -381,6 +381,9 @@ func runMaterialization(in materializationInput) error {
 	// stale index, a false positive this check must never race against.
 	// The resume path's own S-exit contract (after R actually runs) is
 	// the authoritative dirt check for a resume.
+	if in.opts.workDestructionErr != nil && (wtPath == "" || in.resumeStage != "") {
+		return in.opts.workDestructionErr
+	}
 	if wtPath == "" {
 		if in.resumeStage == "" {
 			artifactDirt, userDirt, dirtErr := checkDirtyTreeFn(in.root, in.root)
@@ -408,7 +411,8 @@ func runMaterialization(in materializationInput) error {
 			fmt.Sprintf("mindspec next %s   (recreates the missing bead worktree; then re-run `mindspec complete %s`)", idrender.Bead(beadID), idrender.Bead(beadID)),
 		)
 	}
-	if in.resumeStage == "" {
+	// A failed preflight still needs the full report. Skip artifact export.
+	if in.resumeStage == "" && in.opts.workDestructionErr == nil {
 		_, userDirt, dirtErr := checkDirtyTreeFn(wtPath, wtPath)
 		if dirtErr != nil {
 			return fmt.Errorf("checking working tree: %w", dirtErr)
@@ -431,24 +435,10 @@ func runMaterialization(in materializationInput) error {
 		// --- Normal run: snapshot once, gate, then materialize. -------
 		tree, err := exec.SnapshotWorktreeTree(wtPath, panel.ToolArtifactPaths(workspace.SpecsDir(wtPath)))
 		if err != nil {
-			return fmt.Errorf("snapshotting bead worktree %s: %w", wtPath, err)
+			return errors.Join(in.opts.workDestructionErr, fmt.Errorf("snapshotting bead worktree %s: %w", wtPath, err))
 		}
 
-		ownerRef, err := ownershipLandingTree(in.root, in.specDir, tree, beadHead, exec)
-		if err != nil {
-			return &landingOwnershipError{beadID: beadID, cause: err}
-		}
-		docResult := validate.ValidateDocsSnapshot(in.root, in.base, tree, ownerRef, wtPath, exec)
-		printResultWarnings(in.warnWriter, docResult)
-		if docResult.HasFailures() && in.opts.AllowDocSkew == "" {
-			return fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
-		}
-
-		adrResult, adrFindings := validate.CheckADRDivergenceSnapshot(in.root, in.base, exec, in.specDir, beadID, tree, ownerRef, wtPath)
-		printResultWarnings(in.warnWriter, adrResult)
-		beadScopeWarnAdvisory(exec, in.root, in.specDir, beadID, beadHead, in.base, beadHead, in.warnWriter)
-
-		if err := handleADRGateOutcome(in.root, beadID, in.opts, adrResult, adrFindings); err != nil {
+		if err := runSnapshotContentGates(in, tree); err != nil {
 			return err
 		}
 

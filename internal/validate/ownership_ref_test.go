@@ -214,6 +214,11 @@ func TestValidateDivergence_BranchOnlyDomainDirFromRef(t *testing.T) {
 	}
 
 	r, findings := ValidateDivergence(mock, root, specDir, "mindspec-bead.1", "BASE", "branch", "branch", false)
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-unowned" {
+			t.Errorf("unexpected unowned issue at any severity: %+v", i)
+		}
+	}
 	if r.HasFailures() {
 		t.Fatalf("branch-only domain (owned + ADR-covered) must pass; got %+v", r.Issues)
 	}
