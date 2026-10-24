@@ -999,8 +999,9 @@ func ExactSecondParentMerges(workdir, branch, tip string) ([]MergeCommit, error)
 // CommitAll stages all changes in workdir and commits with the given message.
 // Used for auto-commits at lifecycle boundaries (spec-init, approvals) to ensure
 // artifacts are on the branch before downstream worktrees branch from it.
-// Returns nil if there are no changes to commit.
-func CommitAll(workdir, message string) error {
+// Optional exclusion globs stay outside staging and the partial commit, including
+// any excluded content already in the index. Returns nil when only exclusions differ.
+func CommitAll(workdir, message string, excludePaths ...string) error {
 	statusCmd := execCommand("git", "-C", workdir, "status", "--porcelain")
 	statusOut, err := statusCmd.Output()
 	if err != nil {
@@ -1010,7 +1011,15 @@ func CommitAll(workdir, message string) error {
 		return nil // nothing to commit
 	}
 
-	addCmd := execCommand("git", "-C", workdir, "add", "-A")
+	paths := []string{"."}
+	for _, pattern := range excludePaths {
+		paths = append(paths, ":(exclude,glob)"+pattern)
+	}
+	addArgs := []string{"-C", workdir, "add", "-A"}
+	if len(excludePaths) > 0 {
+		addArgs = append(append(addArgs, "--"), paths...)
+	}
+	addCmd := execCommand("git", addArgs...)
 	if out, err := addCmd.CombinedOutput(); err != nil {
 		// R4: git's CombinedOutput can echo back agent-writable repo content
 		// (e.g. a hostile pathspec/filename) — escape per-line before it
@@ -1018,7 +1027,20 @@ func CommitAll(workdir, message string) error {
 		return fmt.Errorf("staging changes: %s", escapeLines(strings.TrimSpace(string(out))))
 	}
 
-	commitCmd := execCommand("git", "-C", workdir, "commit", "-m", message)
+	commitArgs := []string{"-C", workdir, "commit", "-m", message}
+	if len(excludePaths) > 0 {
+		diffArgs := append([]string{"-C", workdir, "diff", "--cached", "--quiet", "--"}, paths...)
+		if err := execCommand("git", diffArgs...).Run(); err == nil {
+			return nil
+		} else {
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+				return fmt.Errorf("checking staged changes: %w", err)
+			}
+		}
+		commitArgs = append(append(commitArgs, "--only", "--"), paths...)
+	}
+	commitCmd := execCommand("git", commitArgs...)
 	if out, err := commitCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("committing: %s", escapeLines(strings.TrimSpace(string(out))))
 	}

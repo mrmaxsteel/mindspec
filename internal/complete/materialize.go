@@ -525,7 +525,7 @@ func runMaterialization(in materializationInput) error {
 	// this snapshot runs — no second export is needed here. Nothing else
 	// in the worktree is dirty (preUserDirt was empty, just checked), so
 	// this add -A snapshot captures the artifact's refresh alone.
-	tree2, err := exec.SnapshotWorktreeTree(wtPath, nil)
+	tree2, err := exec.SnapshotWorktreeTree(wtPath, panel.LedgerArtifactPaths(workspace.SpecsDir(wtPath)))
 	if err != nil {
 		return fmt.Errorf("snapshotting bead worktree %s (artifact-sync leg): %w", wtPath, err)
 	}

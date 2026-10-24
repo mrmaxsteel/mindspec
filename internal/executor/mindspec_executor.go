@@ -1456,13 +1456,23 @@ func checkMergedFinalizeWorktree(path, specID string) error {
 		return nil
 	}
 	if _, statErr := os.Stat(path); statErr == nil {
-		status, statusErr := gitutil.Status(path)
+		status, statusErr := gitutil.StatusNoRenamesWithStderr(path)
 		if statusErr != nil {
 			return guard.NewFailure("cannot read already merged worktree status: "+termsafe.Escape(statusErr.Error()),
 				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 		}
-		if strings.TrimSpace(status) != "" {
-			return guard.NewFailure("already merged worktree has pending changes at "+termsafe.Escape(path)+":\n"+escapeLines(strings.TrimSpace(status)),
+		var pending []string
+		for _, line := range strings.Split(status, "\n") {
+			p, err := panel.PorcelainPath(line)
+			if err != nil {
+				return fmt.Errorf("cannot parse already merged worktree status: %s", termsafe.Escape(err.Error()))
+			}
+			if p != "" && !panel.IsLedgerArtifactPath(p, workspace.SpecsDir(path)) {
+				pending = append(pending, line)
+			}
+		}
+		if len(pending) > 0 {
+			return guard.NewFailure("already merged worktree has pending changes at "+termsafe.Escape(path)+":\n"+escapeLines(strings.Join(pending, "\n")),
 				"preserve the pending changes in a follow-up branch, then leave this worktree clean",
 				fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 		}
@@ -2348,7 +2358,7 @@ func (g *MindspecExecutor) commitWithExport(path, msg string) error {
 	if err := execBeadExportFn(exportDir); err != nil {
 		return fmt.Errorf("refreshing .beads/issues.jsonl: %w", err)
 	}
-	return gitutil.CommitAll(path, msg)
+	return gitutil.CommitAll(path, msg, panel.LedgerArtifactPaths(workspace.SpecsDir(exportDir))...)
 }
 
 // mergeReentryHint renders the generic re-entry pointer commitWithExport's

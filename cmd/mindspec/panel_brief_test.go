@@ -284,3 +284,91 @@ func TestBrief_QuotedFenceSection(t *testing.T) {
 		t.Fatalf("section changed: got %q want %q", got, want)
 	}
 }
+
+func TestPanelBriefFile(t *testing.T) {
+	for _, tc := range []struct{ name, content, want string }{
+		{"filled", "## Summary\nReview the parser.\n## Files in Scope\nparser.go\n## Prior-Round Asks\nNone.\n## Lens\nR1 correctness; R2 tests.\n", ""},
+		{"stub", "<!-- TODO(skill): fill summary -->", "TODO(skill)"},
+		{"relative", "filled", "absolute"},
+		{"directory", "", "regular file"},
+		{"symlink", "filled", "regular file"},
+		{"empty-path", "", "absolute"},
+		{"control-path", "", "cannot read"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _ := newBriefFixture(t, "# Spec\n", "")
+			resetPanelCreateFlags(t)
+			file := filepath.Join(t.TempDir(), "brief.md")
+			if tc.name == "symlink" {
+				target := file + ".target"
+				if err := os.WriteFile(target, []byte(tc.content), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, file); err != nil {
+					t.Fatal(err)
+				}
+			} else if tc.name == "empty-path" {
+				file = ""
+			} else if tc.name == "directory" {
+				file = filepath.Dir(file)
+			} else if tc.name == "relative" {
+				file = "brief.md"
+			} else if tc.name == "control-path" {
+				file += "\x1b\n"
+			} else if err := os.WriteFile(file, []byte(tc.content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := runPanelVerbCmd("create", "p", "--gate", "adhoc", "--target", "HEAD", "--brief-file", file)
+			if tc.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.want) || strings.ContainsRune(err.Error(), '\x1b') {
+					t.Fatalf("want %s, got %v %s", tc.want, err, out)
+				}
+				if _, err := os.Stat(filepath.Join(root, ".mindspec/reviews/p/panel.json")); !os.IsNotExist(err) {
+					t.Fatal("refused create wrote panel")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("create: %v %s", err, out)
+			}
+			if got := readCreatedBrief(t, root, "adhoc"); got != tc.content {
+				t.Fatalf("brief differs: %q", got)
+			}
+			next := tc.content + "Updated round.\n"
+			if err := os.WriteFile(file, []byte(next), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := runPanelVerbCmd("create", "p", "--gate", "adhoc", "--target", "HEAD", "--round", "2", "--brief-file", file); err != nil {
+				t.Fatalf("round bump: %v %s", err, out)
+			}
+			if got := readCreatedBrief(t, root, "adhoc"); got != next {
+				t.Fatalf("round did not replace brief: %q", got)
+			}
+			archived, err := os.ReadFile(filepath.Join(root, ".mindspec/reviews/p/BRIEF-round-1.md"))
+			if err != nil || string(archived) != tc.content {
+				t.Fatalf("archive: %q %v", archived, err)
+			}
+		})
+	}
+}
+
+func TestPanelUnfilledBriefRefused(t *testing.T) {
+	for _, verb := range []string{"prompt"} {
+		t.Run(verb, func(t *testing.T) {
+			root, _ := newBriefFixture(t, "# Spec\n", "")
+			if out, err := runBriefCreate(t, "adhoc"); err != nil {
+				t.Fatalf("create: %v %s", err, out)
+			}
+			briefPath := filepath.Join(root, ".mindspec/reviews/p/BRIEF.md")
+			before := briefFileSnapshot(t, root)
+			args := []string{verb, "p", "--slot", "R1"}
+			out, err := runPanelVerbCmd(args...)
+			if err == nil || !strings.Contains(err.Error(), briefPath) || !strings.Contains(err.Error(), "fill") || !strings.Contains(err.Error(), "--brief-file") {
+				t.Fatalf("unfilled brief accepted: %v %s", err, out)
+			}
+			if !reflect.DeepEqual(before, briefFileSnapshot(t, root)) {
+				t.Fatal("refused dispatch wrote files")
+			}
+		})
+	}
+}

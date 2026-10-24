@@ -25,15 +25,12 @@ var RuntimeIgnoreEntries = []string{
 }
 
 // ReviewIgnoreEntries keep panel reviews, an optional local helper, out of git
-// by default (spec 129 R8). They are separate from RuntimeIgnoreEntries because
+// by default. They are separate from RuntimeIgnoreEntries because
 // doctor's runtime-file check reports tracked runtime entries; this repo's
-// already-tracked reviews stay tracked. The /** form, unlike a directory form,
-// leaves R8.4 option (B)'s later negation lines effective.
+// already-tracked reviews stay tracked.
 var ReviewIgnoreEntries = []string{
 	".mindspec/specs/*/reviews/**",
 	".mindspec/reviews/**",
-	"!.mindspec/specs/*/reviews/*/",
-	"!.mindspec/specs/*/reviews/*/dispositions.jsonl",
 }
 
 // gitignoreRuntimeHeader is the comment written above any entries

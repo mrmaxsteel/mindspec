@@ -15,8 +15,10 @@ Run this panel once after the last bead merges and before `/ms-impl-approve`.
 1. Run `git fetch origin`. Read the cumulative diff against the selected base.
 Record the changed paths, totals, merged commits and known fixer deviations.
 2. Invoke `/ms-panel-run` with gate `final_review` and target `spec/<spec-slug>`.
-The binary creates the registration, BRIEF, roster, lenses and acceptance question.
-Supply the PR link and cumulative context. Do not create panel artifacts by hand.
+First write the brief to an absolute scratch file with Summary, Files in Scope,
+Prior-Round Asks and Lens assignments per slot. Include the PR link, cumulative
+context and fixer deviations. Pass its path as `brief_file` to `/ms-panel-run`.
+The binary creates the registration and copies the filled brief to BRIEF.md.
 3. Use `mindspec panel checkout <panel-slug> --slot <slot>` for isolated reviewer work.
 Run tests and mutations in that slot's `tree/`. Use the slot directory for scratch.
 The adapter uses `panel prompt` and dispatches the configured model for each slot.

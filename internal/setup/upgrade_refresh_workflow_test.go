@@ -111,3 +111,22 @@ func TestUpgradeRefreshWorkflow_UserModifiedPreserved(t *testing.T) {
 		t.Errorf("expected a user-modified notice for %s; got Notices=%v", relPath, r.Notices)
 	}
 }
+
+func TestUpgradeRefreshWorkflow_BeforeBriefRefreshes(t *testing.T) {
+	prior, err := historicalWorkflowsFS.ReadFile("historical_workflows/ms-panel.prebrief.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(prior)
+	if hex.EncodeToString(sum[:]) != "9a19eb10b8a94391141771dfdbeb84c296acad85112a72681d65dbc699755dbe" {
+		t.Fatal("prior workflow snapshot digest differs")
+	}
+	want := pluginmindspec.WorkflowFiles()["ms-panel.js"]
+	if string(prior) == want {
+		t.Fatal("snapshot equals current workflow")
+	}
+	got, result := installWorkflowWithPrior(t, string(prior))
+	if got != want || !containsPath(result.Refreshed, filepath.Join(".claude", "workflows", "ms-panel.js")) || len(result.Notices) != 0 {
+		t.Fatalf("prior workflow did not refresh cleanly: %+v", result)
+	}
+}

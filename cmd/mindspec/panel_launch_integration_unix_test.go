@@ -41,6 +41,7 @@ func newLaunchFixture(t *testing.T) launchFixture {
 	if err := panel.Create(f.dir, in); err != nil {
 		t.Fatal(err)
 	}
+	slotWrite(t, filepath.Join(f.dir, "BRIEF.md"), "Review this fixture.\n")
 	res, err := panel.Tally(f.dir)
 	if err != nil {
 		t.Fatal(err)
@@ -752,7 +753,9 @@ func TestPanelLaunch_AdapterE2E(t *testing.T) {
 `)
 	config.ResetCache()
 	resetPanelCreateFlags(t)
-	if out, err := runPanelCmd("create", "adapter", "--gate", "adhoc", "--target", "main", "--round", "1", "--reviewers", "2"); err != nil {
+	briefFile := filepath.Join(t.TempDir(), "brief.md")
+	slotWrite(t, briefFile, "## Summary\nReview the adapter fixture.\n## Files in Scope\nREADME.md\n## Prior-Round Asks\nNone.\n## Lens\nR1 and R2: adversarial.\n")
+	if out, err := runPanelCmd("create", "adapter", "--gate", "adhoc", "--target", "main", "--round", "1", "--reviewers", "2", "--brief-file", briefFile); err != nil {
 		t.Fatalf("adapter create %v %s", err, out)
 	}
 	reg, err := findPanelRegistration(f.root, "adapter")
@@ -1397,5 +1400,17 @@ func TestPanelLaunch_RetryDetailBound(t *testing.T) {
 	want := termsafe.Escape("/round: " + strings.Repeat("é", 510) + "...\nrecovery: inspect")
 	if got := retryRefusal(err); got != want {
 		t.Fatalf("detail was not bounded at a UTF-8 boundary: got %q want %q", got, want)
+	}
+}
+
+func TestPanelLaunch_UnfilledBriefRefused(t *testing.T) {
+	f := newLaunchFixture(t)
+	slotWrite(t, filepath.Join(f.dir, "BRIEF.md"), "<!-- TODO(skill): fill summary -->\n")
+	out, err := f.run(t, false)
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(f.dir, "BRIEF.md")) || !strings.Contains(err.Error(), "fill") || !strings.Contains(err.Error(), "--brief-file") {
+		t.Fatalf("unfinished launch brief accepted: %v %s", err, out)
+	}
+	if events := f.events(t); len(events) != 0 {
+		t.Fatalf("started process with unfinished brief: %+v", events)
 	}
 }

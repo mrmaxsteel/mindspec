@@ -33,7 +33,7 @@ func TestBootstrap_ReviewsIgnoredGreenfield(t *testing.T) {
 			}
 			data := assertReviewsIgnored(t, root)
 			runtimeHeader := strings.Index(string(data), "# MindSpec local runtime files (not version-controlled)")
-			reviewHeader := strings.Index(string(data), "# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)")
+			reviewHeader := strings.Index(string(data), "# MindSpec panel reviews (local, not version-controlled)")
 			if runtimeHeader < 0 || reviewHeader < 0 || runtimeHeader >= reviewHeader {
 				t.Fatalf("runtime header must precede review header:\n%s", data)
 			}
@@ -96,7 +96,7 @@ func assertReviewsIgnored(t *testing.T, root string) []byte {
 		t.Fatal(err)
 	}
 	lines := strings.Split(string(data), "\n")
-	header := "# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)"
+	header := "# MindSpec panel reviews (local, not version-controlled)"
 	want := header + "\n.mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n"
 	if !strings.Contains(string(data), want) {
 		t.Errorf("missing literal review entries under their header:\n%s", data)
@@ -224,7 +224,7 @@ func runGit(t *testing.T, root string, args ...string) {
 	}
 }
 
-func TestBootstrap_ReviewsLedgerTracked(t *testing.T) {
+func TestBootstrap_ReviewsLedgerLocal(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(fmt.Sprint(existing), func(t *testing.T) {
 			root := t.TempDir()
@@ -242,22 +242,18 @@ func TestBootstrap_ReviewsLedgerTracked(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, entry := range []string{"!.mindspec/specs/*/reviews/*/", "!.mindspec/specs/*/reviews/*/dispositions.jsonl"} {
-				if strings.Count(string(before), entry+"\n") != 1 {
-					t.Fatalf("negation missing or duplicated: %q", before)
+				if strings.Contains(string(before), entry+"\n") {
+					t.Fatalf("ledger negation remains: %q", before)
 				}
 			}
 			for _, name := range []string{"dispositions.jsonl", "panel.json", "BRIEF.md", "R1-round-1.json", "dispositions.lock"} {
 				file := ".mindspec/specs/130-test/reviews/p/" + name
 				cmd := exec.Command("git", "-C", root, "check-ignore", "-q", "--", file)
 				err := cmd.Run()
-				if name == "dispositions.jsonl" {
-					var exit *exec.ExitError
-					if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-						t.Fatalf("ledger still ignored: %v", err)
-					}
-				} else if err != nil {
+				if err != nil {
 					t.Fatalf("%s not ignored: %v", name, err)
 				}
+
 			}
 			if _, err := Run(root, false); err != nil {
 				t.Fatal(err)
@@ -284,7 +280,7 @@ func TestBootstrap_ReviewsOldHeaderDoesNotReappend(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := bytes.ReplaceAll(data,
-		[]byte("# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)"),
+		[]byte("# MindSpec panel reviews (local, not version-controlled)"),
 		[]byte("# MindSpec panel reviews (local, not version-controlled; spec 129 R8)"))
 	if bytes.Equal(data, old) {
 		t.Fatal("fixture did not replace the review header")
@@ -338,5 +334,38 @@ func TestBootstrap_ReviewsV016UpgradeNoDuplicate(t *testing.T) {
 	}
 	if !bytes.Equal(data, after) {
 		t.Fatalf("second init changed upgraded gitignore:\nbefore:\n%s\nafter:\n%s", data, after)
+	}
+}
+
+func TestBootstrap_RemoveLedgerNegationsExactly(t *testing.T) {
+	for _, ending := range []string{"\n", "\r\n"} {
+		t.Run(fmt.Sprintf("%q", ending), func(t *testing.T) {
+			root := reviewBootstrapRepo(t)
+			if _, err := Run(root, false); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(root, ".gitignore")
+			base, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := "!.mindspec/specs/*/reviews/*/"
+			second := first + "dispositions.jsonl"
+			keep := "# custom bytes" + ending + " " + first + ending + second + " " + ending + "!other/file" + ending
+			want := string(base) + keep + "# no final newline"
+			old := string(base) + first + ending + keep + second + ending + first + ending + "# no final newline"
+			if err := os.WriteFile(file, []byte(old), 0644); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 2; i++ {
+				if _, err := Run(root, false); err != nil {
+					t.Fatal(err)
+				}
+				got, err := os.ReadFile(file)
+				if err != nil || string(got) != want {
+					t.Fatalf("init %d changed other bytes: got %q want %q err %v", i, got, want, err)
+				}
+			}
+		})
 	}
 }

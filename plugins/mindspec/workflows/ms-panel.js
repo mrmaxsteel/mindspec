@@ -30,6 +30,8 @@ function buildCommand(verb, value = {}) {
   if (args.spec) command += " --spec " + quote(args.spec);
   switch (verb) {
     case CREATE:
+      if (typeof args.brief_file !== "string" || !args.brief_file.startsWith("/")) throw new Error("brief_file must be an absolute path");
+      command += " --brief-file " + quote(args.brief_file);
       if (args.spec && args.gate === "adhoc") throw new Error("gate conflicts with spec");
       if (args.bead_id && args.gate && args.gate !== "bead") throw new Error("gate conflicts with bead_id");
       if (!args.bead_id) {
@@ -63,17 +65,25 @@ async function cli(verb, value) {
 
 async function roster() {
   const result = await cli(VERIFY);
-  const slots = JSON.parse(result.stdout);
-  if (!Array.isArray(slots)) throw new Error("verify did not return a slot roster");
+  let slots;
+  try {
+    slots = JSON.parse(result.stdout);
+  } catch {
+    throw new Error("panel verify returned non-JSON stdout (exit " + result.exit + "): " + JSON.stringify(result.stdout.slice(0, 160)));
+  }
+  if (slots && typeof slots === "object" && !Array.isArray(slots) && "error" in slots) {
+    throw new Error("panel verify: " + slots.error);
+  }
+  if (!Array.isArray(slots)) throw new Error("panel verify did not return a slot roster (exit " + result.exit + ")");
   return { slots, result };
 }
 
 async function dispatch(slot) {
   const checkout = await cli(CHECKOUT, { slot: slot.slot });
-  if (checkout.exit !== 0) return;
+  if (checkout.exit !== 0) throw new Error("panel checkout failed (exit " + checkout.exit + "): " + JSON.stringify(checkout.stdout.slice(0, 160)));
   const slotDir = checkout.stdout.trim();
   const prompt = await cli(PROMPT, { slot: slot.slot });
-  if (prompt.exit !== 0) return;
+  if (prompt.exit !== 0) throw new Error("panel prompt failed (exit " + prompt.exit + "): " + JSON.stringify(prompt.stdout.slice(0, 160)));
   const attempts = [];
   for (const line of prompt.stdout.split("\n")) {
     const match = line.match(/\/attempt-(\d+)\/verdict\.json/);
@@ -111,8 +121,13 @@ async function runSlot(initial) {
     } else if (slot.kind === "harness") {
       if (slot.status === "damaged" || slot.status === "quota_wall" && !slot.handoff_pending) return slot;
       if (!["missing", "running", "draft", "unsubmitted", "void", "launch_failed", "malformed", "quota_wall"].includes(slot.status)) return slot;
-      if (acted) { if (retried) return slot; retried = true; }
-      await dispatch(slot);
+      if (acted && retried) return slot;
+      try {
+        await dispatch(slot);
+      } catch (error) {
+        return { ...slot, error: error.message };
+      }
+      if (acted) retried = true;
     } else {
       throw new Error("unknown runner kind");
     }
@@ -129,6 +144,8 @@ async function runSlot(initial) {
 if (!args || !Number.isInteger(args.round) || args.round < 1) throw new Error("round must be positive");
 quote(args.slug);
 quote(args.target);
+if (typeof args.brief_file !== "string" || !args.brief_file.startsWith("/")) throw new Error("brief_file must be an absolute path");
+quote(args.brief_file);
 const created = await cli(CREATE);
 if (created.exit !== 0) return { createOutput: created.stdout };
 const initial = await roster();

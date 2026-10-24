@@ -365,11 +365,7 @@ func (f *windowFixture) registerLedger() string {
 	writeCoLocatedPanel(f.t, specDir, "closing-panel", p, approveVerdicts(2))
 	dir := filepath.Join(specDir, "reviews", "closing-panel")
 	core3Cover(f.t, panel.Registration{Dir: dir, Panel: p})
-	wt, paths, err := SpecLedgerPaths(f.root, closingSpec, closingBead)
-	if err != nil || wt != f.specWT || len(paths) != 1 {
-		f.t.Fatalf("ledger fixture not selected: %s %v %v", wt, paths, err)
-	}
-	return paths[0]
+	return filepath.ToSlash(filepath.Join(".mindspec", "specs", closingSpec, "reviews", "closing-panel", "dispositions.jsonl"))
 }
 func (f *windowFixture) assertPublished(ledger string) {
 	f.t.Helper()
@@ -382,10 +378,12 @@ func (f *windowFixture) assertPublished(ledger string) {
 		f.t.Fatalf("close not published: %s %v", data, err)
 	}
 	if ledger != "" {
-		committed, err := f.ex.FileAtRef("spec/"+closingSpec, ledger)
 		current, readErr := os.ReadFile(filepath.Join(f.specWT, ledger))
-		if err != nil || readErr != nil || len(current) == 0 || string(committed) != string(current) {
-			f.t.Fatalf("ledger not published: committed=%s current=%s err=%v read=%v", committed, current, err, readErr)
+		if readErr != nil || len(current) == 0 {
+			f.t.Fatalf("local ledger missing: %s %v", current, readErr)
+		}
+		if _, err := f.ex.FileAtRef("spec/"+closingSpec, ledger); err == nil {
+			f.t.Fatal("local ledger was committed")
 		}
 	}
 }
@@ -931,4 +929,40 @@ func TestComplete_HandMergeImpactedDomainsExitCloses(t *testing.T) {
 		t.Fatalf("Impacted Domains exit did not close the original merge: %+v %v %v", r, err, f.meta)
 	}
 	f.assertPublished("")
+}
+
+func TestComplete_MergedTrackedLedgerStaysLocal(t *testing.T) {
+	for _, staged := range []bool{false, true} {
+		t.Run(fmt.Sprint(staged), func(t *testing.T) {
+			f := newWindowFixture(t)
+			f.mergedOnly()
+			ledger := f.registerLedger()
+			file := filepath.Join(f.specWT, ledger)
+			before, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, f.specWT, "add", "-f", "--", ledger)
+			gitRun(t, f.specWT, "commit", "-qm", "tracked review fixture")
+			dirty := append(append([]byte{}, before...), '\n')
+			if err := os.WriteFile(file, dirty, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if staged {
+				gitRun(t, f.specWT, "add", "--", ledger)
+			}
+			result, err := f.run(CompleteOpts{})
+			if err != nil || !result.BeadClosed {
+				t.Fatalf("dirty ledger blocked close: %+v %v", result, err)
+			}
+			committed, err := f.ex.FileAtRef("spec/"+closingSpec, ledger)
+			if err != nil || string(committed) != string(before) {
+				t.Fatalf("ledger changes committed: %s %v", committed, err)
+			}
+			current, err := os.ReadFile(file)
+			if err != nil || string(current) != string(dirty) {
+				t.Fatalf("ledger changes lost: %s %v", current, err)
+			}
+		})
+	}
 }

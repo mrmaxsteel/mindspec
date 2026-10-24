@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -240,7 +241,7 @@ func materializeConflictedOwnership(in materializationInput, conflict *Ownership
 		return sExitGenuineDirtRefusal(beadID, preUserDirt)
 	}
 
-	tree2, err := exec.SnapshotWorktreeTree(wtPath, nil)
+	tree2, err := exec.SnapshotWorktreeTree(wtPath, panel.LedgerArtifactPaths(workspace.SpecsDir(wtPath)))
 	if err != nil {
 		return fmt.Errorf("snapshotting bead worktree %s (artifact-sync leg): %w", wtPath, err)
 	}

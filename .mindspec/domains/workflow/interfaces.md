@@ -225,7 +225,7 @@ It exits 0 when all slots are final.
 It exits 1 for running or missing slots, harness drafts, or a quota handoff that is pending.
 It exits 2 in every other case. A final status does not imply a passing gate.
 
-**Tool artifacts and ledger commits.**
+**Tool artifacts and local ledgers.**
 `panel.ToolArtifactPaths` is the single home for `.beads/issues.jsonl` and
 `<specs>/*/reviews/*/dispositions.jsonl`, matched with stdlib `path.Match`.
 The gate, next guard and complete materialization share it. The ledger is
@@ -238,23 +238,15 @@ Its proportional claim check exempts a rename or copy only when both endpoints
 match artifact paths. It names both endpoints of user renames and copies.
 Normal and merge-only completion read the artifact-sync snapshot delta with
 rename detection off and NUL separators. Filename bytes stay exact.
-On flat layouts complete checks each existing matched ledger with
-`exec.CheckIgnore` in the spec worktree before any side effect. After the
-bead merge, it commits all matched ledgers once with `exec.CommitPaths`
-and subject `chore(panel): ledger`, in that same worktree. A legacy panel
-without a ledger causes no commit or message. If the ledger commit fails,
-complete prints its error and recovery once on stderr, clears the terminal marker,
-writes override and panel audit metadata, and attempts to advance state. It syncs
-the phase only when the next mode can be derived; otherwise it reports that the
-next mode is indeterminate. It returns the ledger failure even if state advance
-or phase sync also fails. The CLI prints the result summary and cd-back note
-before exiting non-zero. The recovery states that the bead is
-closed and merged and only the ledger commit remains. Impl approve first checks
-ignore status, then refuses any existing spec ledger with uncommitted or
-untracked content. The ignored-path recovery runs `mindspec init` in the
-spec worktree; the uncommitted-path and commit-failure recoveries name
-`git -C <spec-worktree> add <path>` and the ledger commit. Neither panel
-hatch skips these checks or the ledger commit. Adhoc ledgers stay ignored.
+Disposition ledgers are local review artifacts. Init ignores them and removes the
+formerly shipped ledger negations by exact line, preserving other bytes. Files
+already tracked stay tracked. Completion and implementation approval read the
+working ledger for gate decisions without checking ignore or commit status and
+without committing ledger changes. Both materialization stages preserve tracked
+ledger content at HEAD; close publication commits only the tracker export.
+The lifecycle commit funnel also excludes local ledgers from staging and partial
+commits, and finalization cleanup exempts their dirt.
+The user owns any commit of changes to an already-tracked ledger.
 
 **Registration.** Every panel directory (`review/<slug>`, or the
 co-located `<spec-dir>/reviews/<slug>` on a flat tree) holds
@@ -854,7 +846,7 @@ Core 3 runs in `complete` before materialization for every required matched regi
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
 | `mindspec config show` | Print the effective config (panel/models/loop/runner + retained keys), with no `merge_strategy` row; read-only |
-| `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
+| `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--brief-file <absolute-path>` copies a filled regular file to BRIEF.md, replacing it on a round bump. Prompt and launch refuse `TODO(skill)` stubs. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + rule line + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec config show --gate <name> [--json]` | Print one panel gate's resolved defaults: slots, expected reviewer count, and raw `approve_threshold`. Output is text or JSON. The `substitution` member is removed. This command is read-only. |
@@ -884,24 +876,14 @@ Core 3 runs in `complete` before materialization for every required matched regi
   script invocable as `/ms-panel` that coordinates agents and performs no
   shell/file I/O itself (every CLI call and file write below is an `agent()`
   step).
-  **Args contract:** `{slug, spec, target, bead_id?, round, sha?, lenses[],
-  mix, claude_sub_on_quota?}`. `mix` and `claude_sub_on_quota` are resolved
-  by the invoking skill (`ms-panel-run`, spec 111 Bead 3) from config
-  `panel:` / `panel.substitution.claude_sub_on_quota` (spec 109) — this
-  workflow never reads `.mindspec/config.yaml` itself (no fs access, and
-  `mindspec config show` is deliberately outside `ALLOWED_CLI`).
-  `claude_sub_on_quota` is not part of spec 111 R1's illustrative args tuple;
-  it is the field this bead adds and documents here so Bead 3 can rely on it.
-  `sha` is advisory-only display text — the workflow never reads it to set
-  the recorded SHA.
-  **Input hardening** runs before any command or path is built: `slug`,
-  `spec`, `bead_id` (optional), and every `mix[].family` are validated
-  against the clean-single-path-element contract (reject empty, `.`, `..`,
-  `/`, `\`, control bytes); `target` against a branch-name-safe grammar
-  (reject empty, control bytes, a leading `-`, `git check-ref-format`
-  disallowed constructs, a trailing `/` or `.lock`, whitespace); `target` and
-  `bead_id` additionally reject shell metacharacters; `round` must be a
-  positive integer. Any failure throws before registration runs.
+  **Args contract:** `{slug, spec?, gate?, target, bead_id?, round, brief_file}`.
+  The invoking skill first writes Summary, Files in Scope, Prior-Round Asks and
+  Lens assignments per slot to an absolute scratch file. `brief_file` passes that
+  file to `panel create --brief-file`. The binary resolves the roster and runners.
+  **Input hardening:** command values reject empty strings, leading dashes and
+  control bytes and are shell-quoted. `brief_file` must be absolute; `round` must
+  be a positive integer. The binary checks the brief content before writing.
+
   **`buildCommand(verb, ...values)`** is the sole command-construction
   chokepoint: `verb` must be one of the four identifiers destructured from
   the static `ALLOWED_CLI` array (`mindspec panel create`, the sandboxed
@@ -1163,7 +1145,7 @@ override flags with their reasons. A repeated merge-only call records the
 existing valid merge and makes no second merge.
 
 A closed child of the spec epic without a naming merge runs the merge
-recovery without a second close. It publishes the closed export and panel ledger before cleanup.
+recovery without a second close. It publishes the closed tracker export before cleanup. Disposition ledgers remain local.
 An epic, phase, or child-status read failure refuses before close, merge,
 or cleanup. Retry completion when the read succeeds. A closed-unmerged
 conflict keeps its line boundaries and ends with one `--resolve-merge`

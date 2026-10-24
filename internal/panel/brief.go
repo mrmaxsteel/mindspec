@@ -2,6 +2,8 @@ package panel
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -235,4 +237,30 @@ func scanMarkdownLines(s string, fn func(int, string)) {
 		}
 		offset = end + 1
 	}
+}
+
+// ReadFilledBrief refuses unfinished review instructions before dispatch.
+func ReadFilledBrief(file string) ([]byte, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read panel brief %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	if strings.Contains(string(data), "TODO(skill)") {
+		return nil, fmt.Errorf("panel brief %s contains TODO(skill) stubs; fill it or pass --brief-file to mindspec panel create", termsafe.Escape(file))
+	}
+	return data, nil
+}
+
+func readBriefFile(file string) ([]byte, error) {
+	if !filepath.IsAbs(file) {
+		return nil, fmt.Errorf("brief file must be an absolute path: %s", termsafe.Escape(file))
+	}
+	info, err := os.Lstat(file)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("brief file must be a regular file: %s", termsafe.Escape(file))
+	}
+	return ReadFilledBrief(file)
 }
