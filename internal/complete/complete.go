@@ -947,11 +947,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if gateCfgErr != nil {
 		return nil, completionFailure(beadID, opts, "reading configuration", gateCfgErr)
 	}
-	presence := &beadPanelPresence{policy: gateCfg.Enforcement.PanelPresence, specID: specID, ignore: reconcile != nil}
-	panelGateEnabled := true
-	if gateCfgErr == nil {
-		panelGateEnabled = gateCfg.Enforcement.PanelGate
-	}
+	presence := &beadPanelPresence{policy: gateCfg.Enforcement.PanelPresence, specID: specID, ignore: reconcile != nil, closed: closedAtEntry}
+	panelGateEnabled := gateCfg.Enforcement.PanelGate
 	if resumeStage != "" {
 		if err := recheckResumedPanelDeferrals(beadID, specID, panelGateRoots(root, wtPath, specID), panelGateEnabled); err != nil {
 			return nil, err
@@ -960,7 +957,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// absence now so a presence refusal cannot move the spec tip.
 		if closedAtEntry && len(panel.ForBead(panelScanFn(panelGateRoots(root, wtPath, specID)...), beadID)) == 0 {
 			if err := presence.check(beadID, panelGateEnabled, advisoryOut); err != nil {
-				return nil, closedBeadPanelFailure(beadID, true, err)
+				return nil, err
 			}
 		}
 	}
@@ -977,16 +974,16 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		var panelGateErr error
 		panelDecisions, panelGateErr = panelGateWithPresence(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut, presence)
 		if panelGateErr != nil {
-			return nil, closedBeadPanelFailure(beadID, closedAtEntry, panelGateErr)
+			return nil, panelGateErr
 		}
 		if mergeMetadataErr != nil {
 			return nil, completionFailure(beadID, opts, "reading merge-only metadata", mergeMetadataErr)
 		}
 		if err := checkAndRecordPanelDeferrals(beadID, panelDecisions, panelGateEnabled); err != nil {
-			return nil, closedBeadPanelFailure(beadID, closedAtEntry, err)
+			return nil, err
 		}
 		if err := checkPanelCore3(panelDecisions, panelGateEnabled, advisoryOut); err != nil {
-			return nil, closedBeadPanelFailure(beadID, closedAtEntry, err)
+			return nil, err
 		}
 		if len(panelDecisions) > 0 {
 			panelReg = &panelDecisions[0].Registration
@@ -1001,7 +998,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// reviewerCountAdvisory itself also nil-checks reg. ok is false for the
 		// R7 skip carve-outs (a non-bead panel with no recorded gate, or an
 		// unknown recorded gate, while gates: is configured) — no note prints.
-		if gateCfgErr == nil && panelReg != nil {
+		if panelReg != nil {
 			if def, ok := gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()); ok {
 				reviewerCountAdvisory(panelReg, def, advisoryOut)
 			}

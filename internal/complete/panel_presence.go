@@ -3,7 +3,6 @@ package complete
 import (
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -18,6 +17,7 @@ import (
 // panel audits. Reconciliation of a missing branch retains its prior behavior.
 type beadPanelPresence struct {
 	policy, specID string
+	closed         bool
 	absent         bool
 	ignore         bool
 }
@@ -33,6 +33,9 @@ func (p *beadPanelPresence) check(beadID string, enabled bool, out io.Writer) er
 	recovery := fmt.Sprintf("mindspec panel create <slug> --spec %s --gate bead --target bead/%s", specID, idrender.Bead(beadID))
 	const message = "gate bead panel <slug>: no registration"
 	if p.policy == "enforce" {
+		if p.closed {
+			return guard.NewFailure(message, "run a panel for the bead at its tip", fmt.Sprintf("mindspec complete %s", idrender.Bead(beadID)))
+		}
 		return guard.NewFailure(message, recovery)
 	}
 	if !p.absent && out != nil {
@@ -54,20 +57,6 @@ func (p *beadPanelPresence) audit(beadID string, out io.Writer) {
 	if err := completeMergeMetadataFn(beadID, meta); err != nil && out != nil {
 		fmt.Fprintf(out, "warning: could not record panel_absent on %s: %s\n", idrender.Bead(beadID), termsafe.Escape(err.Error()))
 	}
-}
-
-// closedBeadPanelFailure replaces open-bead recovery with the closed retry.
-func closedBeadPanelFailure(beadID string, closed bool, err error) error {
-	if !closed || err == nil {
-		return err
-	}
-	var body []string
-	for _, line := range strings.Split(err.Error(), "\n") {
-		if !strings.HasPrefix(line, guard.RecoveryPrefix) {
-			body = append(body, line)
-		}
-	}
-	return guard.NewFailure(strings.Join(body, "\n"), "run a panel for the bead at its tip", "mindspec complete "+idrender.Bead(beadID))
 }
 
 // panelGate retains the check-only API. Completion supplies its resolved spec

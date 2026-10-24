@@ -15,6 +15,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -286,7 +287,8 @@ func TestS133BeadPresence_ProductMessages(t *testing.T) {
 					t.Fatal("missing enforced presence refusal")
 				}
 				s133AssertNoInternalReferences(t, err.Error())
-				s133AssertNoInternalReferences(t, closedBeadPanelFailure("sample-1", true, err).Error())
+				p.closed = true
+				s133AssertNoInternalReferences(t, p.check("sample-1", true, &out).Error())
 			} else if err != nil || out.Len() == 0 {
 				t.Fatalf("missing absence warning: %v %q", err, out.String())
 			}
@@ -300,4 +302,97 @@ func TestS133BeadPresence_ProductMessages(t *testing.T) {
 		t.Fatal("missing audit write warning")
 	}
 	s133AssertNoInternalReferences(t, out.String())
+}
+
+func TestS133BeadPresence_ClosedRecovery(t *testing.T) {
+	for _, merged := range []bool{false, true} {
+		for _, failure := range []string{"deferral", "coverage"} {
+			t.Run(fmt.Sprintf("merged=%t/%s", merged, failure), func(t *testing.T) {
+				f, _ := s133PresenceFixture(t, "enforce")
+				if merged {
+					f.merge()
+				}
+				s133Closed(t, f)
+				before := gateRevParse(t, f.root, "spec/"+closingSpec)
+				specDir, err := workspace.SpecDir(f.root, closingSpec)
+				if err != nil {
+					t.Fatal(err)
+				}
+				dir := filepath.Join(specDir, "reviews", "recovery-panel")
+				if err := paneltest.CreateV1(dir, panel.CreateInput{
+					Spec: closingSpec, Target: "bead/" + closingBead, BeadID: windowBeadPointer(), Gate: "bead",
+					Round: 1, ReviewedHeadSHA: f.tip, SubjectDigest: "sha256:fixture",
+					Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "tests"}},
+				}); err != nil {
+					t.Fatal(err)
+				}
+				core3JSON(t, dir, "R2-round-1.json", map[string]string{"verdict": "APPROVE"})
+				want := "recovery: mindspec panel tally 'recovery-panel' --spec '" + closingSpec + "'"
+				if failure == "deferral" {
+					fake := deferralBD(t, "epic-window")
+					setDeferredIssue(t, fake, "closed")
+					v := panel.FindingVerdict{Verdict: "REQUEST_CHANGES", ConcreteChangesRequired: []string{"test finding"}}
+					core3JSON(t, dir, "R1-round-1.json", v)
+					findings, err := panel.Findings(v)
+					if err != nil {
+						t.Fatal(err)
+					}
+					finding := findings[0]
+					d := panel.Deferral{Slot: "R1", Round: 1, Finding: finding.ID, FindingSHA256: finding.SHA256,
+						FindingText: finding.Text, Bead: "follow-up", By: "operator", CreatedAt: core3Time}
+					core3Append(t, dir, panel.DeferralRecord{Record: panel.RecordDeferral, Spec: closingSpec, Panel: "recovery-panel", Deferral: d})
+					res, err := panel.Tally(dir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					res.Panel.Deferrals = []panel.Deferral{d}
+					if err := panel.WriteSnapshot(dir, *res.Panel); err != nil {
+						t.Fatal(err)
+					}
+					want = "recovery: bd reopen 'follow-up'"
+				} else {
+					core3JSON(t, dir, "R1-round-1.json", map[string]string{"verdict": "APPROVE"})
+				}
+				_, err = f.run(CompleteOpts{})
+				if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "run a panel for the bead at its tip") {
+					t.Fatalf("closed %s refusal lost its recovery %q: %v", failure, want, err)
+				}
+				if failure == "coverage" && !strings.Contains(err.Error(), "coverage check failed") {
+					t.Fatalf("expected coverage refusal: %v", err)
+				}
+				if !f.closed || f.closeCalls != 0 || f.meta["panel_absent"] != nil || f.meta["mindspec_landed_merge_sha"] != nil || gateRevParse(t, f.root, "spec/"+closingSpec) != before {
+					t.Fatalf("refusal changed bead state: closed=%v closes=%d metadata=%v", f.closed, f.closeCalls, f.meta)
+				}
+			})
+		}
+	}
+}
+
+func TestS133BeadPresence_MalformedConfiguration(t *testing.T) {
+	f, out := s133PresenceFixture(t, "enforce")
+	before := gateRevParse(t, f.root, "spec/"+closingSpec)
+	writeFile(t, f.root, ".mindspec/config.yaml", "enforcement: [\n")
+	config.ResetCache()
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "reading configuration")
+	if f.closed || f.closeCalls != 0 || len(f.meta) != 0 || out.Len() != 0 || gateRevParse(t, f.root, "spec/"+closingSpec) != before || gateRevParse(t, f.root, "bead/"+closingBead) != f.tip {
+		t.Fatalf("configuration refusal changed state: closed=%v closes=%d metadata=%v output=%q", f.closed, f.closeCalls, f.meta, out.String())
+	}
+	if _, err := os.Stat(f.beadWT); err != nil {
+		t.Fatalf("configuration refusal removed worktree: %v", err)
+	}
+}
+
+func TestS133BeadPresence_FailedCloseHasNoAudit(t *testing.T) {
+	f, out := s133PresenceFixture(t, "warn")
+	before := f.merge()
+	closeBeadFn = func(...string) error { f.closeCalls++; return errors.New("close failed") }
+	_, err := f.run(CompleteOpts{})
+	requireWindowRefusal(t, err, "close failed")
+	if !strings.Contains(out.String(), "no registration") {
+		t.Fatalf("test did not reach the presence check: %q", out.String())
+	}
+	if f.closed || f.closeCalls != 1 || f.meta["panel_absent"] != nil || gateRevParse(t, f.root, "spec/"+closingSpec) != before {
+		t.Fatalf("failed close recorded absence or changed state: closed=%v closes=%d metadata=%v", f.closed, f.closeCalls, f.meta)
+	}
 }

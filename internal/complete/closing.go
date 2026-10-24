@@ -101,17 +101,17 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 		out = os.Stderr
 	}
 	if presence == nil {
-		presence = &beadPanelPresence{policy: cfg.Enforcement.PanelPresence, specID: specID}
+		presence = &beadPanelPresence{policy: cfg.Enforcement.PanelPresence, specID: specID, closed: closed}
 	}
 	decisions, err := panelGateWithPresence(beadID, roots, wtPath, cfg.Enforcement.PanelGate, out, presence)
 	if err != nil {
-		return nil, closedBeadPanelFailure(beadID, closed, err)
+		return nil, err
 	}
 	if err := checkAndRecordPanelDeferrals(beadID, decisions, cfg.Enforcement.PanelGate); err != nil {
-		return nil, closedBeadPanelFailure(beadID, closed, err)
+		return nil, err
 	}
 	if err := checkPanelCore3(decisions, cfg.Enforcement.PanelGate, out); err != nil {
-		return nil, closedBeadPanelFailure(beadID, closed, err)
+		return nil, err
 	}
 	if err := runRangeGateWithOwner(root, beadID, row.SHA, specDir, row.Parents[0], row.SHA, exec, opts, warnWriter); err != nil {
 		return nil, mergedRangeFailure(root, beadID, specBranch, specWT, row, exec, opts, err)
