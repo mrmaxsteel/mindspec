@@ -130,7 +130,12 @@ func reportContentGates(root, beadID string, opts CompleteOpts, docs, adrs *vali
 	if docs.HasFailures() && opts.AllowDocSkew == "" {
 		docErr = guard.NewFailure("doc-sync: "+joinResultErrorMessages(docs), "update the affected domain docs, then re-run mindspec complete "+idrender.Bead(beadID)+"; or re-run with --allow-doc-skew \"<reason>\" to record a deferral")
 	}
-	adrErr := handleADRGateOutcome(root, beadID, opts, adrs, findings)
+	adrOpts := opts
+	if docErr != nil || opts.workDestructionErr != nil {
+		// Report the ADR result, but do not create a placeholder on refusal.
+		adrOpts.SupersedeADR = ""
+	}
+	adrErr := handleADRGateOutcome(root, beadID, adrOpts, adrs, findings)
 	return errors.Join(docErr, adrErr, opts.workDestructionErr)
 }
 

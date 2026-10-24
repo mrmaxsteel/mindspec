@@ -175,6 +175,9 @@ func deleteMergeOnlyKeys(beadID string, keys ...string) error {
 // deferOwnershipConflict applies only to the caller's open/closed path choice.
 // A resolved index and every non-ownership error still pass through the gates.
 func deferOwnershipConflict(beadID string, opts CompleteOpts, cause error) (bool, error) {
+	if opts.workDestructionErr != nil {
+		return false, cause
+	}
 	var conflict *OwnershipLandingConflict
 	if !errors.As(cause, &conflict) {
 		return false, nil

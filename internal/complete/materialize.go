@@ -17,6 +17,7 @@ package complete
 // string constants (duplicated below instead).
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -380,6 +381,9 @@ func runMaterialization(in materializationInput) error {
 	// stale index, a false positive this check must never race against.
 	// The resume path's own S-exit contract (after R actually runs) is
 	// the authoritative dirt check for a resume.
+	if in.opts.workDestructionErr != nil && (wtPath == "" || in.resumeStage != "") {
+		return in.opts.workDestructionErr
+	}
 	if wtPath == "" {
 		if in.resumeStage == "" {
 			artifactDirt, userDirt, dirtErr := checkDirtyTreeFn(in.root, in.root)
@@ -407,7 +411,8 @@ func runMaterialization(in materializationInput) error {
 			fmt.Sprintf("mindspec next %s   (recreates the missing bead worktree; then re-run `mindspec complete %s`)", idrender.Bead(beadID), idrender.Bead(beadID)),
 		)
 	}
-	if in.resumeStage == "" {
+	// A failed preflight still needs the full report. Skip artifact export.
+	if in.resumeStage == "" && in.opts.workDestructionErr == nil {
 		_, userDirt, dirtErr := checkDirtyTreeFn(wtPath, wtPath)
 		if dirtErr != nil {
 			return fmt.Errorf("checking working tree: %w", dirtErr)
@@ -430,7 +435,7 @@ func runMaterialization(in materializationInput) error {
 		// --- Normal run: snapshot once, gate, then materialize. -------
 		tree, err := exec.SnapshotWorktreeTree(wtPath, panel.ToolArtifactPaths(workspace.SpecsDir(wtPath)))
 		if err != nil {
-			return fmt.Errorf("snapshotting bead worktree %s: %w", wtPath, err)
+			return errors.Join(in.opts.workDestructionErr, fmt.Errorf("snapshotting bead worktree %s: %w", wtPath, err))
 		}
 
 		if err := runSnapshotContentGates(in, tree); err != nil {

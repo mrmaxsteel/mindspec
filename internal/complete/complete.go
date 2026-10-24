@@ -1084,7 +1084,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// see that a worktree-less bead could possibly hold anyway.
 	specDir, sdErr := workspace.SpecDir(root, specID)
 	if sdErr != nil {
-		return nil, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr)
+		return nil, errors.Join(opts.workDestructionErr, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr))
 	}
 	var base string
 	if reconcile != nil {
@@ -1093,7 +1093,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		var mbErr error
 		base, mbErr = exec.MergeBase(specBranch, beadHead)
 		if mbErr != nil {
-			return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
+			return nil, errors.Join(opts.workDestructionErr, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr))
 		}
 	}
 	if reconcile != nil {
@@ -1919,7 +1919,7 @@ func runCommittedRangeGate(root, beadID, beadHead, specDir, base string, exec ex
 	ownerRef, err := ownershipLandingTree(root, specDir, beadHead, beadHead, exec)
 	if err != nil {
 		var conflict *OwnershipLandingConflict
-		if errors.As(err, &conflict) && opts.deferOwnershipConflict {
+		if errors.As(err, &conflict) && opts.deferOwnershipConflict && opts.workDestructionErr == nil {
 			return nil
 		}
 		return errors.Join(opts.workDestructionErr, &landingOwnershipError{beadID: beadID, cause: err})

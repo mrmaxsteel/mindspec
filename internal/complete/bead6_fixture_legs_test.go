@@ -124,8 +124,7 @@ func TestBead6Leg_i_UntrackedFileGatesBeforeCommit(t *testing.T) {
 	gitRun(t, wtPath, "commit", "-qm", "undeclared owner")
 	preTip := gateRevParse(t, root, beadBranch)
 
-	// UNTRACKED (never `git add`ed) file in a domain NO OWNERSHIP.yaml
-	// claims — the fixture only declares "widget".
+	// The untracked file belongs to "other". The spec declares only "widget".
 	if err := os.MkdirAll(filepath.Join(wtPath, "internal", "core"), 0o755); err != nil {
 		t.Fatal(err)
 	}
