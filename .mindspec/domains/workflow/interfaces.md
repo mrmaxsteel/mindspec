@@ -443,6 +443,16 @@ The CLI helper `findPanelRoot` returns the verified slot's main root or falls ba
 
 ### Panel Gate v2 (verdict ledger)
 
+Each v2 change item can include `artifact_path`, a repository-relative slash path.
+The validator refuses absolute paths, parent segments and control bytes.
+It names the field's JSON pointer. `panel schema` includes the field.
+The gate checks each unresolved item's path in the round record's
+`reviewed_head_sha` tree. A missing path adds the slot, item and path to
+the refusal. A rebind does not change that tree.
+A refutation or deferral discharges the item and its path block.
+A new round checks its own tree. A present path does not discharge a finding.
+An item without this field keeps the existing gate behavior.
+
 `panel.Create` writes `verdict_schema: 2` in the snapshot and round record.
 `RoundSchema` selects the schema from the latest round record.
 `CheckHandEdits` requires the snapshot's pin to match that record.

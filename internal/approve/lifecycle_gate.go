@@ -98,6 +98,7 @@ func runLifecycleGate(root, specID, gate, worktree string, out io.Writer) (Outco
 			if err != nil {
 				return refuse(reg.Slug(), "target", err)
 			}
+			facts.ArtifactDetails = panel.ArtifactPathDetails(res, scanRoot, exec.LsTree)
 			reader := panel.DocumentSubjectTreeReader(gate, specDir, exec.LsTree, func(workdir, ref, name string) ([]byte, error) {
 				return lifecycleExecutorFn(workdir).FileAtRef(ref, name)
 			})

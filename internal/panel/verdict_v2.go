@@ -19,9 +19,10 @@ const MaxVerdictBytes = 1 << 20
 const MaxCommandTailBytes = 4096
 
 type ChangeRequired struct {
-	Text    string `json:"text"`
-	Basis   string `json:"basis"`
-	Command *int   `json:"command,omitempty"`
+	Text         string `json:"text"`
+	Basis        string `json:"basis"`
+	Command      *int   `json:"command,omitempty"`
+	ArtifactPath string `json:"artifact_path,omitempty"`
 }
 type CommandRun struct {
 	Cmd  string      `json:"cmd"`
@@ -56,6 +57,7 @@ type verdictSchemaNode struct {
 	MaxItems             int                           `json:"maxItems,omitempty"`
 	MinLength            int                           `json:"minLength,omitempty"`
 	Pattern              string                        `json:"pattern,omitempty"`
+	Not                  *verdictSchemaNode            `json:"not,omitempty"`
 	Enum                 []any                         `json:"enum,omitempty"`
 	Description          string                        `json:"description,omitempty"`
 }
@@ -81,6 +83,10 @@ func verdictV2Definition() *verdictSchemaNode {
 	schema.Enum = []any{2}
 	sha := stringSchema(false)
 	sha.Pattern = "^[0-9a-f]{40}$"
+	artifactPath := stringSchema(true)
+	artifactPath.Pattern = `^[^/\x00-\x1f\x7f\\][^\x00-\x1f\x7f\\]*$`
+	artifactPath.Not = &verdictSchemaNode{Type: "string", Pattern: `(^|/)\.\.(/|$)`}
+	artifactPath.Description = "Repository-relative slash path. No absolute path, parent segment or control byte."
 	s := objectSchema([]string{"schema", "slot", "round", "reviewed_sha", "status", "verdict", "model", "rationale", "concrete_changes_required", "commands_run"}, map[string]*verdictSchemaNode{
 		"schema": schema, "slot": stringSchema(false), "round": integer(), "reviewed_sha": sha,
 		"status": stringSchema(false, "draft", "final"), "verdict": stringSchema(false, "APPROVE", "REQUEST_CHANGES", "REJECT", "VOID"),
@@ -88,6 +94,7 @@ func verdictV2Definition() *verdictSchemaNode {
 		"findings": stringsArray(), "inputs_read": stringsArray(),
 		"concrete_changes_required": {Type: "array", MaxItems: 100, Items: objectSchema([]string{"text", "basis"}, map[string]*verdictSchemaNode{
 			"text": stringSchema(true), "basis": stringSchema(false, "executed", "traced", "hypothesis"), "command": integer(),
+			"artifact_path": artifactPath,
 		})},
 		"commands_run": {Type: "array", MaxItems: 200, Items: objectSchema([]string{"cmd", "exit", "tail"}, map[string]*verdictSchemaNode{
 			"cmd": stringSchema(false), "exit": integer(), "tail": stringSchema(false),
@@ -181,6 +188,9 @@ func (s *verdictSchemaNode) validate(v any, p string) error {
 		}
 		if s.Pattern != "" && !regexp.MustCompile(s.Pattern).MatchString(x) {
 			return verdictError(p, "has an invalid format")
+		}
+		if s.Not != nil && regexp.MustCompile(s.Not.Pattern).MatchString(x) {
+			return verdictError(p, "must not contain a parent path segment")
 		}
 	case "integer":
 		if _, ok := integerValue(v); !ok {

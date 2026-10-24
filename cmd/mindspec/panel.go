@@ -702,6 +702,7 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 	return panel.ResolveGateFacts(reg, beadID, scanRoot, panel.GateIO{
 		SpecDir:       filepath.Join(workspace.SpecsDir(root), reg.Panel.Spec),
 		SubjectTree:   panelSubjectReader(reg.Panel.Gate, panel.PanelSpecDir(reg.Dir, filepath.Join(workspace.SpecsDir(root), reg.Panel.Spec)), exec.LsTree),
+		ArtifactTree:  exec.LsTree,
 		RevParse:      revParse,
 		Status:        exec.Status,
 		IsRefNotFound: exec.IsRefNotFound,

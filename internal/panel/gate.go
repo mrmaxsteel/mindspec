@@ -155,6 +155,8 @@ type GateFacts struct {
 	// separate from the ordinary rev-parse fail-open GitErr.
 	SubjectDigest string
 	SubjectErr    error
+	// ArtifactDetails names unresolved paths absent from the original round tree.
+	ArtifactDetails string
 
 	// GitErr true means the rev-parse failed with a TRANSIENT or structural
 	// error (not a clean "ref absent"): exit 128, git missing, lock
@@ -353,12 +355,13 @@ func panelGateDecision(f GateFacts) Decision {
 
 	// (9.5) Every finding must be discharged; approval counts are descriptive.
 	if !f.Res.PassRule(true) {
+		details := f.Res.UnresolvedNames() + f.ArtifactDetails
 		if f.BeadID == "" && !p.IsBead() {
-			return Decision{Action: Block, Message: fmt.Sprintf("panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s", slug, round, f.Res.UnresolvedNames())}
+			return Decision{Action: Block, Message: fmt.Sprintf("panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s", slug, round, details)}
 		}
 		return Decision{Action: Block, Message: fmt.Sprintf(
 			"panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s — %d/%d APPROVE. Run /ms-bead-fix with %s, then re-panel%s",
-			slug, round, f.Res.UnresolvedNames(), f.Res.Approves, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
+			slug, round, details, f.Res.Approves, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
 	}
 	return Decision{Action: Allow, AppliedRefutations: f.Res.AppliedRefutations(), AppliedDeferrals: f.Res.EffectiveDeferrals()}
 }
@@ -430,6 +433,8 @@ type GateIO struct {
 	SpecDir string
 	// SubjectTree returns the subject digest at ref, or an error (fail closed).
 	SubjectTree func(scanRoot, ref string, roots SubjectRoots) (string, error)
+	// ArtifactTree returns the full tree listing at the round's recorded commit.
+	ArtifactTree func(scanRoot, ref string) (string, error)
 	// RevParse runs `git rev-parse <ref>` in scanRoot, returning the SHA. A
 	// genuine "ref absent" error must satisfy IsRefNotFound; any other error
 	// is treated as a transient/structural git error.
@@ -518,6 +523,7 @@ func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) Ga
 		return f
 	}
 	f.HeadSHA = sha
+	f.ArtifactDetails = ArtifactPathDetails(res, scanRoot, deps.ArtifactTree)
 	if p := res.Panel; p != nil && p.SubjectDigest != "" && p.ReviewedHeadSHA != "" && !shaEqual(p.ReviewedHeadSHA, sha) {
 		if deps.SubjectTree == nil {
 			f.SubjectErr = fmt.Errorf("subject-tree reader unavailable")
