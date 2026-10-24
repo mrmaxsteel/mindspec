@@ -449,6 +449,59 @@ var resolutionInlineCorpus = []struct {
 	ids        []string
 	want       bool
 }{
+	{"hidden closing tag", "See </plan-one> done.\n", []string{"plan-one"}, false},
+	{"hidden custom tag", "See <plan-one> done.\n", []string{"plan-one"}, false},
+	{"single quoted html attribute", "See <a href='plan-one'>x</a>.\n", []string{"plan-one"}, false},
+	{"html label bracket destination", "See [x <a title=\"[\">y</a>](plan-one).\n", []string{"plan-one"}, false},
+	{"html label closing bracket destination", "See [x <a title=\"]\">y</a>](plan-one).\n", []string{"plan-one"}, false},
+	{"code label bracket destination", "See [x `[` y](plan-one).\n", []string{"plan-one"}, false},
+	{"escaped bracket literal", "See \\[ plan-one.\n", []string{"plan-one"}, true},
+	{"unmatched code run", "See ``broken ` plan-one.\n", []string{"plan-one"}, true},
+	{"reference destination eof", "[b]: plan-one", []string{"plan-one"}, false},
+	{"reference title eof", "[b]: x \"plan-one\"", []string{"plan-one"}, false},
+	{"reference angle eof", "[b]: <plan-one>", []string{"plan-one"}, false},
+	{"reference escaped destination", "[b]: a\\(plan-one\\)", []string{"plan-one"}, false},
+	{"reference balanced destination", "[b]: a(plan-one)", []string{"plan-one"}, false},
+	{"invalid reference title suffix", "[b]: c \"title\" plan-one\n", []string{"plan-one"}, true},
+	{"invalid reference destination suffix", "[b]: c plan-one\n", []string{"plan-one"}, true},
+	{"half open range", "- Half-open range [0, n) fixed: plan-one.\n", []string{"plan-one"}, true},
+	{"unmatched bracket note", "Note [ x plan-one\n", []string{"plan-one"}, true},
+	{"unclosed code and bracket", "- `[ unclosed plan-one\n", []string{"plan-one"}, true},
+	{"unmatched bracket item", "- a [ b plan-one\n", []string{"plan-one"}, true},
+	{"unmatched outer bracket", "- [a [b](c) plan-one\n", []string{"plan-one"}, true},
+	{"unfinished target continuation", "See [b](c\nplan-one fixed.\n", []string{"plan-one"}, true},
+	{"unfinished target same line", "See [b](c plan-one fixed.\n", []string{"plan-one"}, true},
+	{"unfinished angle target", "See [b](<c plan-one\n", []string{"plan-one"}, true},
+	{"unfinished quoted target", "See [b](c \"plan-one\n", []string{"plan-one"}, true},
+	{"unfinished target title", "See [b](c (plan-one\n", []string{"plan-one"}, true},
+	{"unfinished reference suffix", "See [a][b plan-one\n", []string{"plan-one"}, true},
+	{"unfinished reference angle", "[b]: <c plan-one\n", []string{"plan-one"}, true},
+	{"unfinished reference title", "[b]: c \"plan-one\n", []string{"plan-one"}, true},
+	{"unfinished reference next title", "[b]: c\n\"plan-one\n", []string{"plan-one"}, true},
+	{"reference without destination", "[plan-one]:\n", []string{"plan-one"}, true},
+	{"unfinished reference parentheses", "[b]: (c plan-one\n", []string{"plan-one"}, true},
+	{"literal less than", "a < b plan-one\n", []string{"plan-one"}, true},
+	{"visible html content", "<b>plan-one</b> fixed\n", []string{"plan-one"}, true},
+	{"after complete link same line", "See [b](c). plan-one fixed.\n", []string{"plan-one"}, true},
+	{"hidden html href", "See <a href=\"plan-one\">decision</a>.\n", []string{"plan-one"}, false},
+	{"hidden html title", "See <span title=\"plan-one\">decision</span>.\n", []string{"plan-one"}, false},
+	{"hidden html short href", "See <a href=\"plan-one\">x</a>\n", []string{"plan-one"}, false},
+	{"hidden html short title", "See <span title=\"plan-one\">x</span>\n", []string{"plan-one"}, false},
+	{"hidden inline comment", "See <!-- plan-one --> done.\n", []string{"plan-one"}, false},
+	{"hidden processing instruction", "See <?plan-one ?> done.\n", []string{"plan-one"}, false},
+	{"hidden declaration", "See <!THING plan-one> done.\n", []string{"plan-one"}, false},
+	{"hidden cdata", "See <![CDATA[plan-one]]> done.\n", []string{"plan-one"}, false},
+	{"html quoted greater than", "See <a title=\"> plan-one\">x</a> done.\n", []string{"plan-one"}, false},
+	{"html unquoted attribute", "See <a href=plan-one>x</a> done.\n", []string{"plan-one"}, false},
+	{"html multiline attribute", "See <a\nhref=\"plan-one\">x</a>.\n", []string{"plan-one"}, false},
+	{"after html tag", "See <a href=\"hidden\">x</a> plan-one.\n", []string{"plan-one"}, true},
+	{"invalid html tag", "See <a href=\"unfinished plan-one\n", []string{"plan-one"}, true},
+	{"unfinished processing instruction", "See <?broken plan-one\n", []string{"plan-one"}, true},
+	{"unfinished declaration", "See <!THING plan-one\n", []string{"plan-one"}, true},
+	{"unfinished cdata", "See <![CDATA[plan-one\n", []string{"plan-one"}, true},
+	{"url autolink", "See <https://example.test/plan-one>.\n", []string{"plan-one"}, true},
+	{"email autolink", "See <plan-one@example.test>.\n", []string{"plan-one"}, true},
+	{"html in code", "See `<a href=\"plan-one\">` done.\n", []string{"plan-one"}, true},
 	{"after lazy paragraph", "> Context.\nlazy text\n\nplan-one: fixed.\n", []string{"plan-one"}, true},
 	{"checkbox", "- [x] Resolve plan-one and plan-epic-only.\n", []string{"plan-one", "plan-epic-only"}, true},
 	{"after link", "- See [the ADR](x.md).\n- plan-one: resolved.\n", []string{"plan-one"}, true},
@@ -502,7 +555,15 @@ func TestS133Resolutions_InlineApprovePlan(t *testing.T) {
 				f.writePlan(content + "\n## Resolutions\n\n" + tc.body)
 				f.commit("inline resolutions")
 				f.seed("plan_approve", "pass")
-				_, err := f.approve("plan_approve")
+				f.exec.commits = 0
+				f.mutations = nil
+				before := f.read("plan.md")
+				head := preflightGit(t, f.root, "rev-parse", "HEAD")
+				metadata, err := json.Marshal(f.meta)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = f.approve("plan_approve")
 				if tc.want {
 					if err != nil || f.creates != 1 {
 						t.Fatalf("visible ids refused: %v; creates=%d", err, f.creates)
@@ -510,6 +571,10 @@ func TestS133Resolutions_InlineApprovePlan(t *testing.T) {
 				} else {
 					if err == nil || !strings.Contains(err.Error(), "hidden text") || f.creates != 0 {
 						t.Fatalf("hidden ids did not refuse clearly: %v; creates=%d", err, f.creates)
+					}
+					afterMetadata, marshalErr := json.Marshal(f.meta)
+					if marshalErr != nil || string(metadata) != string(afterMetadata) || f.closes != 0 || f.exec.commits != 0 || len(f.mutations) != 0 || before != f.read("plan.md") || head != preflightGit(t, f.root, "rev-parse", "HEAD") {
+						t.Errorf("inline refusal changed lifecycle state: mutations=%v, metadata error=%v", f.mutations, marshalErr)
 					}
 					for _, id := range tc.ids {
 						if !strings.Contains(err.Error(), id) {
@@ -519,5 +584,36 @@ func TestS133Resolutions_InlineApprovePlan(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// These cases isolate inline rules from the block scanner.
+func TestS133Resolutions_InlineSyntax(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"comment", "a <!-- plan-one --> b", "a  b"},
+		{"unfinished comment", "a <!-- plan-one", "a <!-- plan-one"},
+		{"invalid comment", "a <!--> plan-one -->", "a <!--> plan-one -->"},
+		{"processing instruction", "a <?plan-one ?> b", "a  b"},
+		{"unfinished instruction", "a <?plan-one", "a <?plan-one"},
+		{"declaration", "a <!THING plan-one> b", "a  b"},
+		{"unfinished declaration", "a <!THING plan-one", "a <!THING plan-one"},
+		{"cdata", "a <![CDATA[plan-one]]> b", "a  b"},
+		{"unfinished cdata", "a <![CDATA[plan-one", "a <![CDATA[plan-one"},
+		{"empty comment", "a <!----> b", "a  b"},
+		{"closing tag", "a </plan-one> b", "a  b"},
+		{"visible content", "<b>plan-one</b>", "plan-one"},
+		{"quote in tag", "<a title=\"> plan-one\">x</a>", "x"},
+		{"code tag", "`<a title=\"plan-one\">`", "<a title=\"plan-one\">"},
+		{"invalid tag", "a < b plan-one", "a < b plan-one"},
+		{"url", "<https://example.test/plan-one>", "<https://example.test/plan-one>"},
+		{"email", "<plan-one@example.test>", "<plan-one@example.test>"},
+		{"trailing escape", "plan-one\\", "plan-one\\"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolutionVisibleText(tc.body); got != tc.want {
+				t.Fatalf("visible text=%q, want %q", got, tc.want)
+			}
+		})
 	}
 }

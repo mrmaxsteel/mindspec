@@ -7,7 +7,8 @@ import (
 
 var resolutionListItem = regexp.MustCompile(`^[ \t]*(?:[-+*]|[0-9]+[.)])(?:[ \t\r\n]|$)`)
 
-// resolutionVisibleText keeps link labels and code spans. It hides link targets.
+// resolutionVisibleText keeps link labels and code spans.
+// It hides complete link targets and raw HTML tags.
 // The caller limits each input to one paragraph or list item.
 func resolutionVisibleText(text string) string {
 	return resolutionInlineText(text, true)
@@ -26,6 +27,10 @@ func resolutionInlineText(text string, references bool) string {
 			i = end
 			continue
 		}
+		if end := resolutionHTMLEnd(text, i); end > i {
+			i = end
+			continue
+		}
 		if text[i] != '[' {
 			visible.WriteByte(text[i])
 			i++
@@ -33,31 +38,35 @@ func resolutionInlineText(text string, references bool) string {
 		}
 		close := resolutionLabelEnd(text, i)
 		if close < 0 {
-			// Keep uncertainty on this line.
-			next := strings.IndexByte(text[i:], '\n')
-			if next < 0 {
-				break
-			}
-			i += next + 1
-			visible.WriteByte('\n')
+			visible.WriteByte('[')
+			i++
 			continue
 		}
 		next := close + 1
 		if references && next < len(text) && text[next] == ':' && strings.TrimSpace(visible.String()) == "" {
-			i = resolutionReferenceEnd(text, next+1)
-			continue
+			if end := resolutionReferenceEnd(text, next+1); end >= 0 {
+				i = end
+				continue
+			}
 		}
 		label := resolutionInlineText(text[i+1:close], false)
 		if next < len(text) && text[next] == '(' {
-			visible.WriteString(label)
-			i = resolutionTargetEnd(text, next)
+			if end := resolutionTargetEnd(text, next); end >= 0 {
+				visible.WriteString(label)
+				i = end
+			} else {
+				visible.WriteByte('[')
+				i++
+			}
 		} else if next < len(text) && text[next] == '[' {
-			visible.WriteString(label)
 			end := resolutionLabelEnd(text, next)
 			if end < 0 {
-				return visible.String()
+				visible.WriteByte('[')
+				i++
+			} else {
+				visible.WriteString(label)
+				i = end + 1
 			}
-			i = end + 1
 		} else {
 			visible.WriteByte('[')
 			visible.WriteString(label)
@@ -102,6 +111,10 @@ func resolutionLabelEnd(text string, start int) int {
 			continue
 		}
 		if end, _ := resolutionCodeSpan(text, i); end > i {
+			i = end - 1
+			continue
+		}
+		if end := resolutionHTMLEnd(text, i); end > i {
 			i = end - 1
 			continue
 		}
@@ -151,11 +164,10 @@ func resolutionTargetEnd(text string, start int) int {
 			}
 		}
 	}
-	// An incomplete target can hide only the current paragraph or item.
-	return len(text)
+	return -1
 }
 
-// resolutionReferenceEnd hides a definition and its optional title.
+// resolutionReferenceEnd hides a complete definition and its optional title.
 func resolutionReferenceEnd(text string, start int) int {
 	lineEnd := func(i int) int {
 		if n := strings.IndexByte(text[i:], '\n'); n >= 0 {
@@ -168,34 +180,58 @@ func resolutionReferenceEnd(text string, start int) int {
 		i++
 	}
 	if i == len(text) {
-		return i
+		return -1
 	}
 	if text[i] == '<' {
 		i++
 		for i < len(text) && text[i] != '>' {
+			if text[i] == '\n' || text[i] == '<' {
+				return -1
+			}
 			if text[i] == '\\' && i+1 < len(text) {
 				i++
 			}
 			i++
 		}
 		if i == len(text) {
-			return i
+			return -1
 		}
 		i++
 	} else {
+		depth := 0
 		for i < len(text) && !strings.ContainsRune(" \t\n", rune(text[i])) {
-			if text[i] == '\\' && i+1 < len(text) {
-				i++
+			switch text[i] {
+			case '\\':
+				if i+1 < len(text) {
+					i++
+				}
+			case '(':
+				depth++
+			case ')':
+				if depth == 0 {
+					return -1
+				}
+				depth--
+			case '<':
+				return -1
 			}
 			i++
+		}
+		if depth != 0 {
+			return -1
 		}
 	}
 	end := lineEnd(i)
 	for i < len(text) && strings.ContainsRune(" \t\n", rune(text[i])) {
 		i++
 	}
+	// A title on a later line cannot invalidate the destination line.
+	fallback := -1
+	if i >= end || i == len(text) {
+		fallback = end
+	}
 	if i >= len(text) || (text[i] != '\'' && text[i] != '"' && text[i] != '(') {
-		return end
+		return fallback
 	}
 	closer := text[i]
 	if closer == '(' {
@@ -205,9 +241,29 @@ func resolutionReferenceEnd(text string, start int) int {
 		if text[j] == '\\' {
 			j++
 		} else if text[j] == closer {
-			return lineEnd(j)
+			end := lineEnd(j)
+			if strings.TrimSpace(text[j+1:end]) == "" {
+				return end
+			}
+			return fallback
 		}
 	}
-	// Keep an incomplete title within this paragraph or item.
-	return len(text)
+	return fallback
+}
+
+// Match complete raw inline HTML. Autolinks do not match these forms.
+var resolutionHTML = regexp.MustCompile(`(?s)^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t\r\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\r\n]*=[ \t\r\n]*(?:[^ \t\r\n"'=<>` + "`" + `]+|'[^']*'|"[^"]*"))?)*[ \t\r\n]*/?>|</[A-Za-z][A-Za-z0-9-]*[ \t\r\n]*>|<!--(?:[^-]|-[^-])*-->|<\?.*?\?>|<![A-Z]+[ \t\r\n]+[^>]*>|<!\[CDATA\[.*?\]\]>)`)
+
+func resolutionHTMLEnd(text string, start int) int {
+	if text[start] != '<' {
+		return start
+	}
+	match := resolutionHTML.FindString(text[start:])
+	if strings.HasPrefix(match, "<!--") {
+		body := match[4 : len(match)-3]
+		if strings.HasPrefix(body, ">") || strings.HasPrefix(body, "->") {
+			return start
+		}
+	}
+	return start + len(match)
 }
