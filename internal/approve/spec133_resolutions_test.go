@@ -449,6 +449,60 @@ var resolutionInlineCorpus = []struct {
 	ids        []string
 	want       bool
 }{
+	{"grammar unicode full fold", "See ![plan-one][Straße].\n\n[STRASSE]: /u\n", []string{"plan-one"}, false},
+	{"grammar unicode simple fold", "See ![plan-one][Σ].\n\n[ς]: /u\n", []string{"plan-one"}, false},
+	{"grammar reference nonbreaking space", "See ![plan-one][a b].\n\n[a\u00a0b]: /u\n", []string{"plan-one"}, true},
+	{"grammar nested link", "See [a [b](u)](plan-one).\n", []string{"plan-one"}, true},
+	{"grammar nested image", "See ![a ![b](u[) c](plan-one).\n", []string{"plan-one"}, false},
+	{"grammar nested image in link", "See [a ![plan-one](u)](v).\n", []string{"plan-one"}, false},
+	{"grammar autolink image label", "See ![a <https://x/]> b](plan-one).\n", []string{"plan-one"}, false},
+	{"grammar probe complete destination", "See [decision](plan-one).\n", []string{"plan-one"}, false},
+	{"grammar reference whitespace fold", "See [decision][the plan-one].\n\n[THE\tPLAN-ONE]: /u\n", []string{"plan-one"}, false},
+	{"grammar empty image target", "See ![plan-one]().\n", []string{"plan-one"}, false},
+	{"grammar empty angle image target", "See ![plan-one](<>).\n", []string{"plan-one"}, false},
+	{"grammar invalid title parentheses", "See [x](u (a(plan-one))).\n", []string{"plan-one"}, true},
+	{"grammar escaped title parentheses", "See [x](u (a\\(plan-one\\))).\n", []string{"plan-one"}, false},
+	{"grammar escaped angle delimiter", "See [x](<a\\>plan-one>).\n", []string{"plan-one"}, false},
+	{"grammar angle unescaped less than", "See [x](<a<plan-one>).\n", []string{"plan-one"}, false},
+	{"grammar bare destination control", "See [x](u\u0001plan-one).\n", []string{"plan-one"}, true},
+	{"grammar bare destination delete", "See [x](u\u007fplan-one).\n", []string{"plan-one"}, true},
+	{"grammar definition title separator", "[r]: <u>\"plan-one\"\n", []string{"plan-one"}, true},
+	{"grammar definition title extra", "[r]: u \"a\" plan-one\n", []string{"plan-one"}, true},
+	{"grammar definition next line invalid title", "[r]: u\n\"a\" plan-one\n", []string{"plan-one"}, true},
+	{"grammar image undefined collapsed", "See ![plan-one][].\n", []string{"plan-one"}, true},
+	{"grammar image undefined shortcut", "See ![plan-one].\n", []string{"plan-one"}, true},
+	{"grammar image code label", "See ![`plan-one`](u).\n", []string{"plan-one"}, false},
+	{"grammar link code label", "See [`plan-one`](u).\n", []string{"plan-one"}, true},
+	{"grammar code closing bracket", "See [a `]` b](plan-one).\n", []string{"plan-one"}, false},
+	{"grammar image alt", "See ![plan-one](x.png).\n", []string{"plan-one"}, false},
+	{"grammar image reference alt", "See ![plan-one][r].\n\n[r]: x.png\n", []string{"plan-one"}, false},
+	{"grammar image invalid target", "See ![a](x plan-one).\n", []string{"plan-one"}, true},
+	{"grammar invalid target words", "See [x](u plan-one).\n", []string{"plan-one"}, true},
+	{"grammar invalid target title suffix", "See [x](u \"a\" plan-one).\n", []string{"plan-one"}, true},
+	{"grammar undefined reference", "See [decision][plan-one].\n", []string{"plan-one"}, true},
+	{"grammar defined reference", "See [decision][plan-one].\n\n[plan-one]: /u\n", []string{"plan-one"}, false},
+	{"grammar invalid decision target", "See [decision](x plan-one).\n", []string{"plan-one"}, true},
+	{"grammar invalid decision angle", "See [decision](<x y> plan-one).\n", []string{"plan-one"}, true},
+	{"grammar destination internal less than", "See [x](a<plan-one) done.\n", []string{"plan-one"}, false},
+	{"grammar title internal less than", "See [x](a (plan-one<)) done.\n", []string{"plan-one"}, false},
+	{"grammar definition internal less than", "[b]: a<plan-one\n", []string{"plan-one"}, false},
+	{"grammar list definition internal less than", "- [b]: x<plan-one\n", []string{"plan-one"}, false},
+	{"grammar invalid destination spaces", "See [x](a b plan-one) done.\n", []string{"plan-one"}, true},
+	{"grammar invalid destination newline", "See [x](c\nplan-one) done.\n", []string{"plan-one"}, true},
+	{"grammar invalid title trailing words", "See [x](c \"t\" plan-one) done.\n", []string{"plan-one"}, true},
+	// These invalid links contain a complete raw HTML tag. Its attributes stay hidden.
+	{"grammar invalid internal angle spaces", "See [x](a<b plan-one>) done.\n", []string{"plan-one"}, false},
+	{"grammar invalid angle newline", "[a](<b\nplan-one>)\n", []string{"plan-one"}, false},
+	{"grammar invalid bare newline", "[a](plan-one\nmore)\n", []string{"plan-one"}, true},
+	{"grammar invalid angle missing separator", "[a](<u>plan-one)\n", []string{"plan-one"}, true},
+	{"grammar autolink label bracket", "[a <https://x/]> b](plan-one)\n", []string{"plan-one"}, true},
+	{"grammar reference normalization", "See [decision][ PLAN-ONE ].\n\n[plan-one]: /u\n", []string{"plan-one"}, false},
+	{"grammar collapsed image", "See ![plan-one][].\n\n[PLAN-ONE]: /u\n", []string{"plan-one"}, false},
+	{"grammar shortcut image", "See ![plan-one].\n\n[PLAN-ONE]: /u\n", []string{"plan-one"}, false},
+	{"grammar undefined image reference", "See ![decision][plan-one].\n", []string{"plan-one"}, true},
+	{"grammar code definition is not registered", "`[r]: /u`\n\nSee ![plan-one][r].\n", []string{"plan-one"}, true},
+	{"grammar paragraph definition is not registered", "text\n[r]: /u\n\nSee ![plan-one][r].\n", []string{"plan-one"}, true},
+	{"grammar invalid definition is not registered", "[r]: /u junk\n\nSee ![plan-one][r].\n", []string{"plan-one"}, true},
 	{"hidden closing tag", "See </plan-one> done.\n", []string{"plan-one"}, false},
 	{"hidden custom tag", "See <plan-one> done.\n", []string{"plan-one"}, false},
 	{"single quoted html attribute", "See <a href='plan-one'>x</a>.\n", []string{"plan-one"}, false},
@@ -525,7 +579,7 @@ var resolutionInlineCorpus = []struct {
 	{"reference chained label", "[one]: x.md\n[plan-one]: y.md\n", []string{"plan-one"}, false},
 	{"reference multiline title", "[decision]: x.md \"title\nplan-one\nend\"\n", []string{"plan-one"}, false},
 	{"after reference multiline title", "[decision]: x.md \"title\nhidden\nend\"\nplan-one: fixed.\n", []string{"plan-one"}, true},
-	{"reference suffix", "[decision][plan-one]\n", []string{"plan-one"}, false},
+	{"reference suffix", "[decision][plan-one]\n", []string{"plan-one"}, true},
 	{"multiline title", "[decision](x.md\n\"plan-one\")\n", []string{"plan-one"}, false},
 	{"incomplete target next item", "- [decision](unfinished\n- plan-one: fixed.\n", []string{"plan-one"}, true},
 	{"incomplete bracket next line", "[unfinished\nplan-one: fixed.\n", []string{"plan-one"}, true},
@@ -613,6 +667,46 @@ func TestS133Resolutions_InlineSyntax(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := resolutionVisibleText(tc.body); got != tc.want {
 				t.Fatalf("visible text=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Target validity is separate from other markup in a failed link.
+func TestS133Resolutions_LinkTargetGrammar(t *testing.T) {
+	cases := []struct {
+		name, target  string
+		inline, valid bool
+	}{
+		{"internal angle", "a<plan-one)", true, true},
+		{"parenthesis title", "a (plan-one<))", true, true},
+		{"invalid bare words", "a b plan-one)", true, false},
+		{"invalid angle words", "a<b plan-one>)", true, false},
+		{"invalid angle newline", "<b\nplan-one>)", true, false},
+		{"angle missing separator", "<u>plan-one)", true, false},
+		{"invalid title words", "c \"t\" plan-one)", true, false},
+		{"destination newline words", "plan-one\nmore)", true, false},
+		{"definition internal angle", "a<plan-one", false, true},
+		{"definition title", "a (plan-one<)", false, true},
+		{"definition invalid words", "a b plan-one", false, false},
+		{"definition invalid title words", "c \"t\" plan-one", false, false},
+		{"blank line before closer", "u\n\n)", true, false},
+		{"blank line in title", "u \"a\n\nplan-one\")", true, false},
+		{"newline before closer", "u\n)", true, true},
+		{"escaped newline in angle", "<a\\\nplan-one>)", true, false},
+		{"unclosed angle", "<plan-one)", true, false},
+		{"unclosed quote", "u \"plan-one)", true, false},
+		{"unbalanced parentheses", "a(plan-one)", true, false},
+		{"escaped parentheses", "a\\(plan-one\\))", true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			end := resolutionLinkTarget(tc.target, 0, tc.inline)
+			if (end >= 0) != tc.valid {
+				t.Fatalf("target end=%d, valid=%v", end, tc.valid)
+			}
+			if tc.valid && end != len(tc.target) {
+				t.Fatalf("target end=%d, want %d", end, len(tc.target))
 			}
 		})
 	}

@@ -189,7 +189,7 @@ func planResolutionsSection(content string) string {
 	end := 0
 	flush := func() {
 		if len(block) > 0 {
-			section = append(section, resolutionVisibleText(strings.Join(block, "\n")))
+			section = append(section, strings.Join(block, "\n"))
 			block = nil
 		}
 	}
@@ -212,7 +212,7 @@ func planResolutionsSection(content string) string {
 		end = line.End
 	}
 	flush()
-	return strings.Join(section, "\n")
+	return resolutionBlocksText(section)
 }
 
 func resolutionNamesID(section, id string) bool {
