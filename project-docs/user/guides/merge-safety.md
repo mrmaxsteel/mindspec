@@ -36,20 +36,17 @@ panel-staleness block or masked dirt.
     false panel-staleness block, because the tip never moved. If the
     underlying issue is genuinely fixed, this gate now passes; if it
     isn't, the same gate refuses again with the same message.
-  - **A re-run WITH the override** (`--allow-doc-skew "<reason>"` /
-    `--override-adr "<reason>"`) **bypasses that gate class
-    unconditionally** — the reason is recorded, not evaluated as a fix —
-    and execution proceeds to whatever runs next. Doc-sync and
-    ADR-divergence run SEQUENTIALLY (doc-sync first): `--allow-doc-skew`
-    alone can still surface a fresh ADR-divergence refusal that never
-    ran before, and that is correctly a DIFFERENT gate refusing, not a
-    contradiction of the "tip never moved" guarantee above. Neither
-    override is "the whole recovery" on its own when both classes of
-    skew are present — passing both flags (or fixing one and overriding
-    the other) is what a fully-skewed worktree needs.
+  - To defer doc updates, use `--allow-doc-skew "<reason>"` with
+    `--doc-owner <open-bead>`. The owner must be another open bead in the
+    same epic. That bead must update the deferred docs.
+    If the change has no doc impact, use
+    `--no-doc-impact "<domain>: <reason>"` instead. Repeat it for each domain.
+    Use `--override-adr "<reason>"` to record an architecture exception.
+    The content gates run in order. A retry can reveal another gate refusal.
 
   ```bash
-  mindspec complete <bead-id> "msg" --allow-doc-skew "<reason>"
+  mindspec complete <bead-id> "msg" --allow-doc-skew "<reason>" --doc-owner <open-bead>
+  mindspec complete <bead-id> "msg" --no-doc-impact "<domain>: <reason>"
   mindspec complete <bead-id> "msg" --override-adr "<reason>"
   ```
 

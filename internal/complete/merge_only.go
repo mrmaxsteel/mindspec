@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -127,7 +128,12 @@ func recordMergeOnly(root, beadID, specID string, row executor.MergeIdentity, op
 	fmt.Printf("merge: %s\nparents: %s\n", termsafe.Escape(row.SHA), strings.Join(termsafeEscapeEach(row.Parents), " "))
 	// Record the SHA before removing pending. A failed write leaves a durable
 	// mode hint, and the next run finds this same merge from git.
-	if err := completeMergeMetadataFn(beadID, map[string]interface{}{mergeOnlySHAKey: row.SHA}); err != nil {
+	if err := completeMergeMetadataFn(beadID, map[string]interface{}{
+		mergeOnlySHAKey:                 row.SHA,
+		"mindspec_landed_merge_sha":     row.SHA,
+		"mindspec_landed_second_parent": row.Parents[1],
+		"mindspec_landed_at":            time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
 		return nil, completionFailure(beadID, opts, "recording merge-only commit "+row.SHA, err)
 	}
 	if err := deleteMergeOnlyKeys(beadID, mergeOnlyPendingKey); err != nil {

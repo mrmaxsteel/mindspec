@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 )
@@ -164,7 +166,11 @@ func TestS133DocOwner_CheckAndInvalidOwners(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
 		for _, check := range []bool{false, true} {
 			for _, owner := range []string{"", "closed-owner", closingBead, "foreign-owner", "doc-owner"} {
-				t.Run(fmt.Sprintf("%s/check=%t/%s", policy, check, owner), func(t *testing.T) {
+				name := owner
+				if name == "" {
+					name = "missing-owner"
+				}
+				t.Run(fmt.Sprintf("%s/check=%t/%s", policy, check, name), func(t *testing.T) {
 					f, out, stores := s133DocFixture(t, policy, "doc", true)
 					before := s133CheckState(t, f)
 					records := fmt.Sprint(stores)
@@ -400,6 +406,120 @@ func TestS133NoDocImpact_TestOnlyOwnedChange(t *testing.T) {
 			rows, err := validate.ReadDocRecords[validate.DocDeclaration](f.meta, validate.NoDocImpactKey)
 			if err != nil || len(rows) != 1 || rows[0].Domain != "widget" {
 				t.Fatalf("missing test-only declaration: %+v %v", rows, err)
+			}
+		})
+	}
+}
+
+func TestS133DocOwner_TransferRetryRepairsEveryCopy(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		for _, failID := range []string{closingBead, "next-owner", "original-source"} {
+			t.Run(policy+"/"+failID, func(t *testing.T) {
+				_, _, stores := s133DocFixture(t, policy, "doc", false)
+				d := validate.DocDeferral{ID: "doc-existing", Domains: []string{"widget"}, Source: "original-source", Owner: closingBead, Reason: "old", By: "actor", At: "now"}
+				stores[closingBead][validate.DocDeferralsKey] = []validate.DocDeferral{d}
+				stores[d.Source][validate.DocDeferralsKey] = []validate.DocDeferral{d}
+				realWrite := completeMergeMetadataFn
+				failed := false
+				completeMergeMetadataFn = func(id string, updates map[string]interface{}) error {
+					if id == failID && !failed {
+						failed = true
+						return fmt.Errorf("injected tracker failure")
+					}
+					return realWrite(id, updates)
+				}
+				opts := CompleteOpts{AllowDocSkew: "transfer", DocOwner: "next-owner", docAudit: &docCompletionAudit{}}
+				docs := &validate.Result{DocImpact: &validate.DocImpact{Docs: map[string]bool{}}}
+				prepare := func() {
+					t.Helper()
+					opts.docAudit = &docCompletionAudit{}
+					if _, err := prepareDocDeclarations(closingBead, opts, docs, io.Discard); err != nil {
+						t.Fatal(err)
+					}
+				}
+				prepare()
+				if err := recordDocDeclarations(closingBead, opts); err == nil || !failed {
+					t.Fatal("expected injected write failure")
+				}
+				prepare()
+				if err := recordDocDeclarations(closingBead, opts); err != nil {
+					t.Fatal(err)
+				}
+				var want []validate.DocDeferral
+				for _, id := range []string{closingBead, "next-owner", "original-source"} {
+					rows, err := validate.ReadDocRecords[validate.DocDeferral](stores[id], validate.DocDeferralsKey)
+					if err != nil || len(rows) != 1 || rows[0].ID != d.ID || rows[0].Owner != "next-owner" || rows[0].Reason != "transfer" || rows[0].By == "" || rows[0].At == "" {
+						t.Fatalf("retry did not repair %s: %+v %v", id, rows, err)
+					}
+					if want == nil {
+						want = rows
+					} else if !reflect.DeepEqual(want, rows) {
+						t.Fatalf("copies differ on %s: want %+v, got %+v", id, want, rows)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestS133DocOwner_TransferOnlyMissingDomains(t *testing.T) {
+	_, _, stores := s133DocFixture(t, "enforce", "doc", false)
+	d := validate.DocDeferral{ID: "doc-existing", Domains: []string{"widget", "other"}, Source: "original-source", Owner: closingBead, Reason: "old", By: "actor", At: "now"}
+	stores[closingBead][validate.DocDeferralsKey] = []validate.DocDeferral{d}
+	opts := CompleteOpts{AllowDocSkew: "transfer", DocOwner: "next-owner", docAudit: &docCompletionAudit{}}
+	docs := &validate.Result{DocImpact: &validate.DocImpact{Docs: map[string]bool{"widget": true}}}
+	if _, err := prepareDocDeclarations(closingBead, opts, docs, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(opts.docAudit.deferrals) != 1 || !reflect.DeepEqual(opts.docAudit.deferrals[0].Domains, []string{"other"}) {
+		t.Fatalf("must transfer only missing docs: %+v", opts.docAudit.deferrals)
+	}
+}
+
+func TestS133NoDocImpact_MergeOnlyRecordsLandingBinding(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		for _, merged := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/merged=%t", policy, merged), func(t *testing.T) {
+				f, _, stores := s133DocFixture(t, policy, "doc", false)
+				if merged {
+					f.merge()
+				}
+				r, err := f.run(CompleteOpts{MergeOnly: true, NoDocImpact: []string{"widget: internal only"}})
+				if err != nil || r == nil || !r.MergeOnly || f.closed {
+					t.Fatalf("merge-only failed: %+v %v", r, err)
+				}
+				meta := stores[closingBead]
+				if meta["mindspec_landed_merge_sha"] != r.MergeSHA || meta["mindspec_landed_second_parent"] != r.MergeParents[1] {
+					t.Fatalf("merge-only lost landing binding: %+v", meta)
+				}
+				rows, err := validate.ReadDocRecords[validate.DocDeclaration](meta, validate.NoDocImpactKey)
+				if err != nil || len(rows) != 1 || rows[0].Domain != "widget" {
+					t.Fatalf("merge-only lost declaration: %+v %v", rows, err)
+				}
+			})
+		}
+	}
+}
+
+func TestS133NoDocImpact_ReconcileRecordsLandingBinding(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		t.Run(policy, func(t *testing.T) {
+			f, _, stores := s133DocFixture(t, policy, "doc", false)
+			merge := f.merge()
+			gitRun(t, f.root, "worktree", "remove", "--force", f.beadWT)
+			gitRun(t, f.root, "branch", "-D", "bead/"+closingBead)
+			mergedUnclosedFn = lifecycle.MergedUnclosed
+			r, err := f.run(CompleteOpts{NoDocImpact: []string{"widget: internal only"}})
+			if err != nil || r == nil || !r.BeadClosed || !f.closed {
+				t.Fatalf("reconcile failed: %+v %v", r, err)
+			}
+			meta := stores[closingBead]
+			if meta["mindspec_landed_merge_sha"] != merge || meta["mindspec_landed_second_parent"] != f.tip {
+				t.Fatalf("reconcile lost landing binding: %+v", meta)
+			}
+			rows, err := validate.ReadDocRecords[validate.DocDeclaration](meta, validate.NoDocImpactKey)
+			if err != nil || len(rows) != 1 || rows[0].Domain != "widget" {
+				t.Fatalf("reconcile lost declaration: %+v %v", rows, err)
 			}
 		})
 	}

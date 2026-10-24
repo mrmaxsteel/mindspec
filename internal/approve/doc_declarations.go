@@ -11,7 +11,6 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
-	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 func implDocMetadata(id string) (map[string]interface{}, error) {
@@ -38,12 +37,14 @@ func implDocMetadata(id string) (map[string]interface{}, error) {
 // commit cannot borrow a declaring bead's exemption, even for the same path.
 func implDocGate(root, base, branch, specID string, exec executor.Executor, ids []string, docs *validate.Result, override string) ([]validate.DocDeferral, error) {
 	declarations := map[string]map[string]bool{}
+	landings := map[string]map[string]interface{}{}
 	var deferrals []validate.DocDeferral
 	for _, id := range ids {
 		meta, err := implDocMetadata(id)
 		if err != nil {
 			return nil, fmt.Errorf("doc-sync: %w", err)
 		}
+		landings[id] = meta
 		rows, err := validate.ReadDocRecords[validate.DocDeclaration](meta, validate.NoDocImpactKey)
 		if err != nil {
 			return nil, fmt.Errorf("doc-sync: %w", err)
@@ -70,8 +71,12 @@ func implDocGate(root, base, branch, specID string, exec executor.Executor, ids 
 	// Owners can be follow-up beads. Their landed doc change still counts
 	// when they are outside the set that carries source audit records.
 	for _, d := range deferrals {
-		if declarations[d.Owner] == nil {
-			declarations[d.Owner] = map[string]bool{}
+		if _, ok := landings[d.Owner]; !ok {
+			meta, err := implDocMetadata(d.Owner)
+			if err != nil {
+				return nil, fmt.Errorf("doc-sync: %w", err)
+			}
+			landings[d.Owner] = meta
 		}
 	}
 	exempt, seen := map[string]bool{}, map[string]bool{}
@@ -91,9 +96,14 @@ func implDocGate(root, base, branch, specID string, exec executor.Executor, ids 
 			if result.DocImpact == nil {
 				continue
 			}
-			id := declaringMergeBead(commit, declarations)
+			id := declaringMergeBead(commit, landings)
 			if id != "" {
-				landedDocs[id] = result.DocImpact.Docs
+				if landedDocs[id] == nil {
+					landedDocs[id] = map[string]bool{}
+				}
+				for domain, changed := range result.DocImpact.Docs {
+					landedDocs[id][domain] = landedDocs[id][domain] || changed
+				}
 			}
 			for _, domain := range result.DocImpact.Sources {
 				if domain == "" {
@@ -134,21 +144,16 @@ func implDocGate(root, base, branch, specID string, exec executor.Executor, ids 
 	return open, nil
 }
 
-func declaringMergeBead(commit executor.MergeIdentity, known map[string]map[string]bool) string {
+// declaringMergeBead uses the binding recorded at landing. Subject text is
+// caller-controlled and cannot grant a doc exemption or settle an obligation.
+func declaringMergeBead(commit executor.MergeIdentity, landings map[string]map[string]interface{}) string {
 	if len(commit.Parents) != 2 {
 		return ""
 	}
-	start := strings.Index(commit.Subject, workspace.BeadBranchPrefix)
-	if start < 0 {
-		return ""
-	}
-	tokens := strings.FieldsFunc(commit.Subject[start:], func(r rune) bool { return r < 0x20 || strings.ContainsRune(" '\x22\x60])>,;", r) })
-	if len(tokens) == 0 {
-		return ""
-	}
-	for id := range known {
-		branch, err := workspace.BeadBranch(id)
-		if err == nil && tokens[0] == branch {
+	for id, meta := range landings {
+		sha, _ := meta["mindspec_landed_merge_sha"].(string)
+		second, _ := meta["mindspec_landed_second_parent"].(string)
+		if sha != "" && second != "" && commit.SHA == sha && commit.Parents[1] == second {
 			return id
 		}
 	}

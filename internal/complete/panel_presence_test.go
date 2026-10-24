@@ -43,7 +43,14 @@ func s133Closed(t *testing.T, f *windowFixture) {
 
 func s133AssertNoInternalReferences(t *testing.T, message string) {
 	t.Helper()
-	// Operand values are allowed. The message must not cite internal work.
+	// Fixture paths and operand values are allowed.
+	roots := []string{os.TempDir()}
+	if resolved, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
+		roots = append(roots, resolved)
+	}
+	for _, root := range roots {
+		message = strings.ReplaceAll(message, filepath.Clean(root)+string(os.PathSeparator), "<temp>/")
+	}
 	message = strings.ReplaceAll(strings.ReplaceAll(message, closingSpec, "<spec-id>"), closingBead, "<bead-id>")
 	forbidden := regexp.MustCompile(`(?i)ADR[- ]?\d+|spec[- #]+\d+|\b(?:AC|R)\d+\b|#\d+|mindspec-qjy8(?:\.\d+)?`)
 	if forbidden.MatchString(message) {
@@ -395,4 +402,13 @@ func TestS133BeadPresence_FailedCloseHasNoAudit(t *testing.T) {
 	if f.closed || f.closeCalls != 1 || f.meta["panel_absent"] != nil || gateRevParse(t, f.root, "spec/"+closingSpec) != before {
 		t.Fatalf("failed close recorded absence or changed state: closed=%v closes=%d metadata=%v", f.closed, f.closeCalls, f.meta)
 	}
+}
+
+func TestS133Citation_FixturePaths(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "spec-133-fixture")
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", root)
+	s133AssertNoInternalReferences(t, "recovery: git -C '"+filepath.Join(root, "worktree")+"' status")
 }

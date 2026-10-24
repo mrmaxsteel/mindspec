@@ -1366,6 +1366,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if reconcile != nil {
 		if metaErr := completeMergeMetadataFn(beadID, map[string]interface{}{
 			"mindspec_reconcile_landed_merge_sha": reconcile.landed.SHA,
+			"mindspec_landed_merge_sha":           reconcile.landed.SHA,
+			"mindspec_landed_second_parent":       reconcile.landed.SecondParent,
+			"mindspec_landed_at":                  time.Now().UTC().Format(time.RFC3339),
 			"mindspec_reconcile_at":               time.Now().UTC().Format(time.RFC3339),
 		}); metaErr != nil {
 			// R4: beadID is an ID-typed position — idrender.Bead.

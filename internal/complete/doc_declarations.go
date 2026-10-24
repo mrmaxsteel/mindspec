@@ -131,6 +131,7 @@ func prepareDocDeclarations(beadID string, opts CompleteOpts, docs *validate.Res
 		if opts.AllowDocSkew == "" {
 			return filtered, guard.NewFailure(fmt.Sprintf("doc-sync: owner %s must update docs for deferral %s: %s", idrender.Bead(beadID), termsafe.Escape(d.ID), strings.Join(termsafeEscapeEach(missing), ", ")), "update the deferred domain docs, then run "+completionCommand(beadID, opts), docSyncHint(beadID, opts))
 		}
+		d.Domains = missing
 		d.Owner, d.Reason, d.By, d.At = opts.DocOwner, opts.AllowDocSkew, actor, now
 		audit.deferrals = append(audit.deferrals, d)
 	}
@@ -184,8 +185,9 @@ func recordDocDeclarations(beadID string, opts CompleteOpts) error {
 		}
 	}
 	for _, d := range opts.docAudit.deferrals {
-		// Refresh the old owner's copy as well as the source and the new owner.
-		ids := []string{beadID, d.Owner, d.Source}
+		// Write the closing bead last. Its old owner record drives replay
+		// until the source and new owner have the new record.
+		ids := []string{d.Owner, d.Source, beadID}
 		seen := map[string]bool{}
 		for _, id := range ids {
 			if seen[id] {
