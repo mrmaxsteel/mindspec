@@ -807,7 +807,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				return nil, guard.NewFailure(detail.String(), "mindspec complete "+safeBeadID)
 			}
 			if len(rows) == 1 {
-				return runMergedCompletion(root, beadID, specID, epicID, beadBranch, wtPath, rows[0], exec, opts, pending)
+				return runMergedCompletion(root, beadID, specID, epicID, beadBranch, wtPath, rows[0], exec, opts, pending, nil)
 			}
 		}
 		if pending {
@@ -922,8 +922,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// hook is now a defense-in-depth backstop, and the two cannot disagree.
 	//
 	// On a Block it returns a guard.NewFailure (fence in the body + a genuine
-	// recovery line) exiting non-zero having mutated nothing (HC-4). §6
-	// fail-open (no panel.json → completes) and the §7 hatches
+	// recovery line) exiting non-zero having mutated nothing (HC-4). The
+	// presence policy and the §7 hatches
 	// (MINDSPEC_SKIP_PANEL never named in a block — HC-7; enforcement.panel_gate)
 	// are honored. The matched registration is reused below for the
 	// post-completion audit writes (Reqs 13b/13e).
@@ -944,13 +944,21 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 	// Live deferral checks also run on attested materialization retries.
 	gateCfg, gateCfgErr := config.Load(root)
-	panelGateEnabled := true
-	if gateCfgErr == nil {
-		panelGateEnabled = gateCfg.Enforcement.PanelGate
+	if gateCfgErr != nil {
+		return nil, completionFailure(beadID, opts, "reading configuration", gateCfgErr)
 	}
+	presence := &beadPanelPresence{policy: gateCfg.Enforcement.PanelPresence, specID: specID, ignore: reconcile != nil, closed: closedAtEntry}
+	panelGateEnabled := gateCfg.Enforcement.PanelGate
 	if resumeStage != "" {
 		if err := recheckResumedPanelDeferrals(beadID, specID, panelGateRoots(root, wtPath, specID), panelGateEnabled); err != nil {
 			return nil, err
+		}
+		// A closed retry reaches the merged handler after landing. Check
+		// absence now so a presence refusal cannot move the spec tip.
+		if closedAtEntry && len(panel.ForBead(panelScanFn(panelGateRoots(root, wtPath, specID)...), beadID)) == 0 {
+			if err := presence.check(beadID, panelGateEnabled, advisoryOut); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if resumeStage == "" {
@@ -964,7 +972,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// round-3 redesign — it never reads a panel directory.)
 		gateRoots := panelGateRoots(root, wtPath, specID)
 		var panelGateErr error
-		panelDecisions, panelGateErr = panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
+		panelDecisions, panelGateErr = panelGateWithPresence(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut, presence)
 		if panelGateErr != nil {
 			return nil, panelGateErr
 		}
@@ -990,7 +998,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// reviewerCountAdvisory itself also nil-checks reg. ok is false for the
 		// R7 skip carve-outs (a non-bead panel with no recorded gate, or an
 		// unknown recorded gate, while gates: is configured) — no note prints.
-		if gateCfgErr == nil && panelReg != nil {
+		if panelReg != nil {
 			if def, ok := gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()); ok {
 				reviewerCountAdvisory(panelReg, def, advisoryOut)
 			}
@@ -1158,7 +1166,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 
 	if opts.MergeOnly {
-		return runMergeOnly(root, beadID, specID, specBranch, exec, opts)
+		result, err := runMergeOnly(root, beadID, specID, specBranch, exec, opts)
+		if err == nil {
+			presence.audit(beadID, advisoryOut)
+		}
+		return result, err
 	}
 
 	// A closed, unmerged bead needs no second close. Keep its workspace until
@@ -1180,7 +1192,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, guard.NewFailure("the closed bead needs one naming merge before publication", completionCommand(beadID, opts))
 		}
 		if len(rows) == 1 {
-			return runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath, rows[0], exec, opts, false)
+			return runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath, rows[0], exec, opts, false, presence)
 		}
 		// An unchanged ancestor branch creates no naming merge. Keep the
 		// existing completion path for that case.
@@ -1521,6 +1533,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// Best-effort; reuses the panelAdvisory scan (no second fs walk).
 	if completeErr == nil {
 		writePanelAuditMetadata(beadID, panelReg, advisoryOut)
+		presence.audit(beadID, advisoryOut)
 	}
 
 	// 6. Advance state. advanceState re-reads the post-close child set fresh

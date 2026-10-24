@@ -23,7 +23,7 @@ import (
 // closingStepHook is a fault seam. It runs before each durable closing step.
 var closingStepHook func(step int) error
 
-func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, row executor.MergeIdentity, exec executor.Executor, opts CompleteOpts, pending bool) (*Result, error) {
+func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, row executor.MergeIdentity, exec executor.Executor, opts CompleteOpts, pending bool, presence *beadPanelPresence) (*Result, error) {
 	specBranch, _ := workspace.SpecBranch(specID)
 	specDir, err := workspace.SpecDir(root, specID)
 	if err != nil {
@@ -93,14 +93,17 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 		absent := wtPath == "" || os.IsNotExist(statErr)
 		if layout != workspace.LayoutFlat && absent && len(panel.ForBead(panelScanFn(roots...), beadID)) == 0 {
 			return nil, guard.NewFailure("the bead worktree is absent and no panel registration survives",
-				"run a new panel round for the bead at its tip", completionCommand(beadID, opts))
+				"run a panel for the bead at its tip", completionCommand(beadID, opts))
 		}
 	}
 	out := panelAdvisoryOut
 	if out == nil {
 		out = os.Stderr
 	}
-	decisions, err := panelGate(beadID, roots, wtPath, cfg.Enforcement.PanelGate, out)
+	if presence == nil {
+		presence = &beadPanelPresence{policy: cfg.Enforcement.PanelPresence, specID: specID, closed: closed}
+	}
+	decisions, err := panelGateWithPresence(beadID, roots, wtPath, cfg.Enforcement.PanelGate, out, presence)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +135,11 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 		if pending && !opts.ResolveMerge {
 			fmt.Printf("A merge-only run is pending. The bead stays open.\nrecovery: mindspec complete %s\n", idrender.Bead(beadID))
 		}
-		return recordMergeOnly(root, beadID, specID, row, opts)
+		result, err := recordMergeOnly(root, beadID, specID, row, opts)
+		if err == nil {
+			presence.audit(beadID, out)
+		}
+		return result, err
 	}
 	if cfg.Enforcement.PanelGate && !panelSkipEnvFn() {
 		if err := replaceGatedDeferrals(beadID, decisions, nil, true); err != nil {
@@ -145,7 +152,11 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 	if err := reconcilePendingRefutations(beadID); err != nil {
 		return nil, err
 	}
-	return closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath, row, decisions, ledgers, closed, exec, opts)
+	result, err := closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath, row, decisions, ledgers, closed, exec, opts)
+	if err == nil {
+		presence.audit(beadID, out)
+	}
+	return result, err
 }
 
 func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath string, row executor.MergeIdentity, decisions []PanelGateResult, ledgers []string, closed bool, exec executor.Executor, opts CompleteOpts) (*Result, error) {

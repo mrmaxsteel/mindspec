@@ -616,9 +616,23 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	},
 	{
 		File:       "internal/complete/panel_advisory.go",
-		Func:       "panelGate",
+		Func:       "panelGateWithPresence",
 		Detail:     "arg1:unprovable",
 		Rationale:  "idrender-rendered: this function's command-position Sprintf calls substitute idrender.Bead(beadID)/idrender-rendered locals, mirroring cmd/mindspec/panel.go's tallyExitAction sibling.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/panel_presence.go",
+		Func:       "beadPanelPresence.check",
+		Detail:     "arg1:unprovable",
+		Rationale:  "The panel-create recovery substitutes idrender.Spec and idrender.Bead operands (or a literal spec placeholder). The scan cannot fully fold these rendered IDs; the command is outside the destructive floor, so the destructive constructor does not apply.",
+		Obligation: mindspecVerbTemplateObligation,
+	},
+	{
+		File:       "internal/complete/panel_presence.go",
+		Func:       "beadPanelPresence.check",
+		Detail:     "arg2:unprovable",
+		Rationale:  "The closed-bead retry is a mindspec complete template with an idrender.Bead operand. The scan cannot fully fold the rendered ID; this command matches no destructive floor family and cannot use the destructive constructor.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	// Spec 128 Bead 6: the six entries below are the prospective-snapshot
