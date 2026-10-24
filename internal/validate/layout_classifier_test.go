@@ -331,6 +331,11 @@ func TestValidateDivergence_ProjectDocsNotUnowned(t *testing.T) {
 		ChangedFilesResult: []string{"project-docs/foo.md", "project-docs/user/guide.md"},
 	}
 	r, findings := ValidateDivergence(mock, root, specDir, "mindspec-106.1", "BASE", "HEAD", "", false)
+	for _, i := range r.Issues {
+		if i.Name == "adr-divergence-unowned" {
+			t.Errorf("unexpected unowned issue at any severity: %+v", i)
+		}
+	}
 	if r.HasFailures() {
 		t.Fatalf("project-docs/** must not trip adr-divergence; got %+v", r.Issues)
 	}

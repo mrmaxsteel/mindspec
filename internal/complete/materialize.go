@@ -26,7 +26,6 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
-	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -434,21 +433,7 @@ func runMaterialization(in materializationInput) error {
 			return fmt.Errorf("snapshotting bead worktree %s: %w", wtPath, err)
 		}
 
-		ownerRef, err := ownershipLandingTree(in.root, in.specDir, tree, beadHead, exec)
-		if err != nil {
-			return &landingOwnershipError{beadID: beadID, cause: err}
-		}
-		docResult := validate.ValidateDocsSnapshot(in.root, in.base, tree, ownerRef, wtPath, exec)
-		printResultWarnings(in.warnWriter, docResult)
-		if docResult.HasFailures() && in.opts.AllowDocSkew == "" {
-			return fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
-		}
-
-		adrResult, adrFindings := validate.CheckADRDivergenceSnapshot(in.root, in.base, exec, in.specDir, beadID, tree, ownerRef, wtPath)
-		printResultWarnings(in.warnWriter, adrResult)
-		beadScopeWarnAdvisory(exec, in.root, in.specDir, beadID, beadHead, in.base, beadHead, in.warnWriter)
-
-		if err := handleADRGateOutcome(in.root, beadID, in.opts, adrResult, adrFindings); err != nil {
+		if err := runSnapshotContentGates(in, tree); err != nil {
 			return err
 		}
 

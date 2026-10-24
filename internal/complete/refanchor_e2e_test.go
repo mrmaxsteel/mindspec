@@ -91,6 +91,7 @@ func TestCompleteRun_RefAnchoredOwnershipClaimPassesFromMainRoot(t *testing.T) {
 			"- **Supersedes**: n/a\n"+
 			"- **Superseded-by**: n/a\n\n"+
 			"## Decision\nTest fixture.\n")
+	writeFile(t, root, ".mindspec/docs/domains/z-other/OWNERSHIP.yaml", "paths:\n  - internal/widget/**\n")
 	gitRun(t, root, "add", "-A")
 	gitRun(t, root, "commit", "-q", "-m", "base")
 

@@ -2257,7 +2257,7 @@ func TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight(t *testing.
 	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "orders", "")
 
 	mock := &executor.MockExecutor{
-		ChangedFilesResult: []string{"src/orders/models.py"},
+		ChangedFilesResult: []string{"internal/unclaimed/file.go"},
 	}
 
 	r, findings := ValidateDivergence(mock, tmp, specDir, "", "BASE", "HEAD", "", false)
@@ -2265,6 +2265,8 @@ func TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight(t *testing.
 		t.Fatal("nil result")
 	}
 
+	s133AssertUnowned(t, r, "internal/unclaimed/file.go")
+	s133UndeclaredControl(t, tmp, specDir)
 	foundUnowned := false
 	for _, i := range r.Issues {
 		if i.Name == "adr-divergence-unowned" {

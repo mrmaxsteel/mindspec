@@ -68,7 +68,7 @@ func TestValidateDiagnosticsByteIdenticalAfterCaching(t *testing.T) {
 	wantDivergence := []string{
 		`0 adr-divergence-uncovered: file internal/search/query.go attributed to domain "search" (manifest: <ROOT>/.mindspec/docs/domains/search/OWNERSHIP.yaml) but no cited ADR covers "search"`,
 		`1 adr-divergence-proposed: file internal/billing/invoice.go attributed to domain "billing" is covered only by Proposed ADR ADR-0202 — flip it to Accepted before impl approve`,
-		`0 adr-divergence-unowned: file internal/unclaimed/x.go is not claimed by any OWNERSHIP.yaml for the spec's impacted domains [payments search billing]; add it to an existing manifest or create a new domain dir at .mindspec/docs/domains/<name>/OWNERSHIP.yaml`,
+		`1 adr-divergence-unowned: file internal/unclaimed/x.go is not claimed by any OWNERSHIP.yaml under .mindspec/docs/domains; add it to an existing manifest or create a new domain dir at .mindspec/docs/domains/<name>/OWNERSHIP.yaml`,
 	}
 	if !equalLines(gotDivergence, wantDivergence) {
 		t.Errorf("ValidateDivergence diagnostics drifted after caching:\n got: %s\nwant: %s",

@@ -15,6 +15,7 @@ func ownershipWindow(t *testing.T) *windowFixture {
 	plan := "---\nstatus: Approved\nspec_id: 132-window\nversion: \"1\"\nadr_citations:\n  - ADR-9001\n---\n"
 	writeFile(t, f.specWT, ".mindspec/specs/"+closingSpec+"/plan.md", plan)
 	writeFile(t, f.specWT, ".mindspec/adr/ADR-9001.md", "# ADR-9001: Widget\n\n- **Status**: Accepted\n- **Domain(s)**: widget\n\n## Decision\nOwn widget.\n")
+	writeFile(t, f.specWT, ".mindspec/domains/z-other/OWNERSHIP.yaml", "paths:\n  - internal/widget/**\n")
 	writeFile(t, f.specWT, windowManifest, "paths:\n  - feature.txt\n  - internal/widget/**\n  - spec/**\n")
 	gitRun(t, f.specWT, "add", "-A")
 	gitRun(t, f.specWT, "commit", "-qm", "spec claim")

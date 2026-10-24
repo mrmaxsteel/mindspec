@@ -3161,6 +3161,7 @@ func TestOverrideUnblocks(t *testing.T) {
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
 	mock := newMockExec()
+	serveRefFromDisk(mock, root)
 	mock.MergeBaseResult = "merge-base-sha"
 	// Source touch that ValidateDivergence will attribute to "core"
 	// via the fixture's OWNERSHIP.yaml (`internal/core/**`).
@@ -3183,10 +3184,11 @@ func TestOverrideUnblocks(t *testing.T) {
 	// Sanity check: WITHOUT the override flag, the gate must reject.
 	{
 		probeMock := newMockExec()
+		serveRefFromDisk(probeMock, root)
 		probeMock.MergeBaseResult = "merge-base-sha"
 		probeMock.ChangedFilesResult = []string{"internal/core/foo.go"}
 		_, err := Run(root, "bead-1", "", "", probeMock, CompleteOpts{AllowDocSkew: "test setup"})
-		if err == nil || !strings.Contains(err.Error(), "adr-divergence") {
+		if err == nil || !strings.Contains(err.Error(), "adr-divergence-uncovered") || strings.Contains(err.Error(), "adr-divergence-unowned") {
 			t.Fatalf("baseline: expected adr-divergence error without override, got: %v", err)
 		}
 	}
@@ -3776,6 +3778,7 @@ func TestADRDivergenceFailure_RepairFirstLadder(t *testing.T) {
 	runBDFn = func(args ...string) ([]byte, error) { return json.Marshal([]bead.BeadInfo{}) }
 
 	mock := newMockExec()
+	serveRefFromDisk(mock, root)
 	mock.MergeBaseResult = "merge-base-sha"
 	// Source touch attributed to the uncovered "core" domain.
 	mock.ChangedFilesResult = []string{"internal/core/foo.go"}
@@ -3785,6 +3788,9 @@ func TestADRDivergenceFailure_RepairFirstLadder(t *testing.T) {
 		t.Fatal("expected adr-divergence failure, got nil")
 	}
 	msg := err.Error()
+	if !strings.Contains(msg, "adr-divergence-uncovered") || strings.Contains(msg, "adr-divergence-unowned") {
+		t.Fatalf("expected uncovered Error: %v", err)
+	}
 
 	// 092 Req 12/21: final recovery line, no banned commands.
 	if !guard.HasFinalRecoveryLine(msg) {

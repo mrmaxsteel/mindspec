@@ -194,12 +194,12 @@ func TestUnownedFileRejected(t *testing.T) {
 	if r == nil {
 		t.Fatal("nil result")
 	}
-	if !r.HasFailures() {
-		t.Fatalf("expected unowned failure, got %+v", r.Issues)
+	if r.HasFailures() {
+		t.Fatalf("unowned file must warn: %+v", r.Issues)
 	}
 	var hasUnowned bool
 	for _, i := range r.Issues {
-		if i.Name == "adr-divergence-unowned" &&
+		if i.Name == "adr-divergence-unowned" && i.Severity == SevWarning &&
 			strings.Contains(i.Message, "internal/payments/charge.go") {
 			hasUnowned = true
 			break
@@ -217,6 +217,7 @@ func TestUnownedFileRejected(t *testing.T) {
 	if findings[0].Domain != "" || findings[0].ManifestPath != "" {
 		t.Errorf("expected empty Domain/ManifestPath, got %+v", findings[0])
 	}
+	s133UndeclaredControl(t, root, specDir)
 }
 
 // TestValidateDivergenceCoveredDomainPasses confirms the happy path:
@@ -628,9 +629,12 @@ func TestValidateDivergenceGenuinelyUnownedStillFails(t *testing.T) {
 	if r == nil {
 		t.Fatal("nil result")
 	}
+	if r.HasFailures() {
+		t.Fatalf("genuine unowned must warn: %+v", r.Issues)
+	}
 	var hasUnowned bool
 	for _, i := range r.Issues {
-		if i.Name == "adr-divergence-unowned" &&
+		if i.Name == "adr-divergence-unowned" && i.Severity == SevWarning &&
 			strings.Contains(i.Message, "internal/payments/charge.go") {
 			hasUnowned = true
 		}
@@ -638,6 +642,7 @@ func TestValidateDivergenceGenuinelyUnownedStillFails(t *testing.T) {
 	if !hasUnowned {
 		t.Errorf("expected adr-divergence-unowned for the unowned file, got %+v", r.Issues)
 	}
+	s133UndeclaredControl(t, root, specDir)
 }
 
 // TestValidateDivergenceZeroOwnerEntryErrors — spec 100 R1 AC5: an
@@ -811,9 +816,15 @@ func TestValidateDivergenceUnownedSplitNamesRealOwner(t *testing.T) {
 			continue
 		}
 		if strings.Contains(i.Message, "internal/gitutil/x.go") {
+			if i.Severity != SevError {
+				t.Errorf("undeclared owner must stay Error: %+v", i)
+			}
 			ownedMsg = i.Message
 		}
 		if strings.Contains(i.Message, "internal/nope/y.go") {
+			if i.Severity != SevWarning {
+				t.Errorf("genuine unowned must Warn: %+v", i)
+			}
 			unownedMsg = i.Message
 		}
 	}
@@ -878,6 +889,9 @@ func TestValidateDivergenceUnownedHintLayoutAware(t *testing.T) {
 		var msg string
 		for _, i := range r.Issues {
 			if i.Name == "adr-divergence-unowned" {
+				if i.Severity != SevWarning || r.HasFailures() {
+					t.Fatalf("unowned must warn: %+v", r.Issues)
+				}
 				msg = i.Message
 			}
 		}
@@ -890,6 +904,7 @@ func TestValidateDivergenceUnownedHintLayoutAware(t *testing.T) {
 		if strings.Contains(msg, ".mindspec/docs/domains") {
 			t.Errorf("flat workspace hint must NOT contain the canonical literal, got: %q", msg)
 		}
+		s133UndeclaredControl(t, root, specDir)
 	})
 
 	t.Run("pre-flatten (canonical)", func(t *testing.T) {
@@ -912,6 +927,9 @@ func TestValidateDivergenceUnownedHintLayoutAware(t *testing.T) {
 		var msg string
 		for _, i := range r.Issues {
 			if i.Name == "adr-divergence-unowned" {
+				if i.Severity != SevWarning || r.HasFailures() {
+					t.Fatalf("unowned must warn: %+v", r.Issues)
+				}
 				msg = i.Message
 			}
 		}
@@ -921,6 +939,7 @@ func TestValidateDivergenceUnownedHintLayoutAware(t *testing.T) {
 		if !strings.Contains(msg, ".mindspec/docs/domains/") {
 			t.Errorf("expected the canonical domains root in the hint, got: %q", msg)
 		}
+		s133UndeclaredControl(t, root, specDir)
 	})
 }
 
@@ -982,6 +1001,11 @@ func TestValidateDivergenceUnownedIndeterminateOnBrokenSibling(t *testing.T) {
 	if unownedMsg != "" && strings.Contains(unownedMsg, "not claimed by any OWNERSHIP.yaml") {
 		t.Errorf("indeterminate ownership must NOT be reported as genuinely unowned, got: %q", unownedMsg)
 	}
+	writeManifest(t, root, "a-broken", "paths:\n  - internal/elsewhere/**\n")
+	repaired, _ := ValidateDivergence(mock, root, specDir, "", "BASE", "HEAD", "", false)
+	s133AssertUnowned(t, repaired, "internal/gitutil/x.go")
+	s133UndeclaredControl(t, root, specDir)
+
 }
 
 // TestValidateDivergenceUnownedHintRefConsistentRoot — spec 122 Bead 3
@@ -1019,6 +1043,9 @@ func TestValidateDivergenceUnownedHintRefConsistentRoot(t *testing.T) {
 	var msg string
 	for _, i := range r.Issues {
 		if i.Name == "adr-divergence-unowned" {
+			if i.Severity != SevWarning || r.HasFailures() {
+				t.Fatalf("unowned must warn: %+v", r.Issues)
+			}
 			msg = i.Message
 		}
 	}
@@ -1031,4 +1058,5 @@ func TestValidateDivergenceUnownedHintRefConsistentRoot(t *testing.T) {
 	if strings.Contains(msg, ".mindspec/docs/domains") {
 		t.Errorf("ref-anchored hint must NOT print the ambient canonical root, got: %q", msg)
 	}
+	s133UndeclaredControl(t, root, specDir)
 }
