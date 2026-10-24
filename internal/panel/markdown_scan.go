@@ -1,10 +1,13 @@
 package panel
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // MarkdownLine holds visible text and a section boundary, if present.
-// Heading is empty for a conservative boundary. ATX headings have a title
-// and level only at the document top level.
+// Heading is empty for a conservative boundary used by gate checks.
+// ATX headings have a title and level only at the document top level.
 // Offset and End refer to the original input. End includes the newline.
 type MarkdownLine struct {
 	Offset, End int
@@ -28,6 +31,7 @@ func MarkdownLines(content string) []MarkdownLine {
 	fenceLength := 0
 	inComment, inHTML := false, false
 	paragraph := false
+	paragraphStart := 0
 	htmlEnd := ""
 	frontmatter := strings.HasPrefix(content, "---\n") || strings.HasPrefix(content, "---\r")
 	for offset := 0; offset < len(content); {
@@ -80,7 +84,7 @@ func MarkdownLines(content string) []MarkdownLine {
 		if !inComment && markdownIndent(text) >= 4 {
 			continue
 		}
-		hadComment := inComment || strings.Contains(line, "<!--")
+		hadComment := inComment || markdownCommentStart(line) >= 0
 		if !inComment {
 			if matched < len(containers) {
 				level, _ := markdownHeading(text)
@@ -112,9 +116,11 @@ func MarkdownLines(content string) []MarkdownLine {
 				}
 				width := markdownListIndent(text, paragraph)
 				if width < 0 {
-					// An empty item can also be a setext underline. Refuse
-					// this document instead of guessing its content indent.
-					return nil
+					// An empty item has one space of content indent.
+					containers = append(containers, container{indent: len(strings.TrimRight(text, " ")) + 1, marker: markdownListMarker(text)})
+					text = ""
+					paragraph = false
+					break
 				}
 				if width == 0 {
 					break
@@ -138,24 +144,27 @@ func MarkdownLines(content string) []MarkdownLine {
 			continue
 		}
 		// Raw HTML can hide text or headings. Keep the whole block out.
-		if strings.Contains(text, "<") {
-			htmlEnd = markdownHtmlBlockEnd(text)
+		if end, starts := markdownHTMLBlockStart(text, paragraph); starts {
+			htmlEnd = end
 			inHTML = htmlEnd == "" || !strings.Contains(strings.ToLower(text), htmlEnd)
 			paragraph = false
 			continue
 		}
 		entry.Text = text
+		wasParagraph := paragraph
 		level, _ := markdownHeading(text)
 		paragraph = level == 0 && strings.Trim(text, " ") != "" && !markdownThematicBreak(text)
+		if paragraph && !wasParagraph {
+			paragraphStart = len(result)
+		}
 		if len(containers) == 0 && !hadComment {
 			entry.Level, entry.Heading = markdownHeading(text)
 			// A setext underline can end a section but cannot open one here.
 			trimmed := strings.Trim(text, " ")
-			if trimmed != "" && (strings.Trim(trimmed, "=") == "" || strings.Trim(trimmed, "-") == "") {
+			if wasParagraph && trimmed != "" && (strings.Trim(trimmed, "=") == "" || strings.Trim(trimmed, "-") == "") {
 				entry.Level = 2
-				if len(result) > 0 {
-					result = result[:len(result)-1]
-				}
+				result = result[:paragraphStart]
+				paragraph = false
 			}
 		}
 		result = append(result, entry)
@@ -172,6 +181,10 @@ func markdownContinueContainers(line string, containers []container) (string, in
 			}
 			line = strings.TrimPrefix(line[n+1:], " ")
 		} else {
+			if strings.Trim(line, " ") == "" {
+				line = ""
+				continue
+			}
 			if markdownIndent(line) < c.indent {
 				return line, i
 			}
@@ -183,19 +196,29 @@ func markdownContinueContainers(line string, containers []container) (string, in
 
 func markdownIndent(line string) int { return len(line) - len(strings.TrimLeft(line, " ")) }
 
-func markdownHtmlBlockEnd(line string) string {
-	lower := strings.ToLower(line)
-	for _, tag := range []string{"script", "pre", "style", "textarea"} {
-		if strings.Contains(lower, "<"+tag) {
-			return "</" + tag + ">"
+// These patterns match block openers after the container prefix.
+var markdownRawHTML = regexp.MustCompile(`(?i)^<(script|pre|style|textarea)([ >]|$)`)
+var markdownBlockTag = regexp.MustCompile(`(?i)^</?(address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)( |/?>|$)`)
+var markdownCompleteTag = regexp.MustCompile(`(?i)^(?:</[a-z][a-z0-9-]* *> *|<[a-z][a-z0-9-]*(?: +[a-z_:][a-z0-9_.:-]*(?: *= *(?:[^ "'=<>` + "`" + `]+|'[^']*'|"[^"]*"))?)* */?> *)$`)
+var markdownDeclaration = regexp.MustCompile(`^<![A-Z]`)
+
+func markdownHTMLBlockStart(line string, paragraph bool) (string, bool) {
+	if markdownIndent(line) > 3 {
+		return "", false
+	}
+	text := strings.TrimLeft(line, " ")
+	if match := markdownRawHTML.FindStringSubmatch(text); match != nil {
+		return "</" + strings.ToLower(match[1]) + ">", true
+	}
+	for _, pair := range [][2]string{{"<!--", "-->"}, {"<?", "?>"}, {"<![CDATA[", "]]>"}} {
+		if strings.HasPrefix(text, pair[0]) {
+			return pair[1], true
 		}
 	}
-	for _, delimiters := range [][2]string{{"<?", "?>"}, {"<![cdata[", "]]>"}, {"<!", ">"}} {
-		if strings.Contains(lower, delimiters[0]) {
-			return delimiters[1]
-		}
+	if markdownDeclaration.MatchString(text) {
+		return ">", true
 	}
-	return ""
+	return "", markdownBlockTag.MatchString(text) || (!paragraph && markdownCompleteTag.MatchString(text))
 }
 
 func markdownThematicBreak(line string) bool {
@@ -234,12 +257,18 @@ func markdownListIndent(line string, paragraph bool) int {
 		i++
 	}
 	if i == len(line) {
+		if paragraph {
+			return 0
+		}
 		return -1
 	}
 	if line[i] != ' ' {
 		return 0
 	}
 	if strings.Trim(line[i:], " ") == "" {
+		if paragraph {
+			return 0
+		}
 		return -1
 	}
 	spaces := markdownIndent(line[i:])
@@ -312,7 +341,7 @@ func markdownCommentText(line string, inComment *bool) string {
 			visible.WriteByte(' ')
 			continue
 		}
-		start := strings.Index(line, "<!--")
+		start := markdownCommentStart(line)
 		if start < 0 {
 			visible.WriteString(line)
 			break
@@ -323,4 +352,50 @@ func markdownCommentText(line string, inComment *bool) string {
 		*inComment = true
 	}
 	return visible.String()
+}
+
+// markdownCommentStart skips code spans and escaped openers.
+func markdownCommentStart(line string) int {
+	escaped := func(pos int) bool {
+		count := 0
+		for pos > 0 && line[pos-1] == '\\' {
+			count++
+			pos--
+		}
+		return count%2 == 1
+	}
+	for i := 0; i < len(line); {
+		if line[i] == '`' && !escaped(i) {
+			run := 1
+			for i+run < len(line) && line[i+run] == '`' {
+				run++
+			}
+			next := i + run
+			for next < len(line) {
+				if line[next] != '`' {
+					next++
+					continue
+				}
+				end := next + 1
+				for end < len(line) && line[end] == '`' {
+					end++
+				}
+				if end-next == run {
+					i = end
+					break
+				}
+				next = end
+			}
+			if next < len(line) {
+				continue
+			}
+			i += run
+			continue
+		}
+		if strings.HasPrefix(line[i:], "<!--") && !escaped(i) {
+			return i
+		}
+		i++
+	}
+	return -1
 }

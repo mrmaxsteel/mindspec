@@ -1463,7 +1463,7 @@ func extractBeadSectionContents(content string) map[string]string {
 	var currentHeading string
 	start := 0
 	for _, line := range panel.MarkdownLines(content) {
-		if line.Level == 0 || line.Level > 2 {
+		if line.Level != 2 || line.Heading == "" {
 			continue
 		}
 		if currentHeading != "" {

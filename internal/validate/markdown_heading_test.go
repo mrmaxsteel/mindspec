@@ -8,7 +8,7 @@ import (
 func TestSectionHeadingBlocks(t *testing.T) {
 	text := "## Goal\nkeep\n\n- item\n    ```\n    ## Hidden\n    ```\n\n> ## Hidden\n\n    ## Hidden\n\n<!--\n## Hidden\n-->\n\n## Scope\ncontrol\n"
 	sections := parseSections(text)
-	if len(sections) != 2 || !strings.Contains(sections["Goal"], "## Hidden") || sections["Scope"] != "control" {
+	if len(sections) != 2 || !strings.Contains(sections["Goal"], "## Hidden") || sections["Scope"] != "control\n" {
 		t.Fatalf("wrong sections: %#v", sections)
 	}
 }

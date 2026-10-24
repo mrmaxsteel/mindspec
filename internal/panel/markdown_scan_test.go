@@ -69,3 +69,99 @@ func TestOrderedSiblingsKeepSection(t *testing.T) {
 		t.Fatalf("ordered siblings changed the section: %+v", MarkdownLines(text))
 	}
 }
+
+func TestMarkdownListFenceBlank(t *testing.T) {
+	for name, text := range map[string]string{
+		"list":    "- item\n  ```\n  code\n\n  more\n  ```\n\n## After\n",
+		"ordered": "8. Emit:\n   ```\n   a\n\n   b\n   ```\n9. next\n\n## After\n",
+		"nested":  "> - item\n>   ```\n>   a\n>\n>   b\n>   ```\n\n## After\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			lines := MarkdownLines(text)
+			if len(lines) == 0 || lines[len(lines)-1].Heading != "After" {
+				t.Fatalf("lost heading after fence: %+v", lines)
+			}
+			for _, line := range lines {
+				if line.Text == "more" || line.Text == "b" {
+					t.Errorf("code became visible: %+v", line)
+				}
+			}
+		})
+	}
+}
+
+func TestMarkdownFenceEndsWithContainer(t *testing.T) {
+	for _, text := range []string{"> ```\n> code\n## After\n", "> ```\n> code\n\n## After\n", "- ```\n  code\n## After\n"} {
+		lines := MarkdownLines(text)
+		if len(lines) == 0 || lines[len(lines)-1].Heading != "After" {
+			t.Fatalf("container fence hid heading: %+v", lines)
+		}
+	}
+}
+
+func TestMarkdownEmptyListItems(t *testing.T) {
+	for _, marker := range []string{"-", "- ", "*", "+", "1.", "1.   "} {
+		lines := MarkdownLines("## Before\n" + marker + "\n\nbody\n\n## After\n")
+		var headings []string
+		for _, line := range lines {
+			if line.Level > 0 {
+				headings = append(headings, line.Heading)
+			}
+		}
+		if strings.Join(headings, ",") != "Before,After" {
+			t.Errorf("empty item %q lost headings: %+v", marker, lines)
+		}
+	}
+}
+
+func TestMarkdownInlineHTMLText(t *testing.T) {
+	for _, text := range []string{"## Bead 1: handle `<id>` input\n", "Text uses `<script>` here.\n\n", "`<pre-delete-SHA>` is a code span.\n\n", "An input <id> is required.\n\n", "<https://example.test>\n\n", "Text uses `<!--` here.\n\n", "## Bead 1: handle `<!--` input\n"} {
+		lines := MarkdownLines(text + "## After\n")
+		if len(lines) == 0 || lines[len(lines)-1].Heading != "After" {
+			t.Errorf("inline text hid heading: %+v", lines)
+		}
+		if len(lines) > 0 && strings.HasPrefix(text, "##") && lines[0].Heading != strings.TrimSuffix(strings.TrimPrefix(text, "## "), "\n") {
+			t.Errorf("heading text lost: %+v", lines)
+		}
+	}
+}
+
+func TestMarkdownThematicBreakKeepsEarlierHeading(t *testing.T) {
+	text := "## Before\n\n```\nexample\n```\n\n---\n\n## After\n"
+	var headings []string
+	for _, line := range MarkdownLines(text) {
+		if line.Level > 0 {
+			headings = append(headings, line.Heading)
+		}
+	}
+	if strings.Join(headings, ",") != "Before,After" {
+		t.Fatalf("thematic break removed a heading: %v", headings)
+	}
+}
+
+func TestMarkdownHTMLBlockOpeners(t *testing.T) {
+	for _, block := range []string{
+		"<div>\n## Hidden\n</div>\n",
+		"   <SCRIPT>\n\n## Hidden\n</SCRIPT>\n",
+		"<?target\n\n## Hidden\n?>\n",
+		"<!DOCTYPE\n## Hidden\n>\n",
+		"<![CDATA[\n## Hidden\n]]>\n",
+		"<custom attr='value'>\n## Hidden\n",
+	} {
+		var headings []string
+		for _, line := range MarkdownLines(block + "\n## After\n") {
+			if line.Level > 0 {
+				headings = append(headings, line.Heading)
+			}
+		}
+		if strings.Join(headings, ",") != "After" {
+			t.Errorf("wrong headings for %q: %v", block, headings)
+		}
+	}
+	for _, text := range []string{"text\n<custom>\n", "<not a tag\n", "<div/garbage>\n", "</custom attr>\n", "<pre-delete-SHA>\n\n"} {
+		lines := MarkdownLines(text + "## After\n")
+		if len(lines) == 0 || lines[len(lines)-1].Heading != "After" {
+			t.Errorf("text hid heading: %+v", lines)
+		}
+	}
+}

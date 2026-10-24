@@ -37,7 +37,7 @@ func AcceptanceCriteriaSection(spec string) string {
 			}
 			continue
 		}
-		if line.Level > 0 && line.Level <= 2 {
+		if line.Level > 0 && line.Level <= 2 && line.Heading != "" {
 			end = line.Offset
 			break
 		}
@@ -209,7 +209,32 @@ func ValidateBriefRegions(r BriefRegions, fileAtRef func(string) ([]byte, bool, 
 // scanMarkdownLines visits lines outside backtick and tilde fences. A nested
 // shorter fence cannot close the fence used to quote an acceptance section.
 func scanMarkdownLines(s string, fn func(int, string)) {
-	for _, line := range MarkdownLines(s) {
-		fn(line.Offset, strings.TrimSuffix(strings.TrimSuffix(s[line.Offset:line.End], "\n"), "\r"))
+	var fenceByte byte
+	fenceLength := 0
+	for offset := 0; offset < len(s); {
+		end := strings.IndexByte(s[offset:], '\n')
+		if end < 0 {
+			end = len(s)
+		} else {
+			end += offset
+		}
+		line := strings.TrimSuffix(s[offset:end], "\r")
+		trimmed := strings.TrimSpace(line)
+		run := 0
+		if len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
+			for run < len(trimmed) && trimmed[run] == trimmed[0] {
+				run++
+			}
+		}
+		if fenceLength == 0 {
+			if run >= 3 {
+				fenceByte, fenceLength = trimmed[0], run
+			} else {
+				fn(offset, line)
+			}
+		} else if run >= fenceLength && trimmed[0] == fenceByte && strings.TrimSpace(trimmed[run:]) == "" {
+			fenceLength = 0
+		}
+		offset = end + 1
 	}
 }

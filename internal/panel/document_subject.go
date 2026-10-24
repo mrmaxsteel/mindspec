@@ -176,23 +176,21 @@ func DocumentSubjectContent(name string, data []byte, specDir, gate string) ([]b
 func stripApproval(body []byte) []byte {
 	text := string(body)
 	start, end := -1, len(text)
-	for _, line := range MarkdownLines(text) {
-		if start < 0 && line.Level == 2 && line.Heading == "Approval" && strings.TrimRight(text[line.Offset:line.End], "\r\n") == "## Approval" {
-			start = line.Offset
-			continue
+	scanApprovalDigestLines(text, func(offset int, line string) {
+		if start < 0 && line == "## Approval" {
+			start = offset
+			return
 		}
-		if start >= 0 && line.Offset > start && line.Level > 0 && line.Level <= 2 {
-			end = line.Offset
-			break
+		if start >= 0 && offset > start && strings.HasPrefix(line, "## ") && end == len(text) {
+			end = offset
 		}
-	}
-
+	})
 	if start < 0 {
 		return body
 	}
 	seen := map[string]bool{}
 	for _, line := range strings.Split(text[start:end], "\n")[1:] {
-		if strings.Trim(line, " \t\r") == "" {
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		matched := false
@@ -211,6 +209,38 @@ func stripApproval(body []byte) []byte {
 		return body
 	}
 	return []byte(text[:start] + text[end:])
+}
+
+// scanApprovalDigestLines keeps the stored digest input stable.
+func scanApprovalDigestLines(s string, fn func(int, string)) {
+	var fenceByte byte
+	fenceLength := 0
+	for offset := 0; offset < len(s); {
+		end := strings.IndexByte(s[offset:], '\n')
+		if end < 0 {
+			end = len(s)
+		} else {
+			end += offset
+		}
+		line := strings.TrimSuffix(s[offset:end], "\r")
+		trimmed := strings.TrimSpace(line)
+		run := 0
+		if len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
+			for run < len(trimmed) && trimmed[run] == trimmed[0] {
+				run++
+			}
+		}
+		if fenceLength == 0 {
+			if run >= 3 {
+				fenceByte, fenceLength = trimmed[0], run
+			} else {
+				fn(offset, line)
+			}
+		} else if run >= fenceLength && trimmed[0] == fenceByte && strings.TrimSpace(trimmed[run:]) == "" {
+			fenceLength = 0
+		}
+		offset = end + 1
+	}
 }
 
 var placeholderPath = regexp.MustCompile(`^(\.mindspec/adr|\.mindspec/docs/adr|docs/adr)/ADR-[0-9]{4,}(-[a-z0-9]+)*\.md$`)

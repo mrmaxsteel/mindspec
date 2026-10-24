@@ -164,6 +164,8 @@ func TestS133Resolutions_HiddenMarkdown(t *testing.T) {
 }
 
 var resolutionBlockCases = []struct{ name, tail string }{
+	{"list fence blank", "\n## Plan\n- item\n  ```\n  code\n\n  ## Resolutions\n  R1 resolved\n  ```\n"},
+	{"inline tag heading boundary", "\n## Resolutions\n\nR2 resolved\n\n## Bead 1: handle `<id>` input\n\nR1 resolved.\n"},
 	{"list fence", "\n## Resolutions\n\n- item\n    ```\n    plan-one\n    ```\n"},
 	{"quote fence", "\n## Resolutions\n\n> ```\n> plan-one\n> ```\n"},
 	{"indented heading", "\n    ## Resolutions\n    plan-one\n"},
@@ -195,6 +197,7 @@ var resolutionBlockCases = []struct{ name, tail string }{
 	{"empty section boundary", "\n## Resolutions\nNone.\n##\nplan-one\n"},
 	{"closing hashes boundary", "\n## Resolutions\nNone.\n## Appendix ##\nplan-one\n"},
 	{"setext boundary", "\n## Resolutions\n\nAppendix\n--------\nplan-one\n"},
+	{"multiline setext boundary", "\n## Resolutions\n\nplan-one\nAppendix\n--------\n"},
 	{"link destination", "\n## Resolutions\n\n[decision](plan-one)\n"},
 	{"multiline link destination", "\n## Resolutions\n\n[decision](\nplan-one\n)\n"},
 	{"script heading after blank", "\n<script>\n\n## Resolutions\nplan-one\n</script>\n"},
@@ -213,6 +216,8 @@ func TestS133Resolutions_BlockStructure(t *testing.T) {
 			id := "plan-one"
 			if tc.name == "split comment id" {
 				id = "A-1"
+			} else if tc.name == "list fence blank" || tc.name == "inline tag heading boundary" {
+				id = "R1"
 			}
 			if section := planResolutionsSection("# Plan\n\nBody.\n" + tc.tail); resolutionNamesID(section, id) {
 				t.Fatalf("hidden id counted in %q", section)
@@ -244,10 +249,17 @@ func TestS133Resolutions_BlockStructureApprovePlan(t *testing.T) {
 				id := "plan-one"
 				if tc.name == "split comment id" {
 					id = "A-1"
+				} else if tc.name == "list fence blank" || tc.name == "inline tag heading boundary" {
+					id = "R1"
 				}
 				f.meta["plan_deferral_ids"] = []string{id}
 				content := strings.Replace(strings.ReplaceAll(validSingleBeadPlan, "042-test", s133DocID), "version: \"1.0\"", "version: \"1.0\"\nadr_citations: [ADR-0001]", 1)
-				f.writePlan(content + tc.tail)
+				tail := tc.tail
+				if tc.name == "inline tag heading boundary" {
+					content = strings.Replace(content, "## Bead 1: First thing", "## Resolutions\nR2 resolved\n\n## Bead 1: handle `<id>` input\n\nR1 resolved\n", 1)
+					tail = ""
+				}
+				f.writePlan(content + tail)
 				f.commit("block structure refusal")
 				f.seed("plan_approve", "pass")
 				f.exec.commits = 0
@@ -267,7 +279,7 @@ func TestS133Resolutions_BlockStructureApprovePlan(t *testing.T) {
 				control := strings.ReplaceAll(resolutionBlockControls[i%len(resolutionBlockControls)], "plan-one", id)
 				f = s133Document(t, policy, "plan_approve", "absent")
 				f.meta["plan_deferral_ids"] = []string{id}
-				f.writePlan(content + tc.tail + "\n## Resolutions\n\n" + control)
+				f.writePlan(content + tail + "\n## Resolutions\n\n" + control)
 				f.commit("visible block structure control")
 				f.seed("plan_approve", "pass")
 				if _, err := f.approve("plan_approve"); err != nil {
@@ -419,5 +431,12 @@ func TestS133Resolutions_TrackedCommitUsesSpecCheckout(t *testing.T) {
 				t.Fatalf("ledger-only obligation lost at spec approval: %v %v", ids, err)
 			}
 		})
+	}
+}
+
+func TestS133Resolutions_QuoteFenceBlankControl(t *testing.T) {
+	text := "> ```\n> code\n\n## Resolutions\nR1 resolved\n"
+	if !resolutionNamesID(planResolutionsSection(text), "R1") {
+		t.Fatal("blank line did not end quote fence")
 	}
 }
