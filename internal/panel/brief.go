@@ -3,7 +3,6 @@ package panel
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -256,7 +255,19 @@ func scanMarkdownProse(s string, unclosedAsProse bool, fn func(int, string)) {
 
 // ReadFilledBrief refuses unfinished review instructions before dispatch.
 func ReadFilledBrief(file string) ([]byte, error) {
-	data, err := os.ReadFile(file)
+	f, err := openBriefFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read panel brief %s (must be a regular file): %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat panel brief %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("panel brief must be a regular file: %s", termsafe.Escape(file))
+	}
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read panel brief %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
 	}

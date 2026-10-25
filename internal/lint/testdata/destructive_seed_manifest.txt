@@ -148,6 +148,8 @@
 
 [opaque_operand_registry]
 internal/complete/closing.go	commitPanelLedgers	arg1:unprovable
+internal/complete/closing.go	unignoredLedgers	arg1:unprovable
+internal/complete/closing.go	unignoredLedgers	arg2:unprovable
 cmd/mindspec/panel_defer.go	runPanelDefer	arg1:unprovable
 internal/approve/impl.go	implFinalizeFailure	arg1:unprovable
 internal/lifecycle/merge_state.go	RestoreMergeRecovery	variadic-spread:commands

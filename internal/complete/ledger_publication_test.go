@@ -3,6 +3,7 @@ package complete
 import (
 	"errors"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,8 +127,54 @@ func TestComplete_UnignoredLedgerPublication(t *testing.T) {
 func TestUnignoredLedgersFailure(t *testing.T) {
 	for _, failure := range []error{errors.New("git unavailable"), ledgerExitError(128)} {
 		ex := &executor.MockExecutor{CheckIgnoreErr: failure}
-		if _, err := unignoredLedgers("spec-worktree", []string{"ledger"}, ex); !errors.Is(err, failure) {
-			t.Fatalf("lost check-ignore failure: %v", err)
+		_, err := unignoredLedgers("/spec tree's", []string{"review/one's ledger"}, ex, "mindspec complete window-1 --merge-only")
+		var refusal *guard.Failure
+		want := "\nrecovery: git -C '/spec tree'\"'\"'s' check-ignore -- 'review/one'\"'\"'s ledger'\nrecovery: mindspec complete window-1 --merge-only"
+		if !errors.As(err, &refusal) || !strings.Contains(err.Error(), failure.Error()) || !strings.HasSuffix(err.Error(), want) {
+			t.Fatalf("lost check-ignore failure or scoped recovery: %v", err)
+		}
+	}
+}
+
+type ledgerIgnoreFailureExecutor struct {
+	executor.Executor
+	wt, path string
+	failure  error
+}
+
+func (e *ledgerIgnoreFailureExecutor) CheckIgnore(wt, path string) error {
+	e.wt, e.path = wt, path
+	return e.failure
+}
+
+func TestComplete_LedgerIgnoreFailureRecovery(t *testing.T) {
+	for _, merged := range []bool{false, true} {
+		for _, failure := range []error{errors.New("git unavailable"), ledgerExitError(128)} {
+			t.Run(map[bool]string{false: "ordinary", true: "merged"}[merged]+"/"+failure.Error(), func(t *testing.T) {
+				f := newWindowFixture(t)
+				ledger := f.registerLedger()
+				if merged {
+					f.merge()
+				}
+				ex := &ledgerIgnoreFailureExecutor{Executor: f.ex, failure: failure}
+				var err error
+				if merged {
+					_, err = runMergedCompletion(f.root, closingBead, closingSpec, "epic-window", "bead/"+closingBead, f.beadWT, executor.MergeIdentity{}, ex, CompleteOpts{}, false)
+				} else {
+					_, err = Run(f.root, closingBead, closingSpec, "", ex, CompleteOpts{})
+				}
+				var refusal *guard.Failure
+				if !errors.As(err, &refusal) {
+					t.Fatalf("expected guard failure, got %v", err)
+				}
+				want := "\nrecovery: git -C " + ledgerShellArg(f.specWT) + " check-ignore -- " + ledgerShellArg(ledger) + "\nrecovery: mindspec complete " + closingBead
+				if !strings.HasSuffix(err.Error(), want) || !strings.Contains(err.Error(), failure.Error()) {
+					t.Fatalf("missing scoped recovery and retry: %v", err)
+				}
+				if ex.wt != f.specWT || ex.path != ledger || f.closed || f.closeCalls != 0 {
+					t.Fatalf("wrong scope or mutated lifecycle: %+v closed=%t calls=%d", ex, f.closed, f.closeCalls)
+				}
+			})
 		}
 	}
 }

@@ -85,3 +85,17 @@ func TestFilledBriefStubBody(t *testing.T) {
 		}
 	}
 }
+
+func TestReadFilledBriefSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target, link := filepath.Join(dir, "body.md"), filepath.Join(dir, "BRIEF.md")
+	if err := os.WriteFile(target, []byte("Review the implementation."), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+	if _, err := ReadFilledBrief(link); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("expected regular-file refusal, got %v", err)
+	}
+}

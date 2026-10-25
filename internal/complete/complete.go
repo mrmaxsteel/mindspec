@@ -592,7 +592,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if ledgerErr != nil {
 		return nil, ledgerErr
 	}
-	ledgerPaths, ledgerErr = unignoredLedgers(ledgerWorktree, ledgerPaths, exec)
+	ledgerPaths, ledgerErr = unignoredLedgers(ledgerWorktree, ledgerPaths, exec, completionCommand(beadID, opts))
 	if ledgerErr != nil {
 		return nil, ledgerErr
 	}

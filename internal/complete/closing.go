@@ -67,9 +67,9 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 	if err != nil {
 		return nil, completionFailure(beadID, opts, "reading panel ledger paths", err)
 	}
-	ledgers, err = unignoredLedgers(ledgerWT, ledgers, exec)
+	ledgers, err = unignoredLedgers(ledgerWT, ledgers, exec, completionCommand(beadID, opts))
 	if err != nil {
-		return nil, completionFailure(beadID, opts, "checking panel ledger ignores", err)
+		return nil, err
 	}
 	allowed := map[string]bool{".beads/issues.jsonl": true}
 	// Staged ledger paths are allowed because the close publishes them.
@@ -422,7 +422,7 @@ func SpecLedgerPaths(root, specID, beadID string) (string, []string, error) {
 
 // unignoredLedgers lets Git decide which ledgers belong in lifecycle commits.
 // Plain check-ignore treats tracked files as unignored, even under ignore rules.
-func unignoredLedgers(wt string, paths []string, exec executor.Executor) ([]string, error) {
+func unignoredLedgers(wt string, paths []string, exec executor.Executor, retry string) ([]string, error) {
 	var publish []string
 	for _, path := range paths {
 		err := exec.CheckIgnore(wt, path)
@@ -431,7 +431,8 @@ func unignoredLedgers(wt string, paths []string, exec executor.Executor) ([]stri
 		}
 		var exit interface{ ExitCode() int }
 		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-			return nil, fmt.Errorf("checking panel ledger %s ignore status: %w", termsafe.Escape(path), err)
+			return nil, guard.NewFailure(fmt.Sprintf("checking panel ledger %s ignore status: %s", termsafe.Escape(path), termsafe.Escape(err.Error())),
+				"git -C "+ledgerShellArg(wt)+" check-ignore -- "+ledgerShellArg(path), retry)
 		}
 		publish = append(publish, path)
 	}

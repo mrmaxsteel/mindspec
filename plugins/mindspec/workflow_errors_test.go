@@ -157,6 +157,17 @@ func TestWorkflowProcessLaunchRetry(t *testing.T) {
 	}
 }
 func TestWorkflowReviewerRejectionRetry(t *testing.T) {
+	for _, thrown := range []string{`'reviewer crash'`, `new Error('reviewer crash')`} {
+		t.Run(thrown, func(t *testing.T) {
+			workflowUnit(t, `args={slug:'p',target:'main'};
+ let reviewers=0;
+ cli=async(verb)=>({exit:0,stdout:verb===CHECKOUT?'/slot':buildCommand(SUBMIT,{slotDir:'/slot',attempt:1})});
+ agent=async()=>{reviewers++;throw `+thrown+`};
+ roster=async()=>({slots:[{slot:'R1',kind:'harness',status:'unsubmitted'}]});
+ const result=await runSlot({slot:'R1',kind:'harness',status:'missing'});
+ if(reviewers!==2 || result.status!=='unsubmitted' || result.error!=='reviewer crash')throw Error(JSON.stringify({reviewers,result}));`)
+		})
+	}
 	for _, rejected := range []bool{false, true} {
 		t.Run(fmt.Sprint(rejected), func(t *testing.T) {
 			workflowUnit(t, fmt.Sprintf(`args={slug:'p',target:'main'};

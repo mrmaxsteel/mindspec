@@ -115,8 +115,9 @@ async function dispatch(slot) {
       "Do not use the Write tool on a verdict path. Submit through this exact command:\n" + submit, {
       ...options,
     });
-  } catch {
+  } catch (error) {
     // Reviewer failure follows the same verify-and-retry path as a silent return.
+    return String(error?.message ?? error);
   }
 }
 
@@ -124,6 +125,7 @@ async function runSlot(initial) {
   let slot = initial;
   let acted = false;
   let retried = initial.status !== "missing" && !initial.handoff_pending;
+  let reviewerError;
   while (slot.status !== "final") {
     if (slot.status === "running" && !acted) return slot;
     if (slot.kind === "process") {
@@ -162,7 +164,8 @@ async function runSlot(initial) {
       if (!["missing", "running", "draft", "unsubmitted", "void", "launch_failed", "malformed", "quota_wall"].includes(slot.status)) return slot;
       if (acted && retried) return slot;
       try {
-        await dispatch(slot);
+        const error = await dispatch(slot);
+        if (error !== undefined) reviewerError = error;
       } catch (error) {
         return { ...slot, error: String(error?.message ?? error) };
       }
@@ -180,7 +183,7 @@ async function runSlot(initial) {
     }
     // A quota handoff is the first harness dispatch, not a harness retry.
     if (next.kind !== slot.kind) { acted = false; retried = false; }
-    slot = next;
+    slot = next.status !== "final" && reviewerError !== undefined ? { ...next, error: reviewerError } : next;
   }
   return slot;
 }

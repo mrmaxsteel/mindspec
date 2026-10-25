@@ -190,6 +190,12 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	{File: "internal/complete/closing.go", Func: "commitPanelLedgers", Detail: "arg1:unprovable",
 		Rationale:  "LedgerCommitRecovery quotes checkout and ledger paths, escaping terminal controls, and emits scoped git add and commit commands.",
 		Obligation: "TestCommitPanelLedgersFailureRecovery pins commit failure and scoped recovery operands."},
+	{File: "internal/complete/closing.go", Func: "unignoredLedgers", Detail: "arg1:unprovable",
+		Rationale:  "The read-only check-ignore command scopes Git to the ledger checkout and quotes both checkout and ledger operands with ledgerShellArg.",
+		Obligation: "TestUnignoredLedgersFailure pins quoting for spaces and apostrophes. TestComplete_LedgerIgnoreFailureRecovery pins the owning checkout and ledger in both completion paths."},
+	{File: "internal/complete/closing.go", Func: "unignoredLedgers", Detail: "arg2:unprovable",
+		Rationale:  "Both callers supply completionCommand with the validated bead ID and current completion options.",
+		Obligation: "TestUnignoredLedgersFailure pins the merge-only retry. TestComplete_LedgerIgnoreFailureRecovery pins the completion retry before lifecycle mutation in both paths."},
 
 	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "variadic-spread:commands", Rationale: "Busy-worktree recovery names status, merge repair, and complete. An own-branch merge offers abort before the follow-up sequence.", Obligation: "TestComplete_ClosedOwnMergeInProgressAborts and TestComplete_ClosedMergedForeignMergeInProgressRefuses pin identity and state preservation."},
 	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "arg1:unprovable", Rationale: "The command is a status read in the validated spec worktree.", Obligation: "TestComplete_ClosingPathSpecWorktreeBusyRefuses pins the pre-close refusal."},

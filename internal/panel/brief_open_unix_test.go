@@ -6,8 +6,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestReadBriefFileDescriptor(t *testing.T) {
@@ -33,6 +35,37 @@ func TestReadBriefFileDescriptor(t *testing.T) {
 	}
 	if data, err := readBriefFile(target); err != nil || string(data) != body {
 		t.Fatalf("regular body changed: %q %v", data, err)
+	}
+}
+
+func TestReadFilledBriefFIFO(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "BRIEF.md")
+	if err := syscall.Mkfifo(file, 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := ReadFilledBrief(file)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "regular file") {
+			t.Fatalf("expected regular-file refusal, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		// Release an old blocking reader and join it before failing.
+		pipe, err := os.OpenFile(file, os.O_RDWR|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pipe.Close()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("brief reader did not stop")
+		}
+		t.Fatal("panel brief reader blocked on FIFO")
 	}
 }
 
