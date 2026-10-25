@@ -129,11 +129,7 @@ type DestructiveGuidanceAllowlistEntry struct {
 // entries — and stays zero after bead 7 (see the FINAL DISPOSITION note
 // above): release.go's discard is off this floor's program set by
 // design and is never seeded here.
-// The broad restore classifier also catches this path-scoped index-only
-// recovery. It preserves working data and does not discard the staged edit.
-var DestructiveGuidanceAllowlist = []DestructiveGuidanceAllowlistEntry{
-	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "git -C � restore", Family: FamilyGitRestore, Rationale: "Ownership-resolved local ledgers remain busy. This command always includes --staged -- and one shell-quoted path; it only removes that entry from the index and preserves working bytes.", Obligation: "TestComplete_StagedLedgerBusy pins the exact recovery command and verifies both index and working data remain unchanged on refusal."},
-}
+var DestructiveGuidanceAllowlist = []DestructiveGuidanceAllowlistEntry{}
 
 // OpaqueOperandEntry is one call-site operand the scan cannot fold to
 // a literal at all — no literal skeleton whatsoever, e.g. a runtime-
@@ -192,6 +188,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		Rationale:  "The body contains a state line and escaped inner error lines. This call adds only an ID-rendered implementation approval command when the inner error has no recovery.",
 		Obligation: "internal/approve TestApproveImpl_PostCloseBareErrorGetsRerun pins the safe re-run command. TestApproveImpl_PostCloseConflictKeepsInnerRecovery pins unchanged inner recovery lines and no extra command."},
 	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "variadic-spread:commands", Rationale: "Busy-worktree recovery names status, merge repair, and complete. An own-branch merge offers abort before the follow-up sequence.", Obligation: "TestComplete_ClosedOwnMergeInProgressAborts and TestComplete_ClosedMergedForeignMergeInProgressRefuses pin identity and state preservation."},
+	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "arg1:unprovable", Rationale: "The command is a status read in the validated spec worktree.", Obligation: "TestComplete_ClosingPathSpecWorktreeBusyRefuses pins the pre-close refusal."},
 	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "arg2:unprovable", Rationale: "The retry uses a validated bead ID and shell-quoted override reasons.", Obligation: "TestComplete_OverrideRunRecoveryRepeatsFlag pins retry flags and reasons."},
 	{File: "internal/mergefollowup/recovery.go", Func: "MovedTipFailure", Detail: "variadic-spread:commands", Rationale: "The shared recovery preserves the tip before reset-with-keep, then cherry-picks before deleting the saved branch. It executes no command. IDs use idrender and the worktree path is shell-quoted.", Obligation: "TestComplete_FollowupRecoveryOrder and TestFinalizeMerges_MovedBeadTipRefusesBeforeMutation pin preservation and recovery order in both callers."},
 	{File: "internal/complete/closing.go", Func: "mergedRangeFailure", Detail: "variadic-spread:commands", Rationale: "Repair guidance contains a scoped amend, marker removal, complete retry and audited overrides.", Obligation: "TestComplete_ClosingPathGatesMergeRange pins the measured range and later-commit refusal."},

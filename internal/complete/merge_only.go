@@ -232,7 +232,7 @@ func materializeConflictedOwnership(in materializationInput, conflict *Ownership
 		}
 		currentTip = c
 	}
-	_, preUserDirt, dErr := checkMaterializationDirt(exec, wtPath)
+	_, preUserDirt, dErr := checkDirtyTreeFn(wtPath, wtPath)
 	if dErr != nil {
 		return fmt.Errorf("checking working tree (S-exit contract): %w", dErr)
 	}
@@ -240,11 +240,7 @@ func materializeConflictedOwnership(in materializationInput, conflict *Ownership
 		return sExitGenuineDirtRefusal(beadID, preUserDirt)
 	}
 
-	ledgers, err := exec.PanelLedgerPaths(wtPath)
-	if err != nil {
-		return fmt.Errorf("resolving local panel ledgers: %w", err)
-	}
-	tree2, err := exec.SnapshotWorktreeTree(wtPath, ledgers)
+	tree2, err := exec.SnapshotWorktreeTree(wtPath, nil)
 	if err != nil {
 		return fmt.Errorf("snapshotting bead worktree %s (artifact-sync leg): %w", wtPath, err)
 	}

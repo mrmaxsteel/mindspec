@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
@@ -179,7 +180,7 @@ func TestApproveSpec_EpicCreateWarningHostileEscaped(t *testing.T) {
 }
 
 func TestApproveSpec_LocalLedger(t *testing.T) {
-	for _, state := range []string{"tracked", "old-ignore-untracked"} {
+	for _, state := range []string{"tracked", "fresh-init", "upgraded-init"} {
 		t.Run(state, func(t *testing.T) {
 			specE2EFakeBdOnPath(t)
 			root := t.TempDir()
@@ -240,24 +241,23 @@ func prepareApprovalLedger(t *testing.T, root, specID, state string) string {
 	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, file)), 0755); err != nil {
 		t.Fatal(err)
 	}
-	// Registration presence is the same ownership rule used by panel.Scan.
-	if err := os.WriteFile(filepath.Join(root, filepath.Dir(file), "panel.json"), []byte("{}"), 0644); err != nil {
+	if state == "upgraded-init" {
+		ignore := ".mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n!.mindspec/specs/*/reviews/*/\n!.mindspec/specs/*/reviews/*/dispositions.jsonl\n"
+		if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(ignore), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := bootstrap.Run(root, false); err != nil {
 		t.Fatal(err)
 	}
 	if state == "tracked" {
 		if err := os.WriteFile(filepath.Join(root, file), []byte("before\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		adoptGitRun(t, root, "add", "--", file)
-		adoptGitRun(t, root, "commit", "-qm", "tracked ledger fixture")
-	} else {
-		ignore := ".mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n!.mindspec/specs/*/reviews/*/\n!.mindspec/specs/*/reviews/*/dispositions.jsonl\n"
-		if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(ignore), 0644); err != nil {
-			t.Fatal(err)
-		}
-		adoptGitRun(t, root, "add", "--", ".gitignore")
-		adoptGitRun(t, root, "commit", "-qm", "old ignores fixture")
+		adoptGitRun(t, root, "add", "-f", "--", file)
 	}
+	adoptGitRun(t, root, "add", "-A")
+	adoptGitRun(t, root, "commit", "-qm", "init review ignores fixture")
 	if err := os.WriteFile(filepath.Join(root, file), []byte("local\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -266,8 +266,14 @@ func prepareApprovalLedger(t *testing.T, root, specID, state string) string {
 func assertApprovalLedger(t *testing.T, root, file, state string) {
 	t.Helper()
 	data, err := exec.Command("git", "-C", root, "show", "HEAD:"+file).Output()
-	if state == "tracked" && (err != nil || string(data) != "before\n") || state != "tracked" && err == nil {
+	if state == "tracked" && (err != nil || string(data) != "local\n") || state != "tracked" && err == nil {
 		t.Fatalf("approval committed ledger: %q %v", data, err)
+	}
+	if state != "tracked" {
+		adoptGitRun(t, root, "check-ignore", "-q", "--", file)
+		if got, err := exec.Command("git", "-C", root, "ls-files", "--", file).Output(); err != nil || len(got) != 0 {
+			t.Fatalf("ignored ledger tracked: %s", got)
+		}
 	}
 	data, err = os.ReadFile(filepath.Join(root, file))
 	if err != nil || string(data) != "local\n" {

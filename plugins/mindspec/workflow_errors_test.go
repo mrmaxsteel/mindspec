@@ -25,6 +25,8 @@ func TestWorkflowVerifyErrors(t *testing.T) {
  try { await roster(); throw Error('accepted error'); } catch(e) { if(e.constructor!==Error || !e.message.includes('review registry unavailable')) throw e; }`,
 		`cli=async()=>({stdout:'relay\n\x1b[31m'+ 'x'.repeat(500),exit:2});
  try { await roster(); throw Error('accepted non-JSON'); } catch(e) { if(e.constructor!==Error || !e.message.includes('verify') || !e.message.includes('relay\\n\\u001b') || e.message.length>300) throw e; }`,
+		`cli=async()=>({stdout:'invalid\n\x1b[31m'+ 'x'.repeat(500),stderr:'a warning\n\x1b[31m'+ 'y'.repeat(500),exit:2});
+ try { await roster(); throw Error('accepted non-JSON'); } catch(e) { if(!e.message.includes('stdout: "invalid\\n\\u001b') || !e.message.includes('stderr: "a warning\\n\\u001b') || e.message.includes('\x1b') || e.message.length>500) throw e; }`,
 		`cli=async()=>({stdout:'{}',exit:2});
  try { await roster(); throw Error('accepted no roster'); } catch(e) { if(!e.message.includes('verify') || !e.message.includes('2')) throw e; }`,
 	} {
@@ -57,6 +59,37 @@ func TestWorkflowBriefRequired(t *testing.T) {
 	}
 	workflowUnit(t, `args={slug:'p',target:'main',round:1,brief_file:"/absolute/it's filled.md"};
  if(!buildCommand(CREATE).includes(' --brief-file '+quote(args.brief_file)))throw Error('brief file not passed');`)
+}
+
+func TestWorkflowWindowsBrief(t *testing.T) {
+	for _, value := range []string{`C:\briefs\filled.md`, `D:/briefs/filled.md`} {
+		script := fmt.Sprintf(`const args={slug:'p',target:'main',round:1,brief_file:%q};
+ let created;
+ const agent=async(prompt)=>{const command=prompt.split('\n').at(-1); if(command.startsWith('mindspec panel create')){created=command;return {exit:0,stdout:''};}return {exit:0,stdout:'[]'};};
+ const pipeline=async(items,fn)=>Promise.all(items.map(fn));
+ async function workflow(){%s}
+ workflow().then(()=>{if(!created.includes(" --brief-file '"+args.brief_file+"'"))throw Error('Windows path not forwarded')}).catch(e=>{console.error(e);process.exit(1)});`, value, WorkflowFiles()["ms-panel.js"])
+		if out, err := exec.Command("node", "-e", script).CombinedOutput(); err != nil {
+			t.Fatalf("Windows brief: %v %s", err, out)
+		}
+	}
+}
+
+func TestWorkflowPostActionRosterFailure(t *testing.T) {
+	for _, kind := range []string{"process", "harness"} {
+		for _, vanished := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/vanished=%t", kind, vanished), func(t *testing.T) {
+				workflowUnit(t, fmt.Sprintf(`let actions=0;
+ cli=async()=>{actions++;return {exit:0,stdout:''}};
+ dispatch=async()=>{actions++};
+ roster=async()=>{if(%t)return {slots:[]};throw Error('verify unavailable')};
+ const slots=[{slot:'R1',kind:%q,status:'missing'},{slot:'R2',kind:'process',status:'final'}];
+ const results=await Promise.all(slots.map(runSlot));
+ const expected=%t?'slot disappeared from verify':'verify unavailable';
+ if(actions!==1 || results[0].slot!=='R1' || results[0].error!==expected || results[1].status!=='final')throw Error(JSON.stringify(results));`, vanished, kind, vanished))
+			})
+		}
+	}
 }
 
 // Exercise the entry point, rather than only the command builder.

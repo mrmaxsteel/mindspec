@@ -140,8 +140,8 @@ type Executor interface {
 
 	// --- Query methods ---
 
-	// IsTreeClean returns nil when only local ledger dirt remains. It exempts
-	// the same paths as lifecycle commits; other dirt produces an error.
+	// IsTreeClean returns nil if the workspace at path has no uncommitted
+	// changes, or an error describing the dirty files.
 	IsTreeClean(path string) error
 
 	// DiffStat returns a short diffstat summary between two refs.
@@ -283,9 +283,6 @@ type Executor interface {
 	// MockExecutor stubs each with a configurable result/error, defaulting
 	// to zero values so a pre-existing test that never configures them
 	// exercises the "nothing to materialize" (both stages elide) path.
-
-	// PanelLedgerPaths resolves registered local ledgers, including deleted HEAD paths.
-	PanelLedgerPaths(path string) ([]string, error)
 
 	// SnapshotWorktreeTree builds a candidate tree T from wtPath's
 	// PROSPECTIVE content (tracked + untracked + deletions, exactly what

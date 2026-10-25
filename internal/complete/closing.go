@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -62,16 +62,19 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 		}
 		return nil, guard.NewFailure("spec worktree is busy: a merge is in progress at "+termsafe.Escape(state.MergeHead)+". Resolve or complete that merge directly before you retry.", commands...)
 	}
-	ledgers, err := exec.PanelLedgerPaths(specWT)
+	ledgerWT, ledgers, err := SpecLedgerPaths(root, specID, beadID)
 	if err != nil {
-		return nil, completionFailure(beadID, opts, "resolving local panel ledgers", err)
+		return nil, completionFailure(beadID, opts, "reading panel ledger paths", err)
 	}
-	// Staged ledgers remain busy: only the tracker may be staged here.
-	// This deliberately keeps the closing gate stricter than local-ledger status checks.
+	_ = ledgerWT
+	allowed := map[string]bool{".beads/issues.jsonl": true}
+	for _, path := range ledgers {
+		allowed[path] = true
+	}
 	for _, path := range state.StagedPaths {
-		if slices.Contains(ledgers, path) || path != panel.TrackerArtifactPath {
-			return nil, guard.NewFailure("spec worktree is busy: staged user change: "+termsafe.Escape(path),
-				"git -C "+ledgerShellArg(specWT)+" restore --staged -- "+ledgerShellArg(path), completionCommand(beadID, opts))
+		if !allowed[path] {
+			return nil, guard.NewFailure("spec worktree is busy: staged change outside the export and panel ledger: "+termsafe.Escape(path),
+				"git -C "+ledgerShellArg(specWT)+" status", completionCommand(beadID, opts))
 		}
 	}
 	if tip != row.Parents[1] {
@@ -196,7 +199,7 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath st
 			var done bool
 			done, err = closePublicationDone(beadID, specBranch, exec)
 			if err == nil && !done {
-				paths := []string{panel.TrackerArtifactPath}
+				paths := []string{".beads/issues.jsonl"}
 				err = exec.PublishBeadClose(specWT, paths)
 			}
 		case 5:
@@ -325,7 +328,7 @@ func mergedRangeFailure(root, beadID, specBranch, specWT string, row executor.Me
 // closePublicationDone uses the committed tracker close.
 // Later metadata-marker cleanup does not invalidate a published close.
 func closePublicationDone(beadID, specBranch string, exec executor.Executor) (bool, error) {
-	data, present, err := exec.FileAtRefOrAbsent(specBranch, panel.TrackerArtifactPath)
+	data, present, err := exec.FileAtRefOrAbsent(specBranch, ".beads/issues.jsonl")
 	if err != nil || !present {
 		return false, err
 	}
@@ -354,4 +357,47 @@ func closePublicationDone(beadID, specBranch string, exec executor.Executor) (bo
 // ledgerShellArg quotes an operand for a POSIX shell, escaping display controls.
 func ledgerShellArg(s string) string {
 	return "'" + strings.ReplaceAll(termsafe.Escape(s), "'", "'\"'\"'") + "'"
+}
+
+// SpecLedgerPaths resolves existing flat-layout ledgers in their owning checkout.
+// Empty beadID selects every spec ledger, including directories without panel.json.
+func SpecLedgerPaths(root, specID, beadID string) (string, []string, error) {
+	dir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return "", nil, err
+	}
+	wt := workspace.TreeRootForSpecDir(dir)
+	if wt == "" || filepath.Clean(dir) != filepath.Join(wt, ".mindspec", "specs", specID) {
+		return wt, nil, nil
+	}
+	var candidates []string
+	if beadID == "" {
+		candidates, err = filepath.Glob(filepath.Join(dir, "reviews", "*", "dispositions.jsonl"))
+		if err != nil {
+			return wt, nil, err
+		}
+	} else {
+		for _, reg := range panel.ForBead(panel.Scan(dir), beadID) {
+			candidates = append(candidates, filepath.Join(reg.Dir, "dispositions.jsonl"))
+		}
+	}
+	var paths []string
+	for _, file := range candidates {
+		info, err := os.Stat(file)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return wt, nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return wt, nil, fmt.Errorf("panel ledger is not a regular file: %s", termsafe.Escape(file))
+		}
+		rel, err := filepath.Rel(wt, file)
+		if err != nil {
+			return wt, nil, err
+		}
+		paths = append(paths, filepath.ToSlash(rel))
+	}
+	return wt, paths, nil
 }

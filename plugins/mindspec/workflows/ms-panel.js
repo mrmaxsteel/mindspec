@@ -18,6 +18,10 @@ function quote(value) {
   return "'" + value.replace(/'/g, "'\"'\"'") + "'";
 }
 
+function absoluteBriefFile(value) {
+  return typeof value === "string" && (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value));
+}
+
 function buildCommand(verb, value = {}) {
   if (!ALLOWED_CLI.includes(verb)) throw new Error("command is not allowed");
   if (verb === SUBMIT) {
@@ -30,7 +34,7 @@ function buildCommand(verb, value = {}) {
   if (args.spec) command += " --spec " + quote(args.spec);
   switch (verb) {
     case CREATE:
-      if (typeof args.brief_file !== "string" || !args.brief_file.startsWith("/")) throw new Error("brief_file must be an absolute path");
+      if (!absoluteBriefFile(args.brief_file)) throw new Error("brief_file must be an absolute path");
       command += " --brief-file " + quote(args.brief_file);
       if (args.spec && args.gate === "adhoc") throw new Error("gate conflicts with spec");
       if (args.bead_id && args.gate && args.gate !== "bead") throw new Error("gate conflicts with bead_id");
@@ -79,7 +83,7 @@ async function roster() {
   try {
     slots = JSON.parse(result.stdout);
   } catch {
-    throw new Error("panel verify returned non-JSON stdout (exit " + result.exit + "): " + diagnostic(result.stderr || result.stdout));
+    throw new Error("panel verify returned non-JSON stdout (exit " + result.exit + "); stdout: " + diagnostic(result.stdout) + (result.stderr ? "; stderr: " + diagnostic(result.stderr) : ""));
   }
   if (slots && typeof slots === "object" && !Array.isArray(slots) && "error" in slots) {
     throw new Error("panel verify: " + diagnostic(slots.error));
@@ -163,8 +167,13 @@ async function runSlot(initial) {
       throw new Error("unknown runner kind");
     }
     acted = true;
-    const next = (await roster()).slots.find(s => s.slot === slot.slot);
-    if (!next) throw new Error("slot disappeared from verify");
+    let next;
+    try {
+      next = (await roster()).slots.find(s => s.slot === slot.slot);
+      if (!next) throw new Error("slot disappeared from verify");
+    } catch (error) {
+      return { ...slot, error: String(error?.message ?? error) };
+    }
     // A quota handoff is the first harness dispatch, not a harness retry.
     if (next.kind !== slot.kind) { acted = false; retried = false; }
     slot = next;
@@ -175,7 +184,7 @@ async function runSlot(initial) {
 if (!args || !Number.isInteger(args.round) || args.round < 1) throw new Error("round must be positive");
 quote(args.slug);
 quote(args.target);
-if (typeof args.brief_file !== "string" || !args.brief_file.startsWith("/")) throw new Error("brief_file must be an absolute path");
+if (!absoluteBriefFile(args.brief_file)) throw new Error("brief_file must be an absolute path");
 quote(args.brief_file);
 const created = await cli(CREATE);
 if (created.exit !== 0) return { createOutput: failure("create", created) };

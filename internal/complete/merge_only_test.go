@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
@@ -72,6 +73,10 @@ func (w windowWorktrees) Remove(string) error {
 }
 
 func newWindowFixture(t *testing.T) *windowFixture {
+	return newWindowFixtureLayout(t, true)
+}
+
+func newWindowFixtureLayout(t *testing.T, flat bool) *windowFixture {
 	t.Helper()
 	saveAndRestore(t)
 	fakeBdOnPath(t)
@@ -82,7 +87,11 @@ func newWindowFixture(t *testing.T) *windowFixture {
 	resolveTargetFn = func(string, string) (string, error) { return closingSpec, nil }
 	findLocalRootFn = func() (string, error) { return f.root, nil }
 	writeFile(t, f.root, ".mindspec/config.yaml", "source_globs:\n  - internal/**/*.go\n")
-	writeFile(t, f.root, ".mindspec/specs/"+closingSpec+"/spec.md", "# Spec\n\n## Impacted Domains\n\n- widget\n")
+	specs := ".mindspec/specs/"
+	if !flat {
+		specs = ".mindspec/docs/specs/"
+	}
+	writeFile(t, f.root, specs+closingSpec+"/spec.md", "# Spec\n\n## Impacted Domains\n\n- widget\n")
 	writeFile(t, f.root, ".gitignore", ".worktrees/\n")
 	writeFile(t, f.root, "README.md", "before\n")
 	writeFile(t, f.root, ".beads/issues.jsonl", "{\"id\":\"window-1\",\"status\":\"in_progress\"}\n")
@@ -357,6 +366,9 @@ func TestComplete_SecondMergeOnlyRefuses(t *testing.T) {
 }
 func (f *windowFixture) registerLedger() string {
 	f.t.Helper()
+	// Model local review ignores only in tests that register a local panel.
+	// Source-safety fixtures intentionally leave lookalike paths unignored.
+	writeFile(f.t, f.root, ".git/info/exclude", ".mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n")
 	specDir, err := workspace.SpecDir(f.root, closingSpec)
 	if err != nil {
 		f.t.Fatal(err)
@@ -931,64 +943,92 @@ func TestComplete_HandMergeImpactedDomainsExitCloses(t *testing.T) {
 	f.assertPublished("")
 }
 
-func TestComplete_MergedTrackedLedgerStaysLocal(t *testing.T) {
-	for _, staged := range []bool{false, true} {
-		t.Run(fmt.Sprint(staged), func(t *testing.T) {
+func TestComplete_FreshInitIgnoredLedger(t *testing.T) {
+	for _, mergeOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint(mergeOnly), func(t *testing.T) {
 			f := newWindowFixture(t)
-			f.mergedOnly()
+			if _, err := bootstrap.Run(f.specWT, false); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.ex.CommitAll(f.specWT, "initialize local review ignores"); err != nil {
+				t.Fatal(err)
+			}
 			ledger := f.registerLedger()
-			file := filepath.Join(f.specWT, ledger)
-			before, err := os.ReadFile(file)
+			before, err := os.ReadFile(filepath.Join(f.specWT, ledger))
 			if err != nil {
 				t.Fatal(err)
 			}
-			gitRun(t, f.specWT, "add", "-f", "--", ledger)
-			gitRun(t, f.specWT, "commit", "-qm", "tracked review fixture")
-			dirty := append(append([]byte{}, before...), '\n')
-			if err := os.WriteFile(file, dirty, 0644); err != nil {
-				t.Fatal(err)
-			}
-			if staged {
-				gitRun(t, f.specWT, "add", "--", ledger)
-				_, err := f.run(CompleteOpts{})
-				requireWindowRefusal(t, err, "spec worktree is busy")
-				gitRun(t, f.specWT, "restore", "--staged", "--", ledger)
+			gitRun(t, f.specWT, "check-ignore", "-q", "--", ledger)
+			if mergeOnly {
+				f.mergedOnly()
 			}
 			result, err := f.run(CompleteOpts{})
-			if err != nil || !result.BeadClosed {
-				t.Fatalf("dirty ledger blocked close: %+v %v", result, err)
+			if err != nil || result == nil || !result.BeadClosed {
+				t.Fatalf("ignored ledger blocked completion: %+v %v", result, err)
 			}
-			committed, err := f.ex.FileAtRef("spec/"+closingSpec, ledger)
-			if err != nil || string(committed) != string(before) {
-				t.Fatalf("ledger changes committed: %s %v", committed, err)
+			if mergeOnly {
+				f.assertPublished(ledger)
 			}
-			current, err := os.ReadFile(file)
-			if err != nil || string(current) != string(dirty) {
-				t.Fatalf("ledger changes lost: %s %v", current, err)
+			if _, err := f.ex.FileAtRef("spec/"+closingSpec, ledger); err == nil {
+				t.Fatal("ignored ledger was committed")
+			}
+			gitRun(t, f.specWT, "check-ignore", "-q", "--", ledger)
+			if got, err := gitutil.LsFiles(f.specWT, ledger); err != nil || len(got) != 0 {
+				t.Fatalf("ignored ledger became tracked: %v %v", got, err)
+			}
+			if after, err := os.ReadFile(filepath.Join(f.specWT, ledger)); err != nil || string(after) != string(before) {
+				t.Fatalf("working ledger changed: %q %v", after, err)
 			}
 		})
 	}
 }
 
-func TestComplete_StagedLedgerBusy(t *testing.T) {
-	f := newWindowFixture(t)
-	f.mergedOnly()
-	name := ".mindspec/specs/010-test/reviews/p/dispositions.jsonl"
-	writeFile(t, f.specWT, name, "local ledger\n")
-	gitRun(t, f.specWT, "add", "-f", "--", name)
-	_, err := f.run(CompleteOpts{})
-	requireWindowRefusal(t, err, "spec worktree is busy")
-	want := "git -C " + ledgerShellArg(f.specWT) + " restore --staged -- " + ledgerShellArg(name)
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("missing recovery %q: %v", want, err)
+func TestComplete_LegacyLedgerSurvivesBeadRemoval(t *testing.T) {
+	f := newWindowFixtureLayout(t, false)
+	// This test checks lifecycle persistence; panel decisions have separate tests.
+	writeFile(t, f.root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\n")
+	originalSkip := panelSkipEnvFn
+	t.Cleanup(func() { panelSkipEnvFn = originalSkip })
+	panelSkipEnvFn = func() bool { return true }
+	dir := filepath.Join(f.beadWT, "review", "legacy")
+	id := closingBead
+	if err := panel.Create(dir, panel.CreateInput{
+		BeadID: &id, Spec: closingSpec, Gate: "bead", Target: "bead/" + id,
+		Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: f.tip, SubjectDigest: "sha256:fixture",
+		Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "architecture"}},
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(filepath.Join(f.specWT, name)); err != nil || string(data) != "local ledger\n" {
-		t.Fatalf("working data changed: %q %v", data, err)
+	before, err := os.ReadFile(filepath.Join(dir, "dispositions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if f.closed {
-		t.Fatal("closed busy bead")
+	// The real executor's lifecycle funnel commits the registration and ledger together.
+	if err := f.ex.CommitAll(f.beadWT, "lifecycle artifacts"); err != nil {
+		t.Fatal(err)
 	}
-	if got, err := (&executor.MindspecExecutor{Root: f.root}).CompletionState(f.specWT, "", ""); err != nil || len(got.StagedPaths) != 1 || got.StagedPaths[0] != name {
-		t.Fatal("staged ledger was modified")
+	for _, name := range []string{"panel.json", "dispositions.jsonl"} {
+		gitRun(t, f.beadWT, "cat-file", "-e", "HEAD:review/legacy/"+name)
+	}
+	result, err := f.run(CompleteOpts{})
+	if err != nil || result == nil || !result.BeadClosed {
+		t.Fatalf("legacy completion: %+v %v", result, err)
+	}
+	if _, err := os.Stat(f.beadWT); !os.IsNotExist(err) {
+		t.Fatalf("bead worktree not removed: %v", err)
+	}
+	survivor := filepath.Join(f.specWT, "review", "legacy")
+	if after, err := os.ReadFile(filepath.Join(survivor, "dispositions.jsonl")); err != nil || string(after) != string(before) {
+		t.Fatalf("legacy ledger lost at removal: %q %v", after, err)
+	}
+	if legacy, err := panel.LegacyPanel(survivor); err != nil || legacy {
+		t.Fatalf("approval's ledger integrity check failed: legacy=%t %v", legacy, err)
+	}
+	registrations := panel.Scan(f.specWT)
+	if len(registrations) != 1 {
+		t.Fatalf("surviving registrations: %v", registrations)
+	}
+	if _, err := panel.CheckHandEdits(survivor, registrations[0].Panel); err != nil {
+		t.Fatalf("approval's snapshot/ledger check failed: %v", err)
 	}
 }

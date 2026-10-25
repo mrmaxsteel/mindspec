@@ -53,7 +53,7 @@ step 0                 (pick + claim the next eligible bead, create worktree)
   ↓ bead-id + worktree + branch
 /ms-bead-impl          (round 1 implementation — Phase A stages the prompt, Phase B dispatches)
   ↓ commit SHA + flagged deviations
-/ms-panel-run          (round 1 — step 0 writes panel.json + BRIEF, then the configured reviewers fan out)
+/ms-panel-run          (round 1 — the caller writes the brief file; create copies it into BRIEF.md, then the configured reviewers fan out)
   ↓ wait for completions
 /ms-panel-tally        (round 1 verdicts — single decision authority)
   ↓ decide:
@@ -64,7 +64,7 @@ step 0                 (pick + claim the next eligible bead, create worktree)
 
 /ms-bead-fix           (round 1 → round 2 fix commit)
   ↓ new commit SHA + flagged deviations
-/ms-panel-run          (round 2 — step 0 re-bumps round + reviewed_head_sha in one write)
+/ms-panel-run          (round 2 — the caller writes a fresh brief file; create bumps the round + reviewed_head_sha)
   ↓
 /ms-panel-tally        (round 2 verdicts)
   ↓ decide as above

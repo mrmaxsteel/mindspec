@@ -369,3 +369,26 @@ func TestBootstrap_RemoveLedgerNegationsExactly(t *testing.T) {
 		})
 	}
 }
+
+func TestBootstrap_OldNegationsBecomeIgnored(t *testing.T) {
+	root := reviewBootstrapRepo(t)
+	file := ".mindspec/specs/001-test/reviews/bead/dispositions.jsonl"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, file)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, file), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	old := ".mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n!.mindspec/specs/*/reviews/*/\n!.mindspec/specs/*/reviews/*/dispositions.jsonl\n"
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(old), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-C", root, "check-ignore", "-q", "--", file)
+	if err := cmd.Run(); err == nil {
+		t.Fatal("old negations must leave the ledger unignored")
+	}
+	if _, err := Run(root, false); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "check-ignore", "-q", "--", file)
+}

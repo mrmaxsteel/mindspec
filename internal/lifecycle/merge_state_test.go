@@ -371,19 +371,3 @@ func TestMergeState_RestoreOmitsCheckoutOnUserChanges(t *testing.T) {
 		t.Fatalf("read error outcome = %s", got)
 	}
 }
-
-func TestMergeRestoreOutcome_LegacyLedgerRemainsUserDirt(t *testing.T) {
-	dir, run, _ := mergeStateRepo(t)
-	panelDir := filepath.Join(dir, "review", "local")
-	if err := os.MkdirAll(panelDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	mergeStateWrite(t, dir, "review/local/panel.json", "{}")
-	mergeStateWrite(t, dir, "review/local/dispositions.jsonl", "before")
-	run("add", "--", "review/local")
-	run("commit", "-m", "registered legacy panel")
-	mergeStateWrite(t, dir, "review/local/dispositions.jsonl", "local edit")
-	if got := MergeRestoreOutcome(dir, ".mindspec/specs/132-test"); got != guard.DestructionStaleDeletion {
-		t.Fatalf("local ledger enabled restoration: %s", got)
-	}
-}

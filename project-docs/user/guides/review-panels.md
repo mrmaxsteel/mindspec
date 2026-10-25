@@ -11,10 +11,11 @@ Other layouts use `review/<panel-slug>/`.
 
 The directory holds `panel.json`, `BRIEF.md`, `dispositions.jsonl` and submitted verdict files.
 Review artifacts in the two `.mindspec` layouts above, including the disposition ledger, are local and ignored by default.
-Legacy-layout ledgers are left out of lifecycle commits, but Git shows them as untracked.
-Already-tracked ledgers stay tracked. Their changes are the user's own commit to make;
-completion and implementation approval read the working ledger without committing it
-or requiring it to be committed. Run `mindspec init` to remove older ledger exceptions.
+Completion and implementation approval no longer refuse an ignored, untracked or dirty
+ledger. The panel gate still reads the working ledger and applies the same decision rules.
+Git decides what lifecycle commits include: already-tracked ledgers and unignored
+legacy-layout ledgers are committed as before, alongside the other panel files.
+Run `mindspec init` after upgrading to remove the two older ledger ignore exceptions.
 `panel.json` records the roster, round, reviewed SHA and subject digest.
 Every new round uses verdict schema v2. Historical rounds keep their file-based rules.
 

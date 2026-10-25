@@ -81,9 +81,9 @@ const nullOID = "0000000000000000000000000000000000000000"
 // because the seed already has it and `add -A -- . <exclusion>` never
 // re-stages it.
 //
-// excludePaths are exact repo-relative artifact paths (e.g.
-// ".beads/issues.jsonl"). Each becomes a ":(exclude,literal)" pathspec so
-// metacharacters in a registered path remain literal.
+// excludePaths are repo-relative artifact paths or glob patterns (e.g.
+// ".beads/issues.jsonl"). Each becomes a ":(exclude,glob)" pathspec so
+// a single star never matches a directory separator, matching path.Match.
 func SnapshotWorktreeTree(wtPath string, excludePaths []string) (tree string, err error) {
 	tip, err := RevParseHEAD(wtPath)
 	if err != nil {
@@ -104,11 +104,9 @@ func SnapshotWorktreeTree(wtPath string, excludePaths []string) (tree string, er
 	}
 
 	addArgs := []string{"add", "-A", "--", "."}
-	exclusions, err := addArtifactExclusions(wtPath, excludePaths)
-	if err != nil {
-		return "", err
+	for _, p := range excludePaths {
+		addArgs = append(addArgs, ":(exclude,glob)"+p)
 	}
-	addArgs = append(addArgs, exclusions...)
 	addCmd := execCommand("git", gitArgs(wtPath, addArgs...)...)
 	addCmd.Env = env
 	if out, aerr := addCmd.CombinedOutput(); aerr != nil {

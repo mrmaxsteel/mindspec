@@ -1636,7 +1636,8 @@ The closing path runs the panel gate at the bead tip and the content gates
 over M^1..M. Ownership comes from M's tree. It closes the bead, writes its
 landed binding and review identity, records overrides, and publishes the
 close with a path-scoped tracker export commit in the spec worktree.
-Disposition ledgers remain local and are read from the working tree.
+Ignored disposition ledgers remain local and are read from the working tree.
+Tracked and unignored legacy-layout ledgers are committed as before.
 After publication, it clears markers and reads bead user changes again before
 removal. The executor repeats this read at removal. Tool artifacts stay exempt.
 The exemption preserves decoded filename whitespace. A lookalike path blocks the close.

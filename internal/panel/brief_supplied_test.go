@@ -25,6 +25,8 @@ func TestSuppliedBriefQuotedSyntax(t *testing.T) {
 		"Quoted:\n~~~md\n<!-- mindspec:panel-header -->\n~~~\n",
 		"The marker is `<!-- mindspec:panel-header -->`.\n",
 		"Quoted ``<!-- TODO(skill) ` example -->``.\n",
+		"Plain prose mentions TODO(skill) as the stub label.\n",
+		"The half-edited form is `TODO(skill): fill -->`.\n",
 	} {
 		file := filepath.Join(t.TempDir(), "brief.md")
 		if err := os.WriteFile(file, []byte(body), 0600); err != nil {
@@ -32,6 +34,24 @@ func TestSuppliedBriefQuotedSyntax(t *testing.T) {
 		}
 		if data, err := readBriefFile(file); err != nil || string(data) != body {
 			t.Errorf("quoted syntax refused: %q %v", body, err)
+		}
+	}
+	for _, body := range []string{
+		"## Scope\n```md\ncode\n<!-- TODO(skill): fill -->\n",
+		"## Scope\n    ```md\n<!-- TODO(skill): fill -->\n",
+		"## Scope\n\t```md\n<!-- TODO(skill): fill -->\n",
+		"## Scope\nTODO(skill): fill -->\n",
+		"## Scope\n<!-- TODO (skill): fill -->\n",
+	} {
+		file := filepath.Join(t.TempDir(), "brief.md")
+		if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readBriefFile(file); err == nil || !strings.Contains(err.Error(), "TODO") {
+			t.Errorf("supplied stub accepted: %q %v", body, err)
+		}
+		if _, err := ReadFilledBrief(file); err == nil || !strings.Contains(err.Error(), "TODO") {
+			t.Errorf("dispatch stub accepted: %q %v", body, err)
 		}
 	}
 }

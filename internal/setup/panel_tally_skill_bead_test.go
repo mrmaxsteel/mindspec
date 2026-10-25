@@ -78,6 +78,9 @@ func TestMsPanelTallySkill_StaleVerdictRepanelBindsBead(t *testing.T) {
 		if !strings.Contains(line, "--bead <bead-id>") {
 			t.Errorf("%s: the stale-verdict re-panel invocation omits `--bead <bead-id>` — an agent following it registers a bead_id:null panel that mindspec complete's ForBead selection cannot see, fail-opening the gate:\n  %s", label, line)
 		}
+		if !strings.Contains(line, "--brief-file <absolute path to a fresh brief>") {
+			t.Errorf("%s: re-panel must supply a fresh brief: %s", label, line)
+		}
 	}
 
 	// Parity: the same instruction on every surface. A fix applied to one

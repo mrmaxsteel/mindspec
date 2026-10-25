@@ -230,7 +230,7 @@ It exits 2 in every other case. A final status does not imply a passing gate.
 `<specs>/*/reviews/*/dispositions.jsonl`, matched with stdlib `path.Match`.
 The gate, next guard and complete materialization share it. The ledger is
 artifact dirt; other panel files retain their ordinary classification. The gate,
-next guard and impl approve share `panel.PorcelainPath` to decode git porcelain
+next guard share `panel.PorcelainPath` to decode git porcelain
 C-style quoted paths and rename destinations before matching, including
 non-ASCII spec and panel directory names and literal arrows in path names.
 The next guard matches decoded filename bytes exactly, including whitespace.
@@ -238,17 +238,17 @@ Its proportional claim check exempts a rename or copy only when both endpoints
 match artifact paths. It names both endpoints of user renames and copies.
 Normal and merge-only completion read the artifact-sync snapshot delta with
 rename detection off and NUL separators. Filename bytes stay exact.
-Disposition ledgers are local review artifacts. Init ignores `.mindspec/specs/*/reviews/` and `.mindspec/reviews/`;
-legacy-layout ledgers are left out of lifecycle commits but Git shows them as untracked.
-Init removes the
-formerly shipped ledger negations by exact line, preserving other bytes. Files
-already tracked stay tracked. Completion and implementation approval read the
-working ledger for gate decisions without checking ignore or commit status and
-without committing ledger changes. Both materialization stages preserve tracked
-ledger content at HEAD; close publication commits only the tracker export.
-The lifecycle commit funnel also excludes local ledgers from staging and partial
-commits, and finalization cleanup exempts their dirt.
-The user owns any commit of changes to an already-tracked ledger.
+Disposition ledgers in `.mindspec/specs/*/reviews/**` and `.mindspec/reviews/**`
+are ignored by default and stay local. Init removes exactly the two formerly
+shipped ledger negations, preserves other bytes and is idempotent. Run
+`mindspec init` after upgrading to apply this change.
+Completion and implementation approval no longer refuse an ignored, untracked
+or dirty ledger. Gate decisions still read the working ledger and are unchanged.
+Git decides what lifecycle commits include: already-tracked ledgers and
+unignored legacy-layout ledgers are committed as before, alongside `panel.json`.
+Both materialization snapshots and `CommitAll` retain their ordinary Git behavior.
+Close publication commits the tracker export without requiring ignored ledgers
+in that commit. Clean-tree and cleanup checks retain their existing behavior.
 
 **Registration.** Every panel directory (`review/<slug>`, or the
 co-located `<spec-dir>/reviews/<slug>` on a flat tree) holds
@@ -1140,7 +1140,7 @@ override flags with their reasons. A repeated merge-only call records the
 existing valid merge and makes no second merge.
 
 A closed child of the spec epic without a naming merge runs the merge
-recovery without a second close. It publishes the closed tracker export before cleanup. Disposition ledgers remain local.
+recovery without a second close. It publishes the closed tracker export before cleanup. Ignored disposition ledgers remain local; tracked and unignored ledgers follow ordinary Git commit behavior.
 An epic, phase, or child-status read failure refuses before close, merge,
 or cleanup. Retry completion when the read succeeds. A closed-unmerged
 conflict keeps its line boundaries and ends with one `--resolve-merge`

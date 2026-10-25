@@ -1660,7 +1660,7 @@ func TestPlanApprove_BeadsCarrySpecID(t *testing.T) {
 }
 
 func TestApprovePlan_LocalLedger(t *testing.T) {
-	for _, state := range []string{"tracked", "old-ignore-untracked"} {
+	for _, state := range []string{"tracked", "fresh-init", "upgraded-init"} {
 		t.Run(state, func(t *testing.T) {
 			specE2EFakeBdOnPath(t)
 			noopStubPhaseMergeMetadataForTest(t)

@@ -17,6 +17,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
@@ -2722,9 +2723,10 @@ func TestApproveImpl_LocalLedgers(t *testing.T) {
 			}
 			git("init", "-q")
 			if state == "ignored" {
-				if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".mindspec/specs/*/reviews/**\n"), 0644); err != nil {
+				if _, err := bootstrap.Run(root, false); err != nil {
 					t.Fatal(err)
 				}
+				git("check-ignore", "-q", "--", file)
 			}
 			if state == "dirty-tracked" {
 				git("add", "--", file)

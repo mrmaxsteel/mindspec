@@ -210,8 +210,14 @@ func ValidateBriefRegions(r BriefRegions, fileAtRef func(string) ([]byte, bool, 
 // scanMarkdownLines visits lines outside backtick and tilde fences. A nested
 // shorter fence cannot close the fence used to quote an acceptance section.
 func scanMarkdownLines(s string, fn func(int, string)) {
+	scanMarkdownProse(s, false, fn)
+}
+
+// Stub checks treat an unfinished quotation as prose so it cannot hide stubs.
+func scanMarkdownProse(s string, unclosedAsProse bool, fn func(int, string)) {
 	var fenceByte byte
 	fenceLength := 0
+	fenceStart := 0
 	for offset := 0; offset < len(s); {
 		end := strings.IndexByte(s[offset:], '\n')
 		if end < 0 {
@@ -220,16 +226,17 @@ func scanMarkdownLines(s string, fn func(int, string)) {
 			end += offset
 		}
 		line := strings.TrimSuffix(s[offset:end], "\r")
-		trimmed := strings.TrimSpace(line)
+		trimmed := strings.TrimLeft(line, " ")
+		indent := len(line) - len(trimmed)
 		run := 0
-		if len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
+		if indent <= 3 && len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
 			for run < len(trimmed) && trimmed[run] == trimmed[0] {
 				run++
 			}
 		}
 		if fenceLength == 0 {
 			if run >= 3 {
-				fenceByte, fenceLength = trimmed[0], run
+				fenceByte, fenceLength, fenceStart = trimmed[0], run, offset
 			} else {
 				fn(offset, line)
 			}
@@ -237,6 +244,13 @@ func scanMarkdownLines(s string, fn func(int, string)) {
 			fenceLength = 0
 		}
 		offset = end + 1
+	}
+	if unclosedAsProse && fenceLength != 0 {
+		offset := fenceStart
+		for _, line := range strings.Split(s[fenceStart:], "\n") {
+			fn(offset, strings.TrimSuffix(line, "\r"))
+			offset += len(line) + 1
+		}
 	}
 }
 
@@ -290,12 +304,12 @@ func readBriefFile(file string) ([]byte, error) {
 	return data, nil
 }
 
-var briefStub = regexp.MustCompile(`(?i)<!--\s*TODO\(skill\)`)
+var briefStub = regexp.MustCompile(`(?i)<!--\s*TODO\s*\(skill\)|TODO\s*\(skill\)[^\n]*-->`)
 var suppliedHeaderMarker = regexp.MustCompile(`(?i)^<!--\s*/?\s*mindspec:panel-header\s*-->$`)
 
 func containsBriefStub(body string) bool {
 	var prose strings.Builder
-	scanNonFenceLines(body, func(_ int, line string) {
+	scanMarkdownProse(body, true, func(_ int, line string) {
 		prose.WriteString(withoutInlineCode(line))
 		prose.WriteByte('\n')
 	})

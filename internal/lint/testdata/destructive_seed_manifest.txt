@@ -100,12 +100,11 @@
 # full accounting.
 
 [destructive_guidance_allowlist]
-internal/complete/closing.go	runMergedCompletion	git -C � restore	git restore
 # Bead 6 (spec 127 R5(d)): the two entries this section used to carry
 # (beadToSpecConflictFailure/directMergeConflictFailure, both "git
 # merge") EXIT here — neither function prints a `git merge` line (or
 # any floor-matching text) any longer; both are converted to the
-# --resolve-merge re-entry surface. The index-only restore recovery above is a later, separately justified entry.
+# --resolve-merge re-entry surface. The section is intentionally EMPTY.
 
 # Bead 4 (spec 127 R2): internal/approve/impl.go's implOrphanRefusal and
 # internal/approve/adopt.go's adoptOrphanPresentRefusal EXIT their
@@ -249,6 +248,7 @@ internal/complete/panel_deferred.go	deferralFailure	arg1:unprovable
 internal/complete/panel_deferred.go	PanelDeferredAuditFailure	arg1:unprovable
 
 internal/complete/closing.go	runMergedCompletion	variadic-spread:commands
+internal/complete/closing.go	runMergedCompletion	arg1:unprovable
 internal/complete/closing.go	runMergedCompletion	arg2:unprovable
 internal/mergefollowup/recovery.go	MovedTipFailure	variadic-spread:commands
 internal/complete/closing.go	mergedRangeFailure	variadic-spread:commands
