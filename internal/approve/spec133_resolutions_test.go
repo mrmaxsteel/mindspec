@@ -864,7 +864,7 @@ var resolutionDocumentCorpus = []struct {
 	{"round ten image link", "## Resolutions\n\nplan[![a](u)](v)-one\n", false},
 	{"round ten longer tag", "## Resolutions\n\nplan<bright>-one</bright>\n", true},
 	{"round ten longer image tag", "## Resolutions\n\nplan<img-extra>-one</img-extra>\n", true},
-	{"round ten closing break tag", "## Resolutions\n\nplan</br>-one\n", true},
+	{"round ten closing break tag", "## Resolutions\n\nplan</br>-one\n", false},
 	{"round ten escaped break", "## Resolutions\n\nplan&lt;br&gt;-one\n", false},
 	{"round ten inline declaration", "## Resolutions\n\nplan<!THING x>-one\n", true},
 	{"round ten inline instruction", "## Resolutions\n\nplan<?x ?>-one\n", true},
@@ -887,6 +887,30 @@ var resolutionDocumentCorpus = []struct {
 	{"round ten closer eof", "---\nstatus: Draft\n## Resolutions\nplan-one\n---", false},
 	{"round ten frontmatter reference", "---\nstatus: Draft\nnotes: |\n  [r]: /u\n---\n## Resolutions\nSee ![plan-one][r].\n", true},
 	{"round ten body reference", "---\nstatus: Draft\n---\n[r]: /u\n\n## Resolutions\nSee ![plan-one][r].\n", false},
+	{"round eleven p", "# P\n\n## Resolutions\n\nplan<p>-one\n", false},
+	{"round eleven p close", "# P\n\n## Resolutions\n\nplan</p>-one\n", false},
+	{"round eleven p pair", "# P\n\n## Resolutions\n\nplan</p><p>-one\n", false},
+	{"round eleven hr", "# P\n\n## Resolutions\n\nplan<hr>-one\n", false},
+	{"round eleven hr self closing", "# P\n\n## Resolutions\n\nplan<hr/>-one\n", false},
+	{"round eleven div", "# P\n\n## Resolutions\n\nplan<div>-one</div>\n", false},
+	{"round eleven li", "# P\n\n## Resolutions\n\nplan<li>-one\n", false},
+	{"round eleven td", "# P\n\n## Resolutions\n\nplan<td>-one\n", false},
+	{"round eleven h3", "# P\n\n## Resolutions\n\nplan<h3>-one\n", false},
+	{"round eleven input", "# P\n\n## Resolutions\n\nplan<input>-one\n", false},
+	{"round eleven iframe", "# P\n\n## Resolutions\n\nplan<iframe src=x></iframe>-one\n", false},
+	{"round eleven br upper", "# P\n\n## Resolutions\n\nplan<BR>-one\n", false},
+	{"round eleven probe div", "# P\n\n## Resolutions\n\nplan<div>-one\n", false},
+	{"round eleven span", "# P\n\n## Resolutions\n\nplan<span>-one</span>\n", true},
+	{"round eleven em", "# P\n\n## Resolutions\n\nplan<em>-one</em>\n", true},
+	{"round eleven code", "# P\n\n## Resolutions\n\nplan<code>-one</code>\n", true},
+	{"round eleven wbr", "# P\n\n## Resolutions\n\nplan<wbr>-one\n", true},
+	{"round eleven bright", "# P\n\n## Resolutions\n\nplan<bright>-one\n", true},
+	{"round eleven custom", "# P\n\n## Resolutions\n\nplan<custom>-one\n", true},
+	{"round eleven comment", "# P\n\n## Resolutions\n\nplan<!-- c -->-one\n", true},
+	{"round eleven instruction", "# P\n\n## Resolutions\n\nplan<?x?>-one\n", true},
+	{"round eleven cr", "# P\r\r## Resolutions\r\rplan-one\r", true},
+	{"round eleven cr frontmatter", "---\rstatus: Draft\r---\r# P\r## Resolutions\rplan-one\r", true},
+	{"round eleven cr none", "# P\r\r## Resolutions\r\rNone.\r", false},
 }
 
 func TestS133Resolutions_DocumentCorpus(t *testing.T) {
@@ -900,6 +924,32 @@ func TestS133Resolutions_DocumentCorpus(t *testing.T) {
 	}
 }
 
+func TestS133Resolutions_RawHTMLSeparators(t *testing.T) {
+	// Check each tag class with open, close, self-closing and mixed-case tags.
+	for _, name := range strings.Fields(`address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td tfoot th thead title tr track ul pre script style textarea br img input button select embed object video audio canvas svg math`) {
+		t.Run(name, func(t *testing.T) {
+			for _, tag := range []string{"<" + name + ">", "</" + name + ">", "<" + name + "/>", "</" + strings.ToUpper(name) + ">"} {
+				section := planResolutionsSection("## Resolutions\n\nplan" + tag + "-one\n")
+				if resolutionNamesID(section, "plan-one") {
+					t.Errorf("tag %q joined words: %q", tag, section)
+				}
+			}
+			section := planResolutionsSection("## Resolutions\n\nplan<" + name + "-extra>-one\n")
+			if !resolutionNamesID(section, "plan-one") {
+				t.Errorf("longer tag name split words: %q", section)
+			}
+		})
+	}
+	for _, tag := range []string{"<p x=y>", "<p\tx=y>", "<p\rx=y>", "<p\nx=y>", "<p\fx=y>", "<p />"} {
+		t.Run(tag, func(t *testing.T) {
+			section := planResolutionsSection("## Resolutions\n\nplan" + tag + "-one\n")
+			if resolutionNamesID(section, "plan-one") {
+				t.Fatalf("tag %q joined words: %q", tag, section)
+			}
+		})
+	}
+}
+
 // Keep one approval case for each parser mechanism. Unit tables keep all inputs.
 func TestS133Resolutions_DocumentApprovePlan(t *testing.T) {
 	for _, policy := range []string{"warn", "enforce"} {
@@ -907,7 +957,7 @@ func TestS133Resolutions_DocumentApprovePlan(t *testing.T) {
 			f := s133Document(t, policy, "plan_approve", "absent")
 			for _, name := range []string{
 				"boundary plain control",
-				"round ten br",
+				"round eleven hr",
 				"round ten frontmatter hidden",
 				"round ten frontmatter fence crlf",
 				"boundary definition after section",

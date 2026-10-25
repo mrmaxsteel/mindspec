@@ -12,8 +12,30 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
+// Use CommonMark 0.31.2 section 4.6 condition-6 and condition-1 names, plus replaced and form boxes.
+var resolutionSeparatingHTMLTags = map[string]bool{
+	"address": true, "article": true, "aside": true, "base": true, "basefont": true,
+	"blockquote": true, "body": true, "caption": true, "center": true, "col": true,
+	"colgroup": true, "dd": true, "details": true, "dialog": true, "dir": true,
+	"div": true, "dl": true, "dt": true, "fieldset": true, "figcaption": true,
+	"figure": true, "footer": true, "form": true, "frame": true, "frameset": true,
+	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
+	"head": true, "header": true, "hr": true, "html": true, "iframe": true,
+	"legend": true, "li": true, "link": true, "main": true, "menu": true,
+	"menuitem": true, "nav": true, "noframes": true, "ol": true, "optgroup": true,
+	"option": true, "p": true, "param": true, "search": true, "section": true,
+	"summary": true, "table": true, "tbody": true, "td": true, "tfoot": true,
+	"th": true, "thead": true, "title": true, "tr": true, "track": true, "ul": true,
+	"pre": true, "script": true, "style": true, "textarea": true,
+	"br": true, "img": true, "input": true, "button": true, "select": true,
+	"embed": true, "object": true, "video": true, "audio": true, "canvas": true,
+	"svg": true, "math": true,
+}
+
 // Parse the whole body so references resolve across section boundaries.
 func resolutionDocumentText(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
 	source := []byte(resolutionMarkdownBody(content))
 	document := goldmark.New().Parser().Parse(text.NewReader(source))
 	var section strings.Builder
@@ -74,9 +96,10 @@ func resolutionNodeText(root ast.Node, source []byte) string {
 			_ = writer.WriteByte(' ')
 			return ast.WalkSkipChildren, nil
 		case *ast.RawHTML:
-			raw := n.Segments.Value(source)
+			raw := bytes.TrimPrefix(n.Segments.Value(source), []byte("<"))
+			raw = bytes.TrimPrefix(raw, []byte("/"))
 			end := bytes.IndexAny(raw, " \t\r\n\f/>")
-			if end >= 0 && (bytes.EqualFold(raw[:end], []byte("<br")) || bytes.EqualFold(raw[:end], []byte("<img"))) {
+			if end >= 0 && resolutionSeparatingHTMLTags[strings.ToLower(string(raw[:end]))] {
 				_ = writer.WriteByte(' ')
 			}
 			return ast.WalkSkipChildren, nil
