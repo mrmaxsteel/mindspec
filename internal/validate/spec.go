@@ -8,12 +8,14 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // requiredSpecSections lists sections that must exist and have content.
+// Approval is optional: spec approval creates that section as an own write.
 var requiredSpecSections = []string{
 	"Goal",
 	"Impacted Domains",
@@ -21,7 +23,6 @@ var requiredSpecSections = []string{
 	"Requirements",
 	"Scope",
 	"Acceptance Criteria",
-	"Approval",
 }
 
 // ValidateSpec checks the structural quality of a spec.md file.
@@ -94,27 +95,22 @@ func ValidateSpec(root, specID string) *Result {
 // Only handles ## level headings.
 func parseSections(content string) map[string]string {
 	sections := make(map[string]string)
-	lines := strings.Split(content, "\n")
-
 	var currentHeading string
-	var currentBody []string
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "## ") {
-			// Save previous section
-			if currentHeading != "" {
-				sections[currentHeading] = strings.Join(currentBody, "\n")
-			}
-			currentHeading = strings.TrimPrefix(line, "## ")
-			currentHeading = strings.TrimSpace(currentHeading)
-			currentBody = nil
-		} else if currentHeading != "" {
-			currentBody = append(currentBody, line)
+	start := 0
+	for _, line := range panel.MarkdownLines(content) {
+		if line.Level != 2 || line.Heading == "" {
+			continue
+		}
+		if currentHeading != "" {
+			sections[currentHeading] = strings.TrimSuffix(content[start:line.Offset], "\n")
+			currentHeading = ""
+		}
+		if line.Level == 2 {
+			currentHeading, start = line.Heading, line.End
 		}
 	}
-	// Save last section
 	if currentHeading != "" {
-		sections[currentHeading] = strings.Join(currentBody, "\n")
+		sections[currentHeading] = content[start:]
 	}
 
 	return sections
@@ -148,10 +144,16 @@ func checkScopeSubsections(r *Result, sections map[string]string) {
 		return // already flagged by required section check
 	}
 
-	if !strings.Contains(scope, "### In Scope") {
+	headings := map[string]bool{}
+	for _, line := range panel.MarkdownLines(scope) {
+		if line.Level == 3 {
+			headings[line.Heading] = true
+		}
+	}
+	if !headings["In Scope"] {
 		r.AddError("scope-in-missing", "Scope section missing '### In Scope' subsection")
 	}
-	if !strings.Contains(scope, "### Out of Scope") {
+	if !headings["Out of Scope"] {
 		r.AddError("scope-out-missing", "Scope section missing '### Out of Scope' subsection")
 	}
 }

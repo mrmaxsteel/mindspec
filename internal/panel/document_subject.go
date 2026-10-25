@@ -126,12 +126,28 @@ func DocumentSubjectContent(name string, data []byte, specDir, gate string) ([]b
 	}
 	body := data
 	var fm map[string]any
-	if bytes.HasPrefix(data, []byte("---\n")) {
-		rest := data[4:]
-		end := bytes.Index(rest, []byte("\n---\n"))
-		blockEnd, bodyStart := end, end+5
-		if bytes.HasPrefix(rest, []byte("---\n")) {
-			blockEnd, bodyStart = 0, 4
+	if bytes.HasPrefix(data, []byte("---\n")) || bytes.HasPrefix(data, []byte("---\r\n")) {
+		rest := data[bytes.IndexByte(data, '\n')+1:]
+		blockEnd, bodyStart := -1, -1
+		for start := 0; start < len(rest); {
+			newline := bytes.IndexByte(rest[start:], '\n')
+			if newline < 0 {
+				break
+			}
+			next := start + newline + 1
+			line := rest[start:next]
+			if bytes.Equal(line, []byte("---\n")) || bytes.Equal(line, []byte("---\r\n")) {
+				blockEnd, bodyStart = start, next
+				// Keep the LF digest input unchanged.
+				if blockEnd > 0 {
+					blockEnd--
+					if blockEnd > 0 && rest[blockEnd-1] == '\r' {
+						blockEnd--
+					}
+				}
+				break
+			}
+			start = next
 		}
 		if blockEnd < 0 {
 			return nil, false, fmt.Errorf("unclosed document frontmatter")
@@ -152,7 +168,11 @@ func DocumentSubjectContent(name string, data []byte, specDir, gate string) ([]b
 			body = stripApproval(body)
 			// Appending the approval section supplies its own blank separator.
 			// Normalize that end padding when the section is absent as well.
-			body = []byte(strings.TrimRight(string(body), "\n"))
+			padding := "\n"
+			if bytes.Contains(body, []byte("\r\n")) {
+				padding = "\r\n"
+			}
+			body = []byte(strings.TrimRight(string(body), padding))
 		}
 	}
 	// Keep frontmatter and body in distinct fields to prevent representation
@@ -176,7 +196,7 @@ func DocumentSubjectContent(name string, data []byte, specDir, gate string) ([]b
 func stripApproval(body []byte) []byte {
 	text := string(body)
 	start, end := -1, len(text)
-	scanMarkdownLines(text, func(offset int, line string) {
+	scanApprovalDigestLines(text, func(offset int, line string) {
 		if start < 0 && line == "## Approval" {
 			start = offset
 			return
@@ -209,6 +229,38 @@ func stripApproval(body []byte) []byte {
 		return body
 	}
 	return []byte(text[:start] + text[end:])
+}
+
+// scanApprovalDigestLines keeps the stored digest input stable.
+func scanApprovalDigestLines(s string, fn func(int, string)) {
+	var fenceByte byte
+	fenceLength := 0
+	for offset := 0; offset < len(s); {
+		end := strings.IndexByte(s[offset:], '\n')
+		if end < 0 {
+			end = len(s)
+		} else {
+			end += offset
+		}
+		line := strings.TrimSuffix(s[offset:end], "\r")
+		trimmed := strings.TrimSpace(line)
+		run := 0
+		if len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
+			for run < len(trimmed) && trimmed[run] == trimmed[0] {
+				run++
+			}
+		}
+		if fenceLength == 0 {
+			if run >= 3 {
+				fenceByte, fenceLength = trimmed[0], run
+			} else {
+				fn(offset, line)
+			}
+		} else if run >= fenceLength && trimmed[0] == fenceByte && strings.TrimSpace(trimmed[run:]) == "" {
+			fenceLength = 0
+		}
+		offset = end + 1
+	}
 }
 
 var placeholderPath = regexp.MustCompile(`^(\.mindspec/adr|\.mindspec/docs/adr|docs/adr)/ADR-[0-9]{4,}(-[a-z0-9]+)*\.md$`)

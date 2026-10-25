@@ -36,6 +36,13 @@ type Outcome struct {
 var lifecycleExecutorFn = func(root string) executor.Executor { return executor.NewMindspecExecutor(root) }
 var lifecycleMergeMetadataFn = bead.MergeMetadata
 
+// SetLifecycleMergeMetadataForTest replaces the shared audit writer in tests.
+func SetLifecycleMergeMetadataForTest(fn func(string, map[string]interface{}) error) func() {
+	orig := lifecycleMergeMetadataFn
+	lifecycleMergeMetadataFn = fn
+	return func() { lifecycleMergeMetadataFn = orig }
+}
+
 // runLifecycleGate reads all registrations for an approval, without mutation.
 func runLifecycleGate(root, specID, gate, worktree string, out io.Writer) (Outcome, error) {
 	o := Outcome{Gate: gate}
@@ -86,6 +93,9 @@ func runLifecycleGate(root, specID, gate, worktree string, out io.Writer) (Outco
 		res, err := panel.Tally(reg.Dir)
 		if err != nil {
 			return refuse(reg.Slug(), "registration", err)
+		}
+		if res.IntegrityErr != nil {
+			return refuse(reg.Slug(), "integrity", fmt.Errorf("panel.json changed outside the panel verbs (%v); recorded target %s", res.IntegrityErr, reg.Panel.Target))
 		}
 		// Integrity precedes abandonment, as in the shared decision engine.
 		facts := panel.GateFacts{Reg: &reg, Res: res, WorktreeAbsent: true}

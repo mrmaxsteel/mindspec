@@ -30,17 +30,19 @@ type BriefRule struct {
 // its heading. Headings inside code fences do not delimit the section.
 func AcceptanceCriteriaSection(spec string) string {
 	start, end := -1, len(spec)
-	scanMarkdownLines(spec, func(offset int, line string) {
+	for _, line := range MarkdownLines(spec) {
 		if start < 0 {
-			if strings.TrimSpace(line) == "## Acceptance Criteria" {
-				start = offset
+			if line.Level == 2 && line.Heading == "Acceptance Criteria" {
+				start = line.Offset
 			}
-			return
+			continue
 		}
-		if end == len(spec) && (strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ")) {
-			end = offset
+		if line.Level > 0 && line.Level <= 2 && line.Heading != "" {
+			end = line.Offset
+			break
 		}
-	})
+	}
+
 	if start < 0 {
 		return "no acceptance criteria section found"
 	}

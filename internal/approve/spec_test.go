@@ -202,6 +202,7 @@ func TestScaffoldPlanEmitsADRCitations(t *testing.T) {
 }
 
 func TestSpecApprove_WritesSpecID(t *testing.T) {
+	stubDocumentGateAudit(t)
 	for _, specID := range []string{"129-linkage", "129b-linkage"} {
 		t.Run(specID, func(t *testing.T) {
 			fakeDir := t.TempDir()

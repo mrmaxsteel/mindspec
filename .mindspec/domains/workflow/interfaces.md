@@ -1336,3 +1336,21 @@ came through a landed declaring bead merge. A direct source commit on the
 spec branch has no declaration exemption. Approval lists each open doc
 deferral. Its doc-skew override records the open deferral ids and reason
 on the epic. Old ownerless skew records remain subject to branch doc-sync.
+
+## Document approval gates
+
+`ApproveSpec` checks `spec_approve` before its first write on every run.
+`ApprovePlan` checks `plan_approve` before migration, audit, supersede,
+frontmatter, bead creation and commits. A replay runs the same gate.
+Existing approvals remain valid for other lifecycle operations.
+
+Both verbs persist the shared gate audit after epic resolution. Spec approval
+also records accepted to-plan deferral ids. If epic creation fails with an
+audit due, it commits the approval artifacts, warns with the due records and
+refuses with a same-environment retry. A retry can persist those records.
+
+Plan approval requires all ids from the epic and tracked spec approval
+ledgers in the plan's `## Resolutions` section. It reads abandoned, replaced
+and ledger-only registrations. Missing ids refuse before any lifecycle write.
+A refusal does not supersede or create beads. The Approval section is optional
+in a draft spec because spec approval creates it.

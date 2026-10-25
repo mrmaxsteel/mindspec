@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
@@ -127,7 +129,8 @@ type planPreflightFacts struct {
 	// returned without error — resolveTargetEpic refuses fail-closed on
 	// both failure modes it can encounter (P10), so no epic-less path
 	// reaches ApprovePlan's mutation steps.
-	parentID string
+	parentID       string
+	parentMetadata map[string]interface{}
 	// children is the target epic's existing child set (Spec 074
 	// re-approval safeguard), already safety-checked (no in_progress/closed
 	// survivor UNLESS positive partial/interrupted provenance licensed a
@@ -170,6 +173,9 @@ func resolvePlanApprovePreflight(root, planPath, specID string) (*planPreflightF
 	planContent := string(data)
 
 	sections := validate.ParseBeadSections(planContent)
+	if err := checkBeadSectionContents(planContent, sections); err != nil {
+		return nil, err
+	}
 
 	var workChunks []validate.WorkChunk
 	var workChunksParseErr error
@@ -190,7 +196,8 @@ func resolvePlanApprovePreflight(root, planPath, specID string) (*planPreflightF
 		)
 	}
 
-	parentID, err := resolveTargetEpic(specID)
+	var parentMetadata map[string]interface{}
+	parentID, err := resolveTargetEpic(specID, &parentMetadata)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +225,7 @@ func resolvePlanApprovePreflight(root, planPath, specID string) (*planPreflightF
 		workChunks:         workChunks,
 		workChunksParseErr: workChunksParseErr,
 		parentID:           parentID,
+		parentMetadata:     parentMetadata,
 		children:           children,
 	}, nil
 }
@@ -245,9 +253,9 @@ func resolvePlanApprovePreflight(root, planPath, specID string) (*planPreflightF
 //     epic-less approved spec is spec-approve's warn-degraded epic create
 //     (internal/approve/spec.go:85-87) — a failure state to repair, not a
 //     supported no-epic plan-approve scenario (P10).
-func resolveTargetEpic(specID string) (string, error) {
+func resolveTargetEpic(specID string, metadata ...*map[string]interface{}) (string, error) {
 	c := phase.NewCache()
-	_, err := c.AllEpics()
+	epics, err := c.AllEpics()
 	if err != nil {
 		return "", guard.NewFailure(
 			fmt.Sprintf("cannot resolve the lifecycle epic for spec %s: querying epics failed: %v", specID, err),
@@ -255,6 +263,14 @@ func resolveTargetEpic(specID string) (string, error) {
 		)
 	}
 	if epicID, err := c.FindEpicBySpecID(specID); err == nil {
+		for _, epic := range epics {
+			if epic.ID == epicID {
+				if len(metadata) > 0 {
+					*metadata[0] = epic.Metadata
+				}
+				return epicID, nil
+			}
+		}
 		return epicID, nil
 	} else if !errors.Is(err, phase.ErrNoEpicForSpec) {
 		return "", err
@@ -268,61 +284,24 @@ func resolveTargetEpic(specID string) (string, error) {
 
 // ApprovePlan validates and approves a plan, creating beads and setting state.
 //
-// Gate-before-mutate (spec 119 R1): every refusal derivable from immutable
-// plan-content or epic/child-set facts is decided by resolvePlanApprovePreflight
-// BEFORE the first mutation. The sole exemption is the idempotent ADR-0034
-// migration immediately below, which — like the plan-content validation that
-// follows it — is itself read-only-or-idempotent and precedes preflight.
+// The document gate and all immutable plan checks precede migration, audit,
+// supersede, frontmatter, bead creation and commits.
 func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*PlanResult, error) {
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
 	}
-	// Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on first
-	// lifecycle command. No-op if the epic already has mindspec_phase, or
-	// when no epic exists yet (pre-approve-spec). Migration errors fail
-	// the command (spec 089 Requirement 9). This is the ONE exempt
-	// pre-preflight mutation (spec 119 R1).
-	if _, err := phase.EnsureMigrated(root, specID); err != nil {
+	specDir, err := workspace.SpecDir(root, specID)
+	if err != nil {
 		return nil, err
 	}
-	// Spec 128 Bead 2 (OQ-3 option 1): the v2 phase-semantics one-shot
-	// reconciliation runs beside EnsureMigrated, under the SAME
-	// ahead-of-preflight exemption (spec 119 R1) — it must run AFTER
-	// EnsureMigrated (LegacyPhaseSignature requires mindspec_phase
-	// metadata to already exist) and before any preflight refusal below.
-	// No-op when no epic exists yet (pre-approve-spec) or lookup fails —
-	// mirroring EnsureMigrated's own "nothing to migrate" tolerance.
-	//
-	// Round-1 panel G4 (documented fail-safe contract, the "document AND
-	// test" resolution rather than propagating): a genuine FindEpicBySpecID
-	// failure here is BEST-EFFORT-swallowed, not propagated, for two
-	// independent reasons that together prove a legacy epic can never be
-	// permanently skipped:
-	//  1. resolvePlanApprovePreflight (a few lines below) INDEPENDENTLY
-	//     re-resolves the SAME epic and refuses FAIL-CLOSED (P10) if THAT
-	//     lookup also fails — so a lookup failure that is NOT transient
-	//     (the epic genuinely cannot be found) still blocks the approve
-	//     before any mutation, never silently proceeding unreconciled.
-	//  2. If this lookup fails but a later one (here, in preflight, or in
-	//     ANY other lifecycle verb) succeeds, the reconciliation
-	//     opportunity is NOT lost — EnsurePhaseSemanticsV2 is idempotent
-	//     and re-runs at every OTHER verb's own ahead-of-preflight entry
-	//     (internal/approve/impl.go's ApproveImpl, complete.go's step-1.5
-	//     guard, next's claim path, repair.go's entry, release.go); the
-	//     very next lifecycle command
-	//     touching this epic reconciles it then. A failed attempt here
-	//     also writes NOTHING (TestEnsurePhaseSemanticsV2_ChildReadFailurePropagatesNoWrite),
-	//     so there is nothing to "undo" or leave half-applied.
-	// TestApprovePlan_V2PreflightLookupFailureDoesNotCrashOrBypassPreflight
-	// (plan_test.go) proves leg 1: a transient failure at THIS call site
-	// never lets ApprovePlan silently succeed past a real preflight
-	// refusal.
-	if epicID, epicErr := phase.FindEpicBySpecID(specID); epicErr == nil && epicID != "" {
-		if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
-			return nil, err
-		}
+	worktree := workspace.TreeRootForSpecDir(specDir)
+	var gateWarnings bytes.Buffer
+	outcome, err := runLifecycleGate(root, specID, "plan_approve", worktree, &gateWarnings)
+	if err != nil {
+		return nil, err
 	}
 	result := &PlanResult{SpecID: specID}
+	appendDocumentGateWarnings(&result.Warnings, gateWarnings.String())
 
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
 	vr := validate.ValidatePlan(root, specID)
@@ -350,10 +329,6 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 		return nil, planValidationFailure(specID, vr)
 	}
 
-	specDir, err := workspace.SpecDir(root, specID)
-	if err != nil {
-		return nil, err
-	}
 	planPath := filepath.Join(specDir, "plan.md")
 
 	// Preflight (spec 119 R1 / P9 / P10): resolve plan-content facts (bead
@@ -367,6 +342,24 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	facts, err := resolvePlanApprovePreflight(root, planPath, specID)
 	if err != nil {
 		return nil, err
+	}
+	if err := checkPlanResolutions(worktree, specID, facts.planContent, facts.parentMetadata, exec); err != nil {
+		return nil, err
+	}
+	// Run the idempotent legacy migration only after the document and
+	// resolution gates. An older approval needs no new spec panel.
+	if _, err := phase.EnsureMigrated(root, specID); err != nil {
+		return nil, err
+	}
+	// The phase generation reconciliation follows migration. Its lookup is
+	// best effort; preflight has already resolved the epic fail-closed.
+	if epicID, epicErr := phase.FindEpicBySpecID(specID); epicErr == nil && epicID != "" {
+		if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
+			return nil, err
+		}
+	}
+	if err := recordLifecycleGateAudit(facts.parentID, outcome, nil); err != nil {
+		return nil, documentGateAuditFailure(err)
 	}
 
 	// Spec 119 R11 (mindspec-jli8): the double-assignment plan-lint runs
@@ -573,6 +566,9 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, []s
 	planContent := string(data)
 
 	sections := validate.ParseBeadSections(planContent)
+	if err := checkBeadSectionContents(planContent, sections); err != nil {
+		return nil, nil, err
+	}
 	if len(sections) == 0 {
 		return nil, nil, nil
 	}
@@ -620,6 +616,9 @@ func createImplementationBeads(planPath, specID, parentID string) ([]string, []s
 // the historical silent `continue`.
 func createBeadsFromParsed(specDir, specID, parentID, planContent string, sections []validate.BeadSection, workChunks []validate.WorkChunk) ([]string, []string, error) {
 	var warnings []string
+	if err := checkBeadSectionContents(planContent, sections); err != nil {
+		return nil, nil, err
+	}
 
 	// --- Assemble shared context from spec.md ---
 	specContent := readFileOrEmpty(filepath.Join(specDir, "spec.md"))
@@ -1466,38 +1465,42 @@ func buildDesignField(specDir, requirements string, adrCitationIDs []string) str
 	return strings.Join(parts, "\n\n")
 }
 
+// checkBeadSectionContents checks every description before any bead is created.
+func checkBeadSectionContents(content string, sections []validate.BeadSection) error {
+	contents := extractBeadSectionContents(content)
+	for _, section := range sections {
+		if strings.TrimSpace(contents[section.Heading]) == "" {
+			return guard.NewFailure(
+				fmt.Sprintf("plan section %q has no extracted content", termsafe.Escape(section.Heading)),
+				"give each task section a body and run the same command again",
+			)
+		}
+	}
+	return nil
+}
+
 // extractBeadSectionContents extracts the raw markdown content for each ## Bead section.
 // Returns a map from heading text (e.g., "Bead 1: Populate Fields") to section content.
 func extractBeadSectionContents(content string) map[string]string {
 	result := make(map[string]string)
-	lines := strings.Split(content, "\n")
-
 	var currentHeading string
-	var currentLines []string
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "## Bead ") {
-			// Save previous section
-			if currentHeading != "" {
-				result[currentHeading] = strings.TrimSpace(strings.Join(currentLines, "\n"))
-			}
-			currentHeading = strings.TrimPrefix(line, "## ")
-			currentLines = nil
-			continue
-		}
-		// A non-bead ## heading ends the current bead section
-		if strings.HasPrefix(line, "## ") && currentHeading != "" {
-			result[currentHeading] = strings.TrimSpace(strings.Join(currentLines, "\n"))
-			currentHeading = ""
-			currentLines = nil
+	start := 0
+	for _, line := range panel.MarkdownLines(content) {
+		if line.Level != 2 || line.Heading == "" {
 			continue
 		}
 		if currentHeading != "" {
-			currentLines = append(currentLines, line)
+			result[currentHeading] = strings.TrimSpace(content[start:line.Offset])
+			currentHeading = ""
+		}
+		if line.Level == 2 && strings.HasPrefix(line.Heading, "Bead ") {
+			// Keep the source key used by ParseBeadSections.
+			currentHeading = strings.TrimPrefix(strings.TrimSuffix(content[line.Offset:line.End], "\n"), "## ")
+			start = line.End
 		}
 	}
 	if currentHeading != "" {
-		result[currentHeading] = strings.TrimSpace(strings.Join(currentLines, "\n"))
+		result[currentHeading] = strings.TrimSpace(content[start:])
 	}
 
 	return result

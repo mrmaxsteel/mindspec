@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -359,6 +360,13 @@ type BeadSection struct {
 func ParseBeadSections(content string) []BeadSection {
 	var sections []BeadSection
 	lines := strings.Split(content, "\n")
+	boundaries := make(map[int]panel.MarkdownLine)
+	for _, line := range panel.MarkdownLines(content) {
+		if line.Level == 2 && line.Heading != "" {
+			boundaries[line.Offset] = line
+		}
+	}
+	offset := 0
 
 	var current *BeadSection
 	inSteps := false
@@ -368,9 +376,11 @@ func ParseBeadSections(content string) []BeadSection {
 	var acLines []string
 
 	for _, line := range lines {
+		boundary, isBoundary := boundaries[offset]
+		offset += len(line) + 1
 		trimmed := strings.TrimSpace(line)
 
-		if strings.HasPrefix(line, "## Bead ") {
+		if isBoundary && strings.HasPrefix(boundary.Heading, "Bead ") {
 			if current != nil {
 				if len(acLines) > 0 {
 					current.AcceptanceCriteria = strings.TrimSpace(strings.Join(acLines, "\n"))
@@ -439,7 +449,7 @@ func ParseBeadSections(content string) []BeadSection {
 		}
 
 		// New top-level section ends bead
-		if strings.HasPrefix(line, "## ") && !strings.HasPrefix(line, "## Bead ") {
+		if isBoundary {
 			if current != nil {
 				if len(acLines) > 0 {
 					current.AcceptanceCriteria = strings.TrimSpace(strings.Join(acLines, "\n"))
