@@ -8,11 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `complete --check` runs the doc and ADR gates without changes to the bead or workspace. It skips panel review.
+- Content gates warn when no domain owns a changed file.
 - `enforcement.panel_presence` selects `warn` (default) or `enforce` for missing panels.
 - `complete --no-doc-impact "<domain>: <reason>"` records that a domain needs no doc update.
 - `panel defer --to-plan` carries spec findings into plan resolutions. Verdict change items accept an optional `artifact_path`.
 
 ### Changed
+- `complete` reports all content-gate refusals in one run.
 - `spec approve`, `plan approve` and `impl approve` run the panel gate before their first write.
 - `complete --check` refuses `--merge-only`, `--resolve-merge`, `--override-adr`, `--supersede-adr` and `--allow-net-deletion`.
 - `complete --allow-doc-skew` requires `--doc-owner` with another open bead in the same epic.

@@ -57,7 +57,11 @@ func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec
 	if err != nil || !cfg.Enforcement.PanelGate || os.Getenv(panel.SkipPanelEnv) == "1" {
 		return o, false, err
 	}
-	head, err := exec.RevParseRef(wt, "refs/heads/spec/"+specID)
+	branch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return o, false, err
+	}
+	head, err := exec.RevParseRef(wt, "refs/heads/"+branch)
 	if err != nil {
 		return o, false, err
 	}
