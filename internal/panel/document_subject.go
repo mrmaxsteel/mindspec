@@ -194,8 +194,20 @@ func DocumentSubjectContent(name string, data []byte, specDir, gate string) ([]b
 }
 
 func stripApproval(body []byte) []byte {
+	start, end, _, matches := ApprovalSection(body)
+	if start < 0 || !matches {
+		return body
+	}
+	return append(append([]byte{}, body[:start]...), body[end:]...)
+}
+
+// ApprovalSection returns the section range and its first non-owned line.
+// A matching section has each approval bullet once. An absent section has
+// start -1. An incomplete section reports its heading as the non-owned line.
+// This matcher also controls which section the approval writer can replace.
+func ApprovalSection(body []byte) (start, end int, nonOwnedLine string, matches bool) {
 	text := string(body)
-	start, end := -1, len(text)
+	start, end = -1, len(text)
 	scanApprovalDigestLines(text, func(offset int, line string) {
 		if start < 0 && line == "## Approval" {
 			start = offset
@@ -206,7 +218,7 @@ func stripApproval(body []byte) []byte {
 		}
 	})
 	if start < 0 {
-		return body
+		return start, end, "", false
 	}
 	seen := map[string]bool{}
 	for _, line := range strings.Split(text[start:end], "\n")[1:] {
@@ -222,13 +234,13 @@ func stripApproval(body []byte) []byte {
 			}
 		}
 		if !matched {
-			return body
+			return start, end, line, false
 		}
 	}
 	if len(seen) != 4 {
-		return body
+		return start, end, "## Approval", false
 	}
-	return []byte(text[:start] + text[end:])
+	return start, end, "", true
 }
 
 // scanApprovalDigestLines keeps the stored digest input stable.

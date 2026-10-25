@@ -31,6 +31,8 @@ type Outcome struct {
 	Abandoned     bool
 	Absent        bool
 	AbandonReason string
+	// LivePanelSlug names the first non-abandoned panel that passed all checks.
+	LivePanelSlug string
 }
 
 var lifecycleExecutorFn = func(root string) executor.Executor { return executor.NewMindspecExecutor(root) }
@@ -143,6 +145,9 @@ func runLifecycleGate(root, specID, gate, worktree string, out io.Writer) (Outco
 		}
 		if err := panel.CheckCore3(reg); err != nil {
 			return refuse(reg.Slug(), "coverage", err)
+		}
+		if o.LivePanelSlug == "" {
+			o.LivePanelSlug = reg.Slug()
 		}
 	}
 	if o.Abandoned {

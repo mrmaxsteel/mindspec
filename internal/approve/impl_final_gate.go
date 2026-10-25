@@ -1,13 +1,18 @@
 package approve
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
+	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -21,7 +26,7 @@ import (
 
 // implFinalReviewGate runs on every pre-close pass while the spec branch exists.
 // A published spec without its worktree can only replay the same subject.
-func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec executor.Executor) (Outcome, bool, error) {
+func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec executor.Executor, placeholder implPlaceholderWrite) (Outcome, bool, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return Outcome{}, false, err
@@ -49,6 +54,24 @@ func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec
 			fmt.Sprintf("re-create the spec worktree at spec/%s, then run a final-review panel", idrender.Spec(specID)))
 	}
 	o, err := runLifecycleGate(root, specID, "final_review", wt, warnWriter)
+	if err != nil || !cfg.Enforcement.PanelGate || os.Getenv(panel.SkipPanelEnv) == "1" {
+		return o, false, err
+	}
+	head, err := exec.RevParseRef(wt, "refs/heads/spec/"+specID)
+	if err != nil {
+		return o, false, err
+	}
+	var reviewed []string
+	for _, reg := range lifecycleRegistrations(panel.Scan(complete.PanelGateRoots(root, wt, specID)...), specID, "final_review") {
+		if !reg.Panel.Abandoned {
+			reviewed = append(reviewed, reg.Panel.ReviewedHeadSHA)
+		}
+	}
+	// Without a live review, only pending files need this check.
+	if len(reviewed) == 0 {
+		reviewed = append(reviewed, head)
+	}
+	err = implPlaceholderPreflight(exec, wt, specDir, head, reviewed, placeholder, true)
 	return o, false, err
 }
 
@@ -81,12 +104,12 @@ func implPublishedSubject(root, specID, epicID, specDir string, exec executor.Ex
 	if digests[0] != digests[1] {
 		return refuse("stale subject: content changed after publication")
 	}
-	return nil
+	return implPlaceholderPreflight(exec, root, specDir, "refs/heads/"+branch, []string{tip}, implPlaceholderWrite{}, false)
 }
 
 // implBeadWorktreePreflight checks the same plan-scoped worktree population
 // that finalization consumes. Unlike the review subject it excludes no dirt.
-func implBeadWorktreePreflight(root, specID string, allowIDs []string, exec executor.Executor) error {
+func implBeadWorktreePreflight(specID string, allowIDs []string, exec executor.Executor) error {
 	entries, err := implWorktreeListFn()
 	retry := fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID))
 	if err != nil {
@@ -187,4 +210,224 @@ func implEnsurePlaceholder(root, id, title string, opts adr.CreateOpts) error {
 	}
 	_, err = implCreateWithIDFn(root, id, title, opts)
 	return err
+}
+
+// implPlaceholderWrite has the same domain seed as the placeholder writer.
+type implPlaceholderWrite struct {
+	ID      string
+	Domains []string
+}
+
+func implADRPath(name string) bool {
+	for _, root := range []string{".mindspec/adr/", ".mindspec/docs/adr/", "docs/adr/"} {
+		if strings.HasPrefix(name, root) {
+			return true
+		}
+	}
+	return false
+}
+
+// implPlaceholderTree uses the digest's exact placeholder matcher.
+func implPlaceholderTree(exec executor.Executor, worktree, specDir, ref string) (map[string][]byte, error) {
+	listing, err := exec.LsTree(worktree, ref)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string][]byte{}
+	for _, line := range strings.Split(listing, "\n") {
+		if line == "" {
+			continue
+		}
+		meta, name, ok := strings.Cut(line, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 {
+			return nil, fmt.Errorf("malformed subject tree listing")
+		}
+		if strings.HasPrefix(name, "\"") {
+			name, err = strconv.Unquote(name)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !implADRPath(name) || fields[1] != "blob" || (fields[0] != "100644" && fields[0] != "100755") {
+			continue
+		}
+		data, err := exec.FileAtRef(ref, name)
+		if err != nil {
+			return nil, err
+		}
+		_, omit, err := panel.DocumentSubjectContent(name, data, specDir, "final_review")
+		if err != nil {
+			return nil, err
+		}
+		if omit {
+			result[name] = data
+		}
+	}
+	return result, nil
+}
+
+func implPlaceholderDirt(exec executor.Executor, worktree, specDir string) (map[string][]byte, error) {
+	status, err := exec.Status(worktree)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string][]byte{}
+	read := func(name string) error {
+		if !implADRPath(name) {
+			return nil
+		}
+		full := filepath.Join(worktree, filepath.FromSlash(name))
+		info, err := os.Lstat(full)
+		if os.IsNotExist(err) {
+			result[name] = nil
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		file, err := safefile.Open(full)
+		if err != nil {
+			return err
+		}
+		data, readErr := io.ReadAll(file)
+		closeErr := file.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		_, omit, err := panel.DocumentSubjectContent(name, data, specDir, "final_review")
+		if err != nil {
+			return err
+		}
+		if omit {
+			result[name] = data
+		}
+		return nil
+	}
+	for _, line := range strings.Split(status, "\n") {
+		name, err := panel.PorcelainPath(line)
+		if err != nil {
+			return nil, err
+		}
+		if name == "" {
+			continue
+		}
+		if strings.HasSuffix(name, "/") {
+			err = filepath.WalkDir(filepath.Join(worktree, filepath.FromSlash(name)), func(full string, entry os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if entry.IsDir() {
+					return nil
+				}
+				rel, err := filepath.Rel(worktree, full)
+				if err != nil {
+					return err
+				}
+				return read(filepath.ToSlash(rel))
+			})
+		} else {
+			err = read(name)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func implPlaceholderPreflight(exec executor.Executor, worktree, specDir, head string, reviewed []string, write implPlaceholderWrite, withDirt bool) error {
+	refuse := func(detail string) error {
+		return guard.NewFailure("gate final_review: "+detail,
+			"commit the ADR and run a new final-review round, or remove the file")
+	}
+	current, err := implPlaceholderTree(exec, worktree, specDir, head)
+	if err != nil {
+		return refuse(termsafe.Escape(err.Error()))
+	}
+	changed := map[string][][]byte{}
+	for _, ref := range reviewed {
+		before, err := implPlaceholderTree(exec, worktree, specDir, ref)
+		if err != nil {
+			return refuse(termsafe.Escape(err.Error()))
+		}
+		for name, data := range current {
+			if !bytes.Equal(before[name], data) {
+				changed[name] = append(changed[name], data)
+			}
+		}
+		for name := range before {
+			if _, present := current[name]; !present {
+				changed[name] = append(changed[name], nil)
+			}
+		}
+	}
+	pending := map[string][]byte{}
+	if withDirt {
+		pending, err = implPlaceholderDirt(exec, worktree, specDir)
+		if err != nil {
+			return refuse(termsafe.Escape(err.Error()))
+		}
+		for name, data := range pending {
+			if !bytes.Equal(current[name], data) {
+				changed[name] = append(changed[name], data)
+			}
+		}
+	}
+	allowed := ""
+	if write.ID != "" {
+		full, err := workspace.ADRFilePath(worktree, write.ID)
+		if err != nil {
+			return refuse(termsafe.Escape(err.Error()))
+		}
+		rel, err := filepath.Rel(worktree, full)
+		if err != nil {
+			return refuse(termsafe.Escape(err.Error()))
+		}
+		allowed = filepath.ToSlash(rel)
+	}
+	domains := "<comma-separated list>"
+	if len(write.Domains) > 0 {
+		domains = strings.Join(write.Domains, ", ")
+	}
+	// The writer keeps an exact existing placeholder on replay. Retain its
+	// creation date so a retry on a later day compares the same text.
+	creationDate := time.Now().Format("2006-01-02")
+	retained := current[allowed]
+	if data, present := pending[allowed]; present {
+		retained = data
+	}
+	if bytes.Contains(retained, []byte("\n- **Domain(s)**: "+domains+"\n")) {
+		for _, line := range strings.Split(string(retained), "\n") {
+			if value, ok := strings.CutPrefix(line, "- **Date**: "); ok {
+				creationDate = value
+				break
+			}
+		}
+	}
+	var paths []string
+	for name, versions := range changed {
+		for _, data := range versions {
+			// The digest matcher already checks every other template byte.
+			// Use the creation date and the seed known before the gate.
+			text := string(data)
+			matches := strings.Contains(text, "\n- **Domain(s)**: "+domains+"\n") &&
+				strings.Contains(text, "\n- **Date**: "+creationDate+"\n")
+			if name != allowed || !matches {
+				paths = append(paths, termsafe.Escape(name))
+				break
+			}
+		}
+	}
+	if len(paths) > 0 {
+		sort.Strings(paths)
+		return refuse("placeholder changes are outside this approval's write set:\n" + strings.Join(paths, "\n"))
+	}
+	return nil
 }

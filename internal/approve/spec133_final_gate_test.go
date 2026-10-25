@@ -454,7 +454,7 @@ func TestS133FinalGate_MergedDirtyWorktreesAndRecovery(t *testing.T) {
 					t.Fatal("complete did not remove bead worktree")
 				}
 				f.worktrees.entries = nil
-				if _, err := f.approve(); err != nil {
+				if _, err := ApproveImpl(f.root, "010-test", f.exec, ImplOpts{SupersedeADR: "ADR-9801"}); err != nil {
 					t.Fatalf("approval after complete: %v", err)
 				}
 			})
@@ -470,6 +470,7 @@ func TestS133FinalGate_FaultsAndReruns(t *testing.T) {
 				opts := ImplOpts{}
 				switch site {
 				case "spec commit":
+					opts.SupersedeADR = "ADR-9801"
 					// The auto_merge hook follows the spec artifact commit. All beads
 					// are merged, so this leg makes no further content change.
 					if _, err := adr.CreateWithID(f.specWT, "ADR-9801", "Placeholder for ADR-9801", adr.CreateOpts{}); err != nil {
@@ -645,7 +646,7 @@ func TestS133FinalGate_NoWorktreeAndAlreadyLanded(t *testing.T) {
 				if change == "excluded" {
 					// Only subject equality is under test here. The existing merge
 					// destruction guard can still refuse an export-only stale snapshot.
-					_, replay, err := implFinalReviewGate(f.root, "010-test", "epic-parent", "done", filepath.Join(f.root, ".mindspec/specs/010-test"), f.exec)
+					_, replay, err := implFinalReviewGate(f.root, "010-test", "epic-parent", "done", filepath.Join(f.root, ".mindspec/specs/010-test"), f.exec, implPlaceholderWrite{})
 					if err != nil || !replay {
 						t.Fatalf("excluded content changed published subject: replay=%v %v", replay, err)
 					}

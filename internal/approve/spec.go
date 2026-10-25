@@ -15,6 +15,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
@@ -122,7 +123,7 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 
 	// Step 2: Update spec frontmatter + markdown Approval section.
 	specPath := filepath.Join(specDir, "spec.md")
-	if err = updateSpecApproval(specPath, approvedBy); err != nil {
+	if err = updateSpecApprovalWithGate(specPath, approvedBy, outcome); err != nil {
 		return nil, fmt.Errorf("updating spec approval: %w", err)
 	}
 
@@ -311,9 +312,23 @@ func backfillExistingEpicPhase(root, epicID string) (message string, err error) 
 // updateSpecApproval reads a spec file and updates canonical frontmatter fields
 // plus the markdown ## Approval section.
 func updateSpecApproval(specPath, approvedBy string) error {
+	return updateSpecApprovalWithGate(specPath, approvedBy, Outcome{})
+}
+
+// updateSpecApprovalWithGate keeps reviewed subject content intact for a live panel.
+func updateSpecApprovalWithGate(specPath, approvedBy string, outcome Outcome) error {
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		return fmt.Errorf("reading spec: %w", err)
+	}
+
+	livePanel := outcome.LivePanelSlug != ""
+	if livePanel {
+		_, body, _ := splitFrontmatter(string(data))
+		if start, _, line, matches := panel.ApprovalSection([]byte(body)); start >= 0 && !matches {
+			return guard.NewFailure("gate spec_approve panel "+termsafe.Escape(outcome.LivePanelSlug)+": approval section: ## Approval contains subject content: "+termsafe.Escape(strconv.Quote(line)),
+				"move the text out of the ## Approval section, then run a new spec-approve round")
+		}
 	}
 
 	now := time.Now().UTC()
@@ -322,6 +337,24 @@ func updateSpecApproval(specPath, approvedBy string) error {
 		return err
 	}
 	content = upsertSpecApprovalSection(content, approvedBy, now)
+
+	if livePanel {
+		// Check the full result with the digest reader before the write. This also
+		// protects sections whose heading the Markdown writer cannot see.
+		const subjectDir = "approval"
+		before, _, err := panel.DocumentSubjectContent(subjectDir+"/spec.md", data, subjectDir, "spec_approve")
+		if err != nil {
+			return err
+		}
+		after, _, err := panel.DocumentSubjectContent(subjectDir+"/spec.md", []byte(content), subjectDir, "spec_approve")
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(before, after) {
+			return guard.NewFailure("gate spec_approve panel "+termsafe.Escape(outcome.LivePanelSlug)+": approval section: ## Approval rewrite changes subject content",
+				"move the text out of the ## Approval section, then run a new spec-approve round")
+		}
+	}
 
 	return os.WriteFile(specPath, []byte(content), 0644)
 }

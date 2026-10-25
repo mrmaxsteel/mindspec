@@ -481,7 +481,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, err
 	}
 
-	if err := implBeadWorktreePreflight(root, specID, lifecycleAllowSet, exec); err != nil {
+	if err := implBeadWorktreePreflight(specID, lifecycleAllowSet, exec); err != nil {
 		return nil, err
 	}
 
@@ -491,7 +491,15 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if err := implPanelDeferralPreflight(root, specID); err != nil {
 		return nil, err
 	}
-	gateOutcome, _, err := implFinalReviewGate(root, specID, epicID, phaseDetail.Stored, specDir, exec)
+	var seedDomains []string
+	for _, finding := range adrFindings {
+		if finding.Kind == "uncovered" && finding.Domain != "" {
+			seedDomains = []string{finding.Domain}
+			break
+		}
+	}
+	placeholder := implPlaceholderWrite{ID: o.SupersedeADR, Domains: seedDomains}
+	gateOutcome, _, err := implFinalReviewGate(root, specID, epicID, phaseDetail.Stored, specDir, exec, placeholder)
 	if err != nil {
 		return nil, err
 	}
@@ -516,13 +524,6 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// follows the write.
 	var supersedeNewID string
 	if o.SupersedeADR != "" {
-		var seedDomains []string
-		for _, f := range adrFindings {
-			if f.Kind == "uncovered" && f.Domain != "" {
-				seedDomains = []string{f.Domain}
-				break
-			}
-		}
 		title := "Placeholder for " + o.SupersedeADR
 		writeRoot := workspace.TreeRootForSpecDir(specDir)
 		if writeRoot == "" {
