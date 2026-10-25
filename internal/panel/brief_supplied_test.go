@@ -41,6 +41,8 @@ func TestSuppliedBriefQuotedSyntax(t *testing.T) {
 		"## Scope\n    ```md\n<!-- TODO(skill): fill -->\n",
 		"## Scope\n\t```md\n<!-- TODO(skill): fill -->\n",
 		"## Scope\nTODO(skill): fill -->\n",
+		"<!-- note\nTODO(skill): fill\n-->\n",
+		"<!-- note\nTODO (Skill): fill\n",
 		"## Scope\n<!-- TODO (skill): fill -->\n",
 	} {
 		file := filepath.Join(t.TempDir(), "brief.md")
@@ -52,6 +54,18 @@ func TestSuppliedBriefQuotedSyntax(t *testing.T) {
 		}
 		if _, err := ReadFilledBrief(file); err == nil || !strings.Contains(err.Error(), "TODO") {
 			t.Errorf("dispatch stub accepted: %q %v", body, err)
+		}
+	}
+}
+
+func TestSuppliedBriefUnclosedFenceHeader(t *testing.T) {
+	for _, marker := range []string{"<!-- mindspec:panel-header -->", "<!-- /mindspec:panel-header -->"} {
+		file := filepath.Join(t.TempDir(), "brief.md")
+		if err := os.WriteFile(file, []byte("Instructions\n```md\n"+marker+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readBriefFile(file); err == nil || !strings.Contains(err.Error(), "managed-header") {
+			t.Fatalf("accepted marker after unclosed fence: %s: %v", marker, err)
 		}
 	}
 }

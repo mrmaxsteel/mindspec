@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -365,10 +366,16 @@ func TestComplete_SecondMergeOnlyRefuses(t *testing.T) {
 	}
 }
 func (f *windowFixture) registerLedger() string {
+	return f.registerLedgerWithExclude(true)
+}
+
+func (f *windowFixture) registerLedgerWithExclude(exclude bool) string {
 	f.t.Helper()
 	// Model local review ignores only in tests that register a local panel.
 	// Source-safety fixtures intentionally leave lookalike paths unignored.
-	writeFile(f.t, f.root, ".git/info/exclude", ".mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n")
+	if exclude {
+		writeFile(f.t, f.root, ".git/info/exclude", ".mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n")
+	}
 	specDir, err := workspace.SpecDir(f.root, closingSpec)
 	if err != nil {
 		f.t.Fatal(err)
@@ -953,12 +960,19 @@ func TestComplete_FreshInitIgnoredLedger(t *testing.T) {
 			if err := f.ex.CommitAll(f.specWT, "initialize local review ignores"); err != nil {
 				t.Fatal(err)
 			}
-			ledger := f.registerLedger()
+			ledger := f.registerLedgerWithExclude(false)
 			before, err := os.ReadFile(filepath.Join(f.specWT, ledger))
 			if err != nil {
 				t.Fatal(err)
 			}
-			gitRun(t, f.specWT, "check-ignore", "-q", "--", ledger)
+			ignoreBytes, err := exec.Command("git", "-C", f.specWT, "check-ignore", "-v", "--", ledger).CombinedOutput()
+			if err != nil {
+				t.Fatalf("check-ignore: %s %v", ignoreBytes, err)
+			}
+			ignore := string(ignoreBytes)
+			if !strings.HasPrefix(ignore, ".gitignore:") {
+				t.Fatalf("review ignore must come from initialized .gitignore: %s", ignore)
+			}
 			if mergeOnly {
 				f.mergedOnly()
 			}

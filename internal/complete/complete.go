@@ -588,6 +588,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		)
 	}
 
+	ledgerWorktree, ledgerPaths, ledgerErr := SpecLedgerPaths(root, specID, beadID)
+	if ledgerErr != nil {
+		return nil, ledgerErr
+	}
+	ledgerPaths, ledgerErr = unignoredLedgers(ledgerWorktree, ledgerPaths, exec)
+	if ledgerErr != nil {
+		return nil, ledgerErr
+	}
+
 	// Spec 107 wave 1 (mindspec-oexu.3): the spec→epic mapping is immutable for
 	// the life of this call, so resolve it ONCE through a shared cache and
 	// thread that cache through the migration, the impl-only guard, and the
@@ -1153,7 +1162,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 
 	// A closed, unmerged bead needs no second close. Keep its workspace until
-	// the merge binding and tracker export are durable, then finish cleanup.
+	// the merge binding, export and ledger are durable, then finish cleanup.
 	if branchPresent && reconcile == nil && closedAtEntry {
 		if err := exec.MergeBead(beadID, specBranch, opts.AllowNetDeletion, opts.ResolveMerge, executor.MergeBeadOptions{Closed: true}); err != nil {
 			retry := opts
@@ -1404,6 +1413,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s%s", safeBeadID, rerunSuffix))
 	}
 
+	// The bead merge succeeded; persist eligible ledgers in the spec checkout.
+	ledgerCommitErr := commitPanelLedgers(ledgerWorktree, ledgerPaths, exec)
+	if ledgerCommitErr != nil {
+		ledgerCommitErr = fmt.Errorf("bead is closed and merged; only the panel ledger commit remains: %w", ledgerCommitErr)
+		fmt.Fprintln(os.Stderr, ledgerCommitErr)
+		ledgerCommitErr = &ReportedError{Err: ledgerCommitErr}
+	}
+
 	// 5.1. Terminal (T) marker clear (Spec 128 Bead 6): run on BOTH the
 	// ordinary completion path (exec.CompleteBead just merged and cleaned
 	// up bead/<id> — the write-ahead marker's job is done) and the
@@ -1521,7 +1538,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		var readyErr *postCloseReadyError
 		result.postCloseReadyFailed = errors.As(advanceErr, &readyErr)
 		result.NextSpec = specID
-		return result, nil
+		if ledgerCommitErr != nil {
+			return result, &ReportedError{Err: errors.Join(advanceErr, ledgerCommitErr)}
+		}
+		return result, ledgerCommitErr
 	}
 	result.NextMode = nextMode
 	result.NextBead = nextBead
@@ -1534,7 +1554,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// entirely above on the indeterminate return — no value fabricated
 	// from a nil child set is ever written (AC-4b).
 	if nextMode != "" && epicID != "" {
-		completeSyncPhase(root, epicID, nextMode, beadID)
+		if syncErr := completeSyncPhase(root, epicID, nextMode, beadID); syncErr != nil && ledgerCommitErr != nil {
+			ledgerCommitErr = &ReportedError{Err: errors.Join(syncErr, ledgerCommitErr)}
+		}
 	}
 
 	// ADR-0023: no focus write — state is derived from beads.
@@ -1542,7 +1564,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		result.NextSpec = ""
 	}
 
-	return result, nil
+	return result, ledgerCommitErr
 }
 
 // completeSyncPhase performs step 6.5's best-effort mindspec_phase cache

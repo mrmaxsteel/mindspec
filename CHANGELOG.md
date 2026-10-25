@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Upgrade:** run `mindspec init` after upgrading to remove the two old ledger ignore exceptions. Disposition ledgers in the `.mindspec` layouts are ignored by default and stay local.
-- **Panel disposition ledgers are local** — `mindspec init` removes the former ledger ignore exceptions. Completion and implementation approval no longer refuse an ignored, untracked or dirty ledger. Gate decisions still read the working ledger. Git decides what lifecycle commits include: already-tracked ledgers and unignored legacy-layout ledgers are committed as before.
+- **Panel disposition ledgers are local** — `mindspec init` removes the former ledger ignore exceptions. Completion and implementation approval no longer refuse an ignored, untracked or dirty ledger. Gate decisions still read the working ledger. Git decides what lifecycle commits include: bead close publishes tracked or unignored spec ledgers, including edits after merge-only. Unignored legacy-layout ledgers are committed with the bead artifacts.
 
 ### Fixed
 - **Panel dispatch diagnostics and briefs** — verify errors retain their message, slot setup failures report a reason without using a reviewer retry, and prompt and launch refuse unfinished briefs. `panel create --brief-file <absolute-path>` copies the authored body beneath the managed review header; the panel workflow requires its path as `brief_file`.

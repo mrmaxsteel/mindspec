@@ -116,6 +116,13 @@ func TestWorkflowCreateRefusal(t *testing.T) {
 	}
 }
 func TestWorkflowProcessFailures(t *testing.T) {
+	t.Run("recover verify failure preserves sibling", func(t *testing.T) {
+		workflowUnit(t, `cli=async()=>({exit:0,stdout:'',stderr:''});
+ roster=async()=>{throw new Error('verify unavailable')};
+ const sibling={slot:'R2',kind:'process',status:'final'};
+ const results=await Promise.all([runSlot({slot:'R1',kind:'process',status:'damaged'}),runSlot(sibling)]);
+ if(results[0].error!=='verify unavailable' || results[0].slot!=='R1' || results[1]!==sibling)throw Error(JSON.stringify(results));`)
+	})
 	for _, verb := range []string{"LAUNCH", "RECOVER"} {
 		status := "missing"
 		if verb == "RECOVER" {

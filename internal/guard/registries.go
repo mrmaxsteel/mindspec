@@ -187,6 +187,10 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	{File: "internal/approve/impl.go", Func: "implFinalizeFailure", Detail: "arg1:unprovable",
 		Rationale:  "The body contains a state line and escaped inner error lines. This call adds only an ID-rendered implementation approval command when the inner error has no recovery.",
 		Obligation: "internal/approve TestApproveImpl_PostCloseBareErrorGetsRerun pins the safe re-run command. TestApproveImpl_PostCloseConflictKeepsInnerRecovery pins unchanged inner recovery lines and no extra command."},
+	{File: "internal/complete/closing.go", Func: "commitPanelLedgers", Detail: "arg1:unprovable",
+		Rationale:  "LedgerCommitRecovery quotes checkout and ledger paths, escaping terminal controls, and emits scoped git add and commit commands.",
+		Obligation: "TestCommitPanelLedgersFailureRecovery pins commit failure and scoped recovery operands."},
+
 	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "variadic-spread:commands", Rationale: "Busy-worktree recovery names status, merge repair, and complete. An own-branch merge offers abort before the follow-up sequence.", Obligation: "TestComplete_ClosedOwnMergeInProgressAborts and TestComplete_ClosedMergedForeignMergeInProgressRefuses pin identity and state preservation."},
 	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "arg1:unprovable", Rationale: "The command is a status read in the validated spec worktree.", Obligation: "TestComplete_ClosingPathSpecWorktreeBusyRefuses pins the pre-close refusal."},
 	{File: "internal/complete/closing.go", Func: "runMergedCompletion", Detail: "arg2:unprovable", Rationale: "The retry uses a validated bead ID and shell-quoted override reasons.", Obligation: "TestComplete_OverrideRunRecoveryRepeatsFlag pins retry flags and reasons."},

@@ -131,8 +131,12 @@ async function runSlot(initial) {
       if (slot.status === "damaged") {
         const recovered = await cli(RECOVER, { slot: slot.slot });
         if (recovered.exit !== 0) return { ...slot, error: failure("recover", recovered) };
-        const next = (await roster()).slots.find(s => s.slot === slot.slot);
-        return next || { ...slot, error: "recovered slot disappeared from verify" };
+        try {
+          const next = (await roster()).slots.find(s => s.slot === slot.slot);
+          return next || { ...slot, error: "recovered slot disappeared from verify" };
+        } catch (error) {
+          return { ...slot, error: String(error?.message ?? error) };
+        }
       }
       if (!["missing", "draft", "unsubmitted", "void", "launch_failed", "malformed"].includes(slot.status)) return slot;
       if (acted) { if (retried) return slot; retried = true; }

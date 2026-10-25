@@ -3,6 +3,7 @@ package complete
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,8 +67,12 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 	if err != nil {
 		return nil, completionFailure(beadID, opts, "reading panel ledger paths", err)
 	}
-	_ = ledgerWT
+	ledgers, err = unignoredLedgers(ledgerWT, ledgers, exec)
+	if err != nil {
+		return nil, completionFailure(beadID, opts, "checking panel ledger ignores", err)
+	}
 	allowed := map[string]bool{".beads/issues.jsonl": true}
+	// Staged ledger paths are allowed because the close publishes them.
 	for _, path := range ledgers {
 		allowed[path] = true
 	}
@@ -145,10 +150,10 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 	if err := reconcilePendingRefutations(beadID); err != nil {
 		return nil, err
 	}
-	return closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath, row, decisions, closed, exec, opts)
+	return closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath, row, decisions, ledgers, closed, exec, opts)
 }
 
-func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath string, row executor.MergeIdentity, decisions []PanelGateResult, closed bool, exec executor.Executor, opts CompleteOpts) (*Result, error) {
+func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath string, row executor.MergeIdentity, decisions []PanelGateResult, ledgers []string, closed bool, exec executor.Executor, opts CompleteOpts) (*Result, error) {
 	for step := 1; step <= 6; step++ {
 		if closingStepHook != nil {
 			if err := closingStepHook(step); err != nil {
@@ -197,9 +202,9 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath st
 			}
 		case 4:
 			var done bool
-			done, err = closePublicationDone(beadID, specBranch, exec)
+			done, err = closePublicationDone(beadID, specBranch, specWT, ledgers, exec)
 			if err == nil && !done {
-				paths := []string{".beads/issues.jsonl"}
+				paths := append([]string{".beads/issues.jsonl"}, ledgers...)
 				err = exec.PublishBeadClose(specWT, paths)
 			}
 		case 5:
@@ -325,9 +330,9 @@ func mergedRangeFailure(root, beadID, specBranch, specWT string, row executor.Me
 	return guard.NewFailure(text, commands...)
 }
 
-// closePublicationDone uses the committed tracker close.
+// closePublicationDone uses the committed close and current ledger bytes.
 // Later metadata-marker cleanup does not invalidate a published close.
-func closePublicationDone(beadID, specBranch string, exec executor.Executor) (bool, error) {
+func closePublicationDone(beadID, specBranch, specWT string, ledgers []string, exec executor.Executor) (bool, error) {
 	data, present, err := exec.FileAtRefOrAbsent(specBranch, ".beads/issues.jsonl")
 	if err != nil || !present {
 		return false, err
@@ -350,6 +355,19 @@ func closePublicationDone(beadID, specBranch string, exec executor.Executor) (bo
 	}
 	if !closed {
 		return false, nil
+	}
+	for _, path := range ledgers {
+		committed, present, err := exec.FileAtRefOrAbsent(specBranch, path)
+		if err != nil || !present {
+			return false, err
+		}
+		current, err := os.ReadFile(filepath.Join(specWT, path))
+		if err != nil {
+			return false, err
+		}
+		if !bytes.Equal(committed, current) {
+			return false, nil
+		}
 	}
 	return true, nil
 }
@@ -400,4 +418,41 @@ func SpecLedgerPaths(root, specID, beadID string) (string, []string, error) {
 		paths = append(paths, filepath.ToSlash(rel))
 	}
 	return wt, paths, nil
+}
+
+// unignoredLedgers lets Git decide which ledgers belong in lifecycle commits.
+// Plain check-ignore treats tracked files as unignored, even under ignore rules.
+func unignoredLedgers(wt string, paths []string, exec executor.Executor) ([]string, error) {
+	var publish []string
+	for _, path := range paths {
+		err := exec.CheckIgnore(wt, path)
+		if err == nil {
+			continue
+		}
+		var exit interface{ ExitCode() int }
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return nil, fmt.Errorf("checking panel ledger %s ignore status: %w", termsafe.Escape(path), err)
+		}
+		publish = append(publish, path)
+	}
+	return publish, nil
+}
+
+// LedgerCommitRecovery describes a scoped retry for an eligible ledger commit.
+func LedgerCommitRecovery(wt string, paths []string) string {
+	quoted := make([]string, len(paths))
+	for i, file := range paths {
+		quoted[i] = ledgerShellArg(file)
+	}
+	return fmt.Sprintf(`git -C %s add -- %s && git -C %s commit -m "chore(panel): ledger"`, ledgerShellArg(wt), strings.Join(quoted, " "), ledgerShellArg(wt))
+}
+
+func commitPanelLedgers(wt string, paths []string, exec executor.Executor) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := exec.CommitPaths(wt, "chore(panel): ledger", paths); err != nil {
+		return guard.NewFailure("could not commit panel ledger: "+termsafe.Escape(err.Error()), LedgerCommitRecovery(wt, paths))
+	}
+	return nil
 }

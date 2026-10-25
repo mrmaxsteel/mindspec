@@ -287,7 +287,7 @@ func readBriefFile(file string) ([]byte, error) {
 		return nil, fmt.Errorf("cannot read brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
 	}
 	hasHeader := false
-	scanNonFenceLines(string(data), func(_ int, line string) {
+	scanMarkdownProse(string(data), true, func(_ int, line string) {
 		if suppliedHeaderMarker.MatchString(strings.TrimSpace(line)) {
 			hasHeader = true
 		}
@@ -305,6 +305,7 @@ func readBriefFile(file string) ([]byte, error) {
 }
 
 var briefStub = regexp.MustCompile(`(?i)<!--\s*TODO\s*\(skill\)|TODO\s*\(skill\)[^\n]*-->`)
+var briefStubToken = regexp.MustCompile(`(?i)TODO\s*\(skill\)`)
 var suppliedHeaderMarker = regexp.MustCompile(`(?i)^<!--\s*/?\s*mindspec:panel-header\s*-->$`)
 
 func containsBriefStub(body string) bool {
@@ -313,7 +314,25 @@ func containsBriefStub(body string) bool {
 		prose.WriteString(withoutInlineCode(line))
 		prose.WriteByte('\n')
 	})
-	return briefStub.MatchString(prose.String())
+	text := prose.String()
+	if briefStub.MatchString(text) {
+		return true
+	}
+	// Comment state spans prose lines, while quoted examples remain excluded.
+	for {
+		_, rest, opened := strings.Cut(text, "<!--")
+		if !opened {
+			return false
+		}
+		comment, tail, closed := strings.Cut(rest, "-->")
+		if briefStubToken.MatchString(comment) {
+			return true
+		}
+		if !closed {
+			return false
+		}
+		text = tail
+	}
 }
 
 // Matched backtick runs quote examples; an unmatched run remains literal text.

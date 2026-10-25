@@ -244,11 +244,13 @@ shipped ledger negations, preserves other bytes and is idempotent. Run
 `mindspec init` after upgrading to apply this change.
 Completion and implementation approval no longer refuse an ignored, untracked
 or dirty ledger. Gate decisions still read the working ledger and are unchanged.
-Git decides what lifecycle commits include: already-tracked ledgers and
-unignored legacy-layout ledgers are committed as before, alongside `panel.json`.
+Git decides what lifecycle commits include. Ordinary completion commits tracked
+or unignored spec ledgers after the merge. Unignored legacy-layout ledgers are
+committed with the bead artifacts, alongside `panel.json`.
 Both materialization snapshots and `CommitAll` retain their ordinary Git behavior.
-Close publication commits the tracker export without requiring ignored ledgers
-in that commit. Clean-tree and cleanup checks retain their existing behavior.
+Close publication commits the tracker export and tracked or unignored spec ledgers.
+A retry compares current ledger bytes with their published bytes. Ignored
+untracked ledgers stay local. Clean-tree and cleanup checks retain their existing behavior.
 
 **Registration.** Every panel directory (`review/<slug>`, or the
 co-located `<spec-dir>/reviews/<slug>` on a flat tree) holds
@@ -1140,7 +1142,7 @@ override flags with their reasons. A repeated merge-only call records the
 existing valid merge and makes no second merge.
 
 A closed child of the spec epic without a naming merge runs the merge
-recovery without a second close. It publishes the closed tracker export before cleanup. Ignored disposition ledgers remain local; tracked and unignored ledgers follow ordinary Git commit behavior.
+recovery without a second close. It publishes the closed tracker export and tracked or unignored spec ledgers before cleanup. Retry detection compares ledger bytes. Ignored untracked disposition ledgers remain local.
 An epic, phase, or child-status read failure refuses before close, merge,
 or cleanup. Retry completion when the read succeeds. A closed-unmerged
 conflict keeps its line boundaries and ends with one `--resolve-merge`
