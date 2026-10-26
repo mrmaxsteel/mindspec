@@ -43,7 +43,7 @@ func TestPanelSkills_AdapterShape(t *testing.T) {
 		}
 		switch name {
 		case "ms-panel-run":
-			requireAdapterText(t, body, "runner: claude-code-workflow", "`/ms-panel` once", "{slug, spec, gate, target, bead_id, round}", "runner: claude-code-skills", "runner: external", "mindspec panel create", "mindspec panel verify <panel-slug> --json", "mindspec panel checkout <panel-slug> --slot <slot> --dispatch", "--replace", "mindspec panel prompt", "mindspec panel submit", "effective model", "cannot run that model, report", "model equals family", "harness default model", "verdict label", "after each process or agent ends", "On exit 0, invoke `/ms-panel-tally`")
+			requireAdapterText(t, body, "runner: claude-code-workflow", "`/ms-panel` once", "{slug, spec, gate, target, bead_id, round, brief_file}", "runner: claude-code-skills", "runner: external", "mindspec panel create", "mindspec panel verify <panel-slug> --json", "mindspec panel checkout <panel-slug> --slot <slot> --dispatch", "--replace", "mindspec panel prompt", "mindspec panel submit", "effective model", "cannot run that model, report", "model equals family", "harness default model", "verdict label", "after each process or agent ends", "On exit 0, invoke `/ms-panel-tally`")
 		case "ms-panel-tally":
 			requireAdapterText(t, body, "review.reproduce", "review.no-vote", "panel.artifact-gate", "--data - <<'JSON'", "mindspec panel disposition check", "replaced", "--json", "MINDSPEC_SKIP_PANEL=1", "mindspec panel rebind", "mindspec panel defer")
 			if strings.Contains(body, "confidence") {

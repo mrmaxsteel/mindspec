@@ -3,6 +3,7 @@ package complete
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,8 +67,12 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 	if err != nil {
 		return nil, completionFailure(beadID, opts, "reading panel ledger paths", err)
 	}
-	_ = ledgerWT
+	ledgers, err = unignoredLedgers(ledgerWT, ledgers, exec, completionCommand(beadID, opts))
+	if err != nil {
+		return nil, err
+	}
 	allowed := map[string]bool{".beads/issues.jsonl": true}
+	// Staged ledger paths are allowed because the close publishes them.
 	for _, path := range ledgers {
 		allowed[path] = true
 	}
@@ -365,4 +370,90 @@ func closePublicationDone(beadID, specBranch, specWT string, ledgers []string, e
 		}
 	}
 	return true, nil
+}
+
+// ledgerShellArg quotes an operand for a POSIX shell, escaping display controls.
+func ledgerShellArg(s string) string {
+	return "'" + strings.ReplaceAll(termsafe.Escape(s), "'", "'\"'\"'") + "'"
+}
+
+// SpecLedgerPaths resolves existing flat-layout ledgers in their owning checkout.
+// Empty beadID selects every spec ledger, including directories without panel.json.
+func SpecLedgerPaths(root, specID, beadID string) (string, []string, error) {
+	dir, err := workspace.SpecDir(root, specID)
+	if err != nil {
+		return "", nil, err
+	}
+	wt := workspace.TreeRootForSpecDir(dir)
+	if wt == "" || filepath.Clean(dir) != filepath.Join(wt, ".mindspec", "specs", specID) {
+		return wt, nil, nil
+	}
+	var candidates []string
+	if beadID == "" {
+		candidates, err = filepath.Glob(filepath.Join(dir, "reviews", "*", "dispositions.jsonl"))
+		if err != nil {
+			return wt, nil, err
+		}
+	} else {
+		for _, reg := range panel.ForBead(panel.Scan(dir), beadID) {
+			candidates = append(candidates, filepath.Join(reg.Dir, "dispositions.jsonl"))
+		}
+	}
+	var paths []string
+	for _, file := range candidates {
+		info, err := os.Stat(file)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return wt, nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return wt, nil, fmt.Errorf("panel ledger is not a regular file: %s", termsafe.Escape(file))
+		}
+		rel, err := filepath.Rel(wt, file)
+		if err != nil {
+			return wt, nil, err
+		}
+		paths = append(paths, filepath.ToSlash(rel))
+	}
+	return wt, paths, nil
+}
+
+// unignoredLedgers lets Git decide which ledgers belong in lifecycle commits.
+// Plain check-ignore treats tracked files as unignored, even under ignore rules.
+func unignoredLedgers(wt string, paths []string, exec executor.Executor, retry string) ([]string, error) {
+	var publish []string
+	for _, path := range paths {
+		err := exec.CheckIgnore(wt, path)
+		if err == nil {
+			continue
+		}
+		var exit interface{ ExitCode() int }
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return nil, guard.NewFailure(fmt.Sprintf("checking panel ledger %s ignore status: %s", termsafe.Escape(path), termsafe.Escape(err.Error())),
+				"git -C "+ledgerShellArg(wt)+" check-ignore -- "+ledgerShellArg(path), retry)
+		}
+		publish = append(publish, path)
+	}
+	return publish, nil
+}
+
+// LedgerCommitRecovery describes a scoped retry for an eligible ledger commit.
+func LedgerCommitRecovery(wt string, paths []string) string {
+	quoted := make([]string, len(paths))
+	for i, file := range paths {
+		quoted[i] = ledgerShellArg(file)
+	}
+	return fmt.Sprintf(`git -C %s add -- %s && git -C %s commit -m "chore(panel): ledger"`, ledgerShellArg(wt), strings.Join(quoted, " "), ledgerShellArg(wt))
+}
+
+func commitPanelLedgers(wt string, paths []string, exec executor.Executor) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := exec.CommitPaths(wt, "chore(panel): ledger", paths); err != nil {
+		return guard.NewFailure("could not commit panel ledger: "+termsafe.Escape(err.Error()), LedgerCommitRecovery(wt, paths))
+	}
+	return nil
 }

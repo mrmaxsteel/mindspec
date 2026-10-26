@@ -1635,7 +1635,13 @@ Use a follow-up bead for fixes found after verification.
 The closing path runs the panel gate at the bead tip and the content gates
 over M^1..M. Ownership comes from M's tree. It closes the bead, writes its
 landed binding and review identity, records overrides, and publishes the
-close with a path-scoped export and ledger commit in the spec worktree.
+close with a path-scoped commit of the tracker export and tracked or unignored
+spec ledgers in the spec worktree. Retry detection compares current ledger bytes
+with the published bytes. Plain Git check-ignore selects eligible ledgers: tracked
+paths are included even when an ignore rule matches. Ignored untracked ledgers
+remain local and are read from the working tree. Ordinary completion commits
+eligible spec ledgers after the merge. Unignored legacy-layout ledgers are
+committed with the bead artifacts.
 After publication, it clears markers and reads bead user changes again before
 removal. The executor repeats this read at removal. Tool artifacts stay exempt.
 The exemption preserves decoded filename whitespace. A lookalike path blocks the close.

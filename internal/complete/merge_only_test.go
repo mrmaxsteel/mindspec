@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
@@ -72,6 +74,10 @@ func (w windowWorktrees) Remove(string) error {
 }
 
 func newWindowFixture(t *testing.T) *windowFixture {
+	return newWindowFixtureLayout(t, true)
+}
+
+func newWindowFixtureLayout(t *testing.T, flat bool) *windowFixture {
 	t.Helper()
 	saveAndRestore(t)
 	fakeBdOnPath(t)
@@ -82,7 +88,11 @@ func newWindowFixture(t *testing.T) *windowFixture {
 	resolveTargetFn = func(string, string) (string, error) { return closingSpec, nil }
 	findLocalRootFn = func() (string, error) { return f.root, nil }
 	writeFile(t, f.root, ".mindspec/config.yaml", "source_globs:\n  - internal/**/*.go\n")
-	writeFile(t, f.root, ".mindspec/specs/"+closingSpec+"/spec.md", "# Spec\n\n## Impacted Domains\n\n- widget\n")
+	specs := ".mindspec/specs/"
+	if !flat {
+		specs = ".mindspec/docs/specs/"
+	}
+	writeFile(t, f.root, specs+closingSpec+"/spec.md", "# Spec\n\n## Impacted Domains\n\n- widget\n")
 	writeFile(t, f.root, ".gitignore", ".worktrees/\n")
 	writeFile(t, f.root, "README.md", "before\n")
 	writeFile(t, f.root, ".beads/issues.jsonl", "{\"id\":\"window-1\",\"status\":\"in_progress\"}\n")
@@ -356,7 +366,16 @@ func TestComplete_SecondMergeOnlyRefuses(t *testing.T) {
 	}
 }
 func (f *windowFixture) registerLedger() string {
+	return f.registerLedgerWithExclude(true)
+}
+
+func (f *windowFixture) registerLedgerWithExclude(exclude bool) string {
 	f.t.Helper()
+	// Model local review ignores only in tests that register a local panel.
+	// Source-safety fixtures intentionally leave lookalike paths unignored.
+	if exclude {
+		writeFile(f.t, f.root, ".git/info/exclude", ".mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n")
+	}
 	specDir, err := workspace.SpecDir(f.root, closingSpec)
 	if err != nil {
 		f.t.Fatal(err)
@@ -365,11 +384,7 @@ func (f *windowFixture) registerLedger() string {
 	writeCoLocatedPanel(f.t, specDir, "closing-panel", p, approveVerdicts(2))
 	dir := filepath.Join(specDir, "reviews", "closing-panel")
 	core3Cover(f.t, panel.Registration{Dir: dir, Panel: p})
-	wt, paths, err := SpecLedgerPaths(f.root, closingSpec, closingBead)
-	if err != nil || wt != f.specWT || len(paths) != 1 {
-		f.t.Fatalf("ledger fixture not selected: %s %v %v", wt, paths, err)
-	}
-	return paths[0]
+	return filepath.ToSlash(filepath.Join(".mindspec", "specs", closingSpec, "reviews", "closing-panel", "dispositions.jsonl"))
 }
 func (f *windowFixture) assertPublished(ledger string) {
 	f.t.Helper()
@@ -382,10 +397,12 @@ func (f *windowFixture) assertPublished(ledger string) {
 		f.t.Fatalf("close not published: %s %v", data, err)
 	}
 	if ledger != "" {
-		committed, err := f.ex.FileAtRef("spec/"+closingSpec, ledger)
 		current, readErr := os.ReadFile(filepath.Join(f.specWT, ledger))
-		if err != nil || readErr != nil || len(current) == 0 || string(committed) != string(current) {
-			f.t.Fatalf("ledger not published: committed=%s current=%s err=%v read=%v", committed, current, err, readErr)
+		if readErr != nil || len(current) == 0 {
+			f.t.Fatalf("local ledger missing: %s %v", current, readErr)
+		}
+		if _, err := f.ex.FileAtRef("spec/"+closingSpec, ledger); err == nil {
+			f.t.Fatal("local ledger was committed")
 		}
 	}
 }
@@ -931,4 +948,101 @@ func TestComplete_HandMergeImpactedDomainsExitCloses(t *testing.T) {
 		t.Fatalf("Impacted Domains exit did not close the original merge: %+v %v %v", r, err, f.meta)
 	}
 	f.assertPublished("")
+}
+
+func TestComplete_FreshInitIgnoredLedger(t *testing.T) {
+	for _, mergeOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint(mergeOnly), func(t *testing.T) {
+			f := newWindowFixture(t)
+			if _, err := bootstrap.Run(f.specWT, false); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.ex.CommitAll(f.specWT, "initialize local review ignores"); err != nil {
+				t.Fatal(err)
+			}
+			ledger := f.registerLedgerWithExclude(false)
+			before, err := os.ReadFile(filepath.Join(f.specWT, ledger))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ignoreBytes, err := exec.Command("git", "-C", f.specWT, "check-ignore", "-v", "--", ledger).CombinedOutput()
+			if err != nil {
+				t.Fatalf("check-ignore: %s %v", ignoreBytes, err)
+			}
+			ignore := string(ignoreBytes)
+			if !strings.HasPrefix(ignore, ".gitignore:") {
+				t.Fatalf("review ignore must come from initialized .gitignore: %s", ignore)
+			}
+			if mergeOnly {
+				f.mergedOnly()
+			}
+			result, err := f.run(CompleteOpts{})
+			if err != nil || result == nil || !result.BeadClosed {
+				t.Fatalf("ignored ledger blocked completion: %+v %v", result, err)
+			}
+			if mergeOnly {
+				f.assertPublished(ledger)
+			}
+			if _, err := f.ex.FileAtRef("spec/"+closingSpec, ledger); err == nil {
+				t.Fatal("ignored ledger was committed")
+			}
+			gitRun(t, f.specWT, "check-ignore", "-q", "--", ledger)
+			if got, err := gitutil.LsFiles(f.specWT, ledger); err != nil || len(got) != 0 {
+				t.Fatalf("ignored ledger became tracked: %v %v", got, err)
+			}
+			if after, err := os.ReadFile(filepath.Join(f.specWT, ledger)); err != nil || string(after) != string(before) {
+				t.Fatalf("working ledger changed: %q %v", after, err)
+			}
+		})
+	}
+}
+
+func TestComplete_LegacyLedgerSurvivesBeadRemoval(t *testing.T) {
+	f := newWindowFixtureLayout(t, false)
+	// This test checks lifecycle persistence; panel decisions have separate tests.
+	writeFile(t, f.root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\n")
+	originalSkip := panelSkipEnvFn
+	t.Cleanup(func() { panelSkipEnvFn = originalSkip })
+	panelSkipEnvFn = func() bool { return true }
+	dir := filepath.Join(f.beadWT, "review", "legacy")
+	id := closingBead
+	if err := panel.Create(dir, panel.CreateInput{
+		BeadID: &id, Spec: closingSpec, Gate: "bead", Target: "bead/" + id,
+		Round: 1, ExpectedReviewers: 2, ReviewedHeadSHA: f.tip, SubjectDigest: "sha256:fixture",
+		Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "architecture"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(dir, "dispositions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The real executor's lifecycle funnel commits the registration and ledger together.
+	if err := f.ex.CommitAll(f.beadWT, "lifecycle artifacts"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"panel.json", "dispositions.jsonl"} {
+		gitRun(t, f.beadWT, "cat-file", "-e", "HEAD:review/legacy/"+name)
+	}
+	result, err := f.run(CompleteOpts{})
+	if err != nil || result == nil || !result.BeadClosed {
+		t.Fatalf("legacy completion: %+v %v", result, err)
+	}
+	if _, err := os.Stat(f.beadWT); !os.IsNotExist(err) {
+		t.Fatalf("bead worktree not removed: %v", err)
+	}
+	survivor := filepath.Join(f.specWT, "review", "legacy")
+	if after, err := os.ReadFile(filepath.Join(survivor, "dispositions.jsonl")); err != nil || string(after) != string(before) {
+		t.Fatalf("legacy ledger lost at removal: %q %v", after, err)
+	}
+	if legacy, err := panel.LegacyPanel(survivor); err != nil || legacy {
+		t.Fatalf("approval's ledger integrity check failed: legacy=%t %v", legacy, err)
+	}
+	registrations := panel.Scan(f.specWT)
+	if len(registrations) != 1 {
+		t.Fatalf("surviving registrations: %v", registrations)
+	}
+	if _, err := panel.CheckHandEdits(survivor, registrations[0].Panel); err != nil {
+		t.Fatalf("approval's snapshot/ledger check failed: %v", err)
+	}
 }

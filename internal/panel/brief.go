@@ -2,6 +2,8 @@ package panel
 
 import (
 	"fmt"
+	"io"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -207,8 +209,14 @@ func ValidateBriefRegions(r BriefRegions, fileAtRef func(string) ([]byte, bool, 
 // scanMarkdownLines visits lines outside backtick and tilde fences. A nested
 // shorter fence cannot close the fence used to quote an acceptance section.
 func scanMarkdownLines(s string, fn func(int, string)) {
+	scanMarkdownProse(s, false, fn)
+}
+
+// Stub checks treat an unfinished quotation as prose so it cannot hide stubs.
+func scanMarkdownProse(s string, unclosedAsProse bool, fn func(int, string)) {
 	var fenceByte byte
 	fenceLength := 0
+	fenceStart := 0
 	for offset := 0; offset < len(s); {
 		end := strings.IndexByte(s[offset:], '\n')
 		if end < 0 {
@@ -217,16 +225,17 @@ func scanMarkdownLines(s string, fn func(int, string)) {
 			end += offset
 		}
 		line := strings.TrimSuffix(s[offset:end], "\r")
-		trimmed := strings.TrimSpace(line)
+		trimmed := strings.TrimLeft(line, " ")
+		indent := len(line) - len(trimmed)
 		run := 0
-		if len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
+		if indent <= 3 && len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
 			for run < len(trimmed) && trimmed[run] == trimmed[0] {
 				run++
 			}
 		}
 		if fenceLength == 0 {
 			if run >= 3 {
-				fenceByte, fenceLength = trimmed[0], run
+				fenceByte, fenceLength, fenceStart = trimmed[0], run, offset
 			} else {
 				fn(offset, line)
 			}
@@ -235,4 +244,148 @@ func scanMarkdownLines(s string, fn func(int, string)) {
 		}
 		offset = end + 1
 	}
+	if unclosedAsProse && fenceLength != 0 {
+		offset := fenceStart
+		for _, line := range strings.Split(s[fenceStart:], "\n") {
+			fn(offset, strings.TrimSuffix(line, "\r"))
+			offset += len(line) + 1
+		}
+	}
+}
+
+// ReadFilledBrief refuses unfinished review instructions before dispatch.
+func ReadFilledBrief(file string) ([]byte, error) {
+	f, err := openBriefFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read panel brief %s (must be a regular file): %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat panel brief %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("panel brief must be a regular file: %s", termsafe.Escape(file))
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read panel brief %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	if containsBriefStub(authoredBriefBody(string(data))) {
+		return nil, fmt.Errorf("panel brief %s contains TODO(skill) stubs; fill it or pass --brief-file to mindspec panel create", termsafe.Escape(file))
+	}
+	return data, nil
+}
+
+func readBriefFile(file string) ([]byte, error) {
+	if !filepath.IsAbs(file) {
+		return nil, fmt.Errorf("brief file must be an absolute path: %s", termsafe.Escape(file))
+	}
+	f, err := openBriefFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read brief file %s (must be a regular file): %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("brief file must be a regular file: %s", termsafe.Escape(file))
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
+	}
+	hasHeader := false
+	scanMarkdownProse(string(data), true, func(_ int, line string) {
+		if suppliedHeaderMarker.MatchString(strings.TrimSpace(line)) {
+			hasHeader = true
+		}
+	})
+	if hasHeader {
+		return nil, fmt.Errorf("brief file %s contains managed-header markers; supply only the authored body", termsafe.Escape(file))
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return nil, fmt.Errorf("brief file %s has empty review instructions; fill them", termsafe.Escape(file))
+	}
+	if containsBriefStub(string(data)) {
+		return nil, fmt.Errorf("brief file %s contains unfilled TODO(skill) stubs; fill them", termsafe.Escape(file))
+	}
+	return data, nil
+}
+
+var briefStub = regexp.MustCompile(`(?i)<!--\s*TODO\s*\(skill\)|TODO\s*\(skill\)[^\n]*-->`)
+var briefStubToken = regexp.MustCompile(`(?i)TODO\s*\(skill\)`)
+var suppliedHeaderMarker = regexp.MustCompile(`(?i)^<!--\s*/?\s*mindspec:panel-header\s*-->$`)
+
+func containsBriefStub(body string) bool {
+	var prose strings.Builder
+	scanMarkdownProse(body, true, func(_ int, line string) {
+		prose.WriteString(withoutInlineCode(line))
+		prose.WriteByte('\n')
+	})
+	text := prose.String()
+	if briefStub.MatchString(text) {
+		return true
+	}
+	// Comment state spans prose lines, while quoted examples remain excluded.
+	for {
+		_, rest, opened := strings.Cut(text, "<!--")
+		if !opened {
+			return false
+		}
+		comment, tail, closed := strings.Cut(rest, "-->")
+		if briefStubToken.MatchString(comment) {
+			return true
+		}
+		if !closed {
+			return false
+		}
+		text = tail
+	}
+}
+
+// Matched backtick runs quote examples; an unmatched run remains literal text.
+func withoutInlineCode(line string) string {
+	var out strings.Builder
+	for len(line) > 0 {
+		start := strings.IndexByte(line, '`')
+		if start < 0 {
+			out.WriteString(line)
+			break
+		}
+		out.WriteString(line[:start])
+		line = line[start:]
+		n := len(line) - len(strings.TrimLeft(line, "`"))
+		end := -1
+		for i := n; i < len(line); {
+			next := strings.IndexByte(line[i:], '`')
+			if next < 0 {
+				break
+			}
+			i += next
+			run := len(line[i:]) - len(strings.TrimLeft(line[i:], "`"))
+			if run == n {
+				end = i + run
+				break
+			}
+			i += run
+		}
+		if end < 0 {
+			out.WriteString(line)
+			break
+		}
+		out.WriteByte(' ')
+		line = line[end:]
+	}
+	return out.String()
+}
+
+func authoredBriefBody(brief string) string {
+	opens, closes := findMarkerLines(brief, briefHeaderOpen), findMarkerLines(brief, briefHeaderClose)
+	if len(opens) == 1 && len(closes) == 1 && closes[0] > opens[0] {
+		return brief[:opens[0]] + brief[closes[0]+len(briefHeaderClose):]
+	}
+	return brief
 }

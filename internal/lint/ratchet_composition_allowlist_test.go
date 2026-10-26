@@ -9,6 +9,7 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/complete/closing.go SpecLedgerPaths workspace.SpecDir":                                                    {Count: 1, Gate: "waist: SpecDir validates specID before any path composition and returns an error on malformed IDs (spec 130 R6.6); callers also validate at Run/ApproveImpl ingress"},
 	"internal/instruct/panelstate.go gatherPanelState workspace.SpecBranch":                                             {Count: 1, Gate: "SpecBranch validates the registered spec ID before live subject resolution"},
 	"cmd/mindspec/panel.go beadRecoveryTarget workspace.BeadBranch":                                                     {Count: 1, Gate: "BeadBranch validates the recovery bead ID before branch composition"},
 	"cmd/mindspec/panel.go nonBeadTargetRevParse workspace.SpecBranch":                                                  {Count: 1, Gate: "SpecBranch validates the registered spec ID before live subject resolution"},
@@ -25,7 +26,6 @@ var compositionCallAllowlist = map[string]compEntry{
 	"internal/doctor/stale_checkouts.go checkStaleCheckouts workspace.SpecDir":                                          {Count: 1, Gate: "early: idvalidate.SpecID validates the on-disk metadata.Spec before layout lookup and path composition; invalid IDs produce a Warn and skip the entry. The SpecDir waist also validates the ID and fails closed."},
 	"internal/approve/impl.go implPanelDeferralPreflight workspace.SpecDir":                                             {Count: 1, Gate: "waist: SpecDir validates specID and fails closed before the plan path is composed; ApproveImpl validates specID at ingress"},
 	"cmd/mindspec/panel_refute.go panelAcceptanceExists workspace.SpecDir":                                              {Count: 1, Gate: "waist: SpecDir validates the recorded owning spec id before path composition; errors refuse the acceptance-scope refutation"},
-	"internal/complete/panel_ledger.go SpecLedgerPaths workspace.SpecDir":                                               {Count: 1, Gate: "waist: SpecDir validates specID before any path composition and returns an error on malformed IDs (spec 130 R6.6); callers also validate at Run/ApproveImpl ingress"},
 	"cmd/mindspec/bead.go beadWorktreeCmd workspace.BeadBranch":                                                         {Count: 2, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
 	"cmd/mindspec/bead.go beadWorktreeCmd workspace.BeadWorktreeName":                                                   {Count: 2, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2)"},
 	"cmd/mindspec/complete.go completeCmd workspace.SpecWorktreePath":                                                   {Count: 1, Gate: "waist: helper validates its ID argument in internal/workspace ((string,error), fail-closed - R2/AC-2); early: --spec routes the ResolveSpecPrefix result gate (R3/AC-7)"},

@@ -111,3 +111,52 @@ func TestUpgradeRefreshWorkflow_UserModifiedPreserved(t *testing.T) {
 		t.Errorf("expected a user-modified notice for %s; got Notices=%v", relPath, r.Notices)
 	}
 }
+
+func TestUpgradeRefreshWorkflow_BeforeBriefRefreshes(t *testing.T) {
+	prior, err := historicalWorkflowsFS.ReadFile("historical_workflows/ms-panel.prebrief.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(prior)
+	if hex.EncodeToString(sum[:]) != "9a19eb10b8a94391141771dfdbeb84c296acad85112a72681d65dbc699755dbe" {
+		t.Fatal("prior workflow snapshot digest differs")
+	}
+	want := pluginmindspec.WorkflowFiles()["ms-panel.js"]
+	if string(prior) == want {
+		t.Fatal("snapshot equals current workflow")
+	}
+	got, result := installWorkflowWithPrior(t, string(prior))
+	if got != want || !containsPath(result.Refreshed, filepath.Join(".claude", "workflows", "ms-panel.js")) || len(result.Notices) != 0 {
+		t.Fatalf("prior workflow did not refresh cleanly: %+v", result)
+	}
+}
+
+func TestUpgradeRefreshBriefSkills(t *testing.T) {
+	digests := map[string]string{
+		"ms-bead-cycle":        "6c5edba1ab69e35bf5576fb1ab545c71347c87b54c4cfae25d844065e0998d5f",
+		"ms-panel-tally":       "cf5b9b56c49aa32edaac51d9c89ed497c9168db47683be86f5a6eb26ac6c4865",
+		"ms-panel-run":         "46d3151480536e8976bb98ca8ea039665db780910a37907dde9c79f0e59ef16a",
+		"ms-spec-final-review": "848315196f383a5d722a810e80f4e0144bd100468bed3b2725ee1bf9e26229c5",
+	}
+	for name, digest := range digests {
+		t.Run(name, func(t *testing.T) {
+			prior, err := historicalSkillsFS.ReadFile("historical_skills/" + name + ".prebrief.md")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sum := sha256.Sum256(prior)
+			if hex.EncodeToString(sum[:]) != digest {
+				t.Fatal("prior shipped skill snapshot changed")
+			}
+			dir := filepath.Join(t.TempDir(), ".claude", "skills")
+			writeExisting(t, dir, name, string(prior))
+			r := &Result{}
+			if err := installSkills(dir, ".claude/skills", skillFiles(), false, r); err != nil {
+				t.Fatal(err)
+			}
+			if readSkill(t, dir, name) != skillFiles()[name] || !containsPath(r.Refreshed, filepath.Join(".claude", "skills", name, "SKILL.md")) {
+				t.Fatalf("prior shipped skill did not refresh: %+v", r)
+			}
+		})
+	}
+}
