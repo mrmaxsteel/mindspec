@@ -124,7 +124,8 @@ func TestResolveSubjectHead_BranchCompositionErrorBlocks(t *testing.T) {
 
 func TestResolveGateFacts_UnreadablePinnedBranchIsNotMissingRef(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "review/p")
-	if err := Create(dir, CreateInput{Round: 1, Spec: "900-demo", Gate: "plan_approve", Target: "cafe", Roster: createRoster(2), ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
+	// Historical commit-pinned registrations remain readable.
+	if err := WriteSnapshot(dir, Panel{Round: 1, Spec: "900-demo", Gate: "plan_approve", Target: "cafe", Roster: createRoster(2), ExpectedReviewers: 2, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:recorded"}); err != nil {
 		t.Fatal(err)
 	}
 	missing := errors.New("missing commit")

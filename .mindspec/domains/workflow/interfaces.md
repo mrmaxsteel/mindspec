@@ -243,7 +243,10 @@ are ignored by default and stay local. Init removes exactly the two formerly
 shipped ledger negations, preserves other bytes and is idempotent. Run
 `mindspec init` after upgrading to apply this change.
 Completion and implementation approval no longer refuse an ignored, untracked
-or dirty ledger. Gate decisions still read the working ledger and are unchanged.
+or dirty ledger.
+Implementation approval still refuses dirty tracked or unignored untracked ledgers in unfinished bead worktrees listed in the plan.
+Run `mindspec complete <bead>` to recover.
+Gate decisions still read the working ledger and are unchanged.
 Git decides what lifecycle commits include. Ordinary completion commits tracked
 or unignored spec ledgers after the merge. Unignored legacy-layout ledgers are
 committed with the bead artifacts, alongside `panel.json`.
@@ -438,6 +441,16 @@ The CLI helper `findPanelRoot` returns the verified slot's main root or falls ba
 `landedBindingFor` checks the exact panel-round metadata value. It returns false for an empty bead identity and propagates read errors.
 
 ### Panel Gate v2 (verdict ledger)
+
+Each v2 change item can include `artifact_path`, a repository-relative slash path.
+The validator refuses absolute paths, parent segments and control bytes.
+It names the field's JSON pointer. `panel schema` includes the field.
+The gate checks each unresolved item's path in the round record's
+`reviewed_head_sha` tree. A missing path adds the slot, item and path to
+the refusal. A rebind does not change that tree.
+A refutation or deferral discharges the item and its path block.
+A new round checks its own tree. A present path does not discharge a finding.
+An item without this field keeps the existing gate behavior.
 
 `panel.Create` writes `verdict_schema: 2` in the snapshot and round record.
 `RoundSchema` selects the schema from the latest round record.
@@ -826,7 +839,7 @@ and no `--bead`. Every panel subcommand, including disposition leaves, sets
 | `newExecutorFn` (`root.go`) | Package-level `Executor`-constructing seam every verb's `RunE` composes with, letting `verb_output_test.go` drive real `RunE` functions against `executor.MockExecutor`. |
 | `mutatingVerbRows` / `mutatingVerbAliases` / `nonMutatingAllowlist` (`verb_output_test.go`) | The total-classification tables the cobra-tree walk checks every runnable command against — an unclassified new command, or one misclassified as mutating without a row, is red. |
 
-Core 3 runs in `complete` before materialization for every required matched registration whose returned panel gate decision is Allow. Warn registrations (abandoned, missing ref, git error) skip coverage with one advisory line; legacy registrations pass with one advisory. `impl approve` checks every required spec registration, final review included, without running a gate decision. It checks legacy markers and snapshot/ledger integrity before skipping abandoned or legacy registrations; a hand-set abandoned flag blocks. Directories without `panel.json` are not registrations. Both Core 3 legs honour `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`; the orphan/obligation refusal retains its no-hatch rule.
+Core 3 runs in `complete` before materialization for every required matched registration whose returned panel gate decision is Allow. Warn registrations (abandoned, missing ref, git error) skip coverage with one advisory line; legacy registrations pass with one advisory. `impl approve` checks coverage for every required spec registration. Its final-review gate also runs the full gate decision. It checks legacy markers and snapshot/ledger integrity before skipping abandoned or legacy registrations; a hand-set abandoned flag blocks. Directories without `panel.json` are not registrations. Both Core 3 legs honour `MINDSPEC_SKIP_PANEL` and `enforcement.panel_gate: false`; the orphan/obligation refusal retains its no-hatch rule.
 
 ## Consumed Interfaces
 
@@ -1179,3 +1192,146 @@ and the spec worktree before forced removal of those worktrees. The branch-missi
 the same check before its first removal. Pending changes or a read error return
 a cleanup-stage failure with the epic state and recovery commands. No worktree
 or branch is removed.
+
+
+## Spec findings deferred to the plan
+
+`panel defer <slug> --slot S --round N --to-plan --by <actor>` works only on a
+`spec_approve` panel. It refuses `--bead`. Add `--finding I` to cover one finding.
+Without that flag, the verb covers each finding in the slot.
+
+The verb appends one `deferred_to_plan` record and one `confirmed-deferred` row
+per finding in one ledger write. The evidence is `plan:<deferral id>`. Each
+record has a stable id, finding identity, raw text, hash, actor and time. It has
+no `bead` field. The snapshot stores the entries in `plan_deferrals` and leaves
+`deferrals` unchanged. A retry repairs a missing snapshot entry without a second
+ledger record.
+
+The integrity check requires a matching ledger record for each entry. A new
+round carries backed entries. The spec approval gate discharges only findings
+whose slot, round, id and hash match. Other gates do not use these entries to
+discharge findings. The implementation approval bead-deferral check reads only
+bead deferrals.
+
+## Bead panel presence
+
+`complete` applies `enforcement.panel_presence` when its bead gate finds no
+registration. The default `warn` policy prints one warning with the gate name
+and panel creation command. A successful completion records `panel_absent`,
+`panel_absent_gate` and `panel_absent_at` on the bead. The `enforce` policy
+refuses before close or merge. A failed registration refuses under both policies.
+
+A closed bead refusal keeps its status and the spec tip. Its recovery runs a
+panel at the bead tip, then retries completion. The non-flat cleanup guard
+still refuses when the bead worktree and registration are absent. Branchless
+reconciliation and busy-worktree refusals add no presence warning or audit.
+The skip and disabled hatches retain their rules. Refutation obligations still
+settle before close. A closed, unmerged bead shares its presence outcome with
+the merged completion handler, so the command prints only one absence warning.
+
+## Lifecycle panel gate core
+
+`panel.DocumentSubjectDigest` computes the semantic subject for document and
+final-review panels. Create, rebind and verify use the same reader. Document
+subjects exclude approval-owned fields, the standard approval section and
+the exact initial plan scaffold. Other frontmatter values remain in scope.
+Final review excludes the exact generated placeholder ADR. Each lifecycle
+panel target must be `spec/<id>`.
+
+`runLifecycleGate(root, specID, gate, worktree, out)` returns an `Outcome`
+and an error. It makes no lifecycle write. It checks each live registration,
+the recorded target tip, semantic subject dirt and durable coverage. A failed
+leg refuses under both presence policies. A missing panel warns or refuses
+as the policy directs. The skip, disabled and abandonment hatches retain
+their audit rules.
+
+`recordLifecycleGateAudit(epicID, outcome, deferralIDs)` writes the due audit
+through a metadata merge. It records skip, abandonment and absence with their
+times. Absence includes `panel_absent_gate`. It writes the accepted IDs to
+`plan_deferral_ids`. A nil list writes no deferral key. Call it after epic
+resolution. A failed write returns an error.
+
+### Implementation final-review gate
+
+`impl approve` runs `final_review` before the placeholder write, phase reconcile,
+epic audit, close and finalization. The gate applies with any plan bead count.
+It reads the subject at `spec/<id>`. The shared lifecycle gate records absence,
+skip and abandonment on the epic.
+
+Before these writes, approval checks each plan-scoped bead worktree from the
+tracker worktree list. Any tracked or untracked change refuses. This check has
+no subject exclusions and no hatch. It names the bead and each path. Export or
+panel-ledger dirt directs the operator to `mindspec complete <bead>`. Other dirt
+requires a commit or discard before completion. A moved tip requires a follow-up
+bead and a new final-review round. Clean merged worktrees pass.
+
+An exact generated placeholder is an own write. A retry accepts it without a
+second create. It must be a regular file, not a symlink. Its permissions do not
+affect this check. Any other placeholder content stays in the subject. With no spec
+branch, the existing publication checks decide replay. With a closed epic, done
+phase and no spec worktree, approval compares the current subject to the final
+publication tip. A changed subject requires a spec worktree and a new panel.
+In all other cases with a spec branch and no spec worktree, approval refuses
+under both presence policies. Re-create the spec worktree and run a final-review
+panel. The subject dirt check runs only in the spec worktree.
+
+## Approval guidance
+
+Spec and Plan instruct output names the document panel gate and its spec-branch
+target. Approval skills use the same target for document and final-review panels.
+The bead cycle runs the content check after each implementation commit and before
+the bead panel. Setup preserves old skill bodies as refresh snapshots and keeps
+user edits.
+
+Doctor reports `enforcement.panel_presence: warn` at Info. It reports each
+in-flight spec in Plan or Implement mode with `panel_absent` metadata at Warn,
+under both presence policies. These checks do not change approval state.
+
+### Content check before completion
+
+`mindspec complete <bead> --check` reports doc-sync, ADR and work-destruction
+failures on the same candidate and landing tree as completion. It skips panel
+review and coverage. It leaves git, worktrees and bead records unchanged. The
+bead must be open, have a branch and have no pending merge-only run. Check refuses
+`--merge-only`, `--resolve-merge`, `--override-adr`, `--supersede-adr` and
+`--allow-net-deletion`. Completion also reports all failing content gates.
+A file that no domain owns gives a warning and retains its structured finding.
+An undeclared owner, an attribution failure or missing ADR coverage still refuses.
+
+### Domain doc declarations and owners
+
+`complete --no-doc-impact "<domain>: <reason>"` declares no doc impact for
+one touched domain. The flag can repeat. Completion records each domain,
+reason, actor and time on the bead. Other domain errors still refuse.
+
+`complete --allow-doc-skew "<reason>" --doc-owner <bead>` defers missing
+domain docs to another open bead in the same epic. Both beads carry the
+record. An owner must land the domain doc updates or transfer the record
+to a new owner. Recovery commands retain the owner and each declaration.
+The content check validates the same flags, names each covered domain and
+writes no record.
+
+Implementation approval checks every source-changing step on the spec
+branch. A domain with no doc update passes only when each source change
+came through a landed declaring bead merge. A direct source commit on the
+spec branch has no declaration exemption. Approval lists each open doc
+deferral. Its doc-skew override records the open deferral ids and reason
+on the epic. Old ownerless skew records remain subject to branch doc-sync.
+
+## Document approval gates
+
+`ApproveSpec` checks `spec_approve` before its first write on every run.
+`ApprovePlan` checks `plan_approve` before migration, audit, supersede,
+frontmatter, bead creation and commits. A replay runs the same gate.
+Existing approvals remain valid for other lifecycle operations.
+
+Both verbs persist the shared gate audit after epic resolution. Spec approval
+also records accepted to-plan deferral ids. If epic creation fails with an
+audit due, it commits the approval artifacts, warns with the due records and
+refuses with a same-environment retry. A retry can persist those records.
+
+Plan approval requires all ids from the epic and tracked spec approval
+ledgers in the plan's `## Resolutions` section. It reads abandoned, replaced
+and ledger-only registrations. Missing ids refuse before any lifecycle write.
+A refusal does not supersede or create beads. The Approval section is optional
+in a draft spec because spec approval creates it.

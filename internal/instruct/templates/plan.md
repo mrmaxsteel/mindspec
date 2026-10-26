@@ -145,6 +145,9 @@ Apply these research-backed questions while decomposing the spec into beads (see
 
 ## Human Gates
 
+Approval needs a passing document panel: `mindspec panel create <slug> --spec {{.ActiveSpec}} --gate plan_approve --target spec/{{.ActiveSpec}}`.
+Use reviewers from more than one family for a spec that changes a gate, a schema, a trust boundary or a merge path.
+
 - **Plan approval**: Run `mindspec plan approve <id>` when the plan is ready
 - **ADR divergence**: If a better design would diverge from an accepted ADR, **stop planning**. Present: (1) which ADR, (2) why it should be superseded, (3) the proposed alternative. Wait for human approval before proceeding. Use `mindspec adr create --supersedes <ADR-NNNN>` to create the superseding ADR once approved.
 

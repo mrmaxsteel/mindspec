@@ -98,6 +98,7 @@ type Panel struct {
 
 	Roster         []RosterSlot     `json:"roster,omitempty"`
 	Deferrals      []Deferral       `json:"deferrals,omitempty"`
+	PlanDeferrals  []PlanDeferral   `json:"plan_deferrals,omitempty"`
 	Rebinds        []Rebind         `json:"rebinds,omitempty"`
 	Telemetry      string           `json:"telemetry,omitempty"`
 	AbandonHistory []AbandonHistory `json:"abandon_history,omitempty"`

@@ -993,7 +993,7 @@ func TestPanelRecover_RecoveryCommand(t *testing.T) {
 			f := newLaunchFixture(t)
 			slug := "panel's review"
 			f.dir = filepath.Join(f.root, "review", slug)
-			if err := panel.Create(f.dir, panel.CreateInput{Spec: "131-test", Gate: "final_review", Target: "main", Round: 1, ReviewedHeadSHA: f.p.ReviewedHeadSHA, SubjectDigest: f.p.SubjectDigest, Roster: f.p.Roster}); err != nil {
+			if err := panel.Create(f.dir, panel.CreateInput{Spec: "131-test", Gate: "final_review", Target: "spec/131-test", Round: 1, ReviewedHeadSHA: f.p.ReviewedHeadSHA, SubjectDigest: f.p.SubjectDigest, Roster: f.p.Roster}); err != nil {
 				t.Fatal(err)
 			}
 			if started {

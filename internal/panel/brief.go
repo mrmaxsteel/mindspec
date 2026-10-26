@@ -32,17 +32,19 @@ type BriefRule struct {
 // its heading. Headings inside code fences do not delimit the section.
 func AcceptanceCriteriaSection(spec string) string {
 	start, end := -1, len(spec)
-	scanMarkdownLines(spec, func(offset int, line string) {
+	for _, line := range MarkdownLines(spec) {
 		if start < 0 {
-			if strings.TrimSpace(line) == "## Acceptance Criteria" {
-				start = offset
+			if line.Level == 2 && line.Heading == "Acceptance Criteria" {
+				start = line.Offset
 			}
-			return
+			continue
 		}
-		if end == len(spec) && (strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ")) {
-			end = offset
+		if line.Level > 0 && line.Level <= 2 && line.Heading != "" {
+			end = line.Offset
+			break
 		}
-	})
+	}
+
 	if start < 0 {
 		return "no acceptance criteria section found"
 	}
@@ -213,6 +215,8 @@ func scanMarkdownLines(s string, fn func(int, string)) {
 }
 
 // Stub checks treat an unfinished quotation as prose so it cannot hide stubs.
+// They also open a fence only at an indent of three spaces or less. The
+// released scan keeps its fence rule for headers and gate documents.
 func scanMarkdownProse(s string, unclosedAsProse bool, fn func(int, string)) {
 	var fenceByte byte
 	fenceLength := 0
@@ -225,8 +229,12 @@ func scanMarkdownProse(s string, unclosedAsProse bool, fn func(int, string)) {
 			end += offset
 		}
 		line := strings.TrimSuffix(s[offset:end], "\r")
-		trimmed := strings.TrimLeft(line, " ")
-		indent := len(line) - len(trimmed)
+		trimmed := strings.TrimSpace(line)
+		indent := 0
+		if unclosedAsProse {
+			trimmed = strings.TrimLeft(line, " ")
+			indent = len(line) - len(trimmed)
+		}
 		run := 0
 		if indent <= 3 && len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
 			for run < len(trimmed) && trimmed[run] == trimmed[0] {
@@ -298,11 +306,14 @@ func readBriefFile(file string) ([]byte, error) {
 		return nil, fmt.Errorf("cannot read brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
 	}
 	hasHeader := false
-	scanMarkdownProse(string(data), true, func(_ int, line string) {
+	checkHeader := func(_ int, line string) {
 		if suppliedHeaderMarker.MatchString(strings.TrimSpace(line)) {
 			hasHeader = true
 		}
-	})
+	}
+	// Refuse markers exposed by either the stub scan or the header parser.
+	scanMarkdownProse(string(data), true, checkHeader)
+	scanMarkdownLines(string(data), checkHeader)
 	if hasHeader {
 		return nil, fmt.Errorf("brief file %s contains managed-header markers; supply only the authored body", termsafe.Escape(file))
 	}

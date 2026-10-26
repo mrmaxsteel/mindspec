@@ -159,7 +159,7 @@ func TestPanelRefuted_E2E_SatisfiesAndRecordsBothEntries(t *testing.T) {
 	})
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err != nil {
 		t.Fatalf("a refuted RC panel must complete; got: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestPanelRefuted_SatisfyWriteFailure_FailsCompletion(t *testing.T) {
 	})
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err == nil {
 		t.Fatal("expected Run to fail when the satisfying panel_refuted write fails")
 	}
@@ -243,7 +243,7 @@ func TestPanelRefuted_MarkerWriteFailure_Blocks(t *testing.T) {
 		})
 
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 		if err == nil {
 			t.Fatal("expected a Block when the durable marker write fails")
 		}
@@ -282,7 +282,7 @@ func TestPanelRefuted_MarkerWriteFailure_Blocks(t *testing.T) {
 		})
 
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 		if err == nil {
 			t.Fatal("expected a Block when the union read fails")
 		}
@@ -331,7 +331,7 @@ func TestPanelRefuted_SatisfyFromMarker_PanelGone(t *testing.T) {
 	closeCalled := false
 	closeBeadFn = func(...string) error { closeCalled = true; return nil }
 	ex1 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err == nil {
+	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err == nil {
 		t.Fatal("run 1 precondition: the panel_refuted write must fail")
 	}
 	if closeCalled || ex1.completeCalled {
@@ -350,7 +350,7 @@ func TestPanelRefuted_SatisfyFromMarker_PanelGone(t *testing.T) {
 		t.Fatalf("removing panel.json: %v", err)
 	}
 	ex2 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex2, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+	if _, err := Run(root, beadID, specID, "", ex2, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 		t.Fatalf("run 2 must satisfy FROM THE MARKER and complete with the panel gone; got: %v", err)
 	}
 	if !closeCalled || !ex2.completeCalled {
@@ -398,7 +398,7 @@ func TestPanelRefuted_NaturalResolution_NoObligation(t *testing.T) {
 	closeCalled := false
 	closeBeadFn = func(...string) error { closeCalled = true; return nil }
 	ex1 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err == nil {
+	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err == nil {
 		t.Fatal("run 1 precondition: a live unrefuted RC must Block")
 	}
 	if closeCalled || ex1.completeCalled {
@@ -417,7 +417,7 @@ func TestPanelRefuted_NaturalResolution_NoObligation(t *testing.T) {
 		t.Fatal(err)
 	}
 	ex2 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex2, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+	if _, err := Run(root, beadID, specID, "", ex2, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 		t.Fatalf("run 2 must complete with zero ceremony (no obligation was ever created); got: %v", err)
 	}
 	if !closeCalled || !ex2.completeCalled {
@@ -450,7 +450,7 @@ func TestPanelRefuted_CrossRun_UnionReconcilesAll(t *testing.T) {
 	// Run 1: marker (X,1) persists, panel_refuted fails.
 	store.failMerge = failOnKey("panel_refuted")
 	ex1 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err == nil {
+	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err == nil {
 		t.Fatal("run 1 precondition: the panel_refuted write must fail")
 	}
 
@@ -473,7 +473,7 @@ func TestPanelRefuted_CrossRun_UnionReconcilesAll(t *testing.T) {
 	closeCalled := false
 	closeBeadFn = func(...string) error { closeCalled = true; return nil }
 	ex2 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex2, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+	if _, err := Run(root, beadID, specID, "", ex2, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 		t.Fatalf("run 2 must UNION-reconcile both entries and complete; got: %v", err)
 	}
 	if !closeCalled || !ex2.completeCalled {
@@ -521,7 +521,7 @@ func TestPanelRefuted_GetMetadataError_Refuses(t *testing.T) {
 	closeBeadFn = func(...string) error { closeCalled = true; return nil }
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err == nil {
 		t.Fatal("expected Run to REFUSE when the metadata store is unreadable")
 	}
@@ -542,7 +542,7 @@ func TestPanelRefuted_PristineNoPanel_FailsOpen(t *testing.T) {
 	closeBeadFn = func(...string) error { closeCalled = true; return nil }
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err != nil {
 		t.Fatalf("a genuinely pristine bead (no panel, no pending) must complete via §6 fail-open; got: %v", err)
 	}
@@ -586,7 +586,7 @@ func TestPanelRefuted_AuditSurvivesLaterReadError(t *testing.T) {
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
 	// AllowDocSkew triggers the step-5.5 best-effort write, which this stub
 	// fails; that must be a WARNING only, never fatal.
-	if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+	if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 		t.Fatalf("a best-effort doc-skew write failure must not fail completion; got: %v", err)
 	}
 	if !closeCalled || !ex.completeCalled {
@@ -625,7 +625,7 @@ func TestPanelRefuted_RecoveryPath_AuditPresent(t *testing.T) {
 	})
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err != nil {
 		t.Fatalf("the already-closed recovery path must still complete (reconciliation runs BEFORE it); got: %v", err)
 	}
@@ -660,7 +660,7 @@ func TestPanelRefuted_AbandonAddsNoNewObligation_UnaffectedByPanelRefutedStub(t 
 	}, map[string]string{"a-round-1.json": "APPROVE", "b-round-1.json": "REQUEST_CHANGES"})
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+	if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 		t.Fatalf("an abandoned panel must complete despite the panel_refuted stub (it adds no new obligation); got: %v", err)
 	}
 	if !closeCalled || !ex.completeCalled {
@@ -731,7 +731,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 		})
 
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 			t.Fatalf("expected the hatch to reconcile (satisfy from the marker) and complete; got: %v", err)
 		}
 		assertSatisfied(t, store, beadID)
@@ -752,7 +752,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 		closeBeadFn = func(...string) error { closeCalled = true; return nil }
 
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err == nil {
+		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err == nil {
 			t.Fatal("audit integrity must override the hatch: an unreadable store must REFUSE")
 		}
 		if closeCalled || ex.completeCalled {
@@ -783,7 +783,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 		})
 
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 			t.Fatalf("expected the config-disabled hatch to reconcile and complete; got: %v", err)
 		}
 		assertSatisfied(t, store, beadID)
@@ -806,7 +806,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 		})
 
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 			t.Fatalf("expected the abandoned-panel Warn path to reconcile and complete; got: %v", err)
 		}
 		assertSatisfied(t, store, beadID)
@@ -830,7 +830,7 @@ func TestPanelRefuted_HatchStillReconcilesPendingObligation(t *testing.T) {
 		}, map[string]string{"a-round-1.json": "REQUEST_CHANGES"}) // would BLOCK without the hatch
 
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 			t.Fatalf("the hatch must let a pristine bead complete; got: %v", err)
 		}
 		meta := store.data[beadID]
@@ -875,7 +875,7 @@ func TestPanelRefuted_AlreadyCoveredPending_Completes(t *testing.T) {
 
 		// NO panel dir at all: the marker + covering audit alone settle it.
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+		res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 		if err != nil {
 			t.Fatalf("an already-covered pending must reconcile to a no-op and COMPLETE; got: %v", err)
 		}
@@ -899,7 +899,7 @@ func TestPanelRefuted_AlreadyCoveredPending_Completes(t *testing.T) {
 		closeCalled := false
 		closeBeadFn = func(...string) error { closeCalled = true; return nil }
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 			t.Fatalf("coverage is (slot, round)-exact: the non-covered X@1 must satisfy from its marker and complete; got: %v", err)
 		}
 		if !closeCalled || !ex.completeCalled {
@@ -949,7 +949,7 @@ func TestPanelRefuted_MalformedPendingEntries_Refuses(t *testing.T) {
 		closeCalled := false
 		closeBeadFn = func(...string) error { closeCalled = true; return nil }
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 		if err == nil {
 			t.Fatal("a present-but-malformed obligation store must REFUSE (fail-closed), never decode to empty")
 		}
@@ -980,7 +980,7 @@ func TestPanelRefuted_MalformedPendingEntries_Refuses(t *testing.T) {
 		closeCalled := false
 		closeBeadFn = func(...string) error { closeCalled = true; return nil }
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 		if err == nil {
 			t.Fatal("a present-but-corrupt panel_refuted_entries must REFUSE (fail-closed), not be read as \"nothing covered\"")
 		}
@@ -1006,7 +1006,7 @@ func TestPanelRefuted_MalformedPendingEntries_Refuses(t *testing.T) {
 		closeCalled := false
 		closeBeadFn = func(...string) error { closeCalled = true; return nil }
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+		_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 		if err == nil {
 			t.Fatal("a shape-invalid pending entry must REFUSE (fail-closed)")
 		}
@@ -1033,7 +1033,7 @@ func TestPanelRefuted_AppliedEmpty_NoAuditWritten(t *testing.T) {
 	}, approveVerdicts(6))
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+	if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 		t.Fatalf("a plain all-APPROVE pass must complete; got: %v", err)
 	}
 	meta := store.data[beadID]
@@ -1069,7 +1069,7 @@ func TestPanelRefuted_MarkerCarriesReasonEvidence(t *testing.T) {
 	// write — pinning the marker's persisted content in isolation.
 	store.failMerge = failOnKey("panel_refuted")
 	ex1 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err == nil {
+	if _, err := Run(root, beadID, specID, "", ex1, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err == nil {
 		t.Fatal("run 1 precondition: the panel_refuted write must fail")
 	}
 	pend, decErr := decodePendingEntries(store.data[beadID]["refutation_pending_entries"])
@@ -1087,7 +1087,7 @@ func TestPanelRefuted_MarkerCarriesReasonEvidence(t *testing.T) {
 	closeCalled := false
 	closeBeadFn = func(...string) error { closeCalled = true; return nil }
 	ex2 := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex2, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+	if _, err := Run(root, beadID, specID, "", ex2, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 		t.Fatalf("run 2 must satisfy and complete; got: %v", err)
 	}
 	if !closeCalled || !ex2.completeCalled {

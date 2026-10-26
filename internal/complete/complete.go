@@ -280,7 +280,13 @@ var (
 // discipline. If CompleteBead fails, the metadata is not written —
 // the failure itself is the audit trail.
 type CompleteOpts struct {
-	AllowDocSkew string
+	// Check runs content gates without changing lifecycle or workspace state.
+	Check              bool
+	workDestructionErr error
+	AllowDocSkew       string
+	DocOwner           string
+	NoDocImpact        []string
+	docAudit           *docCompletionAudit
 
 	// MergeOnly merges for verification and keeps the bead open.
 	MergeOnly              bool
@@ -349,6 +355,7 @@ type reconcileState struct {
 
 // Result summarizes what mindspec complete did.
 type Result struct {
+	Check           bool
 	BeadID          string
 	BeadClosed      bool
 	WorktreeRemoved bool
@@ -588,6 +595,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		)
 	}
 
+	opts.docAudit = &docCompletionAudit{}
+	if err := validateDocFlags(beadID, opts); err != nil {
+		return nil, err
+	}
+	if opts.Check {
+		return runCheck(root, beadID, specID, exec, opts)
+	}
+
 	ledgerWorktree, ledgerPaths, ledgerErr := SpecLedgerPaths(root, specID, beadID)
 	if ledgerErr != nil {
 		return nil, ledgerErr
@@ -807,7 +822,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 				return nil, guard.NewFailure(detail.String(), "mindspec complete "+safeBeadID)
 			}
 			if len(rows) == 1 {
-				return runMergedCompletion(root, beadID, specID, epicID, beadBranch, wtPath, rows[0], exec, opts, pending)
+				return runMergedCompletion(root, beadID, specID, epicID, beadBranch, wtPath, rows[0], exec, opts, pending, nil)
 			}
 		}
 		if pending {
@@ -922,8 +937,8 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// hook is now a defense-in-depth backstop, and the two cannot disagree.
 	//
 	// On a Block it returns a guard.NewFailure (fence in the body + a genuine
-	// recovery line) exiting non-zero having mutated nothing (HC-4). §6
-	// fail-open (no panel.json → completes) and the §7 hatches
+	// recovery line) exiting non-zero having mutated nothing (HC-4). The
+	// presence policy and the §7 hatches
 	// (MINDSPEC_SKIP_PANEL never named in a block — HC-7; enforcement.panel_gate)
 	// are honored. The matched registration is reused below for the
 	// post-completion audit writes (Reqs 13b/13e).
@@ -944,13 +959,21 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 	// Live deferral checks also run on attested materialization retries.
 	gateCfg, gateCfgErr := config.Load(root)
-	panelGateEnabled := true
-	if gateCfgErr == nil {
-		panelGateEnabled = gateCfg.Enforcement.PanelGate
+	if gateCfgErr != nil {
+		return nil, completionFailure(beadID, opts, "reading configuration", gateCfgErr)
 	}
+	presence := &beadPanelPresence{policy: gateCfg.Enforcement.PanelPresence, specID: specID, ignore: reconcile != nil, closed: closedAtEntry}
+	panelGateEnabled := gateCfg.Enforcement.PanelGate
 	if resumeStage != "" {
 		if err := recheckResumedPanelDeferrals(beadID, specID, panelGateRoots(root, wtPath, specID), panelGateEnabled); err != nil {
 			return nil, err
+		}
+		// A closed retry reaches the merged handler after landing. Check
+		// absence now so a presence refusal cannot move the spec tip.
+		if closedAtEntry && len(panel.ForBead(panelScanFn(panelGateRoots(root, wtPath, specID)...), beadID)) == 0 {
+			if err := presence.check(beadID, panelGateEnabled, advisoryOut); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if resumeStage == "" {
@@ -964,7 +987,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// round-3 redesign — it never reads a panel directory.)
 		gateRoots := panelGateRoots(root, wtPath, specID)
 		var panelGateErr error
-		panelDecisions, panelGateErr = panelGate(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut)
+		panelDecisions, panelGateErr = panelGateWithPresence(beadID, gateRoots, wtPath, panelGateEnabled, advisoryOut, presence)
 		if panelGateErr != nil {
 			return nil, panelGateErr
 		}
@@ -990,7 +1013,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		// reviewerCountAdvisory itself also nil-checks reg. ok is false for the
 		// R7 skip carve-outs (a non-bead panel with no recorded gate, or an
 		// unknown recorded gate, while gates: is configured) — no note prints.
-		if gateCfgErr == nil && panelReg != nil {
+		if panelReg != nil {
 			if def, ok := gateCfg.PanelGateAdvisoryDefault(panelReg.Panel.Gate, panelReg.Panel.IsBead()); ok {
 				reviewerCountAdvisory(panelReg, def, advisoryOut)
 			}
@@ -1034,8 +1057,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// backstop that actually gates the mutation regardless of whether
 	// this check ran or observed stale state.
 	if reconcile == nil {
-		if err := completeWorkDestructionPreflightFn(root, beadHead, specBranch, opts.AllowNetDeletion, fmt.Sprintf("mindspec complete %s", beadID)); err != nil {
-			return nil, err
+		opts.workDestructionErr = workDestructionReport(completeWorkDestructionPreflightFn(root, beadHead, specBranch, opts.AllowNetDeletion, fmt.Sprintf("mindspec complete %s", beadID)))
+		if resumeStage != "" && opts.workDestructionErr != nil {
+			return nil, opts.workDestructionErr
 		}
 	}
 
@@ -1067,7 +1091,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// see that a worktree-less bead could possibly hold anyway.
 	specDir, sdErr := workspace.SpecDir(root, specID)
 	if sdErr != nil {
-		return nil, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr)
+		return nil, errors.Join(opts.workDestructionErr, fmt.Errorf("resolving spec dir for adr-divergence: %w", sdErr))
 	}
 	var base string
 	if reconcile != nil {
@@ -1076,7 +1100,14 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		var mbErr error
 		base, mbErr = exec.MergeBase(specBranch, beadHead)
 		if mbErr != nil {
-			return nil, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr)
+			return nil, errors.Join(opts.workDestructionErr, fmt.Errorf("computing merge-base of %s and %s for the per-bead gates: %w", specBranch, beadHead, mbErr))
+		}
+	}
+	// A resumed materialization still needs the declarations for this run's
+	// audit. Rebuild them from the immutable committed candidate before close.
+	if resumeStage != "" && (len(opts.NoDocImpact) > 0 || opts.AllowDocSkew != "") {
+		if err := runCommittedRangeGate(root, beadID, beadHead, specDir, base, exec, opts, warnWriter); err != nil {
+			return nil, err
 		}
 	}
 	if reconcile != nil {
@@ -1158,7 +1189,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	}
 
 	if opts.MergeOnly {
-		return runMergeOnly(root, beadID, specID, specBranch, exec, opts)
+		result, err := runMergeOnly(root, beadID, specID, specBranch, exec, opts)
+		if err == nil {
+			presence.audit(beadID, advisoryOut)
+		}
+		return result, err
 	}
 
 	// A closed, unmerged bead needs no second close. Keep its workspace until
@@ -1180,7 +1215,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, guard.NewFailure("the closed bead needs one naming merge before publication", completionCommand(beadID, opts))
 		}
 		if len(rows) == 1 {
-			return runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath, rows[0], exec, opts, false)
+			return runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath, rows[0], exec, opts, false, presence)
 		}
 		// An unchanged ancestor branch creates no naming merge. Keep the
 		// existing completion path for that case.
@@ -1331,6 +1366,9 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if reconcile != nil {
 		if metaErr := completeMergeMetadataFn(beadID, map[string]interface{}{
 			"mindspec_reconcile_landed_merge_sha": reconcile.landed.SHA,
+			"mindspec_landed_merge_sha":           reconcile.landed.SHA,
+			"mindspec_landed_second_parent":       reconcile.landed.SecondParent,
+			"mindspec_landed_at":                  time.Now().UTC().Format(time.RFC3339),
 			"mindspec_reconcile_at":               time.Now().UTC().Format(time.RFC3339),
 		}); metaErr != nil {
 			// R4: beadID is an ID-typed position — idrender.Bead.
@@ -1410,7 +1448,11 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			// final instead of stacking a redundant generic one.
 			return nil, errors.New(msg)
 		}
-		return nil, guard.NewFailure(msg, fmt.Sprintf("mindspec complete %s%s", safeBeadID, rerunSuffix))
+		return nil, guard.NewFailure(msg, completionCommand(beadID, opts))
+	}
+
+	if err := recordDocDeclarations(beadID, opts); err != nil {
+		return nil, completionFailure(beadID, opts, "recording doc-sync declarations", err)
 	}
 
 	// The bead merge succeeded; persist eligible ledgers in the spec checkout.
@@ -1521,6 +1563,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// Best-effort; reuses the panelAdvisory scan (no second fs walk).
 	if completeErr == nil {
 		writePanelAuditMetadata(beadID, panelReg, advisoryOut)
+		presence.audit(beadID, advisoryOut)
 	}
 
 	// 6. Advance state. advanceState re-reads the post-close child set fresh
@@ -1624,6 +1667,9 @@ func completeSyncPhase(root, epicID, nextMode, beadID string) error {
 
 // FormatResult returns a human-readable summary of the completion.
 func FormatResult(r *Result) string {
+	if r != nil && r.Check {
+		return "Content gates passed.\n"
+	}
 	if r != nil && r.MergeOnly {
 		var out strings.Builder
 		fmt.Fprintf(&out, "Bead %s is merged for verification. The bead stays open.\n", idrender.Bead(r.BeadID))
@@ -1894,10 +1940,10 @@ func runCommittedRangeGate(root, beadID, beadHead, specDir, base string, exec ex
 	ownerRef, err := ownershipLandingTree(root, specDir, beadHead, beadHead, exec)
 	if err != nil {
 		var conflict *OwnershipLandingConflict
-		if errors.As(err, &conflict) && opts.deferOwnershipConflict {
+		if errors.As(err, &conflict) && opts.deferOwnershipConflict && opts.workDestructionErr == nil {
 			return nil
 		}
-		return &landingOwnershipError{beadID: beadID, cause: err}
+		return errors.Join(opts.workDestructionErr, &landingOwnershipError{beadID: beadID, cause: err})
 	}
 	return runRangeGateWithOwner(root, beadID, beadHead, specDir, base, ownerRef, exec, opts, warnWriter)
 }
@@ -1906,18 +1952,11 @@ func runRangeGateWithOwner(root, beadID, beadHead, specDir, base, ownerRef strin
 	docResult := validate.ValidateDocsRange(root, base, beadHead, ownerRef, exec)
 	// Spec 091 Req 22(a): surface warning-severity issues BEFORE the
 	// failure decision so they print on every run.
-	printResultWarnings(warnWriter, docResult)
-	if docResult.HasFailures() && opts.AllowDocSkew == "" {
-		return fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason in bead metadata)", joinResultErrorMessages(docResult))
-	}
-	// The gate runs EXACTLY ONCE. Same bead-branch anchoring as doc-sync
-	// above: base..beadHead. Ownership uses the landing tree.
 	adrResult, adrFindings := validate.CheckADRDivergence(root, base, exec, specDir, beadID, beadHead, ownerRef)
-	printResultWarnings(warnWriter, adrResult)
-	// Spec 119 R11 (mindspec-jli8): advisory, non-fatal per-bead scope
-	// WARN — never affects the pass/fail decision.
-	beadScopeWarnAdvisory(exec, root, specDir, beadID, beadHead, base, beadHead, warnWriter)
-	return handleADRGateOutcome(root, beadID, opts, adrResult, adrFindings)
+	if !opts.Check {
+		beadScopeWarnAdvisory(exec, root, specDir, beadID, beadHead, base, beadHead, warnWriter)
+	}
+	return reportContentGates(root, beadID, opts, docResult, adrResult, adrFindings, warnWriter)
 }
 
 // handleADRGateOutcome is the shared ADR-divergence gate outcome handler

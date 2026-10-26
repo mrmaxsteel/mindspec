@@ -988,3 +988,59 @@ When an ownership manifest conflicts, an open plain completion refuses
 before close. Merge-only and closed-unmerged recovery preserve the merge.
 Re-entry reads ownership from the resolved index. A hand-committed merge
 is checked over M^1..M before recording or close.
+
+## Amendment (Spec 133)
+
+### Document approval preflight
+
+Each run of `spec approve` checks `spec_approve`. Each run of `plan approve`
+checks `plan_approve`. The gate runs before the first write. This includes
+frontmatter, the Approval section, epic creation, the plan scaffold, phase
+migration, the supersede close, bead creation and commits. An existing epic
+or approval field does not skip the gate. Existing approvals remain valid
+until an operator runs the approval verb again.
+
+Each live registration must pass every decision leg and the coverage check.
+The presence policy applies only when no panel exists. The default is `warn`.
+A failed leg refuses under `warn` and `enforce`. Each document panel targets
+`spec/<id>`. The gate and verify read the same target tip. A refusal names
+the gate, panel and leg. It ends with one recovery line and has no bead
+merge fence.
+
+### Own write set and retry
+
+The own write set of `spec approve` is the `status`, `approved_at` and
+`approved_by` frontmatter fields of `spec.md`, the standard `## Approval`
+section, and a `plan.md` that equals the generated scaffold byte for byte.
+The standard section has its heading, blank lines and each of the four
+labels once: `Status`, `Approved By`, `Approval Date` and `Notes`. Values
+can differ. An absent standard section has the same digest. Any extra
+line remains subject content.
+
+The own write set of `plan approve` is the `status`, `approved_at`,
+`approved_by` and `bead_ids` frontmatter fields of `plan.md`. Both document
+subjects exclude both verbs' own write sets. One digest function serves
+create, rebind, verify and approval. It compares parsed frontmatter keys
+and values. Key order and quoting do not change the digest. Other body or
+frontmatter changes still refuse. Uncommitted subject changes outside the
+own write set refuse before mutation and list each path.
+
+A retry after a frontmatter write or approval commit still runs the gate.
+Own writes do not make that panel stale. The verb records `panel_gate_skipped`,
+`panel_abandoned` or `panel_absent` after it finds or creates the epic.
+The record includes time and, where applicable, the gate or abandonment reason.
+A disabled gate writes no gate audit. If epic creation fails with an audit
+due, spec approval finishes its commits, warns with each due record and
+exits non-zero. Recovery is to run the same command again in the same
+environment. The retry writes the due audit on the epic.
+
+### Plan resolution obligations
+
+Spec approval records each accepted to-plan deferral id in `plan_deferral_ids`
+on the epic. Plan approval reads that list and each `deferred_to_plan` record
+in every tracked spec approval ledger. Abandoned and replaced registrations
+still impose these obligations. Deletion of a ledger cannot erase an id
+recorded on the epic. Before its first write, plan approval requires each id
+in `## Resolutions`. An id outside that section does not count. The refusal
+lists every missing id under either presence policy. It closes no old bead
+and creates no new bead.

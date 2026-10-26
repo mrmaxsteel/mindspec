@@ -403,13 +403,6 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// HasFailures() is false and the flow proceeds normally, and on
 	// the override/error paths.
 	printResultWarnings(warnWriter, docResult)
-	if docResult.HasFailures() {
-		if o.AllowDocSkew == "" {
-			return nil, fmt.Errorf("doc-sync: %s\nhint: re-run with --allow-doc-skew \"<reason>\" to override (records the reason on the spec epic's metadata)", joinResultErrorMessages(docResult))
-		}
-		// Override path: fall through. Metadata write happens AFTER
-		// FinalizeEpic per panel CONSENSUS revision 4.
-	}
 
 	// Enforcement gate (3/3): Spec 087 Bead 2 fills the body; this
 	// backstop runs across the full spec branch. The
@@ -449,6 +442,19 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 			fmt.Sprintf("mindspec impl approve %s", specID),
 		)
 	}
+	docChildren, childErr := phase.FetchChildren(epicID)
+	if childErr != nil {
+		return nil, guard.NewFailure("doc-sync: cannot read epic doc obligations: "+termsafe.Escape(childErr.Error()), "mindspec impl approve "+idrender.Spec(specID))
+	}
+	docBeads := make([]string, 0, len(docChildren))
+	for _, child := range docChildren {
+		docBeads = append(docBeads, child.ID)
+	}
+	openDocDeferrals, docErr := implDocGate(root, base, specBranch, specID, exec, docBeads, docResult, o.AllowDocSkew)
+	if docErr != nil {
+		return nil, docErr
+	}
+
 	var lifecycleAllowSet []string
 	if planErr == nil {
 		lifecycleAllowSet = intersectIDs(beadIDs, lifecycleChildren)
@@ -470,11 +476,26 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, err
 	}
 
-	if err := implPanelCore3Preflight(root, specID, warnWriter); err != nil {
+	if err := implBeadWorktreePreflight(specID, lifecycleAllowSet, exec); err != nil {
 		return nil, err
 	}
 
+	if err := implPanelCore3Preflight(root, specID, warnWriter); err != nil {
+		return nil, err
+	}
 	if err := implPanelDeferralPreflight(root, specID); err != nil {
+		return nil, err
+	}
+	var seedDomains []string
+	for _, finding := range adrFindings {
+		if finding.Kind == "uncovered" && finding.Domain != "" {
+			seedDomains = []string{finding.Domain}
+			break
+		}
+	}
+	placeholder := implPlaceholderWrite{ID: o.SupersedeADR, Domains: seedDomains}
+	gateOutcome, _, err := implFinalReviewGate(root, specID, epicID, phaseDetail.Stored, specDir, exec, placeholder)
+	if err != nil {
 		return nil, err
 	}
 
@@ -498,15 +519,12 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// follows the write.
 	var supersedeNewID string
 	if o.SupersedeADR != "" {
-		var seedDomains []string
-		for _, f := range adrFindings {
-			if f.Kind == "uncovered" && f.Domain != "" {
-				seedDomains = []string{f.Domain}
-				break
-			}
-		}
 		title := "Placeholder for " + o.SupersedeADR
-		if _, err := implCreateWithIDFn(root, o.SupersedeADR, title, adr.CreateOpts{Domains: seedDomains}); err != nil {
+		writeRoot := workspace.TreeRootForSpecDir(specDir)
+		if writeRoot == "" {
+			writeRoot = root
+		}
+		if err := implEnsurePlaceholder(writeRoot, o.SupersedeADR, title, adr.CreateOpts{Domains: seedDomains}); err != nil {
 			return nil, fmt.Errorf("--supersede-adr: %w", err)
 		}
 		supersedeNewID = o.SupersedeADR
@@ -515,6 +533,9 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if o.OverrideADR == "" && o.SupersedeADR == "" && adrResult.HasFailures() {
 		return nil, fmt.Errorf("adr-divergence: %s\nhint: re-run with --override-adr \"<reason>\" or --supersede-adr ADR-NNNN to bypass",
 			joinResultErrorMessages(adrResult))
+	}
+	if err := recordLifecycleGateAudit(epicID, gateOutcome, nil); err != nil {
+		return nil, guard.NewFailure("cannot record final_review panel audit: "+termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
 	}
 
 	// Spec 092 Req 1: deferred forward reconcile of the stale phase
@@ -637,6 +658,13 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// trail. Best-effort: a metadata-write failure becomes a warning.
 	if o.AllowDocSkew != "" && epicID != "" {
 		meta := buildImplSkewMetadata(o.AllowDocSkew)
+		if len(openDocDeferrals) > 0 {
+			var ids []string
+			for _, d := range openDocDeferrals {
+				ids = append(ids, d.ID)
+			}
+			meta["mindspec_impl_doc_deferrals"] = ids
+		}
 		if err := implMergeMetadataFn(epicID, meta); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("could not record impl-skew override metadata on %s: %v", epicID, err))
 		}

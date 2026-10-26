@@ -264,10 +264,9 @@ func validateDivergence(
 			// candidate set) — the docsync.go checkInternalPackages
 			// pattern, no new discovery mechanism. This distinguishes
 			// "owned by a domain the spec didn't declare" (scope drift
-			// — #178's option 2) from "genuinely unowned": the
-			// pass/fail boundary is unchanged (both remain errors,
-			// overridable exactly as today), only the message names the
-			// TRUE remedy.
+			// — #178's option 2) from "genuinely unowned": an
+			// undeclared owner remains an error. A file with no owner
+			// gives a warning and keeps its structured finding.
 			//
 			// FX-1 (gvb5.3 codex): ownership is INDETERMINATE — and must
 			// NEVER be classified as genuinely unowned — when the full
@@ -301,9 +300,9 @@ func validateDivergence(
 					fmt.Sprintf("file %s is claimed by domain %s's OWNERSHIP.yaml, but %s is not in the spec's declared Impacted Domains %v; add %s to the spec's `## Impacted Domains`",
 						termsafe.Escape(path), safeOwner, safeOwner, meta.Domains, safeOwner))
 			} else {
-				r.AddError("adr-divergence-unowned",
-					fmt.Sprintf("file %s is not claimed by any OWNERSHIP.yaml for the spec's impacted domains %v; add it to an existing manifest or create a new domain dir at %s/<name>/OWNERSHIP.yaml",
-						termsafe.Escape(path), meta.Domains, domainsRootLabelAtRef(exec, root, ownerRef)))
+				r.AddWarning("adr-divergence-unowned",
+					fmt.Sprintf("file %s is not claimed by any OWNERSHIP.yaml under %s; add it to an existing manifest or create a new domain dir at %s/<name>/OWNERSHIP.yaml",
+						termsafe.Escape(path), domainsRootLabelAtRef(exec, root, ownerRef), domainsRootLabelAtRef(exec, root, ownerRef)))
 			}
 			findings = append(findings, DivergenceFinding{
 				Path: path,

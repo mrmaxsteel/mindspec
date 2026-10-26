@@ -72,7 +72,7 @@ func TestFaultInjection_Complete_C1_ObligationMarkerWrite_KillThenConverge(t *te
 
 	// KILL: the durable-obligation marker write fails — Run must Block
 	// BEFORE any further mutation (no close, no merge).
-	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: fault-injection"})
+	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fault-injection"})
 	if err == nil {
 		t.Fatal("expected c1 kill: the marker write must Block completion")
 	}
@@ -84,7 +84,7 @@ func TestFaultInjection_Complete_C1_ObligationMarkerWrite_KillThenConverge(t *te
 	// re-scanned, the SAME refutation is re-applied, and this time the
 	// (idempotent) union-then-write durably persists — Run converges.
 	store.failMerge = nil
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: fault-injection"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fault-injection"})
 	if err != nil {
 		t.Fatalf("expected c1 re-invocation to converge to completion, got: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestFaultInjection_Complete_C8_ObligationSettlementWrite_KillThenConverge(t
 
 	// KILL: the marker write (refutation_pending_entries) lands durably, but
 	// the settling panel_refuted write fails — completion fails pre-close.
-	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: fault-injection"})
+	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fault-injection"})
 	if err == nil {
 		t.Fatal("expected c8 kill: the settlement write failure must fail completion pre-close")
 	}
@@ -143,7 +143,7 @@ func TestFaultInjection_Complete_C8_ObligationSettlementWrite_KillThenConverge(t
 	// recomputes uncoveredPendingObligations from the durable marker alone
 	// and settles it — Run converges to done.
 	store.failMerge = nil
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: fault-injection"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fault-injection"})
 	if err != nil {
 		t.Fatalf("expected c8 re-invocation to converge to completion, got: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestFaultInjection_Complete_C7_SupersedeADRPlaceholder_KillThenConverge(t *
 
 	// Run 1 (KILL): the real placeholder write lands on disk, then the seam
 	// forces a terminal error — no close, no merge.
-	_, err := Run(root, beadID, specID, "", mock, CompleteOpts{AllowDocSkew: "test: fixture", SupersedeADR: supersedeID})
+	_, err := Run(root, beadID, specID, "", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fixture", SupersedeADR: supersedeID})
 	if err == nil {
 		t.Fatal("expected c7 kill: the supersede-adr seam failure must fail completion")
 	}
@@ -310,7 +310,7 @@ func TestFaultInjection_Complete_C7_SupersedeADRPlaceholder_KillThenConverge(t *
 
 	// Run 2: re-invocation WITH the same flag converges to the clean NAMED
 	// collision refusal (adr.CreateWithID's own exact-path check).
-	_, err = Run(root, beadID, specID, "", mock, CompleteOpts{AllowDocSkew: "test: fixture", SupersedeADR: supersedeID})
+	_, err = Run(root, beadID, specID, "", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fixture", SupersedeADR: supersedeID})
 	if err == nil {
 		t.Fatal("expected c7 re-invocation (same flag) to hit the collision refusal")
 	}
@@ -324,7 +324,7 @@ func TestFaultInjection_Complete_C7_SupersedeADRPlaceholder_KillThenConverge(t *
 	// Run 3: the flag-less re-run converges to done — the already-written
 	// Proposed placeholder (cited by the plan) clears the per-bead lane's
 	// advisory tolerance.
-	res, err := Run(root, beadID, specID, "", mock, CompleteOpts{AllowDocSkew: "test: fixture"})
+	res, err := Run(root, beadID, specID, "", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fixture"})
 	if err != nil {
 		t.Fatalf("expected the flag-less re-run to converge to done, got: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestFaultInjection_Complete_C6_PostTerminalMetadataSwallowed(t *testing.T) 
 	}
 
 	mock := newMockExec()
-	res, err := Run(root, "bead-1", "", "", mock, CompleteOpts{AllowDocSkew: "test: c6 forward-safety"})
+	res, err := Run(root, "bead-1", "", "", mock, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: c6 forward-safety"})
 	if err != nil {
 		t.Fatalf("a post-terminal metadata failure must be swallowed (forward-safe), got: %v", err)
 	}

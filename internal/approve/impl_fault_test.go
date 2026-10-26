@@ -11,11 +11,9 @@ package approve
 // resumes from the stored state. Override-metadata failures remain warnings.
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
@@ -36,10 +34,8 @@ func (e fiFakeErr) Error() string { return string(e) }
 // adrID, with the given bead IDs.
 func writeSpecWithDomain(t *testing.T, root, specID, domain, adrID string, beadIDs []string) {
 	t.Helper()
+	writeSpecDir(t, root, specID)
 	specDir := filepath.Join(root, "docs", "specs", specID)
-	if err := os.MkdirAll(specDir, 0o755); err != nil {
-		t.Fatalf("mkdir spec dir: %v", err)
-	}
 	spec := "# Spec " + specID + "\n\n## Impacted Domains\n\n- " + domain + "\n"
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(spec), 0o644); err != nil {
 		t.Fatalf("write spec.md: %v", err)
@@ -69,16 +65,8 @@ func quoteYAML(s string) string { return "\"" + s + "\"" }
 
 // --- i0: supersede-ADR placeholder pre-create ------------------------------
 //
-// implCreateWithIDFn (impl.go, the supersede flow's placeholder pre-create)
-// TERMINATES via `return nil, fmt.Errorf("--supersede-adr: %w", err)` when
-// it fails — the FIRST post-preflight mutation on this lane (a file-system
-// write after the orphan/obligation gate, before the ADR-divergence
-// decision). Mechanism B: the wrapper performs the REAL adr.CreateWithID
-// write, then fails. Re-invocation WITH the same flag hits the real
-// exact-path collision refusal. The impl-approve lane hard-requires
-// Accepted coverage (Proposed-only is an ERROR here, unlike complete's
-// advisory tolerance) — the documented recovery is the operator flipping
-// the placeholder to Accepted, then a flag-less re-run converges.
+// The first run writes the real placeholder and fails. The same command
+// accepts only that exact generated placeholder and resumes to completion.
 func TestFaultInjection_ApproveImpl_I0_SupersedeADRPlaceholder_KillThenConverge(t *testing.T) {
 	tmp := t.TempDir()
 	const specID, supersedeID = "010-test", "ADR-9600"
@@ -131,35 +119,10 @@ func TestFaultInjection_ApproveImpl_I0_SupersedeADRPlaceholder_KillThenConverge(
 		t.Fatalf("expected the real placeholder to land on disk despite the kill (path=%s): %v", placeholderPath, statErr)
 	}
 
-	// Run 2: re-invocation WITH the same flag hits the real collision.
-	_, err = ApproveImpl(tmp, specID, mock, ImplOpts{AllowDocSkew: "test: fixture", SupersedeADR: supersedeID})
-	if err == nil {
-		t.Fatal("expected i0 re-invocation (same flag) to hit the collision refusal")
-	}
-	if !strings.Contains(err.Error(), supersedeID) || !strings.Contains(err.Error(), "already exists") {
-		t.Errorf("expected a NAMED collision refusal for %s, got: %v", supersedeID, err)
-	}
-	if closeCalls != 0 || len(mock.CallsTo("FinalizeEpic")) != 0 {
-		t.Fatalf("nothing may mutate on the i0 collision refusal: closeCalls=%d finalizeCalls=%d", closeCalls, len(mock.CallsTo("FinalizeEpic")))
-	}
-
-	// Operator recovery: flip the placeholder from Proposed to Accepted —
-	// the impl-approve lane hard-requires Accepted coverage.
-	data, err := os.ReadFile(placeholderPath)
+	// The same command resumes after its exact placeholder write.
+	result, err := ApproveImpl(tmp, specID, mock, ImplOpts{AllowDocSkew: "test: fixture", SupersedeADR: supersedeID})
 	if err != nil {
-		t.Fatalf("reading placeholder: %v", err)
-	}
-	data = bytes.Replace(data, []byte("Status**: Proposed"), []byte("Status**: Accepted"), 1)
-	if err := os.WriteFile(placeholderPath, data, 0o644); err != nil {
-		t.Fatalf("flipping placeholder to Accepted: %v", err)
-	}
-
-	// Run 3: flag-less re-run converges to done (doc-sync's own gate is
-	// unrelated to this ADR-divergence supersede mechanism, so AllowDocSkew
-	// stays set across every run here — same fixture, same doc-sync facts).
-	result, err := ApproveImpl(tmp, specID, mock, ImplOpts{AllowDocSkew: "test: fixture"})
-	if err != nil {
-		t.Fatalf("expected the flag-less re-run to converge to done, got: %v", err)
+		t.Fatalf("expected the same command to converge, got: %v", err)
 	}
 	if result == nil || result.SpecID != specID {
 		t.Fatalf("unexpected result: %+v", result)
@@ -283,6 +246,15 @@ func TestFaultInjection_ApproveImpl_I2I3I5_PostPreflightWritesRecover(t *testing
 			writeSpecDir(t, tmp, specID)
 			writePlanWithBeads(t, tmp, specID, []string{"bead-1"})
 			if err := os.MkdirAll(filepath.Join(tmp, ".mindspec"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// Finalization is mocked here, so retain a spec-worktree directory
+			// through retries to model a live checkout before cleanup.
+			specWorktree, err := workspace.SpecWorktreePath(tmp, nil, specID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(specWorktree, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			saveAndRestore(t)

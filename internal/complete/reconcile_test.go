@@ -99,7 +99,7 @@ func TestRun_Reconcile_NoEvidenceAttestedRestore(t *testing.T) {
 		return &readStubMergeExecutor{Executor: ex}
 	}
 
-	_, err := Run(root, beadID, specID, "", newExec(), CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	_, err := Run(root, beadID, specID, "", newExec(), CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err == nil {
 		t.Fatal("expected the attested-restore refusal")
 	}
@@ -123,7 +123,7 @@ func TestRun_Reconcile_NoEvidenceAttestedRestore(t *testing.T) {
 	// Executing the restore command + re-running converges: the surviving
 	// branch now corroborates the candidate, and the bead closes.
 	gitRun(t, root, "branch", beadBranch, beadSHA)
-	res, err := Run(root, beadID, specID, "", newExec(), CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	res, err := Run(root, beadID, specID, "", newExec(), CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err != nil {
 		t.Fatalf("re-run after restoring the branch must converge, got: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestRun_Reconcile_SpoofedMergeRefusesViaAttestedRestore(t *testing.T) {
 	var closed bool
 	closeBeadFn = func(...string) error { closed = true; return nil }
 
-	_, err := Run(root, beadID, specID, "", &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	_, err := Run(root, beadID, specID, "", &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err == nil {
 		t.Fatal("expected the spoofed merge to refuse via the attested-restore no-evidence path")
 	}
@@ -638,7 +638,7 @@ func TestRun_Reconcile_RealPanel_MissingRefWarnCloses(t *testing.T) {
 	})
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err != nil {
 		t.Fatalf("merged-unclosed reconcile with a registered panel (MissingRef -> Warn) must succeed, got: %v", err)
 	}

@@ -119,10 +119,12 @@ func TestBead6Leg_i_UntrackedFileGatesBeforeCommit(t *testing.T) {
 	root, _, beadBranch := setupRealGitFaultFixture(t, specID, beadID)
 	wireRealGitFaultSeams(t, specID)
 	wtPath := wireBeadWorktree(t, root, specID, beadID, beadBranch)
+	writeFile(t, wtPath, ".mindspec/docs/domains/other/OWNERSHIP.yaml", "paths:\n  - internal/core/**\n")
+	gitRun(t, wtPath, "add", "-A")
+	gitRun(t, wtPath, "commit", "-qm", "undeclared owner")
 	preTip := gateRevParse(t, root, beadBranch)
 
-	// UNTRACKED (never `git add`ed) file in a domain NO OWNERSHIP.yaml
-	// claims — the fixture only declares "widget".
+	// The untracked file belongs to "other". The spec declares only "widget".
 	if err := os.MkdirAll(filepath.Join(wtPath, "internal", "core"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +137,7 @@ func TestBead6Leg_i_UntrackedFileGatesBeforeCommit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the gate to refuse on the untracked, unowned source file")
 	}
-	if !strings.Contains(err.Error(), "adr-divergence") {
+	if !strings.Contains(err.Error(), "adr-divergence-unowned") || !strings.Contains(err.Error(), "not in the spec") {
 		t.Errorf("expected an adr-divergence refusal, got: %v", err)
 	}
 	if got := gateRevParse(t, root, beadBranch); got != preTip {
@@ -1732,7 +1734,7 @@ func TestBead6Leg_xxiii_AC6CompositeFlagship_DocSyncRefusalThenAllowDocSkewConve
 	// Run 2: --allow-doc-skew lets doc-sync's OWN gate class decide
 	// (and here, pass) — never re-routed through the panel's stale-SHA
 	// gate.
-	res, err := Run(root, beadID, specID, "", base, CompleteOpts{AllowDocSkew: "test: ac-6 flagship override"})
+	res, err := Run(root, beadID, specID, "", base, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: ac-6 flagship override"})
 	if err != nil {
 		t.Fatalf("expected --allow-doc-skew to let doc-sync decide (and converge), got: %v", err)
 	}
@@ -1769,6 +1771,9 @@ func TestBead6Leg_xxiv_ForgedMarkerAndTrailerNeverResumePastGates(t *testing.T) 
 	root, specBranch, beadBranch := setupRealGitFaultFixture(t, specID, beadID)
 	wireRealGitFaultSeams(t, specID)
 	wtPath := wireBeadWorktree(t, root, specID, beadID, beadBranch)
+	writeFile(t, wtPath, ".mindspec/docs/domains/other/OWNERSHIP.yaml", "paths:\n  - internal/core/**\n")
+	gitRun(t, wtPath, "add", "-A")
+	gitRun(t, wtPath, "commit", "-qm", "undeclared owner")
 	preSpecTip := gateRevParse(t, root, specBranch)
 
 	// The forged commit: unowned content + a clean, single Mindspec-Stage
@@ -1797,7 +1802,7 @@ func TestBead6Leg_xxiv_ForgedMarkerAndTrailerNeverResumePastGates(t *testing.T) 
 	if err == nil {
 		t.Fatal("the forged marker resumed past the content gates — the R6 F1 bypass is open")
 	}
-	if !strings.Contains(err.Error(), "adr-divergence") {
+	if !strings.Contains(err.Error(), "adr-divergence-unowned") || !strings.Contains(err.Error(), "not in the spec") {
 		t.Errorf("expected the NORMAL run's adr-divergence refusal on the smuggled unowned file, got: %v", err)
 	}
 	// The forged, unattested marker was cleared (FOREIGN), not honored.

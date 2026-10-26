@@ -31,7 +31,7 @@ func TestDoctor_LegacyMergeStrategyInfo(t *testing.T) {
 	} {
 		t.Run(content, func(t *testing.T) {
 			root := t.TempDir()
-			fullConfig := content + "source_globs: [cmd/**]\nmodels: {implementation: test}\ncommands: {test: go test}\n"
+			fullConfig := content + "enforcement: {panel_presence: enforce}\nsource_globs: [cmd/**]\nmodels: {implementation: test}\ncommands: {test: go test}\n"
 			writeConfig(t, root, fullConfig)
 			config.ResetCache()
 			t.Cleanup(config.ResetCache)

@@ -156,7 +156,7 @@ func TestPanelGate_FailOpen_ActuallyCompletes(t *testing.T) {
 	// AllowDocSkew bypasses the LATER (step-3.5) doc-sync gate so the test
 	// isolates the panel gate: the fixture's source-only commit would
 	// otherwise trip doc-sync, masking the panel-gate outcome.
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"})
 	if err != nil {
 		t.Fatalf("panel-less complete must fail open and complete; got: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestPanelGate_DifferentBead_DoesNotBlock(t *testing.T) {
 	}, subThresholdVerdicts())
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadY, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+	if _, err := Run(root, beadY, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 		t.Fatalf("a sub-threshold panel for bead X must not block complete of bead Y; got: %v", err)
 	}
 	if !ex.completeCalled {
@@ -305,7 +305,7 @@ func TestPanelGate_Freshness_PassAndStaleBlock(t *testing.T) {
 		}, approveVerdicts(6))
 
 		ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+		if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 			t.Fatalf("a fresh, threshold-met, clean panel must pass; got: %v", err)
 		}
 		if !ex.completeCalled {
@@ -350,7 +350,7 @@ func TestPanelGate_Hatch_SkipEnv(t *testing.T) {
 	}, subThresholdVerdicts())
 
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: e2e fixture"}); err != nil {
+	if _, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: e2e fixture"}); err != nil {
 		t.Fatalf("MINDSPEC_SKIP_PANEL must skip the gate; got: %v", err)
 	}
 	if !ex.completeCalled {
@@ -479,7 +479,7 @@ func TestComplete_BeadIDHandEditCannotEvadeGate(t *testing.T) {
 	closed := false
 	closeBeadFn = func(...string) error { closed = true; return nil }
 	ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: source-only fixture"})
+	res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: source-only fixture"})
 	if err == nil || !strings.Contains(err.Error(), "changed outside the panel verbs (bead_id)") {
 		t.Fatalf("snapshot bead edit escaped integrity gate: result=%+v err=%v", res, err)
 	}
@@ -534,7 +534,7 @@ func TestComplete_CorruptRegistrationCannotEvadeGate(t *testing.T) {
 			closed := false
 			closeBeadFn = func(...string) error { closed = true; return nil }
 			ex := &readStubMergeExecutor{Executor: executor.NewMindspecExecutor(root)}
-			res, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: source-only fixture"})
+			res, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: source-only fixture"})
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("corrupt registration escaped gate: result=%+v err=%v", res, err)
 			}

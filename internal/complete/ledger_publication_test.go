@@ -159,7 +159,7 @@ func TestComplete_LedgerIgnoreFailureRecovery(t *testing.T) {
 				ex := &ledgerIgnoreFailureExecutor{Executor: f.ex, failure: failure}
 				var err error
 				if merged {
-					_, err = runMergedCompletion(f.root, closingBead, closingSpec, "epic-window", "bead/"+closingBead, f.beadWT, executor.MergeIdentity{}, ex, CompleteOpts{}, false)
+					_, err = runMergedCompletion(f.root, closingBead, closingSpec, "epic-window", "bead/"+closingBead, f.beadWT, executor.MergeIdentity{}, ex, CompleteOpts{}, false, nil)
 				} else {
 					_, err = Run(f.root, closingBead, closingSpec, "", ex, CompleteOpts{})
 				}

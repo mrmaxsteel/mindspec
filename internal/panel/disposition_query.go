@@ -108,7 +108,7 @@ func loadDispositionFile(path string) ([]DispositionRow, []CoverageManifest, err
 			return nil, nil, fmt.Errorf("%s:%d: %s", termsafe.Escape(path), line, termsafe.Escape(err.Error()))
 		}
 		switch disc.Record {
-		case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon:
+		case RecordRound, RecordRefutation, RecordDeferral, RecordDeferredToPlan, RecordRebind, RecordAbandon:
 			// Audit events validate but do not contribute telemetry rows.
 			continue
 		case RecordDisposition:

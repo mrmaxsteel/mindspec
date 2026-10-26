@@ -39,6 +39,7 @@ func checkConfiguration(r *Report, root string, opts Options) {
 	checkSourceGlobs(r, root, cfg)
 	checkModels(r, root, cfg)
 	checkCommands(r, root, cfg)
+	checkPanelPresencePolicy(r, cfg)
 	git := executor.NewMindspecExecutor(root)
 	tracked, trackErr := git.LsFiles(root, localConfigPath)
 	checkPanelConfigWarnings(r, root, cfg, git, tracked)

@@ -47,6 +47,7 @@ func checkLineage(r *Report, root string) {
 		return
 	}
 	bySpec := map[string][]string{}
+	checkPanelAbsence(r, c)
 	var order []string
 	for _, epic := range epics {
 		id, err := phase.ResolveSpec(epic)

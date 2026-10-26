@@ -9,6 +9,7 @@ package approve
 // exactly this state while the old tail still demanded a manual commit.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
@@ -53,6 +55,7 @@ func specE2EValidSpecMD(specID string) string {
 }
 
 func TestApproveSpec_RealExecutorCommitsAndLeavesClean(t *testing.T) {
+	stubDocumentGateAudit(t)
 	specE2EFakeBdOnPath(t)
 	root := t.TempDir()
 	specID := "990-approve-commit"
@@ -153,18 +156,18 @@ func TestApproveSpec_EpicCreateWarningHostileEscaped(t *testing.T) {
 		return nil, hostile
 	}))
 
-	result, err := ApproveSpec(root, specID, "test-user", &executor.MockExecutor{})
-	if err != nil {
-		t.Fatalf("ApproveSpec (epic-create failure is warn-and-continue): %v", err)
+	_, err := ApproveSpec(root, specID, "test-user", &executor.MockExecutor{})
+	if err == nil || !strings.HasSuffix(err.Error(), "recovery: run the same command again in the same environment") {
+		t.Fatalf("epic-create failure with an absence audit must refuse: %v", err)
 	}
 	var found string
-	for _, w := range result.Warnings {
+	for _, w := range strings.Split(err.Error(), "\n") {
 		if strings.Contains(w, "could not create lifecycle epic") {
 			found = w
 		}
 	}
 	if found == "" {
-		t.Fatalf("expected the epic-create warning, got: %v", result.Warnings)
+		t.Fatalf("expected the epic-create warning, got: %v", err)
 	}
 	if !strings.Contains(found, "depends_on_id") {
 		t.Errorf("the bd diagnostic must survive into the warning: %q", found)
@@ -182,6 +185,7 @@ func TestApproveSpec_EpicCreateWarningHostileEscaped(t *testing.T) {
 func TestApproveSpec_LocalLedger(t *testing.T) {
 	for _, state := range []string{"tracked", "fresh-init", "upgraded-init"} {
 		t.Run(state, func(t *testing.T) {
+			stubDocumentGateAudit(t)
 			specE2EFakeBdOnPath(t)
 			root := t.TempDir()
 			specID := "990-approve-commit"
@@ -235,6 +239,26 @@ func TestApproveSpec_LocalLedger(t *testing.T) {
 	}
 }
 
+// approvalLedgerBytes returns a valid ledger of n adhoc round records.
+func approvalLedgerBytes(t *testing.T, specID string, n int) string {
+	t.Helper()
+	var out strings.Builder
+	for round := 1; round <= n; round++ {
+		data, err := json.Marshal(panel.RoundRecord{Record: panel.RecordRound, Spec: specID, Panel: "p", Round: round,
+			ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:abc", Target: "main", Gate: "adhoc",
+			Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "architecture"}}, ExpectedReviewers: 2, Telemetry: "required", CreatedAt: "2026-01-01T00:00:00Z"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := panel.Validate(data); err != nil {
+			t.Fatal(err)
+		}
+		out.Write(data)
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
+
 func prepareApprovalLedger(t *testing.T, root, specID, state string) string {
 	t.Helper()
 	file := ".mindspec/specs/" + specID + "/reviews/p/dispositions.jsonl"
@@ -251,22 +275,24 @@ func prepareApprovalLedger(t *testing.T, root, specID, state string) string {
 		t.Fatal(err)
 	}
 	if state == "tracked" {
-		if err := os.WriteFile(filepath.Join(root, file), []byte("before\n"), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, file), []byte(approvalLedgerBytes(t, specID, 1)), 0644); err != nil {
 			t.Fatal(err)
 		}
 		adoptGitRun(t, root, "add", "-f", "--", file)
 	}
 	adoptGitRun(t, root, "add", "-A")
 	adoptGitRun(t, root, "commit", "-qm", "init review ignores fixture")
-	if err := os.WriteFile(filepath.Join(root, file), []byte("local\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, file), []byte(approvalLedgerBytes(t, specID, 2)), 0644); err != nil {
 		t.Fatal(err)
 	}
 	return file
 }
 func assertApprovalLedger(t *testing.T, root, file, state string) {
 	t.Helper()
+	specID := strings.Split(file, "/")[2]
+	local := approvalLedgerBytes(t, specID, 2)
 	data, err := exec.Command("git", "-C", root, "show", "HEAD:"+file).Output()
-	if state == "tracked" && (err != nil || string(data) != "local\n") || state != "tracked" && err == nil {
+	if state == "tracked" && (err != nil || string(data) != local) || state != "tracked" && err == nil {
 		t.Fatalf("approval committed ledger: %q %v", data, err)
 	}
 	if state != "tracked" {
@@ -276,7 +302,7 @@ func assertApprovalLedger(t *testing.T, root, file, state string) {
 		}
 	}
 	data, err = os.ReadFile(filepath.Join(root, file))
-	if err != nil || string(data) != "local\n" {
+	if err != nil || string(data) != local {
 		t.Fatalf("local bytes changed: %q %v", data, err)
 	}
 }

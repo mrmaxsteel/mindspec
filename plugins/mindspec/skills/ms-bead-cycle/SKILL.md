@@ -52,7 +52,9 @@ Don't claim multiple beads at once — the cycle is serial per bead by design (p
 step 0                 (pick + claim the next eligible bead, create worktree)
   ↓ bead-id + worktree + branch
 /ms-bead-impl          (round 1 implementation — Phase A stages the prompt, Phase B dispatches)
-  ↓ commit SHA + flagged deviations
+  ↓ implementation commit SHA + flagged deviations
+mindspec complete <bead> --check
+  ↓ content gates PASS
 /ms-panel-run          (round 1 — the caller writes the brief file; create copies it into BRIEF.md, then the configured reviewers fan out)
   ↓ wait for completions
 /ms-panel-tally        (round 1 verdicts — single decision authority)
@@ -63,7 +65,9 @@ step 0                 (pick + claim the next eligible bead, create worktree)
        any REJECT / HARD block → halt (see /ms-panel-tally recovery)
 
 /ms-bead-fix           (round 1 → round 2 fix commit)
-  ↓ new commit SHA + flagged deviations
+  ↓ new implementation commit SHA + flagged deviations
+mindspec complete <bead> --check
+  ↓ content gates PASS
 /ms-panel-run          (round 2 — the caller writes a fresh brief file; create bumps the round + reviewed_head_sha)
   ↓
 /ms-panel-tally        (round 2 verdicts)
@@ -73,6 +77,14 @@ step 0                 (pick + claim the next eligible bead, create worktree)
 
 merge terminal         (panel-approved bead — mindspec complete)
 ```
+
+## Content check before the bead panel
+
+After each implementation or fix commit, run `mindspec complete <bead> --check`.
+This check writes nothing and does not run the panel gate. If it fails, send all
+failing gates and recovery lines to the implementer or fixer. Wait for the fixed
+commit and run the check again. Convene the bead panel only after the check passes,
+so the panel reviews the fixed diff.
 
 ## NOT READY — pre-damage triage
 

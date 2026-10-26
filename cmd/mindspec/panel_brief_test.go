@@ -27,6 +27,7 @@ func newBriefFixture(t *testing.T, spec, cfg string) (string, string) {
 	subjectCLIGit(t, root, "commit", "-qm", "reviewed fixture")
 	sha := subjectCLIGit(t, root, "rev-parse", "HEAD")
 	subjectCLIGit(t, root, "branch", "bead/mindspec-brief.1")
+	subjectCLIGit(t, root, "branch", "spec/901-brief")
 	withTestChdir(t, root)
 	config.ResetCache()
 	t.Cleanup(config.ResetCache)
@@ -39,6 +40,9 @@ func runBriefCreate(t *testing.T, gate string) (string, error) {
 	resetPanelCreateFlags(t)
 	fileAtRefForPanelBriefFn = readAtRef
 	target := "HEAD"
+	if panel.IsLifecycleGate(gate) {
+		target = "spec/901-brief"
+	}
 	args := []string{"create", "p", "--gate", gate}
 	if gate != "adhoc" {
 		args = append(args, "--spec", "901-brief")
@@ -415,7 +419,7 @@ func TestPanelBriefFilePrompt(t *testing.T) {
 		if round == "2" {
 			subjectCLIWrite(t, root, ".mindspec/specs/901-brief/reviews/p/consolidated-round-1.md", "Prior consolidation text.\n")
 		}
-		if out, err := runPanelVerbCmd("create", "p", "--spec", "901-brief", "--gate", "spec_approve", "--target", "HEAD", "--round", round, "--brief-file", file); err != nil {
+		if out, err := runPanelVerbCmd("create", "p", "--spec", "901-brief", "--gate", "spec_approve", "--target", "spec/901-brief", "--round", round, "--brief-file", file); err != nil {
 			t.Fatalf("create: %v %s", err, out)
 		}
 		brief := readCreatedBrief(t, root, "spec_approve")

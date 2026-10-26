@@ -117,6 +117,9 @@ type Decision struct {
 // shape the round-6 spec gate closed. Recorded here, reviewed, rather
 // than left for a reader to discover the scan does not see it.
 func RawMergeFence(beadID string) string {
+	if beadID == "" {
+		return ""
+	}
 	return fmt.Sprintf(
 		"\nDo NOT bypass with raw `git merge bead/%s` — it skips bd closure, "+
 			"worktree cleanup, and this gate; only `mindspec complete` merges bead branches.",
@@ -152,6 +155,8 @@ type GateFacts struct {
 	// separate from the ordinary rev-parse fail-open GitErr.
 	SubjectDigest string
 	SubjectErr    error
+	// ArtifactDetails names unresolved paths absent from the original round tree.
+	ArtifactDetails string
 
 	// GitErr true means the rev-parse failed with a TRANSIENT or structural
 	// error (not a clean "ref absent"): exit 128, git missing, lock
@@ -197,7 +202,7 @@ type GateFacts struct {
 // false POSITIVES (a wrongful Block) are the pinned bug class (Req 9); the
 // missing-ref and missing-worktree pass-throughs exist to keep the
 // documented partial-failure recovery rerun unblocked.
-func PanelGateDecision(f GateFacts) Decision {
+func panelGateDecision(f GateFacts) Decision {
 	// (0) Escape hatch — env-only, audited. Never names the variable in a
 	// Block (this is a Warn/Allow path, so HC-7 is moot here, but we still
 	// keep the message hatch-name-free except for this legitimate audit).
@@ -304,7 +309,11 @@ func PanelGateDecision(f GateFacts) Decision {
 	// window).
 	if !f.WorktreeAbsent && len(f.UserDirt) > 0 {
 		var b strings.Builder
-		fmt.Fprintf(&b, "uncommitted changes in %s — `mindspec complete` would materialize them into a commit past review; commit and re-panel, or revert:",
+		text := "uncommitted changes in %s — `mindspec complete` would materialize them into a commit past review; commit and re-panel, or revert:"
+		if f.BeadID == "" && !p.IsBead() {
+			text = "uncommitted changes in %s — approval would include content past review; commit and review the listed paths:"
+		}
+		fmt.Fprintf(&b, text,
 			termsafe.Escape(f.WorktreePath))
 		// The "\n  " separator is the template's OWN real newline — only
 		// the interpolated path itself is escaped, never the layout.
@@ -346,9 +355,13 @@ func PanelGateDecision(f GateFacts) Decision {
 
 	// (9.5) Every finding must be discharged; approval counts are descriptive.
 	if !f.Res.PassRule(true) {
+		details := f.Res.UnresolvedNames() + f.ArtifactDetails
+		if f.BeadID == "" && !p.IsBead() {
+			return Decision{Action: Block, Message: fmt.Sprintf("panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s", slug, round, details)}
+		}
 		return Decision{Action: Block, Message: fmt.Sprintf(
 			"panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s — %d/%d APPROVE. Run /ms-bead-fix with %s, then re-panel%s",
-			slug, round, f.Res.UnresolvedNames(), f.Res.Approves, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
+			slug, round, details, f.Res.Approves, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
 	}
 	return Decision{Action: Allow, AppliedRefutations: f.Res.AppliedRefutations(), AppliedDeferrals: f.Res.EffectiveDeferrals()}
 }
@@ -420,6 +433,8 @@ type GateIO struct {
 	SpecDir string
 	// SubjectTree returns the subject digest at ref, or an error (fail closed).
 	SubjectTree func(scanRoot, ref string, roots SubjectRoots) (string, error)
+	// ArtifactTree returns the full tree listing at the round's recorded commit.
+	ArtifactTree func(scanRoot, ref string) (string, error)
 	// RevParse runs `git rev-parse <ref>` in scanRoot, returning the SHA. A
 	// genuine "ref absent" error must satisfy IsRefNotFound; any other error
 	// is treated as a transient/structural git error.
@@ -508,6 +523,7 @@ func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) Ga
 		return f
 	}
 	f.HeadSHA = sha
+	f.ArtifactDetails = ArtifactPathDetails(res, scanRoot, deps.ArtifactTree)
 	if p := res.Panel; p != nil && p.SubjectDigest != "" && p.ReviewedHeadSHA != "" && !shaEqual(p.ReviewedHeadSHA, sha) {
 		if deps.SubjectTree == nil {
 			f.SubjectErr = fmt.Errorf("subject-tree reader unavailable")
@@ -704,4 +720,32 @@ func LedgerBackedRebinds(dir string, p Panel) []Rebind {
 		}
 	}
 	return matched
+}
+
+// PanelGateDecision applies one decision engine and renders lifecycle refusals.
+func PanelGateDecision(f GateFacts) Decision {
+	d := panelGateDecision(f)
+	if f.BeadID != "" || f.Reg == nil || f.Reg.Panel.IsBead() {
+		return d
+	}
+	p := f.Reg.Panel
+	if f.Res != nil && f.Res.Panel != nil {
+		p = *f.Res.Panel
+	}
+	if !IsLifecycleGate(p.Gate) {
+		return d
+	}
+	if d.Action == Warn && (f.GitErr != nil || f.MissingRef) {
+		d.Message = fmt.Sprintf("target %s cannot be verified", termsafe.Escape(p.Target))
+		if f.MissingRef {
+			d.Message = fmt.Sprintf("target %s no longer exists", termsafe.Escape(p.Target))
+		}
+	}
+	if d.Action == Block || (d.Action == Warn && (f.GitErr != nil || f.MissingRef)) {
+		d.Message, _, _ = strings.Cut(d.Message, "\nrecovery:")
+		d.Message = fmt.Sprintf("gate %s panel %s: %s\nrecovery: mindspec panel create %s --spec %s --gate %s --target spec/%s --round %d",
+			termsafe.Escape(p.Gate), termsafe.Escape(f.Reg.Slug()), d.Message,
+			promptShellQuote(f.Reg.Slug()), promptShellQuote(p.Spec), termsafe.Escape(p.Gate), promptShellQuote(p.Spec), p.Round+1)
+	}
+	return d
 }

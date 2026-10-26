@@ -294,7 +294,7 @@ func TestComplete_Core3BeforeMaterialization(t *testing.T) {
 		return origPreflight(workdir, branch, target, overrideReason, rerun)
 	}
 	ex := &landedReviewRecorder{Executor: executor.NewMindspecExecutor(root)}
-	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{AllowDocSkew: "test: fixture"})
+	_, err := Run(root, beadID, specID, "", ex, CompleteOpts{DocOwner: "fixture-doc-owner", AllowDocSkew: "test: fixture"})
 	if err == nil || !strings.Contains(err.Error(), "no coverage manifest") {
 		t.Fatalf("Run must refuse absent coverage: %v", err)
 	}

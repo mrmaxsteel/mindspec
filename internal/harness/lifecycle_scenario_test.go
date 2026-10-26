@@ -35,15 +35,10 @@ func stubNoEpics(t *testing.T) {
 // ApproveSpec and ApprovePlan don't create real beads in the shared database.
 func stubApproveBeads(t *testing.T) {
 	t.Helper()
-	noopBD := func(args ...string) ([]byte, error) {
-		return []byte(`{"id":"fake-test-bead"}`), nil
-	}
-	t.Cleanup(approve.SetSpecRunBDForTest(noopBD))
-	t.Cleanup(approve.SetPlanRunBDForTest(noopBD))
-	t.Cleanup(approve.SetPlanRunBDCombinedForTest(noopBD))
+	stubApproveBeadsWithEpicRegistry(t)
 }
 
-// stubApproveBeadsWithEpicRegistry is stubApproveBeads' sibling for scenario
+// stubApproveBeadsWithEpicRegistry is the shared stub for scenario
 // tests that call ApproveSpec THEN ApprovePlan for the SAME specID (spec 119
 // bead 4 fix-up, F1 finding 4). Before spec 119's gate-before-mutate
 // preflight, ApprovePlan tolerated `phase.FindEpicBySpecID` failing (it just
@@ -73,6 +68,23 @@ func stubApproveBeadsWithEpicRegistry(t *testing.T) {
 	var mu sync.Mutex
 	var epics []map[string]interface{}
 	epicByID := map[string]map[string]interface{}{}
+	t.Cleanup(approve.SetLifecycleMergeMetadataForTest(func(id string, updates map[string]interface{}) error {
+		mu.Lock()
+		defer mu.Unlock()
+		epic, ok := epicByID[id]
+		if !ok {
+			return fmt.Errorf("unknown fixture epic %q", id)
+		}
+		metadata, ok := epic["metadata"].(map[string]interface{})
+		if !ok {
+			metadata = map[string]interface{}{}
+			epic["metadata"] = metadata
+		}
+		for key, value := range updates {
+			metadata[key] = value
+		}
+		return nil
+	}))
 
 	bdFn := func(args ...string) ([]byte, error) {
 		mu.Lock()

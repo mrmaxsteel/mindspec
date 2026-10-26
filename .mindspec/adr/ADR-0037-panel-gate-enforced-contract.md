@@ -715,3 +715,46 @@ change both the verdict file and the ledger.
 links and without blocking. The leaf rule's purpose does not change: no config,
 git or process code belongs in `internal/panel`.
 `TestPanelLeafImports_StdlibPlusTermsafeOnly` checks the exact import set.
+
+## Amendment (Spec 133)
+
+The approval gates are `spec_approve`, `plan_approve` and `final_review`.
+Each gate requires a live panel at `spec/<id>`. Each live panel must pass
+the decision legs and the coverage check. A malformed registration, integrity
+error, round mismatch, stale subject, dirty subject, incomplete round, REJECT,
+hard block or unresolved finding refuses approval.
+
+The presence policy is `enforcement.panel_presence`. Its default is `warn`.
+The only other value is `enforce`. Config load refuses any other value.
+With no registration, `warn` emits one warning and records `panel_absent`,
+the gate and the time. With no registration, `enforce` refuses before a write.
+The policy does not weaken a failed decision leg. It applies to bead gates too.
+
+Document panels use a semantic subject digest. The subject contains the spec
+directory and excludes review artifacts. Both document gates exclude the
+approval fields of `spec.md` and `plan.md`. They exclude the standard
+`## Approval` section only when it contains the four approval bullets once
+and no other content. An absent section has the same subject. They exclude
+`plan.md` only when its bytes match the initial scaffold. All other fields,
+including dependencies and citations, remain in the subject. YAML key order
+and scalar quoting do not affect the digest.
+
+Final review uses the whole tree with the review-artifact exclusions. It
+excludes only a placeholder ADR whose bytes match the generated placeholder.
+Create, rebind, verify and approval use one digest function. Each target must
+be `spec/<id>`. A prior round with an old target or digest can need a new
+round at that target.
+
+The existing hatches remain. The skip hatch warns and records
+`panel_gate_skipped` and the time. A disabled panel gate writes no audit.
+An abandoned panel warns with its reason and records `panel_abandoned`,
+the reason and the time. Approval writes these records after it resolves the
+epic. Spec approval also records accepted plan-deferral IDs. A nil deferral
+list leaves that key untouched. An audit that cannot reach an epic requires
+a re-run in the same environment.
+
+Each refusal names the gate, panel and failed leg. It ends with one recovery
+line. Without a registration, recovery creates a panel at `spec/<id>`.
+Document and final-review messages contain no bead merge fence or bead fix
+instruction. The subject and dirt checks exclude the verbs' own writes so a
+retry can finish after a partial failure.

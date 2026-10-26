@@ -2224,19 +2224,9 @@ func TestImpactedDomainsForwardOnlyReject_ValidatePlan(t *testing.T) {
 	})
 }
 
-// TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight pins spec
-// 122 AC-3: an already-Approved spec carrying the SAME bare label, forced
-// to bead time (the complete-shaped divergence lane, ValidateDivergence)
-// with a diff changing src/orders/models.py, behaves EXACTLY as it did
-// before this bead — Rule 2's verbatim-keep drives the same per-file
-// attribution (today: an "adr-divergence-unowned" finding, since the bare
-// label names no real domain dir). This bead wires the forward-only reject
-// ONLY into the two AUTHORING consumers (checkImpactedDomainsResolutionParity
-// in spec.go, ValidatePlan in plan.go); divergence.go's own
-// normalizeImpactedDomains call (:155) is untouched by this bead, so this
-// pins BY CONSTRUCTION that forward-only is keyed on authoring status, not
-// on the bead-time path — an already-Approved spec is never newly
-// hard-failed at bead time.
+// An approved spec keeps its bare domain label at bead time.
+// Changes to internal/unclaimed/file.go produce an unowned warning.
+// The authoring checks do not apply to this approved spec.
 func TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight(t *testing.T) {
 	const bareLabel = "api (orders — models)"
 
@@ -2257,7 +2247,7 @@ func TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight(t *testing.
 	writeTestADRWithDomains(t, tmp, "ADR-0001", "Accepted", "orders", "")
 
 	mock := &executor.MockExecutor{
-		ChangedFilesResult: []string{"src/orders/models.py"},
+		ChangedFilesResult: []string{"internal/unclaimed/file.go"},
 	}
 
 	r, findings := ValidateDivergence(mock, tmp, specDir, "", "BASE", "HEAD", "", false)
@@ -2265,6 +2255,8 @@ func TestValidateDivergence_ForwardOnlyGrandfathersApprovedMidFlight(t *testing.
 		t.Fatal("nil result")
 	}
 
+	s133AssertUnowned(t, r, "internal/unclaimed/file.go")
+	s133UndeclaredControl(t, tmp, specDir)
 	foundUnowned := false
 	for _, i := range r.Issues {
 		if i.Name == "adr-divergence-unowned" {

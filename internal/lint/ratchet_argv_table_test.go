@@ -7,6 +7,7 @@ package lint
 // non-id); caller-audited is the mechanical wrapper marker that
 // promotes a function's CALL SITES into this same table.
 var argvAuditTable = map[string]argvEntry{
+	"internal/approve/doc_declarations.go implDocMetadata call implRunBDFn":                       {Count: 1, Disp: dispGated, Note: "gate-in-func: idvalidate.BeadID validates the tracker show operand before the read."},
 	"internal/gitutil/gitops.go ExactRefExists exec-git execCommand":                              {Count: 1, Disp: dispNonID, Class: opClassRejectOptionLikeGated, Note: "Fully qualified revision ref, guarded against option-like operands before exact show-ref --exists lookup (Git >= 2.43); no ID operand."},
 	"internal/executor/mindspec_executor.go checkTemporaryFinalizeWorktree exec-git exec.Command": {Count: 1, Disp: dispNonID, Class: opClassFrameworkSubcommandOrFlag, Note: "The command lists worktrees in the repository root with fixed subcommands and flags. No branch, ref, or ID operand reaches this read."},
 	"internal/gitutil/neteffect.go RangeRevertedAt exec-git execCommand":                          {Count: 1, Disp: dispNonID, Class: opClassRejectOptionLikeGated, Note: "Range endpoints reject option-like values before rev-list. The operands are revisions. The trailing separator ends revision parsing."},

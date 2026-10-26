@@ -392,7 +392,7 @@ func Validate(data []byte) error {
 		return validateDispositionMap(m)
 	case RecordPanelManifest:
 		return validateManifestMap(m)
-	case RecordRound, RecordRefutation, RecordDeferral, RecordRebind, RecordAbandon, RecordVerdict, RecordLaunch, RecordSubstitution:
+	case RecordRound, RecordRefutation, RecordDeferral, RecordDeferredToPlan, RecordRebind, RecordAbandon, RecordVerdict, RecordLaunch, RecordSubstitution:
 		return validateLedgerMap(m, record)
 	default:
 		return fmt.Errorf("unknown disposition record kind %s", termsafe.Escape(record))

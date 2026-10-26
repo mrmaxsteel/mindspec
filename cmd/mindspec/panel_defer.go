@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var panelDeferCmd = &cobra.Command{Use: "defer <slug>", Short: "Defer a latest-round finding to an open follow-up bead", Args: cobra.ExactArgs(1), SilenceUsage: true, RunE: runPanelDefer}
+var panelDeferCmd = &cobra.Command{Use: "defer <slug>", Short: "Defer a latest-round finding to the plan or an open follow-up bead", Args: cobra.ExactArgs(1), SilenceUsage: true, RunE: runPanelDefer}
 
 func runPanelDefer(cmd *cobra.Command, args []string) error {
 	_, reg, err := resolvePanelVerb(cmd, args[0])
@@ -26,9 +26,19 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	round, _ := cmd.Flags().GetInt("round")
 	finding, _ := cmd.Flags().GetString("finding")
 	beadID, _ := cmd.Flags().GetString("bead")
+	toPlan, _ := cmd.Flags().GetBool("to-plan")
+	if toPlan && cmd.Flags().Changed("bead") {
+		return panelVerbFailure(fmt.Errorf("--to-plan and --bead are mutually exclusive"))
+	}
+	if toPlan && reg.Panel.Gate != "spec_approve" {
+		return panelVerbFailure(fmt.Errorf("--to-plan requires a spec_approve panel"))
+	}
 	by, _ := cmd.Flags().GetString("by")
 	if strings.TrimSpace(by) == "" {
 		return panelVerbFailure(fmt.Errorf("--by must not be empty"))
+	}
+	if toPlan {
+		return runPanelDeferToPlan(cmd, reg, slot, round, finding, by)
 	}
 	if reg.Panel.Gate == "spec_approve" || reg.Panel.Gate == "adhoc" || reg.Panel.Gate == "" {
 		return guard.NewFailure("this panel has no owning epic for a deferral", "fix the finding or use mindspec panel refute")
@@ -168,6 +178,7 @@ func init() {
 	panelDeferCmd.Flags().String("slot", "", "Roster slot to defer")
 	panelDeferCmd.Flags().Int("round", 0, "Latest verdict round")
 	panelDeferCmd.Flags().String("finding", "", "Finding id ccr[i]; omit to cover the whole slot")
+	panelDeferCmd.Flags().Bool("to-plan", false, "Defer each covered finding to the plan on a spec_approve panel")
 	panelDeferCmd.Flags().String("bead", "", "Open follow-up bead outside the owning epic")
 	panelDeferCmd.Flags().String("by", "", "Name of the person recording the deferral")
 	panelCmd.AddCommand(panelDeferCmd)

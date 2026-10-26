@@ -36,9 +36,10 @@ type Issue struct {
 
 // Result holds the output of a validation run.
 type Result struct {
-	SubCommand string  `json:"sub_command"`
-	TargetID   string  `json:"target_id,omitempty"`
-	Issues     []Issue `json:"issues"`
+	SubCommand string     `json:"sub_command"`
+	TargetID   string     `json:"target_id,omitempty"`
+	Issues     []Issue    `json:"issues"`
+	DocImpact  *DocImpact `json:"-"`
 }
 
 // HasFailures returns true if any issue has error severity.

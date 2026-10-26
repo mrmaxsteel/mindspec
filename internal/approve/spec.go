@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +15,10 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -71,9 +74,17 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 	if err != nil {
 		return nil, err
 	}
+	worktree := workspace.TreeRootForSpecDir(specDir)
+	var gateWarnings bytes.Buffer
+	outcome, err := runLifecycleGate(root, specID, "spec_approve", worktree, &gateWarnings)
+	if err != nil {
+		return nil, err
+	}
+	appendDocumentGateWarnings(&result.Warnings, gateWarnings.String())
 
 	specNum, _ := parseSpecID(specID)
-	existingEpicID, lookupErr := phase.FindEpicBySpecID(specID)
+	epicCache := phase.NewCache()
+	existingEpicID, lookupErr := epicCache.FindEpicBySpecID(specID)
 	if lookupErr != nil && !errors.Is(lookupErr, phase.ErrNoEpicForSpec) {
 		if errors.Is(lookupErr, phase.ErrSpecResolution) {
 			return nil, lookupErr
@@ -81,9 +92,38 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 		return nil, fmt.Errorf("%w\nrecovery: mindspec spec approve %s", next.RenderBDError(lookupErr), idrender.Spec(specID))
 	}
 
+	deferralIDs, err := specPlanDeferralIDs(root, worktree, specID, exec)
+	if err != nil {
+		return nil, err
+	}
+
+	if existingEpicID != "" && deferralIDs != nil {
+		epics, err := epicCache.AllEpics()
+		if err != nil {
+			return nil, err
+		}
+		ids := map[string]bool{}
+		for _, id := range deferralIDs {
+			ids[id] = true
+		}
+		for _, epic := range epics {
+			if epic.ID != existingEpicID {
+				continue
+			}
+			recorded, err := recordedPlanDeferralIDs(epic.Metadata)
+			if err != nil {
+				return nil, fmt.Errorf("%w\nrecovery: repair the epic plan_deferral_ids and run the same command again", err)
+			}
+			for _, id := range recorded {
+				ids[id] = true
+			}
+		}
+		deferralIDs = sortedDeferralIDs(ids)
+	}
+
 	// Step 2: Update spec frontmatter + markdown Approval section.
 	specPath := filepath.Join(specDir, "spec.md")
-	if err = updateSpecApproval(specPath, approvedBy); err != nil {
+	if err = updateSpecApprovalWithGate(specPath, approvedBy, outcome); err != nil {
 		return nil, fmt.Errorf("updating spec approval: %w", err)
 	}
 
@@ -135,11 +175,15 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 				ID string `json:"id"`
 			}
 			if json.Unmarshal(out, &created) == nil && created.ID != "" {
+				existingEpicID = created.ID
 				// Push to Dolt so other agents see the epic immediately
 				_, _ = specRunBDFn("dolt", "push")
 			}
 		}
 	}
+	// Keep the audit failure until after the approval commits. A replay can
+	// then create the epic and persist the same due records.
+	auditErr := recordLifecycleGateAudit(existingEpicID, outcome, deferralIDs)
 
 	// Step 3b: Scaffold plan.md if it doesn't exist, so the agent has the exact
 	// structure that validation requires (frontmatter, sections, bead template).
@@ -177,6 +221,9 @@ func ApproveSpec(root, specID, approvedBy string, exec executor.Executor) (*Spec
 
 	if err := exec.IsTreeClean(specWtPath); err != nil {
 		return nil, fmt.Errorf("spec worktree has uncommitted changes after spec approval: %w\n\n%s && git status", err, containment.EmitCd(specWtPath))
+	}
+	if auditErr != nil {
+		return nil, fmt.Errorf("warning: %s\n%w", strings.Join(result.Warnings, "\nwarning: "), documentGateAuditFailure(auditErr))
 	}
 
 	// Step 4: Emit recording phase marker (best-effort)
@@ -265,9 +312,23 @@ func backfillExistingEpicPhase(root, epicID string) (message string, err error) 
 // updateSpecApproval reads a spec file and updates canonical frontmatter fields
 // plus the markdown ## Approval section.
 func updateSpecApproval(specPath, approvedBy string) error {
+	return updateSpecApprovalWithGate(specPath, approvedBy, Outcome{})
+}
+
+// updateSpecApprovalWithGate keeps reviewed subject content intact for a live panel.
+func updateSpecApprovalWithGate(specPath, approvedBy string, outcome Outcome) error {
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		return fmt.Errorf("reading spec: %w", err)
+	}
+
+	livePanel := outcome.LivePanelSlug != ""
+	if livePanel {
+		_, body, _ := splitFrontmatter(string(data))
+		if start, _, line, matches := panel.ApprovalSection([]byte(body)); start >= 0 && !matches {
+			return guard.NewFailure("gate spec_approve panel "+termsafe.Escape(outcome.LivePanelSlug)+": approval section: ## Approval contains subject content: "+termsafe.Escape(strconv.Quote(line)),
+				"move the text out of the ## Approval section, then run a new spec-approve round")
+		}
 	}
 
 	now := time.Now().UTC()
@@ -276,6 +337,24 @@ func updateSpecApproval(specPath, approvedBy string) error {
 		return err
 	}
 	content = upsertSpecApprovalSection(content, approvedBy, now)
+
+	if livePanel {
+		// Check the full result with the digest reader before the write. This also
+		// protects sections whose heading the Markdown writer cannot see.
+		const subjectDir = "approval"
+		before, _, err := panel.DocumentSubjectContent(subjectDir+"/spec.md", data, subjectDir, "spec_approve")
+		if err != nil {
+			return err
+		}
+		after, _, err := panel.DocumentSubjectContent(subjectDir+"/spec.md", []byte(content), subjectDir, "spec_approve")
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(before, after) {
+			return guard.NewFailure("gate spec_approve panel "+termsafe.Escape(outcome.LivePanelSlug)+": approval section: ## Approval rewrite changes subject content",
+				"move the text out of the ## Approval section, then run a new spec-approve round")
+		}
+	}
 
 	return os.WriteFile(specPath, []byte(content), 0644)
 }
@@ -307,18 +386,17 @@ func upsertSpecFrontmatterApproval(content, approvedBy string, now time.Time) (s
 }
 
 func upsertSpecApprovalSection(content, approvedBy string, now time.Time) string {
-	lines := strings.Split(content, "\n")
-
-	approvalStart := -1
-	approvalEnd := len(lines)
-	for i, line := range lines {
-		if strings.HasPrefix(line, "## Approval") {
-			approvalStart = i
+	approvalStart, approvalEnd := -1, len(content)
+	for _, line := range panel.MarkdownLines(content) {
+		if line.Level != 2 || line.Heading == "" {
 			continue
 		}
-		if approvalStart >= 0 && strings.HasPrefix(line, "## ") {
-			approvalEnd = i
+		if approvalStart >= 0 {
+			approvalEnd = line.Offset
 			break
+		}
+		if line.Level == 2 && line.Heading == "Approval" && strings.TrimRight(content[line.Offset:line.End], "\r\n") == "## Approval" {
+			approvalStart = line.Offset
 		}
 	}
 
@@ -339,11 +417,11 @@ func upsertSpecApprovalSection(content, approvedBy string, now time.Time) string
 		return base + "\n\n" + strings.Join(newApproval, "\n") + "\n"
 	}
 
-	var result []string
-	result = append(result, lines[:approvalStart]...)
-	result = append(result, newApproval...)
-	result = append(result, lines[approvalEnd:]...)
-	return strings.Join(result, "\n")
+	separator := ""
+	if approvalEnd < len(content) {
+		separator = "\n"
+	}
+	return content[:approvalStart] + strings.Join(newApproval, "\n") + separator + content[approvalEnd:]
 }
 
 // scaffoldPlan generates a plan.md skeleton with the exact structure that
@@ -362,66 +440,7 @@ func upsertSpecApprovalSection(content, approvedBy string, now time.Time) string
 // `**Acceptance Criteria**` section is likewise structurally REQUIRED — the
 // validator hard-errors (`bead-acceptance-criteria`) when a bead section
 // lacks one.
-func scaffoldPlan(specID string) string {
-	return fmt.Sprintf(`---
-status: Draft
-spec_id: %s
-version: "1"
-# adr_citations: cite the Accepted ADRs whose Domain(s) cover this plan's
-# impacted domains (drop the leading "# " and list them); leave empty only when
-# the ## ADR Fitness section explains why no ADR applies.
-# adr_citations:
-#   - ADR-XXXX
-# work_chunks: the AUTHORITATIVE dependency-wiring source — the
-# ONLY thing bd dependency edges are wired from. Each chunk's "id" is 1-based
-# and maps positionally to the Nth "## Bead N" section below (chunk id 1 -> the
-# first "## Bead" section, id 2 -> the second, and so on); "depends_on" lists
-# the chunk ids this chunk depends on (e.g. depends_on: [1] wires this bead to
-# depend on Bead 1); "key_file_paths" declares the files that bead's context
-# surface should carry. Add one chunk per "## Bead N" section, keeping ids
-# contiguous (1..N) — the plan-approve preflight refuses a misaligned set
-# before any mutation.
-work_chunks:
-  - id: 1
-    depends_on: []
-    key_file_paths:
-      - path/to/file.go
----
-# Plan: %s
-
-## ADR Fitness
-
-No ADRs are relevant to this work. (Update this section if ADRs apply.)
-
-## Testing Strategy
-
-Unit tests will verify the implementation.
-
-## Bead 1: <Title>
-
-**Steps**
-1. Step one
-2. Step two
-3. Step three
-
-**Verification**
-- [ ] `+"`make test`"+` passes
-
-**Acceptance Criteria**
-- <Specific, measurable criterion for this bead>
-
-**Depends on**
-None (human-readable documentation only — NOT parsed; bd dependency edges
-are wired exclusively from this bead's `+"`work_chunks[].depends_on`"+` entry
-in the frontmatter above)
-
-## Provenance
-
-| Acceptance Criterion | Verified By |
-|---------------------|-------------|
-| (map spec criteria) | Bead 1 verification |
-`, specID, specID)
-}
+func scaffoldPlan(specID string) string { return panel.PlanScaffold(specID) }
 
 // splitFrontmatter locates the leading YAML frontmatter block via the
 // canonical internal/frontmatter.Parse (ARCH-6). It returns the raw block, the

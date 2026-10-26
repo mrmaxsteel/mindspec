@@ -31,6 +31,22 @@ func TestConfigShow_NoMergeStrategyRow(t *testing.T) {
 	}
 }
 
+func TestS133ConfigShow_PanelPresence(t *testing.T) {
+	for _, policy := range []string{"warn", "enforce"} {
+		t.Run(policy, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Enforcement.PanelPresence = policy
+			out, err := renderConfig(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out, "\n  panel_presence: "+policy+"\n") {
+				t.Fatalf("config show missing panel_presence policy %q:\n%s", policy, out)
+			}
+		})
+	}
+}
+
 // resetConfigShowGateFlags resets configShowCmd's --gate/--json flags to
 // their zero values, both immediately and via t.Cleanup. rootCmd is a
 // package-level singleton these tests share via Execute(), and cobra does

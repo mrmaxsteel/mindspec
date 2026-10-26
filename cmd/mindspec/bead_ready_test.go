@@ -602,7 +602,7 @@ Bead 1
 	}
 
 	if out, err := sb.Run("mindspec", "complete", bead1, "land bead 1",
-		"--allow-doc-skew", "test fixture, no docs domain",
+		"--allow-doc-skew", "test fixture, no docs domain", "--doc-owner", bead2,
 		"--override-adr", "test fixture, no OWNERSHIP.yaml domain"); err != nil {
 		t.Fatalf("mindspec complete %s: %v\n%s", bead1, err, out)
 	}

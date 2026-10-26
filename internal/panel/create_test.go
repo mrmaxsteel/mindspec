@@ -346,7 +346,7 @@ func TestCreate_RepanelOfAbandonedPanelRevivesIt(t *testing.T) {
 func TestCreate_StampsGate(t *testing.T) {
 	base := CreateInput{
 		Spec:                 "113-panel-verb-workflow-followups",
-		Target:               "spec/113-x",
+		Target:               "spec/113-panel-verb-workflow-followups",
 		Round:                1,
 		ExpectedReviewers:    3,
 		Roster:               createRoster(3),

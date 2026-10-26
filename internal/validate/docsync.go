@@ -116,6 +116,32 @@ func validateDocsRange(root, base, head, ownerRef string, exec executor.Executor
 
 	sourceChanges, docChanges := classifyChangesWithGlobs(changed, globs)
 	changes := classifiedChanges{All: changed, Source: sourceChanges, Docs: docChanges}
+	r.DocImpact = newDocImpact(sourceChanges, docChanges)
+	r.DocImpact.touchDomain = func(domain string) (bool, error) {
+		domains, err := resolveDomains(exec, root, ownerRef)
+		if err != nil {
+			return false, err
+		}
+		if len(domains) == 0 {
+			for _, path := range changed {
+				if strings.HasPrefix(path, "internal/"+domain+"/") {
+					return true, nil
+				}
+			}
+			return false, nil
+		}
+		cache := newOwnershipCache(exec, root, ownerRef)
+		for _, path := range changed {
+			owner, _, err := attributeDomainCached(cache, path, domains)
+			if err != nil {
+				return false, err
+			}
+			if owner == domain {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
 
 	// Spec-artifact sync runs BEFORE the source-empty early-return so a
 	// spec.md-only diff (which classifies as docs-only) still gates on
@@ -128,6 +154,7 @@ func validateDocsRange(root, base, head, ownerRef string, exec executor.Executor
 
 	// Check if any doc files were also changed
 	if len(docChanges) == 0 {
+		r.DocImpact.generalError = len(r.Issues)
 		r.AddError("doc-sync", "source files changed but no documentation files updated")
 	}
 
@@ -513,6 +540,10 @@ func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef str
 				continue
 			}
 			pkgs[parts[1]] = append(pkgs[parts[1]], f)
+			if r.DocImpact != nil {
+				r.DocImpact.Sources[f] = parts[1]
+				r.DocImpact.Touched[parts[1]] = true
+			}
 		}
 		if len(pkgs) == 0 {
 			return
@@ -533,6 +564,9 @@ func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef str
 		}
 		sort.Strings(names)
 		for _, p := range names {
+			if r.DocImpact != nil {
+				r.DocImpact.domainErrors[len(r.Issues)] = p
+			}
 			r.AddError("internal-docs", fmt.Sprintf(
 				"internal sources in domain %q changed (%s) but no doc updates under %s/; ownership decided by <fallback: internal/%s/**>",
 				p, strings.Join(pkgs[p], ", "),
@@ -559,6 +593,10 @@ func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef str
 		}
 		if domain == "" {
 			continue
+		}
+		if r.DocImpact != nil {
+			r.DocImpact.Sources[f] = domain
+			r.DocImpact.Touched[domain] = true
 		}
 		manifest := ""
 		if o != nil {
@@ -601,6 +639,9 @@ func checkInternalPackages(r *Result, exec executor.Executor, root, ownerRef str
 		// The old empty-ManifestPath "<fallback: internal/<domain>/**>"
 		// marker branch was therefore dead and has been removed (panel
 		// V2-4); TestPerDomainMarkerNamesManifest pins this outcome.
+		if r.DocImpact != nil {
+			r.DocImpact.domainErrors[len(r.Issues)] = domain
+		}
 		r.AddError("internal-docs", fmt.Sprintf(
 			"internal sources in domain %q changed (%s) but no doc updates under %s/; ownership decided by %s",
 			domain, strings.Join(a.files, ", "),

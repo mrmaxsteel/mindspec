@@ -28,6 +28,10 @@ For `runner: claude-code-skills` and `runner: external`, use the steps below.
 ## Step 0 — create
 
 Run `mindspec panel create <panel-slug> --spec <spec-id> --gate <gate> --target <ref> --round <N> --brief-file <absolute-brief-file>`.
+For `spec_approve`, `plan_approve` and `final_review`, use `--target spec/<id>`.
+An older live registration with another target blocks the gate until a new round
+at `spec/<id>` replaces it or it is abandoned with a reason. A round created by an
+older binary can also need a new round at `spec/<id>`.
 For a bead panel, add `--bead <bead-id>`. Keep the reported panel directory path.
 For an adhoc panel, run `mindspec panel create <panel-slug> --gate adhoc --target <ref> --brief-file <absolute-brief-file>`.
 Its artifacts are at `<repo>/.mindspec/reviews/<panel-slug>/`.

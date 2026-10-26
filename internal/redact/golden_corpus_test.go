@@ -83,23 +83,19 @@ func worktreeSetupFixture(t *testing.T) goldenFixture {
 }
 
 // divergenceFolded reconstructs divergence.go:186 (adr-divergence-unowned)
-// VERBATIM from its template, folded the way joinResultErrorMessages
-// (complete.go) renders it ("[name] message") and wrapped by
-// adrDivergenceFailure ("adr-divergence: ...").
+// from its warning template and the completion warning renderer.
 func divergenceFoldedFixture() goldenFixture {
 	relPath := "internal/validate/divergence.go"
-	domains := "[core git state]"
+	domains := ".mindspec/docs/domains"
 	inner := fmt.Sprintf(
-		"file %s is not claimed by any OWNERSHIP.yaml for the spec's impacted domains %s; add it to an existing manifest or create a new domain dir at .mindspec/docs/domains/<name>/OWNERSHIP.yaml",
+		"file %s is not claimed by any OWNERSHIP.yaml under %s; add it to an existing manifest or create a new domain dir at .mindspec/docs/domains/<name>/OWNERSHIP.yaml",
 		relPath, domains)
-	folded := "[adr-divergence-unowned] " + inner
-	full := "adr-divergence: " + folded
+	full := "WARN adr-divergence-unowned: " + inner
 	return goldenFixture{
 		name: "divergence.go:186 folded by complete.go",
 		raw:  full,
 		sensitive: []string{
 			"internal/validate/divergence.go", "divergence.go",
-			"[core git state]", "core git state",
 			".mindspec/docs/domains",
 		},
 		scrub:          Scrub,

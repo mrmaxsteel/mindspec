@@ -23,6 +23,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // serveRefFromDisk wires a MockExecutor's ref-read seams
@@ -63,8 +64,21 @@ func serveRefFromDisk(mock *executor.MockExecutor, root string) {
 	}
 }
 
+func writeImplFixtureWorktree(t *testing.T, root, specID string) {
+	t.Helper()
+	// Mock branch-existence fixtures also need a present spec worktree.
+	wt, err := workspace.SpecWorktreePath(root, nil, specID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(wt, 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeSpecDir(t *testing.T, root, specID string) {
 	t.Helper()
+	writeImplFixtureWorktree(t, root, specID)
 	specDir := filepath.Join(root, "docs", "specs", specID)
 	if err := os.MkdirAll(specDir, 0755); err != nil {
 		t.Fatalf("mkdir spec dir: %v", err)
@@ -519,6 +533,9 @@ func contains(args []string, s string) bool {
 // restores them via t.Cleanup.
 func saveAndRestore(t *testing.T) {
 	t.Helper()
+	origLifecycleMerge := lifecycleMergeMetadataFn
+	t.Cleanup(func() { lifecycleMergeMetadataFn = origLifecycleMerge })
+	lifecycleMergeMetadataFn = func(string, map[string]interface{}) error { return nil }
 	origRunBD := implRunBDFn
 	origRunBDCombined := implRunBDCombinedFn
 	origMergeMeta := implMergeMetadataFn
@@ -1136,7 +1153,7 @@ func TestApproveImplCallOrder(t *testing.T) {
 // TestApproveImplCallOrder_OrphanGatePrecedesSupersedePlaceholder pins
 // Spec 119 Bead 3's Step-3 preflight restructure (R1): the Spec 115
 // orphan/obligation gate (runOrphanObligationGate) must run BEFORE the
-// --supersede-adr placeholder-ADR file write (implCreateWithIDFn) — today
+// --supersede-adr placeholder-ADR file write (implEnsurePlaceholder) — today
 // that file write used to precede a derivable refusal, violating "facts
 // before mutation". A derivable refusal must never leave a placeholder ADR
 // file on disk.
@@ -1170,7 +1187,7 @@ func TestApproveImplCallOrder_OrphanGatePrecedesSupersedePlaceholder(t *testing.
 				if orphanGatePos == 0 {
 					orphanGatePos = call.Pos()
 				}
-			case "implCreateWithIDFn":
+			case "implEnsurePlaceholder":
 				if supersedePos == 0 {
 					supersedePos = call.Pos()
 				}
@@ -1183,10 +1200,10 @@ func TestApproveImplCallOrder_OrphanGatePrecedesSupersedePlaceholder(t *testing.
 		t.Fatal("runOrphanObligationGate call not found in ApproveImpl body")
 	}
 	if supersedePos == 0 {
-		t.Fatal("implCreateWithIDFn call not found in ApproveImpl body")
+		t.Fatal("implEnsurePlaceholder call not found in ApproveImpl body")
 	}
 	if !(orphanGatePos < supersedePos) {
-		t.Errorf("runOrphanObligationGate (pos %d) must precede the --supersede-adr placeholder write implCreateWithIDFn (pos %d)", orphanGatePos, supersedePos)
+		t.Errorf("runOrphanObligationGate (pos %d) must precede the --supersede-adr placeholder write implEnsurePlaceholder (pos %d)", orphanGatePos, supersedePos)
 	}
 }
 
@@ -1363,6 +1380,7 @@ func TestApproveImpl_FinalizeEpicReceivesIntersectedAllowSet(t *testing.T) {
 // execution-domain ADR, and that ADR on disk.
 func writeADRDivergenceFixtureImpl(t *testing.T, root, specID string) {
 	t.Helper()
+	writeImplFixtureWorktree(t, root, specID)
 
 	specDir := filepath.Join(root, "docs", "specs", specID)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
@@ -1452,6 +1470,7 @@ func TestApproveImplOverrideMetadataGoesThroughSeam(t *testing.T) {
 // mock) or on disk, to exercise the spec-095 ref-anchored read.
 func writeWidgetAcceptedFixture(t *testing.T, root, specID string) {
 	t.Helper()
+	writeImplFixtureWorktree(t, root, specID)
 	docsRoot := filepath.Join(root, ".mindspec", "docs")
 	specDir := filepath.Join(docsRoot, "specs", specID)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
@@ -1485,6 +1504,7 @@ func TestApproveImpl_WholeBranchOwnershipFromRef(t *testing.T) {
 	changed := []string{
 		"internal/widget/foo.go",
 		".mindspec/docs/domains/widget/OWNERSHIP.yaml",
+		".mindspec/docs/domains/z-other/architecture.md",
 	}
 
 	t.Run("branch-tip claim passes", func(t *testing.T) {
@@ -1502,6 +1522,9 @@ func TestApproveImpl_WholeBranchOwnershipFromRef(t *testing.T) {
 			ChangedFilesResult: changed,
 			// Claim lives only at the diffed ref (spec-branch tip).
 			FileAtRefOrAbsentFn: func(_ref, p string) ([]byte, bool, error) {
+				if p == ".mindspec/docs/domains/z-other/OWNERSHIP.yaml" {
+					return []byte("paths:\n  - internal/widget/**\n"), true, nil
+				}
 				if p == ".mindspec/docs/domains/widget/OWNERSHIP.yaml" {
 					return []byte("paths:\n  - internal/widget/**\n"), true, nil
 				}
@@ -1509,10 +1532,16 @@ func TestApproveImpl_WholeBranchOwnershipFromRef(t *testing.T) {
 			},
 			TreeDirsAtRefFn: func(_ref, dir string) ([]string, error) {
 				if dir == ".mindspec/docs/domains" {
-					return []string{"widget"}, nil
+					return []string{"widget", "z-other"}, nil
 				}
 				return nil, nil
 			},
+		}
+		if err := os.MkdirAll(filepath.Join(tmp, ".mindspec/docs/domains/z-other"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmp, ".mindspec/docs/domains/z-other/OWNERSHIP.yaml"), []byte("paths:\n  - internal/widget/**\n"), 0644); err != nil {
+			t.Fatal(err)
 		}
 		if _, err := ApproveImpl(tmp, specID, mock); err != nil {
 			t.Fatalf("a branch-tip OWNERSHIP claim must satisfy the whole-branch gate with no override; got: %v", err)
@@ -1545,11 +1574,24 @@ func TestApproveImpl_WholeBranchOwnershipFromRef(t *testing.T) {
 			ChangedFilesResult: changed,
 			// ref reads: absent everywhere (default zero values).
 		}
+		mock.TreeDirsAtRefFn = func(_ref, dir string) ([]string, error) {
+			if dir == ".mindspec/docs/domains" {
+				return []string{"other"}, nil
+			}
+			return nil, nil
+		}
+		mock.FileAtRefOrAbsentFn = func(_ref, p string) ([]byte, bool, error) {
+			if p == ".mindspec/docs/domains/other/OWNERSHIP.yaml" {
+				return []byte("paths:\n  - internal/widget/**\n"), true, nil
+			}
+			return nil, false, nil
+		}
+
 		_, err := ApproveImpl(tmp, specID, mock, ImplOpts{AllowDocSkew: "isolate the ADR lane"})
 		if err == nil {
 			t.Fatal("a claim absent at the diffed ref must NOT satisfy the gate (read follows the ref)")
 		}
-		if !strings.Contains(err.Error(), "adr-divergence-unowned") {
+		if !strings.Contains(err.Error(), "adr-divergence-unowned") || !strings.Contains(err.Error(), "not in the spec") {
 			t.Errorf("expected adr-divergence-unowned block, got: %v", err)
 		}
 		if len(mock.CallsTo("FinalizeEpic")) != 0 {
@@ -1601,6 +1643,7 @@ func TestApproveImpl_DocSyncUsesBaseToSpecBranchRange(t *testing.T) {
 // ADR-9002 is on disk with Status Proposed and Domain core.
 func writeProposedADRFixtureImpl(t *testing.T, root, specID string) {
 	t.Helper()
+	writeImplFixtureWorktree(t, root, specID)
 
 	// Spec 091 Req 13 removed the silent "internal/<domain>/**" loader
 	// fallback, so the touched source file internal/core/foo.go is now
@@ -2477,6 +2520,7 @@ func TestApproveImplPrintResultWarningsRecursStatelessly(t *testing.T) {
 // between block (unowned) and pass.
 func writeScenarioImplApproveFixture(t *testing.T, root, specID string, withADRCitation bool) {
 	t.Helper()
+	writeImplFixtureWorktree(t, root, specID)
 	docsRoot := filepath.Join(root, ".mindspec", "docs")
 	specDir := filepath.Join(docsRoot, "specs", specID)
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
@@ -2535,11 +2579,24 @@ func TestApproveImpl_ScenarioImplApproveCoverageTriple(t *testing.T) {
 			// No OWNERSHIP claim at the ref (default absent) -> done.go is
 			// unowned -> the gate blocks.
 		}
+		mock.TreeDirsAtRefFn = func(_ref, dir string) ([]string, error) {
+			if dir == ".mindspec/docs/domains" {
+				return []string{"other"}, nil
+			}
+			return nil, nil
+		}
+		mock.FileAtRefOrAbsentFn = func(_ref, p string) ([]byte, bool, error) {
+			if p == ".mindspec/docs/domains/other/OWNERSHIP.yaml" {
+				return []byte("paths:\n  - done.go\n"), true, nil
+			}
+			return nil, false, nil
+		}
+
 		_, err := ApproveImpl(tmp, specID, mock)
 		if err == nil {
 			t.Fatal("a committed root source with no ownership coverage must trip adr-divergence-unowned (the RED state)")
 		}
-		if !strings.Contains(err.Error(), "adr-divergence-unowned") {
+		if !strings.Contains(err.Error(), "adr-divergence-unowned") || !strings.Contains(err.Error(), "not in the spec") {
 			t.Errorf("expected adr-divergence-unowned block, got: %v", err)
 		}
 		if len(mock.CallsTo("FinalizeEpic")) != 0 {
@@ -2576,6 +2633,9 @@ func TestApproveImpl_ScenarioImplApproveCoverageTriple(t *testing.T) {
 			// domain) is present at the diffed ref — the manifest half of
 			// the triple committed pre-fork in the harness.
 			FileAtRefOrAbsentFn: func(_ref, p string) ([]byte, bool, error) {
+				if p == ".mindspec/docs/domains/z-other/OWNERSHIP.yaml" {
+					return []byte("paths:\n  - done.go\n"), true, nil
+				}
 				if p == ".mindspec/docs/domains/sandbox/OWNERSHIP.yaml" {
 					return []byte("paths:\n  - done.go\n"), true, nil
 				}
@@ -2583,10 +2643,16 @@ func TestApproveImpl_ScenarioImplApproveCoverageTriple(t *testing.T) {
 			},
 			TreeDirsAtRefFn: func(_ref, dir string) ([]string, error) {
 				if dir == ".mindspec/docs/domains" {
-					return []string{"sandbox"}, nil
+					return []string{"sandbox", "z-other"}, nil
 				}
 				return nil, nil
 			},
+		}
+		if err := os.MkdirAll(filepath.Join(tmp, ".mindspec/docs/domains/z-other"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmp, ".mindspec/docs/domains/z-other/OWNERSHIP.yaml"), []byte("paths:\n  - done.go\n"), 0644); err != nil {
+			t.Fatal(err)
 		}
 		if _, err := ApproveImpl(tmp, specID, mock); err != nil {
 			t.Fatalf("the ownership + Accepted-ADR-0001 + plan adr_citations triple must satisfy the gate with no override; got: %v", err)

@@ -147,6 +147,17 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+internal/approve/doc_declarations.go	implDocGate	arg1:unprovable
+internal/approve/doc_declarations.go	implDocGate	arg2:unprovable
+internal/complete/check.go	reportContentGates	arg2:unprovable
+internal/complete/doc_declarations.go	validateDocFlags	arg1:unprovable
+internal/complete/doc_declarations.go	prepareDocDeclarations	arg1:unprovable
+internal/complete/doc_declarations.go	prepareDocDeclarations	arg2:unprovable
+internal/approve/impl_final_gate.go	implBeadWorktreePreflight	arg1:unprovable
+internal/approve/impl_final_gate.go	implBeadWorktreePreflight	variadic-spread:recovery
+internal/approve/impl_final_gate.go	implFinalReviewGate	arg1:unprovable
+internal/approve/impl_final_gate.go	implPublishedSubject	arg1:unprovable
+internal/complete/check.go	reportContentGates	arg1:unprovable
 internal/complete/closing.go	commitPanelLedgers	arg1:unprovable
 internal/complete/closing.go	unignoredLedgers	arg1:unprovable
 internal/complete/closing.go	unignoredLedgers	arg2:unprovable
@@ -213,8 +224,10 @@ internal/complete/materialize.go	userDirtRefusal	arg1:unprovable
 internal/complete/materialize.go	materializationRaceRefusal	arg1:unprovable
 internal/complete/materialize.go	materializationResetRefusal	arg1:unprovable
 internal/complete/materialize.go	recordStageMarkerAttestation	arg1:unprovable
-internal/complete/panel_advisory.go	panelGate	arg1:unprovable
+internal/complete/panel_advisory.go	panelGateWithPresence	arg1:unprovable
 internal/complete/panel_advisory.go	reconcilePendingRefutations	arg1:unprovable
+internal/complete/panel_presence.go	beadPanelPresence.check	arg1:unprovable
+internal/complete/panel_presence.go	beadPanelPresence.check	arg2:unprovable
 internal/executor/layout_guard.go	mergeLayoutRegressionFailure	arg1:unprovable
 internal/executor/merge_preflight.go	destructionRefusal	arg1:unprovable
 internal/executor/merge_preflight.go	evidenceErrorRefusal	arg1:unprovable

@@ -258,8 +258,10 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 			// so that leg (and its `git status --porcelain` cost) stays
 			// inert; Status is therefore never invoked and left nil.
 			facts := panel.ResolveGateFacts(reg, beadID, scanRoot, panel.GateIO{
-				SpecDir:     filepath.Join(workspace.SpecsDir(roots[0]), reg.Panel.Spec),
-				SubjectTree: panel.SubjectTreeReader((&executor.MindspecExecutor{}).LsTree),
+				SpecDir: filepath.Join(workspace.SpecsDir(roots[0]), reg.Panel.Spec),
+				SubjectTree: panel.DocumentSubjectTreeReader(reg.Panel.Gate, panel.PanelSpecDir(reg.Dir, filepath.Join(workspace.SpecsDir(roots[0]), reg.Panel.Spec)), (&executor.MindspecExecutor{}).LsTree, func(workdir, ref, name string) ([]byte, error) {
+					return executor.NewMindspecExecutor(workdir).FileAtRef(ref, name)
+				}),
 				RevParse: func(workdir, _ string) (string, error) {
 					if !reg.Panel.IsBead() {
 						exec := &executor.MindspecExecutor{}

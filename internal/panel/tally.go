@@ -62,6 +62,8 @@ type Verdict struct {
 	Findings   []Finding
 	FileSHA256 string
 	SlotSHA256 string
+	// ArtifactPaths maps v2 finding IDs to their optional repository paths.
+	ArtifactPaths map[string]string
 	// ReadError marks an unreadable verdict as INVALID. It cannot supply findings.
 	ReadError string
 }
@@ -95,6 +97,8 @@ type Result struct {
 	Unsubmitted   []string
 	NotIn         []ExcludedVerdict
 	VerdictSchema int
+	// RoundReviewedHeadSHA comes from the round event, never a rebind.
+	RoundReviewedHeadSHA string
 
 	// LatestRound is the FILENAME-derived latest round: max(N) over
 	// `*-round-<N>.json` in the directory. 0 when no verdict files
@@ -389,6 +393,7 @@ func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, erro
 		res.IntegrityErr = schemaErr
 	}
 	res.VerdictSchema = round.VerdictSchema
+	res.RoundReviewedHeadSHA = round.ReviewedHeadSHA
 	var submissions map[string]SubmissionRecord
 	var attempts map[string][]SlotAttempt
 	if round.VerdictSchema == 2 {
@@ -462,6 +467,14 @@ func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, erro
 		if round.VerdictSchema == 2 {
 			if parsed, parseErr := ParseVerdictV2(data); parseErr == nil {
 				payload, payloadErr = parsed.FindingVerdict(), nil
+				for i, item := range parsed.ConcreteChangesRequired {
+					if item.ArtifactPath != "" {
+						if v.ArtifactPaths == nil {
+							v.ArtifactPaths = map[string]string{}
+						}
+						v.ArtifactPaths[fmt.Sprintf("ccr[%d]", i)] = item.ArtifactPath
+					}
+				}
 			} else if !offRoster {
 				res.Malformed = append(res.Malformed, vf.name)
 				continue
