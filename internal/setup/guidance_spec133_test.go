@@ -12,6 +12,10 @@ import (
 )
 
 var s133GuidanceDigests = map[string]string{
+	"ms-bead-cycle.premerge":        "2ba2cf420771c6bf2fe240650e4f7f98340f5e5319ca1fb1bfd287c0142b0e84",
+	"ms-panel-run.premerge":         "9e383d5094cf5d51a2e5d9ee062ca03ecbb227dea97e370f942cdc0926359faa",
+	"ms-panel-tally.premerge":       "40736085ab8bbefcd772f2a0b7f390b5f2e29690da996cf8cd9c24575190d207",
+	"ms-spec-final-review.premerge": "2841330ccd09b7084ebe65288136c673973e753f9dac26c170a805d50c533f1d",
 	"ms-impl-approve.pre133-agents": "5033283a1fd1ebc433bd235732871d973c9e7f8502ae7c6cec703daa9973c2c7",
 	"ms-plan-approve.pre133-agents": "3438c062ef3834cf57421eb2b412aac35a366d6e66ebc48ea6bf9b1aade697e4",
 	"ms-spec-approve":               "0804274dd777d98e7e712141aeed122e1a492146a131e0e7568103678067d960",

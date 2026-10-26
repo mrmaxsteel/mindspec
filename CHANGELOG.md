@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Upgrade:** run `mindspec init` after upgrading to remove the two old ledger ignore exceptions. Disposition ledgers in the `.mindspec` layouts are ignored by default and stay local.
-- **Panel disposition ledgers are local** — `mindspec init` removes the former ledger ignore exceptions. Completion and implementation approval no longer refuse an ignored, untracked or dirty ledger. Gate decisions still read the working ledger. Git decides what lifecycle commits include: bead close publishes tracked or unignored spec ledgers, including edits after merge-only. Unignored legacy-layout ledgers are committed with the bead artifacts.
+- **Panel disposition ledgers are local** — `mindspec init` removes the former ledger ignore exceptions. Completion and implementation approval no longer refuse an ignored, untracked or dirty ledger. Implementation approval still refuses dirty tracked or unignored untracked ledgers in unfinished bead worktrees listed in the plan. Run `mindspec complete <bead>` to recover. Gate decisions still read the working ledger. Git decides what lifecycle commits include: bead close publishes tracked or unignored spec ledgers, including edits after merge-only. Unignored legacy-layout ledgers are committed with the bead artifacts.
 - `complete` reports all content-gate refusals in one run.
 - `spec approve`, `plan approve` and `impl approve` run the panel gate before their first write.
 - `complete --check` refuses `--merge-only`, `--resolve-merge`, `--override-adr`, `--supersede-adr` and `--allow-net-deletion`.

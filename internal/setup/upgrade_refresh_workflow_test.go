@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -156,6 +157,40 @@ func TestUpgradeRefreshBriefSkills(t *testing.T) {
 			}
 			if readSkill(t, dir, name) != skillFiles()[name] || !containsPath(r.Refreshed, filepath.Join(".claude", "skills", name, "SKILL.md")) {
 				t.Fatalf("prior shipped skill did not refresh: %+v", r)
+			}
+		})
+	}
+}
+
+func TestUpgradeRefreshWorkflow_MainBody(t *testing.T) {
+	prior, err := historicalWorkflowsFS.ReadFile("historical_workflows/ms-panel.premerge.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sha256.Sum256(prior); hex.EncodeToString(got[:]) != "abdb5de7e352ab40cdc0f4e91b32a5d9b6f49d078c73d48aa07f41990ff1cdb6" {
+		t.Fatal("prior workflow snapshot digest differs")
+	}
+	for _, modified := range []bool{false, true} {
+		t.Run("modified="+strconv.FormatBool(modified), func(t *testing.T) {
+			body := string(prior)
+			if modified {
+				body += "\n// local operator note\n"
+			}
+			got, result := installWorkflowWithPrior(t, body)
+			want := pluginmindspec.WorkflowFiles()["ms-panel.js"]
+			if modified {
+				want = body
+			}
+			if got != want {
+				t.Fatal("installed workflow differs from expected body")
+			}
+			path := filepath.Join(".claude", "workflows", "ms-panel.js")
+			if modified {
+				if containsPath(result.Refreshed, path) || len(result.Notices) == 0 {
+					t.Fatalf("user-modified workflow was not preserved: %+v", result)
+				}
+			} else if !containsPath(result.Skipped, path) || len(result.Notices) != 0 {
+				t.Fatalf("unchanged canonical workflow was not recognized: %+v", result)
 			}
 		})
 	}

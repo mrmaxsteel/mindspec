@@ -306,11 +306,14 @@ func readBriefFile(file string) ([]byte, error) {
 		return nil, fmt.Errorf("cannot read brief file %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
 	}
 	hasHeader := false
-	scanMarkdownProse(string(data), true, func(_ int, line string) {
+	checkHeader := func(_ int, line string) {
 		if suppliedHeaderMarker.MatchString(strings.TrimSpace(line)) {
 			hasHeader = true
 		}
-	})
+	}
+	// Refuse markers exposed by either the stub scan or the header parser.
+	scanMarkdownProse(string(data), true, checkHeader)
+	scanMarkdownLines(string(data), checkHeader)
 	if hasHeader {
 		return nil, fmt.Errorf("brief file %s contains managed-header markers; supply only the authored body", termsafe.Escape(file))
 	}

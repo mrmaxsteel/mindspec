@@ -326,12 +326,13 @@ func TestS133FinalGate_SubjectDirtAndExclusions(t *testing.T) {
 					if _, err := runLifecycleGate(f.root, "010-test", "final_review", f.specWT, nil); err != nil {
 						t.Fatalf("subject dirt check counted ledger: %v", err)
 					}
+					s133Commit(t, f.specWT, "ledger only")
 				case "export":
 					s133Write(t, f.specWT, ".beads/issues.jsonl", "export only\n")
 				}
 				if kind != "source" {
 					if _, err := f.approve(); err != nil {
-						t.Fatalf("change only in an excluded path blocked approval: %v", err)
+						t.Fatalf("excluded path or ledger-only commit blocked approval: %v", err)
 					}
 					f.assertConverged()
 				}

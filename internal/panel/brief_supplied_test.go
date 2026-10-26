@@ -69,3 +69,24 @@ func TestSuppliedBriefUnclosedFenceHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestSuppliedBriefFenceScanDisagreement(t *testing.T) {
+	for _, marker := range []string{
+		briefHeaderOpen,
+		briefHeaderClose,
+		"<!--  mindspec:panel-header -->",
+		"<!-- / mindspec:panel-header -->",
+		"<!-- MINDSPEC:panel-header -->",
+	} {
+		t.Run(marker, func(t *testing.T) {
+			body := "## Summary\n\nok\n\n    ```\n```\n" + marker + "\n```\n\nend\n"
+			file := filepath.Join(t.TempDir(), "brief.md")
+			if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := readBriefFile(file); err == nil || !strings.Contains(err.Error(), "managed-header") {
+				t.Fatalf("accepted marker exposed by the header parser: %q: %v", marker, err)
+			}
+		})
+	}
+}

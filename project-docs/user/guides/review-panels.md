@@ -12,7 +12,10 @@ Other layouts use `review/<panel-slug>/`.
 The directory holds `panel.json`, `BRIEF.md`, `dispositions.jsonl` and submitted verdict files.
 Review artifacts in the two `.mindspec` layouts above, including the disposition ledger, are local and ignored by default.
 Completion and implementation approval no longer refuse an ignored, untracked or dirty
-ledger. The panel gate still reads the working ledger and applies the same decision rules.
+ledger.
+Implementation approval still refuses dirty tracked or unignored untracked ledgers in unfinished bead worktrees listed in the plan.
+Run `mindspec complete <bead>` to recover.
+The panel gate still reads the working ledger and applies the same decision rules.
 Git decides what lifecycle commits include. Bead close publishes tracked or unignored
 spec ledgers, including edits made after merge-only. Ordinary completion commits these
 ledgers in the spec worktree after the merge. Unignored legacy-layout ledgers are

@@ -243,7 +243,10 @@ are ignored by default and stay local. Init removes exactly the two formerly
 shipped ledger negations, preserves other bytes and is idempotent. Run
 `mindspec init` after upgrading to apply this change.
 Completion and implementation approval no longer refuse an ignored, untracked
-or dirty ledger. Gate decisions still read the working ledger and are unchanged.
+or dirty ledger.
+Implementation approval still refuses dirty tracked or unignored untracked ledgers in unfinished bead worktrees listed in the plan.
+Run `mindspec complete <bead>` to recover.
+Gate decisions still read the working ledger and are unchanged.
 Git decides what lifecycle commits include. Ordinary completion commits tracked
 or unignored spec ledgers after the merge. Unignored legacy-layout ledgers are
 committed with the bead artifacts, alongside `panel.json`.
