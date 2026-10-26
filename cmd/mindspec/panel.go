@@ -67,7 +67,7 @@ var tallyWarnOut io.Writer = os.Stderr
 
 var panelCreateCmd = &cobra.Command{
 	SilenceUsage: true,
-	Use:          "create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N] [--reviewers N]",
+	Use:          "create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N] [--reviewers N] [--brief-file <absolute-path>]",
 	Short:        "Register (or re-panel) a review panel",
 	Long: `panel create registers the target's live commit and subject digest, writes a
 reviewer roster and round event, and updates BRIEF.md's managed header.
@@ -100,7 +100,11 @@ A round bump preserves ledger-backed refutations, deferrals and rebinds,
 and names dropped entries. Legacy entries are preserved as a baseline.
 An abandoned panel is revived with history. The old BRIEF is archived as
 BRIEF-round-N.md without overwriting an existing archive. The new header
-includes the prior round's consolidation and keeps the authored body.
+includes the prior round's consolidation and keeps the authored body unless
+--brief-file is supplied.
+--brief-file requires an absolute path to a regular file without TODO(skill)
+stubs or managed-header markers. Its content replaces the authored body below
+the managed header, including on a round bump.
 
 --gate selects spec_approve, plan_approve, bead, final_review or adhoc.
 Without --gate, the roster uses adhoc defaults and the gate stays omitted.
@@ -254,8 +258,13 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 		if err != nil {
 			return err
 		}
+		briefFile, _ := cmd.Flags().GetString("brief-file")
+		if cmd.Flags().Changed("brief-file") && briefFile == "" {
+			return fmt.Errorf("brief file must be an absolute path")
+		}
 		in := panel.CreateInput{
 			BriefRegions: regions,
+			BriefFile:    briefFile,
 			BeadID:       beadPtr, Spec: specID, Target: target, Round: round,
 			HasRunner: func(family string) bool { _, ok := cfg.RunnerFor(family); return ok },
 			Roster:    roster, ExpectedReviewers: len(roster), ReviewersOverride: override,
@@ -441,6 +450,7 @@ func init() {
 	panelVerifyCmd.Flags().Bool("json", false, "Print the slot roster and statuses as JSON")
 	panelVerifyCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
 	panelTallyCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
+	panelCreateCmd.Flags().String("brief-file", "", "Absolute path to a filled authored body; preserves the managed header on every round")
 	panelCreateCmd.Flags().String("spec", "", "Owning spec ID")
 	panelCreateCmd.Flags().String("target", "", "Reviewed ref (e.g. bead/<id>)")
 	panelCreateCmd.Flags().String("bead", "", "Optional bead ID; requires --gate bead and must match --target bead/<id>")
@@ -661,6 +671,9 @@ func panelCreateFailure(err error, slug string, in panel.CreateInput) error {
 	command := fmt.Sprintf("mindspec panel create %s --round %d --target %s", shellQuoteTarget(slug), round, shellQuoteTarget(escapeConfigValue(in.Target))) + panelCreateScope(in.Spec, in.Gate)
 	if in.Gate != "" && in.Gate != "adhoc" {
 		command += " --gate " + shellQuoteTarget(in.Gate)
+	}
+	if in.BriefFile != "" {
+		command += " --brief-file " + shellQuoteTarget(escapeConfigValue(in.BriefFile))
 	}
 	recovery := "repair the registration or BRIEF if needed, then " + command
 	if conflict != nil {

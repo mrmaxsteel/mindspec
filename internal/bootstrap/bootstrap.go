@@ -525,42 +525,25 @@ This step and the ` + "`bd`" + ` steps are for the top-level session only. A sub
 MindSpec workflow skills are available in ` + "`.agents/skills/`" + `. Each skill directory contains a ` + "`SKILL.md`" + ` with instructions.
 `
 
-// Review negations use exact-line presence: check-ignore cannot test a ! rule.
+// Remove only the formerly shipped ledger negations, preserving other bytes.
 func ensureReviewIgnoreEntries(root string) error {
-	header := "# MindSpec panel reviews (local; only each panel's dispositions.jsonl ledger is version-controlled)"
-	var ignores []string
-	for _, entry := range gitutil.ReviewIgnoreEntries {
-		if !strings.HasPrefix(entry, "!") {
-			ignores = append(ignores, entry)
-		}
-	}
-	if err := gitutil.EnsureGitignoreEntriesWithHeader(root, header, ignores...); err != nil {
-		return err
-	}
 	file := filepath.Join(root, ".gitignore")
 	data, err := os.ReadFile(file)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	present := map[string]bool{}
-	for _, line := range strings.Split(string(data), "\n") {
-		present[strings.TrimSuffix(line, "\r")] = true
+	var kept strings.Builder
+	for _, line := range strings.SplitAfter(string(data), "\n") {
+		entry := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		if entry == "!.mindspec/specs/*/reviews/*/" || entry == "!.mindspec/specs/*/reviews/*/dispositions.jsonl" {
+			continue
+		}
+		kept.WriteString(line)
 	}
-	var missing []string
-	for _, entry := range gitutil.ReviewIgnoreEntries {
-		if !present[entry] {
-			missing = append(missing, entry)
+	if kept.String() != string(data) {
+		if err := os.WriteFile(file, []byte(kept.String()), 0644); err != nil {
+			return err
 		}
 	}
-	if len(missing) == 0 {
-		return nil
-	}
-	content := string(data)
-	if content != "" && !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	if !present[header] {
-		content += "\n" + header + "\n"
-	}
-	return os.WriteFile(file, []byte(content+strings.Join(missing, "\n")+"\n"), 0644)
+	return gitutil.EnsureGitignoreEntriesWithHeader(root, "# MindSpec panel reviews (local, not version-controlled)", gitutil.ReviewIgnoreEntries...)
 }

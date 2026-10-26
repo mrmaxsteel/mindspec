@@ -71,6 +71,9 @@ func runWorkflowFixture(t *testing.T, silent, quota bool, source, wantFailure st
 	if e := panel.Create(dir, panel.CreateInput{Gate: "adhoc", Target: "main", Round: 1, ReviewedHeadSHA: sha, SubjectDigest: "sha256:workflow", Roster: []panel.RosterSlot{{Slot: "R1", Family: family, Model: model, Lens: "adversarial"}, {Slot: "R2", Family: "harness", Model: "m", Lens: "adversarial"}}}); e != nil {
 		t.Fatal(e)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "BRIEF.md"), []byte("## Summary\nReview fixture.\n## Files in Scope\nREADME.md\n## Prior-Round Asks\nNone.\n## Lens\nR1 and R2: correctness.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	raw, _ := json.Marshal(map[string]interface{}{"schema": 2, "slot": "R2", "round": 1, "reviewed_sha": sha, "status": "final", "verdict": "APPROVE", "model": "m", "rationale": "fixture", "concrete_changes_required": []interface{}{}, "commands_run": []interface{}{}})
 	if _, e := panel.Submit(panel.SubmitTarget{Dir: dir, Panel: "p", Slot: "R2", Round: 1}, raw, func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
 		return panel.SubmitResolution{Family: "harness", Model: "m", RunnerKind: "harness", RunnerSource: "default"}, nil
@@ -93,10 +96,10 @@ const silent=silentArg==='true'; let agents=0, creates=0, tallies=0;
 const commands=[];
 function execute(command) {
   commands.push(command);
-  if(command.startsWith('mindspec panel create ')){creates++;if(!command.includes(' --bead ')||!command.includes(' --gate bead'))throw Error('bead create needs --gate bead');return {stdout:'registered',exit:0};}
+  if(command.startsWith('mindspec panel create ')){creates++;if(!command.includes(' --bead ')||!command.includes(' --gate bead'))throw Error('bead create needs --gate bead');return {stdout:'registered',stderr:'',exit:0};}
   if(command.startsWith('mindspec panel tally ')) tallies++;
-  try {return {stdout:cp.execSync(command.replace(/^mindspec /,"'"+bin+"' "),{cwd:root,encoding:'utf8',stdio:['pipe','pipe','pipe']}),exit:0};}
-  catch(e){return {stdout:String(e.stdout||''),exit:e.status||1};}
+  try {return {stdout:cp.execSync(command.replace(/^mindspec /,"'"+bin+"' "),{cwd:root,encoding:'utf8',stdio:['pipe','pipe','pipe']}),stderr:'',exit:0};}
+  catch(e){return {stdout:String(e.stdout||''),stderr:String(e.stderr||''),exit:e.status||1};}
 }
 async function agent(prompt,options){
   if(options.label==='panel-command')return execute(prompt.split('\n').at(-1));
@@ -115,9 +118,21 @@ async function agent(prompt,options){
   return {};
 }
 const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
-(async()=>{const result=await new AsyncFunction('args','agent','pipeline',fs.readFileSync(source,'utf8'))({slug:'p',target:'main',round:1,bead_id:'test-bead'},agent,async(items,fn)=>Promise.all(items.map(fn)));process.stdout.write(JSON.stringify({result,agents,creates,tallies,commands}));})().catch(e=>{console.error(e);process.exit(1)});`
+(async()=>{const result=await new AsyncFunction('args','agent','pipeline',fs.readFileSync(source,'utf8'))({slug:'p',target:'main',round:1,brief_file:root+'/.mindspec/reviews/p/BRIEF.md',bead_id:'test-bead'},agent,async(items,fn)=>Promise.all(items.map(fn)));process.stdout.write(JSON.stringify({result,agents,creates,tallies,commands}));})().catch(e=>{console.error(e);process.exit(1)});`
 	cmd := exec.Command("node", "-e", js, bin, root, workflowPath, sha, fmt.Sprint(silent))
 	out, e := cmd.CombinedOutput()
+	if strings.HasPrefix(wantFailure, "slot:") {
+		var got struct {
+			Result struct {
+				SlotResults []struct{ Status, Error string }
+			}
+			Agents int
+		}
+		if e != nil || json.Unmarshal(out, &got) != nil || len(got.Result.SlotResults) != 2 || !strings.Contains(got.Result.SlotResults[0].Error, strings.TrimPrefix(wantFailure, "slot:")) || got.Result.SlotResults[1].Status != "final" || got.Agents != 0 {
+			t.Fatalf("wanted slot refusal %q: %v %s", wantFailure, e, out)
+		}
+		return
+	}
 	if wantFailure != "" {
 		if e == nil || !strings.Contains(string(out), wantFailure) {
 			t.Fatalf("wanted refusal %q: %v %s", wantFailure, e, out)
@@ -203,7 +218,7 @@ func TestMsPanelWorkflow_SubmitCommandBinding(t *testing.T) {
   return result;
  };
  `
-	workflowFixtureRejects(t, prefix+source, "slot prompt needs one bound submission command")
+	workflowFixtureRejects(t, prefix+source, "slot:slot prompt needs one bound submission command")
 }
 
 func TestMsPanelWorkflow_RefusedFinalReplacement(t *testing.T) {
@@ -233,7 +248,7 @@ async function agent(prompt, options) {
   const command = prompt.split('\n').at(-1);
   commands.push(command);
   if (commands.length > 20) throw Error('workflow did not stop after refusal');
-  if (command.startsWith('mindspec panel create ')) return {stdout:'registered',exit:0};
+  if (command.startsWith('mindspec panel create ')) return {stdout:'registered',stderr:'',exit:0};
   if (command.startsWith('mindspec panel verify ')) return {stdout:JSON.stringify([slot]),exit:1};
   if (command.startsWith('mindspec panel launch ') || command.startsWith('mindspec panel checkout ')) {
     return {stdout:'slot already has a final submission',exit:1};
@@ -243,7 +258,7 @@ async function agent(prompt, options) {
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 (async()=>{
   const result = await new AsyncFunction('args','agent','pipeline',fs.readFileSync(source,'utf8'))(
-    {slug:'p',target:'main',round:1},agent,async(items,fn)=>Promise.all(items.map(fn)));
+    {slug:'p',target:'main',round:1,brief_file:'/brief.md'},agent,async(items,fn)=>Promise.all(items.map(fn)));
   process.stdout.write(JSON.stringify({result,commands,reviewers}));
 })().catch(e=>{console.error(e);process.exit(1)});`
 	out, err := exec.Command("node", "-e", js, workflowPath, kind).CombinedOutput()
@@ -314,19 +329,20 @@ func TestMsPanelWorkflow_CreateGate(t *testing.T) {
 				workflowGit(t, root, "", "branch", "spec/900-example", "main")
 			}
 			source := WorkflowFiles()["ms-panel.js"]
-			js := `const cp=require('child_process'), assert=require('assert');
+			js := `const cp=require('child_process'), fs=require('fs'), assert=require('assert');
 const [source,gate,bin,root]=process.argv.slice(1); let created;
 const agent=async(prompt,options)=>{
  assert.equal(options.label,'panel-command');
  const command=prompt.split('\n').at(-1);
- if(command.startsWith('mindspec panel create ')){created=command;return {stdout:'registered',exit:0};}
+ if(command.startsWith('mindspec panel create ')){created=command;return {stdout:'registered',stderr:'',exit:0};}
  if(command.startsWith('mindspec panel verify '))return {stdout:'[]',exit:0};
  if(command.startsWith('mindspec panel tally '))return {stdout:'PASS',exit:0};
  throw Error('unexpected command: '+command);
 };
 const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
 (async()=>{
- const args={slug:'p',target:'main',round:1};
+ const briefFile=root+'/filled-brief.md'; fs.writeFileSync(briefFile,'Review this fixture.\n');
+ const args={slug:'p',target:'main',round:1,brief_file:briefFile};
  if(['spec_approve','plan_approve','final_review'].includes(gate))args.target='spec/900-example';
  if(gate){args.gate=gate;if(gate!=='adhoc')args.spec='900-example';}
  await new AsyncFunction('args','agent','pipeline',source)(args,agent,async(items,fn)=>Promise.all(items.map(fn)));
@@ -358,7 +374,7 @@ const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
 let calls=0;
 (async()=>{
  await assert.rejects(()=>new AsyncFunction('args','agent','pipeline',process.argv[1])(
-  {slug:'p',target:'main',round:1,spec:'example',gate:'adhoc'},
+  {slug:'p',target:'main',round:1,brief_file:'/brief.md',spec:'example',gate:'adhoc'},
   async()=>{calls++;return {stdout:'[]',exit:0};},
   async(items,fn)=>Promise.all(items.map(fn))), /gate conflicts with spec/);
  assert.equal(calls,0,'refusal must precede every command');

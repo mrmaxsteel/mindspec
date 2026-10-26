@@ -120,7 +120,7 @@ func resetPanelCreateFlags(t *testing.T) {
 	t.Cleanup(func() { lsTreeForPanelFn = original })
 	t.Helper()
 	restore := func() {
-		for _, name := range []string{"spec", "target", "bead", "round", "gate", "reviewers"} {
+		for _, name := range []string{"spec", "target", "bead", "round", "gate", "reviewers", "brief-file"} {
 			if f := panelCreateCmd.Flags().Lookup(name); f != nil {
 				_ = f.Value.Set(f.DefValue)
 				f.Changed = false

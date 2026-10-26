@@ -1,6 +1,7 @@
 package gitutil
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,6 +65,32 @@ func TestCommitAll_SkipsIgnoredReviews(t *testing.T) {
 	}
 	if got := reviewIgnoreGit(t, root, "status", "--porcelain"); got != "" {
 		t.Errorf("ignored review must leave a clean status: %s", got)
+	}
+}
+
+func TestCommitAll_CommitsTrackedDirtyLedger(t *testing.T) {
+	for _, staged := range []bool{false, true} {
+		t.Run(fmt.Sprint(staged), func(t *testing.T) {
+			root := reviewIgnoreRepo(t)
+			file := strings.Replace(ignoredReviewPath, "panel.json", "dispositions.jsonl", 1)
+			if err := os.WriteFile(filepath.Join(root, file), []byte("before\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			reviewIgnoreGit(t, root, "add", "-f", "--", file)
+			reviewIgnoreGit(t, root, "commit", "-qm", "tracked ledger")
+			if err := os.WriteFile(filepath.Join(root, file), []byte("after\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if staged {
+				reviewIgnoreGit(t, root, "add", "-f", "--", file)
+			}
+			if err := CommitAll(root, "lifecycle artifacts"); err != nil {
+				t.Fatal(err)
+			}
+			if got := reviewIgnoreGit(t, root, "show", "HEAD:"+file); got != "after\n" {
+				t.Fatalf("tracked ledger edit not committed: %q", got)
+			}
+		})
 	}
 }
 

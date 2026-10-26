@@ -55,7 +55,7 @@ step 0                 (pick + claim the next eligible bead, create worktree)
   ↓ implementation commit SHA + flagged deviations
 mindspec complete <bead> --check
   ↓ content gates PASS
-/ms-panel-run          (round 1 — step 0 writes panel.json + BRIEF, then the configured reviewers fan out)
+/ms-panel-run          (round 1 — the caller writes the brief file; create copies it into BRIEF.md, then the configured reviewers fan out)
   ↓ wait for completions
 /ms-panel-tally        (round 1 verdicts — single decision authority)
   ↓ decide:
@@ -68,7 +68,7 @@ mindspec complete <bead> --check
   ↓ new implementation commit SHA + flagged deviations
 mindspec complete <bead> --check
   ↓ content gates PASS
-/ms-panel-run          (round 2 — step 0 re-bumps round + reviewed_head_sha in one write)
+/ms-panel-run          (round 2 — the caller writes a fresh brief file; create bumps the round + reviewed_head_sha)
   ↓
 /ms-panel-tally        (round 2 verdicts)
   ↓ decide as above

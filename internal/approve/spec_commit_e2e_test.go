@@ -9,6 +9,7 @@ package approve
 // exactly this state while the old tail still demanded a manual commit.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,7 +18,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/bootstrap"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
@@ -176,5 +179,130 @@ func TestApproveSpec_EpicCreateWarningHostileEscaped(t *testing.T) {
 		if line == "recovery: forged" {
 			t.Errorf("a forged standalone recovery line survived: %q", found)
 		}
+	}
+}
+
+func TestApproveSpec_LocalLedger(t *testing.T) {
+	for _, state := range []string{"tracked", "fresh-init", "upgraded-init"} {
+		t.Run(state, func(t *testing.T) {
+			stubDocumentGateAudit(t)
+			specE2EFakeBdOnPath(t)
+			root := t.TempDir()
+			specID := "990-approve-commit"
+
+			adoptGitRun(t, root, "init", "-q", "-b", "main")
+			adoptGitRun(t, root, "config", "user.email", "test@example.invalid")
+			adoptGitRun(t, root, "config", "user.name", "test")
+			adoptGitRun(t, root, "config", "commit.gpgsign", "false")
+
+			specRel := filepath.Join(".mindspec", "specs", specID, "spec.md")
+			if err := os.MkdirAll(filepath.Join(root, filepath.Dir(specRel)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, specRel), []byte(specE2EValidSpecMD(specID)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			adoptGitRun(t, root, "add", "-A")
+			adoptGitRun(t, root, "commit", "-q", "-m", "spec-init "+specID)
+
+			// A real spec worktree, exactly where SpecWorktreePath resolves it —
+			// workspace.SpecDir is worktree-aware, so the frontmatter update and
+			// the auto-commit both land there.
+			specBranch := "spec/" + specID
+			adoptGitRun(t, root, "branch", specBranch)
+			specWt := filepath.Join(root, ".worktrees", "worktree-spec-"+specID)
+			if err := os.MkdirAll(filepath.Dir(specWt), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			adoptGitRun(t, root, "worktree", "add", specWt, specBranch)
+
+			// bd seams: no existing epic; the create + dolt push both succeed.
+			t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+				return []byte(`[]`), nil
+			}))
+			t.Cleanup(SetSpecRunBDForTest(func(args ...string) ([]byte, error) {
+				return []byte(`{"id":"epic-990"}`), nil
+			}))
+
+			file := prepareApprovalLedger(t, specWt, specID, state)
+			real := &executor.MindspecExecutor{Root: root}
+			result, err := ApproveSpec(root, specID, "test-user", real)
+			if err != nil {
+				t.Fatalf("ApproveSpec against the real executor: %v", err)
+			}
+			if result == nil || result.SpecID != specID {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+
+			assertApprovalLedger(t, specWt, file, state)
+		})
+	}
+}
+
+// approvalLedgerBytes returns a valid ledger of n adhoc round records.
+func approvalLedgerBytes(t *testing.T, specID string, n int) string {
+	t.Helper()
+	var out strings.Builder
+	for round := 1; round <= n; round++ {
+		data, err := json.Marshal(panel.RoundRecord{Record: panel.RecordRound, Spec: specID, Panel: "p", Round: round,
+			ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:abc", Target: "main", Gate: "adhoc",
+			Roster: []panel.RosterSlot{{Slot: "R1", Model: "model-a", Lens: "correctness"}, {Slot: "R2", Model: "model-b", Lens: "architecture"}}, ExpectedReviewers: 2, Telemetry: "required", CreatedAt: "2026-01-01T00:00:00Z"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := panel.Validate(data); err != nil {
+			t.Fatal(err)
+		}
+		out.Write(data)
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
+
+func prepareApprovalLedger(t *testing.T, root, specID, state string) string {
+	t.Helper()
+	file := ".mindspec/specs/" + specID + "/reviews/p/dispositions.jsonl"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, file)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if state == "upgraded-init" {
+		ignore := ".mindspec/specs/*/reviews/**\n.mindspec/reviews/**\n!.mindspec/specs/*/reviews/*/\n!.mindspec/specs/*/reviews/*/dispositions.jsonl\n"
+		if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(ignore), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := bootstrap.Run(root, false); err != nil {
+		t.Fatal(err)
+	}
+	if state == "tracked" {
+		if err := os.WriteFile(filepath.Join(root, file), []byte(approvalLedgerBytes(t, specID, 1)), 0644); err != nil {
+			t.Fatal(err)
+		}
+		adoptGitRun(t, root, "add", "-f", "--", file)
+	}
+	adoptGitRun(t, root, "add", "-A")
+	adoptGitRun(t, root, "commit", "-qm", "init review ignores fixture")
+	if err := os.WriteFile(filepath.Join(root, file), []byte(approvalLedgerBytes(t, specID, 2)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+func assertApprovalLedger(t *testing.T, root, file, state string) {
+	t.Helper()
+	specID := strings.Split(file, "/")[2]
+	local := approvalLedgerBytes(t, specID, 2)
+	data, err := exec.Command("git", "-C", root, "show", "HEAD:"+file).Output()
+	if state == "tracked" && (err != nil || string(data) != local) || state != "tracked" && err == nil {
+		t.Fatalf("approval committed ledger: %q %v", data, err)
+	}
+	if state != "tracked" {
+		adoptGitRun(t, root, "check-ignore", "-q", "--", file)
+		if got, err := exec.Command("git", "-C", root, "ls-files", "--", file).Output(); err != nil || len(got) != 0 {
+			t.Fatalf("ignored ledger tracked: %s", got)
+		}
+	}
+	data, err = os.ReadFile(filepath.Join(root, file))
+	if err != nil || string(data) != local {
+		t.Fatalf("local bytes changed: %q %v", data, err)
 	}
 }

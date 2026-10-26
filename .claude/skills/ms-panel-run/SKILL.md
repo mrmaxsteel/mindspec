@@ -10,21 +10,30 @@ description: Create a review panel and dispatch each slot through its configured
 Use `panel-slug`, `spec`, `gate`, `target`, `bead-id` and `round` from the caller.
 The binary resolves the roster, lenses, acceptance question and verdict contract.
 
+## Prepare the brief
+
+Before starting a workflow or creating a panel, write a filled brief to an absolute
+scratch file. Include Summary, Files in Scope, Prior-Round Asks (or "none"), and
+Lens assignments per slot. Include known implementation or fixer deviations.
+Use the configured roster to assign lenses, and confirm it with verify after creation.
+Remove every `TODO(skill)` stub. Pass this absolute path as `brief_file`.
+For a later round, write a fresh brief with the previous asks and their outcomes.
+
 ## Runner dispatch
 
-For `runner: claude-code-workflow`, invoke `/ms-panel` once with `{slug, spec, gate, target, bead_id, round}`.
+For `runner: claude-code-workflow`, invoke `/ms-panel` once with `{slug, spec, gate, target, bead_id, round, brief_file}`.
 Use the returned verify and tally output. If workflows are unavailable, use the steps below.
 For `runner: claude-code-skills` and `runner: external`, use the steps below.
 
 ## Step 0 — create
 
-Run `mindspec panel create <panel-slug> --spec <spec-id> --gate <gate> --target <ref> --round <N>`.
+Run `mindspec panel create <panel-slug> --spec <spec-id> --gate <gate> --target <ref> --round <N> --brief-file <absolute-brief-file>`.
 For `spec_approve`, `plan_approve` and `final_review`, use `--target spec/<id>`.
 An older live registration with another target blocks the gate until a new round
 at `spec/<id>` replaces it or it is abandoned with a reason. A round created by an
 older binary can also need a new round at `spec/<id>`.
 For a bead panel, add `--bead <bead-id>`. Keep the reported panel directory path.
-For an adhoc panel, run `mindspec panel create <panel-slug> --gate adhoc --target <ref>`.
+For an adhoc panel, run `mindspec panel create <panel-slug> --gate adhoc --target <ref> --brief-file <absolute-brief-file>`.
 Its artifacts are at `<repo>/.mindspec/reviews/<panel-slug>/`.
 
 ## Dispatch and wait
@@ -52,6 +61,8 @@ A harness substitute uses the harness column in the latest verify output.
 For each harness redispatch:
 1. Run `mindspec panel checkout <panel-slug> --slot <slot> --dispatch`. Add `--replace` after a final verdict other than VOID.
 2. Run `mindspec panel prompt <panel-slug> --slot <slot>`.
+If checkout or prompt fails, report its reason for that slot and stop that branch.
+A setup failure does not use the reviewer retry. Continue the other slots.
 3. Dispatch that prompt once with the harness agent tool, in the slot tree.
 Pass the slot's effective model to the agent tool. If it cannot run that model, report the slot.
 When model equals family, use the harness default model. Keep the slot model as the verdict label.

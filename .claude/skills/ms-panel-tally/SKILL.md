@@ -32,7 +32,7 @@ Apply `panel.fix-after-final` and `panel.one-fixer` before a fix dispatch.
 ## After a halt — recovery
 
 `mindspec instruct --panel-state` lists the panel state.
-For a stale bead panel, run `mindspec panel create <slug> --spec <spec-id> --gate bead --target bead/<bead-id> --bead <bead-id> --round <N+1>`.
+For a stale bead panel, run `mindspec panel create <slug> --spec <spec-id> --gate bead --target bead/<bead-id> --bead <bead-id> --round <N+1> --brief-file <absolute path to a fresh brief>`.
 For `spec_approve`, `plan_approve` and `final_review`, create the next round with `--target spec/<id>`.
 Use the recorded gate and target for other panels. Omit `--spec` for adhoc panels.
 `mindspec panel rebind <slug> --reason "<who>: <why>"` accepts a passing panel when changed paths need no new review.

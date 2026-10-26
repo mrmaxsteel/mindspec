@@ -603,13 +603,13 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		return runCheck(root, beadID, specID, exec, opts)
 	}
 
-	// R6.6 runs before migration, marker clearing, materialization or close.
 	ledgerWorktree, ledgerPaths, ledgerErr := SpecLedgerPaths(root, specID, beadID)
 	if ledgerErr != nil {
 		return nil, ledgerErr
 	}
-	if err := CheckPanelLedgers(ledgerWorktree, ledgerPaths, exec); err != nil {
-		return nil, err
+	ledgerPaths, ledgerErr = unignoredLedgers(ledgerWorktree, ledgerPaths, exec, completionCommand(beadID, opts))
+	if ledgerErr != nil {
+		return nil, ledgerErr
 	}
 
 	// Spec 107 wave 1 (mindspec-oexu.3): the spec→epic mapping is immutable for
@@ -1455,7 +1455,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		return nil, completionFailure(beadID, opts, "recording doc-sync declarations", err)
 	}
 
-	// The bead merge succeeded; persist all matched ledgers in the spec checkout.
+	// The bead merge succeeded; persist eligible ledgers in the spec checkout.
 	ledgerCommitErr := commitPanelLedgers(ledgerWorktree, ledgerPaths, exec)
 	if ledgerCommitErr != nil {
 		ledgerCommitErr = fmt.Errorf("bead is closed and merged; only the panel ledger commit remains: %w", ledgerCommitErr)

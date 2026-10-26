@@ -158,15 +158,14 @@ internal/approve/impl_final_gate.go	implBeadWorktreePreflight	variadic-spread:re
 internal/approve/impl_final_gate.go	implFinalReviewGate	arg1:unprovable
 internal/approve/impl_final_gate.go	implPublishedSubject	arg1:unprovable
 internal/complete/check.go	reportContentGates	arg1:unprovable
+internal/complete/closing.go	commitPanelLedgers	arg1:unprovable
+internal/complete/closing.go	unignoredLedgers	arg1:unprovable
+internal/complete/closing.go	unignoredLedgers	arg2:unprovable
 cmd/mindspec/panel_defer.go	runPanelDefer	arg1:unprovable
 internal/approve/impl.go	implFinalizeFailure	arg1:unprovable
 internal/lifecycle/merge_state.go	RestoreMergeRecovery	variadic-spread:commands
 internal/lifecycle/stale_open.go	StaleOpenBead.Message	arg1:unprovable
 internal/complete/complete.go	landingOwnershipError.Error	arg1:unprovable
-# Spec 130 R6.6: shell-quoted ledger recoveries, registered with TestLedger_RecoveryOperands obligations.
-internal/approve/impl.go	implLedgerPreflight	arg1:unprovable
-internal/complete/panel_ledger.go	CheckPanelLedgers	arg1:unprovable
-internal/complete/panel_ledger.go	commitPanelLedgers	arg1:unprovable
 cmd/mindspec/bead_clarify.go	beadClarifyCmd	arg1:unprovable
 cmd/mindspec/bead_ready.go	beadReadyCheckCmd	arg1:unprovable
 cmd/mindspec/bead_ready.go	beadReadyCheckCmd	variadic-spread:commands

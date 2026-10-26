@@ -14,20 +14,16 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
-// briefHeaderOpen/briefHeaderClose delimit the BRIEF.md region Create
-// owns exclusively (Spec 110 R1). Everything outside this region —
-// including everything below the closing marker — is skill-authored
-// and Create never touches it.
+// briefHeaderOpen/briefHeaderClose delimit the managed region refreshed by
+// default. An explicit BriefFile replaces the authored body
+// below a refreshed managed header.
 const (
 	briefHeaderOpen  = "<!-- mindspec:panel-header -->"
 	briefHeaderClose = "<!-- /mindspec:panel-header -->"
 )
 
-// briefStubBody is the panel-specific skeleton a first `create` writes
-// below the machine-managed header, mirroring the section headings
-// /ms-panel-run step 3 fills in. It is written verbatim exactly once
-// (the first Create for a slug); every later re-panel Create leaves it,
-// and everything else the skill authored below it, untouched.
+// briefStubBody is the skeleton written when no brief file is supplied on
+// first creation. Fill it before dispatch; later default creates preserve it.
 const briefStubBody = `## Summary
 
 <!-- TODO(skill): one-paragraph summary of what this panel reviews -->
@@ -53,6 +49,7 @@ Use the quoted acceptance criteria in the managed region above.
 // the roster from config and the reviewed commit and digest from the target.
 type CreateInput struct {
 	BriefRegions      BriefRegions
+	BriefFile         string
 	BeadID            *string
 	Spec              string
 	Target            string
@@ -153,6 +150,14 @@ func Create(dir string, in CreateInput) error {
 func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	if err := CheckLifecycleTarget(in.Gate, in.Spec, in.Target); err != nil {
 		return nil, err
+	}
+	var suppliedBrief []byte
+	if in.BriefFile != "" {
+		var err error
+		suppliedBrief, err = readBriefFile(in.BriefFile)
+		if err != nil {
+			return nil, err
+		}
 	}
 	beadID := ""
 	if in.BeadID != nil {
@@ -388,7 +393,9 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	}
 	header := renderCreateBriefHeader(filepath.Base(dir), p, prior, in.BriefRegions)
 	var newBrief string
-	if briefExists {
+	if in.BriefFile != "" {
+		newBrief = header + "\n\n" + string(suppliedBrief)
+	} else if briefExists {
 		newBrief, err = spliceBriefHeader(string(existing), header)
 		if err != nil {
 			return nil, fmt.Errorf("BRIEF.md header in %s: %w", briefPath, err)

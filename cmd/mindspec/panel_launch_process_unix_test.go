@@ -117,17 +117,29 @@ func TestPanelLaunch_OrphanOutcomeDigests(t *testing.T) {
 	f.stopLauncher(t, cmd)
 	dir := f.layout(t).AttemptDir(1)
 	launchAwait(t, func() bool { _, e := os.Stat(filepath.Join(dir, "exit.json")); return e == nil })
-	// A missing brief stops the next launch after the orphan check and before
-	// another started event. Recover must then bind the original dead attempt.
+	// A missing brief stops launch before the orphan check or any writes.
+	// After restoring it, explicitly check and recover the original attempt.
 	brief := filepath.Join(f.dir, "BRIEF.md")
 	if e := os.Rename(brief, brief+".quarantine"); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := f.run(t, false); e == nil || !strings.Contains(e.Error(), "brief") {
-		t.Fatalf("next launch did not stop after orphan check: %v", e)
+		t.Fatalf("next launch did not refuse missing brief: %v", e)
 	}
 	if e := os.Rename(brief+".quarantine", brief); e != nil {
 		t.Fatal(e)
+	}
+	if events := f.events(t); len(events) != 1 {
+		t.Fatalf("missing-brief refusal changed orphan records: %+v", events)
+	}
+	lock, err := panel.AcquireSlotLock(f.layout(t).Lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = checkProcessOrphans(f.root, panel.Registration{Dir: f.dir, Panel: f.p}, f.layout(t))
+	_ = lock.Release()
+	if err != nil {
+		t.Fatal(err)
 	}
 	events := f.events(t)
 	if len(events) != 2 || events[1].Status != "launch_failed" || events[1].ExitCode == nil || *events[1].ExitCode != 1 || events[1].StdoutSHA256 == "" || events[1].StderrSHA256 == "" || events[1].VerdictSHA256 == "" {
