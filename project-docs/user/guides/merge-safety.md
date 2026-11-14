@@ -182,6 +182,15 @@ path for the externally-merged case, and the orphaned-bead hints
 propose inspection (never `mindspec complete`, never a pasteable
 force-delete) when merge provenance is not positively established.
 
+## A second CI run after `impl approve` on a protected main
+
+`mindspec impl approve` closes the epic before it publishes. It then commits
+`chore: commit remaining spec artifacts` on the spec branch. This commit often
+holds only the `.beads/issues.jsonl` tracker export. Then it pushes the spec
+branch. If the spec PR is still open, CI already ran on it, so this push starts
+a second CI run. This is expected. The approval itself makes the commit content,
+so an earlier push cannot include it. Without the commit, the epic close does
+not reach `main`. Wait for the second CI run to pass, then merge the PR.
 
 ## Retry an approval after an export failure
 
