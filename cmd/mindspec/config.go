@@ -550,7 +550,7 @@ func reviewerCountNotesFor(cfg *config.Config, root string) string {
 		if !ok {
 			continue
 		}
-		note := panel.ReviewerCountNote(reg.Panel.ExpectedReviewers, configDefault)
+		note := panel.ReviewerCountNote(reg.Panel.ExpectedReviewers, configDefault, reg.Panel.ReviewerCountSource)
 		if note == "" {
 			continue
 		}

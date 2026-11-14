@@ -58,12 +58,7 @@ func runPanelDeferToPlan(cmd *cobra.Command, reg panel.Registration, slot string
 	if err != nil {
 		return panelVerbFailure(err)
 	}
-	model := ""
-	for _, s := range res.Panel.Roster {
-		if s.Slot == slot {
-			model = s.Model
-		}
-	}
+	model := res.ReviewerModel(slot)
 	if model == "" {
 		return panelVerbFailure(fmt.Errorf("slot must belong to the recorded roster"))
 	}
@@ -96,7 +91,7 @@ func runPanelDeferToPlan(cmd *cobra.Command, reg panel.Registration, slot string
 		if err != nil {
 			return err
 		}
-		if word != verdict || !reflect.DeepEqual(fs, findings) || !reflect.DeepEqual(current.Panel.Roster, res.Panel.Roster) || current.Panel.Gate != "spec_approve" {
+		if current.ReviewerModel(slot) != model || word != verdict || !reflect.DeepEqual(fs, findings) || !reflect.DeepEqual(current.Panel.Roster, res.Panel.Roster) || current.Panel.Gate != "spec_approve" {
 			return fmt.Errorf("finding changed; retry against the current verdict")
 		}
 		res = current

@@ -785,7 +785,7 @@ func reviewerCountAdvisory(reg *panel.Registration, configDefault int, w io.Writ
 	if reg == nil || reg.Err != nil || w == nil {
 		return
 	}
-	if note := panel.ReviewerCountNote(reg.Panel.ExpectedReviewers, configDefault); note != "" {
+	if note := panel.ReviewerCountNote(reg.Panel.ExpectedReviewers, configDefault, reg.Panel.ReviewerCountSource); note != "" {
 		fmt.Fprintf(w, "panel advisory: %s\n", note)
 	}
 }

@@ -33,7 +33,7 @@ func TestResolveSubjectHead_CommitPinsUseExactSpecBranch(t *testing.T) {
 							t.Fatalf("inexact existence check: %s %s", root, ref)
 						}
 						return true, nil
-					})
+					}, nil)
 				if err != nil || sha != "spec-tip" || !reflect.DeepEqual(refs, []string{"refs/heads/spec/900-demo"}) {
 					t.Fatalf("pin must follow exact branch: sha=%s err=%v refs=%v", sha, err, refs)
 				}
@@ -68,7 +68,7 @@ func TestResolveSubjectHead_OnlyConfirmedAbsenceAllowsFallback(t *testing.T) {
 					}
 					return "spec-tip", tc.resolveErr
 				},
-				func(_, _ string) (bool, error) { return tc.exists, tc.existsErr })
+				func(_, _ string) (bool, error) { return tc.exists, tc.existsErr }, nil)
 			switch {
 			case tc.existsErr != nil:
 				if !errors.Is(err, ErrSubjectHead) || len(refs) != 0 || sha != "" {
@@ -102,7 +102,7 @@ func TestResolveSubjectHead_OtherTargetsResolveRecordedTarget(t *testing.T) {
 				sha, err := ResolveSubjectHead(Panel{Gate: gate, Target: target}, "repo",
 					func(string) (string, error) { t.Fatal("must not compose spec branch"); return "", nil },
 					func(_, ref string) (string, error) { refs = append(refs, ref); return "target-tip", nil },
-					func(string, string) (bool, error) { t.Fatal("must not inspect spec branch"); return false, nil })
+					func(string, string) (bool, error) { t.Fatal("must not inspect spec branch"); return false, nil }, nil)
 				if err != nil || sha != "target-tip" || !reflect.DeepEqual(refs, []string{target}) {
 					t.Fatalf("recorded target changed: %s %v %v", sha, err, refs)
 				}
@@ -116,7 +116,7 @@ func TestResolveSubjectHead_BranchCompositionErrorBlocks(t *testing.T) {
 	_, err := ResolveSubjectHead(Panel{Gate: "plan_approve", Target: "cafe"}, "repo",
 		func(string) (string, error) { return "", broken },
 		func(string, string) (string, error) { t.Fatal("must not resolve invalid branch"); return "", nil },
-		func(string, string) (bool, error) { t.Fatal("must not inspect invalid branch"); return false, nil })
+		func(string, string) (bool, error) { t.Fatal("must not inspect invalid branch"); return false, nil }, nil)
 	if !errors.Is(err, ErrSubjectHead) || !errors.Is(err, broken) {
 		t.Fatalf("branch error hidden: %v", err)
 	}
@@ -138,5 +138,28 @@ func TestResolveGateFacts_UnreadablePinnedBranchIsNotMissingRef(t *testing.T) {
 	}
 	if d := PanelGateDecision(facts); d.Action != Block {
 		t.Fatalf("unreadable pinned subject must block: %+v", d)
+	}
+}
+
+func TestResolveSubjectHeadMissingNamedTargetBlocksUncertainBranch(t *testing.T) {
+	missing := errors.New("target missing")
+	oldGit := errors.New("show-ref --exists unsupported")
+	sha, err := ResolveSubjectHead(Panel{Gate: "plan_approve", Spec: "900-demo", Target: "review-tag"}, "repo",
+		func(string) (string, error) { return "spec/900-demo", nil },
+		func(_, ref string) (string, error) {
+			if ref != "review-tag" {
+				t.Fatalf("must not resolve uncertain branch: %s", ref)
+			}
+			return "", missing
+		},
+		func(_, ref string) (bool, error) {
+			if ref != "refs/heads/spec/900-demo" {
+				t.Fatalf("inexact branch: %s", ref)
+			}
+			return false, oldGit
+		},
+		func(err error) bool { return errors.Is(err, missing) })
+	if sha != "" || !errors.Is(err, ErrSubjectHead) || !errors.Is(err, oldGit) {
+		t.Fatalf("uncertain exact-ref check must block: %s %v", sha, err)
 	}
 }

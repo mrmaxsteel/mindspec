@@ -57,9 +57,11 @@ type Panel struct {
 	Target            string  `json:"target"`
 	Round             int     `json:"round"`
 	ExpectedReviewers int     `json:"expected_reviewers"`
-	ReviewedHeadSHA   string  `json:"reviewed_head_sha"`
-	SubjectDigest     string  `json:"subject_digest,omitempty"`
-	Abandoned         bool    `json:"abandoned,omitempty"`
+	// ReviewerCountSource is default or explicit; absent legacy values mean default.
+	ReviewerCountSource string `json:"reviewer_count_source,omitempty"`
+	ReviewedHeadSHA     string `json:"reviewed_head_sha"`
+	SubjectDigest       string `json:"subject_digest,omitempty"`
+	Abandoned           bool   `json:"abandoned,omitempty"`
 	// AbandonReason is REQUIRED (who/why) when Abandoned is true,
 	// but that requirement is deliberately NOT enforced at parse
 	// time: flagging a reason-less abandonment as malformed here
@@ -205,7 +207,8 @@ func (p Panel) ApproveThreshold() int {
 // ReviewerCountNote returns a pure, config-free advisory string for a
 // caller-side surface (`mindspec config show`, the complete-gate advisory —
 // spec 109 R8) noting when a panel's recorded reviewer count differs from
-// the config's current default. It returns "" when recorded and
+// the config's current default. Explicit choices never produce a note. An
+// absent source on a legacy panel means default. It returns "" when recorded and
 // configDefault match (the common case, including every no-panel and
 // unchanged-config-default call site — nothing to say).
 //
@@ -214,8 +217,8 @@ func (p Panel) ApproveThreshold() int {
 // takes no *config.Config — internal/panel stays a config-free leaf. The
 // caller resolves configDefault (e.g. via internal/config's
 // PanelExpectedReviewers) and passes it in as a plain int.
-func ReviewerCountNote(recorded, configDefault int) string {
-	if recorded == configDefault {
+func ReviewerCountNote(recorded, configDefault int, source string) string {
+	if source == "explicit" || recorded == configDefault {
 		return ""
 	}
 	return fmt.Sprintf(

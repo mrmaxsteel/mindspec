@@ -781,3 +781,23 @@ func TestCompleteRun_RegatesAlreadyClosedOrphan(t *testing.T) {
 		t.Errorf("expected the reconciliation to durably record panel_refuted, got %v", store.data[beadID])
 	}
 }
+
+func TestReviewerCountAdvisoryProvenance(t *testing.T) {
+	for _, source := range []string{"", "default", "explicit"} {
+		t.Run("source="+source, func(t *testing.T) {
+			var p panel.Panel
+			data := fmt.Sprintf(`{"expected_reviewers":3,"reviewer_count_source":%q}`, source)
+			if source == "" {
+				data = `{"expected_reviewers":3}`
+			}
+			if err := json.Unmarshal([]byte(data), &p); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			reviewerCountAdvisory(&panel.Registration{Panel: p}, 6, &out)
+			if got, want := out.Len() > 0, source != "explicit"; got != want {
+				t.Fatalf("count note present=%t, want %t: %s", got, want, out.String())
+			}
+		})
+	}
+}

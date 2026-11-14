@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Spec and Plan guidance names the required panel and when to use reviewers from more than one family. Doctor reports the panel presence policy and in-flight specs with a missing-panel record.
 
 ### Fixed
+- The bead cycle claims the selected bead by its explicit ID without bypassing session freshness; refresh updates unmodified installed skills.
+- `panel create --reviewer R<n>=<model>` sets individual roster slots, accepts an optional family prefix, and carries explicit choices into later rounds.
+- Panel coverage manifests and disposition rows record the submitted model, including reviewer substitutions.
+- Spec and plan panels whose named target was deleted check the live spec branch for unreviewed changes; uncertain branch checks, including on older Git versions, block.
+- Reviewer-count notices appear only for panels created from a default count when that default changes; explicit reviewer choices stay quiet across rounds.
 - **Panel dispatch diagnostics and briefs** — verify errors retain their message, slot setup failures report a reason without using a reviewer retry, and prompt and launch refuse unfinished briefs. `panel create --brief-file <absolute-path>` copies the authored body beneath the managed review header; the panel workflow requires its path as `brief_file`.
 - `impl approve` refuses unreviewed placeholder ADR changes outside its own write set.
 - `spec approve` refuses subject text in `## Approval` with a live panel before it writes the file.

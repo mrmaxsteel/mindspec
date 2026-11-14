@@ -704,3 +704,43 @@ func TestRenderBriefHeader_GoldenUnchanged(t *testing.T) {
 		t.Fatalf("renderBriefHeader output changed (spec 126 R5 must not touch renderBriefHeader):\ngot:  %q\nwant: %q", got, want)
 	}
 }
+
+func TestCreateReviewerCountProvenance(t *testing.T) {
+	for _, override := range []bool{false, true} {
+		t.Run(fmt.Sprint(override), func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "panel")
+			in := CreateInput{Spec: "demo", Target: "HEAD", Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:fixture", Roster: createRoster(3), ReviewersOverride: override}
+			want := "default"
+			if override {
+				want = "explicit"
+			}
+			for round := 1; round <= 2; round++ {
+				in.Round = round
+				if err := Create(dir, in); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, FileName))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields map[string]interface{}
+				if err := json.Unmarshal(data, &fields); err != nil {
+					t.Fatal(err)
+				}
+				if fields["reviewer_count_source"] != want {
+					t.Fatalf("round %d: source=%v, want %s", round, fields["reviewer_count_source"], want)
+				}
+				reg := load(dir)
+				if field, err := CheckHandEdits(dir, reg.Panel); err != nil || field != "" {
+					t.Fatalf("hand edits: %s %v", field, err)
+				}
+				reg.Panel.ReviewerCountSource = "tampered"
+				if field, err := CheckHandEdits(dir, reg.Panel); err != nil || field != "reviewer_count_source" {
+					t.Fatalf("source hand edit not detected: %s %v", field, err)
+				}
+				in.ReviewersOverride = false
+				in.Roster = createRoster(6)
+			}
+		})
+	}
+}

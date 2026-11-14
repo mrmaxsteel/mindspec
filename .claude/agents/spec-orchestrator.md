@@ -146,8 +146,8 @@ works without intervention.
 
 For each bead in dependency order:
 
-a. `mindspec next --force` (the `--force` flag bypasses the
-   session-freshness gate that fires after the first claim in a session).
+a. Claim the selected bead with `mindspec next --spec <spec-slug> <bead-id>`.
+   An explicit bead ID warns on session freshness and continues.
 
 b. Spawn an implementation subagent with the bead's worktree path,
    explicit "DO NOT run `mindspec complete`, DO NOT push" instructions,
@@ -669,12 +669,11 @@ clean-tree step — cited by symbol, not by line), exactly as step
 Symptom: `mindspec next` errors with "a bead was already claimed in
 this session. You MUST run /clear".
 
-Cause: the harness expects each `mindspec next` to come from a fresh
-agent context.
+Cause: automatic selection expects a fresh agent context.
 
-Recovery: `mindspec next --force` bypasses the gate. The orchestrator
-is allowed to do this; the gate exists to catch agents who forgot to
-context-clear.
+Recovery: clear the context before automatic selection, or claim the
+selected bead with `mindspec next --spec <spec-slug> <bead-id>`. An
+explicit bead ID warns on session freshness and continues.
 
 ### 6. Phase drift between epic and beads
 

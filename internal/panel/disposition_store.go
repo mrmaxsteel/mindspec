@@ -419,7 +419,7 @@ func checkCompletenessAt(dir, panelName string, current *Result) error {
 }
 
 // DeriveCoverageManifest derives coverage from roster slots and latest verdicts.
-// Roster order and roster model identity are authoritative; unexpected files
+// Roster order and submitted model identity are authoritative; unexpected files
 // never contribute slots. Legacy registrations do not require coverage.
 func DeriveCoverageManifest(res *Result) CoverageManifest {
 	p := res.Panel
@@ -437,7 +437,7 @@ func DeriveCoverageManifest(res *Result) CoverageManifest {
 	}
 	for _, slot := range p.Roster {
 		if v, ok := bySlot[slot.Slot]; ok {
-			m.Slots = append(m.Slots, ManifestSlot{Slot: slot.Slot, Model: slot.Model, Verdict: v.Verdict})
+			m.Slots = append(m.Slots, ManifestSlot{Slot: slot.Slot, Model: res.ReviewerModel(slot.Slot), Verdict: v.Verdict})
 		}
 	}
 	return m

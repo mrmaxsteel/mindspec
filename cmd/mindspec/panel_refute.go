@@ -231,12 +231,7 @@ func runPanelRefute(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return panelVerbFailure(err)
 	}
-	model := ""
-	for _, s := range res.Panel.Roster {
-		if s.Slot == slot {
-			model = s.Model
-		}
-	}
+	model := res.ReviewerModel(slot)
 	if model == "" {
 		return panelVerbFailure(fmt.Errorf("slot must belong to the recorded roster"))
 	}
@@ -269,7 +264,7 @@ func runPanelRefute(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if latest != f {
+		if latest != f || current.ReviewerModel(slot) != model {
 			return fmt.Errorf("finding changed; retry against the current verdict")
 		}
 		res = current

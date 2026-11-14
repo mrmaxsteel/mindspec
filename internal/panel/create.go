@@ -63,6 +63,8 @@ type CreateInput struct {
 	Roster               []RosterSlot
 	// ReviewersOverride replaces the previous roster when --reviewers was supplied.
 	ReviewersOverride bool
+	// ReviewerOverrides applies slot=model or slot=family:model after roster selection.
+	ReviewerOverrides []string
 	// HasRunner validates a family carried from a round without family fields.
 	HasRunner func(string) bool
 	// ReportDropped receives each unbacked entry after the snapshot is written.
@@ -311,13 +313,19 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		}
 	}
 	roster := in.Roster
+	countSource := "default"
+	if in.ReviewersOverride {
+		countSource = "explicit"
+	}
 	carrying := false
 	if !in.ReviewersOverride {
 		if latest != nil {
 			roster = latest.Roster
+			countSource = latest.ReviewerCountSource
 			carrying = true
 		} else if legacy && len(old.Roster) > 0 {
 			roster = old.Roster
+			countSource = old.ReviewerCountSource
 			carrying = true
 		}
 	}
@@ -340,9 +348,15 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 			return nil, submitRefusal("invalid slot model", "set a non-empty model without whitespace, control bytes or a leading dash")
 		}
 	}
+	if len(in.ReviewerOverrides) > 0 {
+		if err := applyReviewerOverrides(roster, in.ReviewerOverrides, in.HasRunner); err != nil {
+			return nil, err
+		}
+		countSource = "explicit"
+	}
 	gate := in.Gate
 	p := Panel{VerdictSchema: 2, BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
-		ExpectedReviewers: len(roster), Roster: roster, ReviewedHeadSHA: in.ReviewedHeadSHA,
+		ExpectedReviewers: len(roster), ReviewerCountSource: countSource, Roster: roster, ReviewedHeadSHA: in.ReviewedHeadSHA,
 		SubjectDigest: in.SubjectDigest, Gate: gate, Telemetry: "required",
 		Refutations: carried.Refutations, Deferrals: carried.Deferrals, PlanDeferrals: carriedPlan, Rebinds: carried.Rebinds,
 		AbandonHistory: old.AbandonHistory}
@@ -361,7 +375,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	event := RoundRecord{VerdictSchema: 2, Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
 		ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target,
 		Gate: p.Gate, BeadID: p.BeadID, Roster: p.Roster, ExpectedReviewers: p.ExpectedReviewers,
-		Telemetry: p.Telemetry, Carried: baseline, CreatedAt: now}
+		ReviewerCountSource: p.ReviewerCountSource, Telemetry: p.Telemetry, Carried: baseline, CreatedAt: now}
 	eventData, err := json.Marshal(event)
 	if err != nil {
 		return nil, err
@@ -581,4 +595,41 @@ func spliceBriefHeader(existing, header string) (string, error) {
 	before := existing[:openIdx]
 	after := existing[closeEnd:]
 	return before + header + after, nil
+}
+
+// applyReviewerOverrides changes only existing slots, preserving their lenses.
+func applyReviewerOverrides(roster []RosterSlot, overrides []string, hasRunner func(string) bool) error {
+	seen := map[string]bool{}
+	for _, override := range overrides {
+		slot, value, ok := strings.Cut(override, "=")
+		if !ok {
+			return submitRefusal("invalid reviewer override", "use --reviewer R<n>=<model> or --reviewer R<n>=<family>:<model>")
+		}
+		if seen[slot] {
+			return submitRefusal("duplicate reviewer override", "supply each reviewer slot once")
+		}
+		seen[slot] = true
+		index := -1
+		for i := range roster {
+			if roster[i].Slot == slot {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return submitRefusal("reviewer slot is not on the roster", "select a slot from the panel roster")
+		}
+		family, model := roster[index].Family, value
+		if f, m, qualified := strings.Cut(value, ":"); qualified {
+			family, model = f, m
+		}
+		if hasRunner == nil || !hasRunner(family) {
+			return submitRefusal("reviewer family has no runner", "select a family configured in panel.runners")
+		}
+		if !modelSafe(model) {
+			return submitRefusal("invalid reviewer model", "use a non-empty model without whitespace, control bytes or a leading dash")
+		}
+		roster[index].Family, roster[index].Model = family, model
+	}
+	return nil
 }

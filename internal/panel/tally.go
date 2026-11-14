@@ -43,6 +43,8 @@ func ConsolidatedName(round int) string {
 
 // Verdict is one reviewer's parsed verdict or read failure from the latest round.
 type Verdict struct {
+	// Model is the effective model recorded by the accepted submission.
+	Model string
 	// File is the basename, e.g. "codex-correctness-round-2.json".
 	File string
 	// Slot is the reviewer slot derived from the filename
@@ -419,7 +421,7 @@ func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, erro
 				res.Malformed = append(res.Malformed, vf.name)
 				continue
 			}
-			v := Verdict{File: vf.name, Slot: vf.slot, Round: vf.round, Verdict: "INVALID", Invalid: true, ReadError: err.Error()}
+			v := Verdict{Model: submissions[vf.slot].Model, File: vf.name, Slot: vf.slot, Round: vf.round, Verdict: "INVALID", Invalid: true, ReadError: err.Error()}
 			if offRoster {
 				res.Unexpected = append(res.Unexpected, v)
 			} else {
@@ -455,6 +457,7 @@ func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, erro
 			continue
 		}
 		v := Verdict{
+			Model:      submissions[vf.slot].Model,
 			FileSHA256: findingHash(data),
 			File:       vf.name,
 			Slot:       vf.slot,
@@ -542,4 +545,24 @@ func ReadSubmittedFindingVerdict(dir, slot string, round int) (FindingVerdict, e
 		}
 	}
 	return FindingVerdict{}, fmt.Errorf("slot has no counted submission in this round")
+}
+
+// ReviewerModel returns a roster member's submitted model when available,
+// otherwise the registered model. Off-roster verdicts never supply identity.
+func (r *Result) ReviewerModel(slot string) string {
+	if r.Panel == nil {
+		return ""
+	}
+	for _, s := range r.Panel.Roster {
+		if s.Slot != slot {
+			continue
+		}
+		for _, v := range r.Verdicts {
+			if v.Slot == slot && v.Model != "" {
+				return v.Model
+			}
+		}
+		return s.Model
+	}
+	return ""
 }
