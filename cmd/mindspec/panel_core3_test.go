@@ -168,6 +168,9 @@ func TestTally_AppendsManifestOnChange(t *testing.T) {
 	reg.Panel.Refutations = []panel.Refutation{ref}
 	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
 	core3Cover(t, reg)
+	if err := panel.CheckCore3(reg); err == nil || !strings.Contains(err.Error(), "coverage manifest differs from the roster and verdict files") || !strings.Contains(err.Error(), "run mindspec panel tally coverage") {
+		t.Fatalf("changed manifest must name tally recovery: %v", err)
+	}
 	if err := core3Tally(t, reg, false); err != nil {
 		t.Fatal(err)
 	}

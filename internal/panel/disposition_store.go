@@ -526,7 +526,7 @@ func CheckCore3(reg Registration) error {
 		return fmt.Errorf("coverage verdict files are incomplete or from another round")
 	}
 	if last.Spec != derived.Spec || last.Panel != derived.Panel || last.Gate != derived.Gate || !reflect.DeepEqual(last.Slots, derived.Slots) {
-		return fmt.Errorf("coverage manifest differs from the roster and verdict files (slots %s)", coverageSlotNames(derived))
+		return fmt.Errorf("coverage manifest differs from the roster and verdict files (slots %s)%s", coverageSlotNames(derived), tallyFirstHint(reg.Slug()))
 	}
 	return checkCompletenessAt(reg.Dir, reg.Slug(), res)
 }

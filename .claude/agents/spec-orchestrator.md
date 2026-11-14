@@ -666,8 +666,7 @@ clean-tree step — cited by symbol, not by line), exactly as step
 
 ### 5. Session freshness gate
 
-Symptom: `mindspec next` errors with "a bead was already claimed in
-this session. You MUST run /clear".
+Symptom: `mindspec next` errors with "session freshness gate: a bead was already claimed in this session".
 
 Cause: automatic selection expects a fresh agent context.
 

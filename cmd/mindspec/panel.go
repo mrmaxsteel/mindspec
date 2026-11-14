@@ -462,7 +462,7 @@ func init() {
 	panelCreateCmd.Flags().String("bead", "", "Optional bead ID; requires --gate bead and must match --target bead/<id>")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
 	panelCreateCmd.Flags().String("gate", "", "Panel gate (spec_approve|plan_approve|bead|final_review|adhoc); omit for adhoc reviewer defaults")
-	panelCreateCmd.Flags().StringArray("reviewer", nil, "Override an existing slot: R<n>=<model> or R<n>=<family>:<model>; repeat for multiple slots")
+	panelCreateCmd.Flags().StringArray("reviewer", nil, "Override an existing slot: R<n>=<model> or R<n>=<family>:<model>; a model id containing ':' must use R<n>=<family>:<model>; repeat for multiple slots")
 	panelCreateCmd.Flags().Int("reviewers", 0, "Set roster size (at least 2); on a round bump, omission keeps the previous roster")
 
 	panelCmd.AddCommand(panelCreateCmd)

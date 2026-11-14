@@ -64,7 +64,7 @@ This is not an incidental choice; it's what makes the loop possible.
 
 Each bead is a **self-contained work packet**: requirements, per-bead acceptance criteria, impacted domains, cited ADRs, dependency edges, and completion evidence. A fresh agent picking up a bead needs no session history and no tribal knowledge — `mindspec context bead <id>` assembles a deterministic, token-budgeted context pack (spec, plan section, cited ADR decisions, domain docs, file paths — with a SHA-256 provenance record of every input) and the agent gets exactly what the plan intended it to see.
 
-Fresh context per work item isn't a suggestion, it's enforced: the session-freshness gate hard-errors if an agent tries to claim a bead from a stale, compacted, or already-claimed session. Context quality degrades as sessions age; MindSpec makes the fresh start mandatory rather than hopeful.
+The session-freshness gate refuses automatic bead selection from a stale, compacted, or already-claimed session. A claim by explicit bead ID warns and continues. Clear the context before automatic selection.
 
 ## Review panels
 

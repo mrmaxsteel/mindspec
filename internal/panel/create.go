@@ -352,7 +352,6 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		if err := applyReviewerOverrides(roster, in.ReviewerOverrides, in.HasRunner); err != nil {
 			return nil, err
 		}
-		countSource = "explicit"
 	}
 	gate := in.Gate
 	p := Panel{VerdictSchema: 2, BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
@@ -624,7 +623,7 @@ func applyReviewerOverrides(roster []RosterSlot, overrides []string, hasRunner f
 			family, model = f, m
 		}
 		if hasRunner == nil || !hasRunner(family) {
-			return submitRefusal("reviewer family has no runner", "select a family configured in panel.runners")
+			return submitRefusal("reviewer family has no runner", "select a family configured in panel.runners; a model id containing ':' must use R<n>=<family>:<model>")
 		}
 		if !modelSafe(model) {
 			return submitRefusal("invalid reviewer model", "use a non-empty model without whitespace, control bytes or a leading dash")

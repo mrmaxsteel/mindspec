@@ -49,6 +49,11 @@ func TestPanelCreateReviewerOverrides(t *testing.T) {
 			if res.Panel.Roster[0].Model != "actual-model" || res.Panel.Roster[1].Model != "second-model" {
 				t.Fatalf("override roster: %+v", res.Panel.Roster)
 			}
+			for i, slot := range res.Panel.Roster {
+				if slot.Lens != defaults[i].Lens {
+					t.Fatalf("override changed slot %s lens: got %q, want %q", slot.Slot, slot.Lens, defaults[i].Lens)
+				}
+			}
 			if field, err := panel.CheckHandEdits(dir, *res.Panel); err != nil || field != "" {
 				t.Fatalf("hand edit: %s %v", field, err)
 			}
@@ -115,6 +120,11 @@ func TestPanelCreateReviewerOverrides(t *testing.T) {
 			if !reflect.DeepEqual(res.Panel.Roster, roster) || res.Panel.ReviewerCountSource != "explicit" {
 				t.Fatalf("round lost explicit roster: %+v", res.Panel)
 			}
+			for i, slot := range res.Panel.Roster {
+				if slot.Lens != defaults[i].Lens {
+					t.Fatalf("round bump changed slot %s lens: got %q, want %q", slot.Slot, slot.Lens, defaults[i].Lens)
+				}
+			}
 		})
 	}
 }
@@ -138,7 +148,7 @@ func TestPanelCreateReviewerOverrideRefusals(t *testing.T) {
 	}
 }
 
-func TestPanelCreateSlotOverrideAloneIsExplicit(t *testing.T) {
+func TestPanelCreateSlotOverrideKeepsDefaultCountSource(t *testing.T) {
 	root := setupCreateIntegrity(t)
 	if out, err := runPanelVerbCmd("create", "actual", "--gate", "adhoc", "--target", "HEAD", "--reviewer", "R1=actual-model"); err != nil {
 		t.Fatalf("create: %v %s", err, out)
@@ -151,7 +161,30 @@ func TestPanelCreateSlotOverrideAloneIsExplicit(t *testing.T) {
 	if err := json.Unmarshal(data, &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.ReviewerCountSource != "explicit" {
+	if p.ReviewerCountSource != "default" {
 		t.Fatalf("override source: %q", p.ReviewerCountSource)
+	}
+	resetPanelCreateFlags(t)
+	if out, err := runPanelVerbCmd("create", "actual", "--gate", "adhoc", "--target", "HEAD", "--round", "2"); err != nil {
+		t.Fatalf("round bump: %v %s", err, out)
+	}
+	res, err := panel.Tally(filepath.Join(root, "review", "actual"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Panel.ReviewerCountSource != "default" || !reflect.DeepEqual(res.Panel.Roster, p.Roster) {
+		t.Fatalf("round lost default count source or override roster: %+v", res.Panel)
+	}
+}
+
+func TestPanelCreateDuplicateReviewerOverrideRefused(t *testing.T) {
+	root := setupCreateIntegrity(t)
+	before := panelTreeBytes(t, root)
+	out, err := runPanelVerbCmd("create", "bad", "--gate", "adhoc", "--target", "HEAD", "--reviewer", "R1=a", "--reviewer", "R1=b")
+	if err == nil || !strings.Contains(err.Error(), "duplicate reviewer override") {
+		t.Fatalf("duplicate override must be refused: %v %s", err, out)
+	}
+	if after := panelTreeBytes(t, root); !reflect.DeepEqual(before, after) {
+		t.Fatal("duplicate override wrote files")
 	}
 }

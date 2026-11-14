@@ -163,3 +163,26 @@ func TestResolveSubjectHeadMissingNamedTargetBlocksUncertainBranch(t *testing.T)
 		t.Fatalf("uncertain exact-ref check must block: %s %v", sha, err)
 	}
 }
+
+func TestResolveSubjectHeadNamedTargetReadErrorDoesNotLookUpSpecBranch(t *testing.T) {
+	broken := errors.New("cannot read object database")
+	sha, err := ResolveSubjectHead(Panel{Gate: "plan_approve", Spec: "900-demo", Target: "review-tag"}, "repo",
+		func(string) (string, error) {
+			t.Fatal("must not compose spec branch after a target read error")
+			return "", nil
+		},
+		func(root, ref string) (string, error) {
+			if root != "repo" || ref != "review-tag" {
+				t.Fatalf("unexpected target lookup: %s %s", root, ref)
+			}
+			return "", broken
+		},
+		func(string, string) (bool, error) {
+			t.Fatal("must not inspect spec branch after a target read error")
+			return false, nil
+		},
+		func(error) bool { return false })
+	if sha != "" || !errors.Is(err, broken) {
+		t.Fatalf("target read error must be returned: sha=%q err=%v", sha, err)
+	}
+}
