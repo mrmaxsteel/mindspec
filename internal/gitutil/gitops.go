@@ -1058,14 +1058,13 @@ func CommitNoEdit(workdir string) error {
 // markers still in it has no unmerged index entry, so ConflictedFiles
 // misses it.
 //
-// Git does the marker detection. The files scanned are the ones git
-// reported as conflicted when the merge stopped (RecordMergeConflicts),
+// The files scanned are the ones git reported as conflicted when the
+// merge stopped (RecordMergeConflicts),
 // so a file changed by one side only (for example a Markdown file with a
 // '=======' setext underline) is never scanned. If that record is
 // missing, unreadable, or belongs to another merge, every path staged
-// against HEAD is scanned. For each file,
-// `git diff --cached --check HEAD` reports leftover marker lines; it
-// honors the conflict-marker-size attribute and CRLF endings.
+// against HEAD is scanned. Added staged lines are checked directly,
+// honoring the conflict-marker-size attribute and CRLF endings.
 func StagedConflictMarkerFiles(workdir string) []string {
 	candidates, ok := MergeConflictRecord(workdir)
 	if !ok {
@@ -1077,7 +1076,12 @@ func StagedConflictMarkerFiles(workdir string) []string {
 	}
 	var files []string
 	for _, path := range candidates {
-		lines := leftoverMarkerLines(workdir, path)
+		lines, err := leftoverMarkerLines(workdir, path)
+		if err != nil {
+			// Cannot check the staged changes: fail closed.
+			files = append(files, path)
+			continue
+		}
 		if len(lines) == 0 {
 			continue
 		}
@@ -1221,30 +1225,70 @@ func MergeConflictRecord(workdir string) (paths []string, ok bool) {
 	return paths, true
 }
 
-// leftoverMarkerLines runs `git diff --cached --check HEAD` on one path
-// and returns the staged line numbers git reports as leftover conflict
-// markers. Whitespace problems are ignored. One path per call, so the
-// path never has to be parsed back out of the output.
-func leftoverMarkerLines(workdir, path string) []int {
-	// Exit status 2 only means problems were found; the output is valid.
-	out, _ := markerGit(workdir, "diff", "--cached", "--check", "--no-ext-diff", "HEAD", "--", path)
-	const marker = ": leftover conflict marker"
-	var lines []int
-	for _, line := range strings.Split(string(out), "\n") {
-		i := strings.LastIndex(line, marker)
-		if i < 0 {
-			continue
-		}
-		loc := line[:i] // "<path>:<line>"
-		j := strings.LastIndex(loc, ":")
-		if j < 0 {
-			continue
-		}
-		if n, err := strconv.Atoi(loc[j+1:]); err == nil {
-			lines = append(lines, n)
-		}
+// leftoverMarkerLines returns staged line numbers containing newly added
+// conflict markers. Git 2.56's diff --check requires a space after '<' and '>'
+// markers, missing bare LF and CRLF markers. Inspect
+// added patch lines instead, keeping unchanged parent lines out of scope.
+func leftoverMarkerLines(workdir, path string) ([]int, error) {
+	out, err := markerGit(workdir, "diff", "--cached", "--patch", "--no-color", "--no-ext-diff", "--no-textconv",
+		"--unified=0", "--inter-hunk-context=0", "--output-indicator-new=+", "--output-indicator-old=-",
+		"--output-indicator-context= ", "HEAD", "--", path)
+	if err != nil {
+		return nil, err
 	}
-	return lines
+	attr, err := markerGit(workdir, "check-attr", "-z", "conflict-marker-size", "--", path)
+	if err != nil {
+		return nil, err
+	}
+	fields := strings.Split(string(attr), "\x00")
+	if len(fields) != 4 || fields[0] != path || fields[1] != "conflict-marker-size" || fields[3] != "" {
+		return nil, fmt.Errorf("invalid conflict-marker-size attribute response")
+	}
+	markerSize := 7
+	if n, err := strconv.ParseInt(strings.TrimLeft(fields[2], " \t\r\n\v\f"), 10, 32); err == nil && n > 0 {
+		markerSize = int(n)
+	}
+	patch := strings.SplitAfter(string(out), "\n")
+	var lines []int
+	newLine, remaining := 0, 0
+	for i, line := range patch {
+		if strings.HasPrefix(line, "@@ ") {
+			hunk := strings.Fields(line)
+			if len(hunk) < 4 || hunk[3] != "@@" || !strings.HasPrefix(hunk[2], "+") {
+				return nil, fmt.Errorf("invalid staged diff hunk")
+			}
+			start, count, hasCount := strings.Cut(hunk[2][1:], ",")
+			newLine, err = strconv.Atoi(start)
+			if err != nil {
+				return nil, err
+			}
+			remaining = 1
+			if hasCount {
+				remaining, err = strconv.Atoi(count)
+				if err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+		if remaining == 0 || len(line) == 0 || (line[0] != '+' && line[0] != ' ') {
+			continue
+		}
+		if line[0] == '+' {
+			content := line[1:]
+			if i+1 < len(patch) && strings.HasPrefix(patch[i+1], "\\ ") {
+				content = strings.TrimSuffix(content, "\n")
+			}
+			if len(content) > markerSize && strings.ContainsRune("<>=|", rune(content[0])) &&
+				strings.ContainsRune(" \t\r\n\v\f", rune(content[markerSize])) &&
+				strings.Trim(content[:markerSize], content[:1]) == "" {
+				lines = append(lines, newLine)
+			}
+		}
+		newLine++
+		remaining--
+	}
+	return lines, nil
 }
 
 // markerGit runs one git command for the conflict-marker check, with

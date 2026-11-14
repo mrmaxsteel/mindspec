@@ -113,6 +113,81 @@ func TestStagedConflictMarkerFiles_CRLFBlock(t *testing.T) {
 	assertMarkerFiles(t, dir, []string{"f"})
 }
 
+func TestStagedConflictMarkerFiles_MarkerLineSemantics(t *testing.T) {
+	dir := markerMerge(t, nil, map[string]string{"f": "base\n"},
+		map[string]string{"f": "ours\n"}, map[string]string{"f": "theirs\n"})
+	for _, tc := range []struct {
+		name, content string
+		want          bool
+	}{
+		{"bare CRLF opening", "<<<<<<<\r\n", true},
+		{"bare CRLF closing", ">>>>>>>\r\n", true},
+		{"bare LF opening", "<<<<<<<\n", true},
+		{"bare LF closing", ">>>>>>>\n", true},
+		{"tab after marker", "<<<<<<<\tours\n", true},
+		{"other whitespace", ">>>>>>>\v\f\n", true},
+		{"label without final newline", ">>>>>>> side", true},
+		{"bare without final newline", ">>>>>>>", false},
+		{"CR without final newline", ">>>>>>>\r", true},
+		{"CRLF separator", "=======\r\n", false},
+		{"CRLF ancestor", "|||||||\r\n", false},
+		{"short marker", "<<<<<<\r\n", false},
+		{"long marker", "<<<<<<<<\r\n", false},
+		{"no whitespace", "<<<<<<<ours\r\n", false},
+		{"indented marker", " <<<<<<<\r\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stageMarkerFile(t, dir, "f", tc.content)
+			var want []string
+			if tc.want {
+				want = []string{"f"}
+			}
+			assertMarkerFiles(t, dir, want)
+		})
+	}
+}
+
+func TestStagedConflictMarkerFiles_CRLFMarkerSize(t *testing.T) {
+	dir := markerMerge(t, nil,
+		map[string]string{"f": "base\r\n", ".gitattributes": "f conflict-marker-size=10\n"},
+		map[string]string{"f": "ours\r\n"}, map[string]string{"f": "theirs\r\n"})
+	stageMarkerFile(t, dir, "f", "<<<<<<<\r\nours\r\n=======\r\ntheirs\r\n>>>>>>>\r\n")
+	assertMarkerFiles(t, dir, nil)
+	stageMarkerFile(t, dir, "f", "<<<<<<<<<<\r\nours\r\n==========\r\ntheirs\r\n>>>>>>>>>>\r\n")
+	assertMarkerFiles(t, dir, []string{"f"})
+}
+
+func TestStagedConflictMarkerFiles_UnchangedParentMarkers(t *testing.T) {
+	parent := "<<<<<<<\r\nours\r\n=======\r\ntheirs\r\n>>>>>>>\r\n"
+	dir := markerMerge(t, nil, map[string]string{"f": "base\r\n"},
+		map[string]string{"f": parent}, map[string]string{"f": "side\r\n"})
+	stageMarkerFile(t, dir, "f", "prefix\r\n"+parent+"suffix\r\n")
+	assertMarkerFiles(t, dir, nil)
+	stageMarkerFile(t, dir, "f", "prefix\r\n"+parent+"suffix\r\n<<<<<<<\r\n")
+	assertMarkerFiles(t, dir, []string{"f"})
+}
+
+func TestStagedConflictMarkerFiles_CheckFailureFailsClosed(t *testing.T) {
+	dir := markerMerge(t, nil, map[string]string{"f": "base\n"},
+		map[string]string{"f": "ours\n"}, map[string]string{"f": "theirs\n"})
+	stageMarkerFile(t, dir, "f", "resolved\n")
+	for _, operation := range []string{"--patch", "check-attr"} {
+		t.Run(operation, func(t *testing.T) {
+			original := execCommand
+			t.Cleanup(func() { execCommand = original })
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				for _, arg := range args {
+					if arg == operation {
+						return exec.Command("git", "--invalid-marker-check-option")
+					}
+				}
+				return original(name, args...)
+			}
+			assertMarkerFiles(t, dir, []string{"f"})
+		})
+	}
+}
+
 // The block's opening comes from HEAD and its closing from MERGE_HEAD,
 // but the assembled block exists in neither parent.
 func TestStagedConflictMarkerFiles_MixedParentBlock(t *testing.T) {
