@@ -7,35 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-14
+
+The theme is **every lifecycle gate checks its panel**. `spec approve` and `plan approve` need a passing document panel on the spec branch, `impl approve` needs a passing final review for every spec, and `complete` checks that the bead has a panel. A missing panel only warns by default; set `enforcement.panel_presence: enforce` to refuse it. `complete --check` runs the content gates without changes, and new `complete` flags record a domain with no doc impact or name the bead that owns deferred doc work. Panel disposition ledgers are now local and ignored by default. Not a pure drop-in. Read **Changed** before you upgrade: a live document or final-review panel whose target is not the spec branch blocks approval, `--allow-doc-skew` needs `--doc-owner`, and a spec or plan panel pinned to a commit, or whose named target was deleted, needs git 2.43 or later.
+
+On upgrade: use git 2.43 or later if a spec or plan panel targets a commit or a deleted named ref. Run `mindspec init` to remove the two old ledger ignore exceptions. Replace a live spec, plan or final-review panel whose target is not `spec/<id>` with a new round at `spec/<id>`, or abandon it with a reason. Add `--doc-owner <open-bead>` to each `complete --allow-doc-skew` call.
+
 ### Added
-- `complete --check` runs the doc and ADR gates without changes to the bead or workspace. It skips panel review.
-- Content gates warn when no domain owns a changed file.
-- `enforcement.panel_presence` selects `warn` (default) or `enforce` for missing panels.
-- `complete --no-doc-impact "<domain>: <reason>"` records that a domain needs no doc update.
-- `panel defer --to-plan` carries spec findings into plan resolutions. Verdict change items accept an optional `artifact_path`.
+- **Document panel gate** — `spec approve` and `plan approve` need a passing panel registered at `spec/<id>`. They record an approval obligation for each resolved finding.
+- **Final-review gate** — `impl approve` needs a passing final-review panel on the spec branch for every spec, whatever the number of beads. It checks the subject, tally and dispositions before any write.
+- **Panel presence policy** — `enforcement.panel_presence` selects `warn` (default) or `enforce` for a missing panel at `spec approve`, `plan approve`, `impl approve` and `complete`. `warn` records the absence; `enforce` refuses. A failing registered panel refuses under both policies. `doctor` reports the policy and each in-flight spec with a missing-panel record.
+- `complete --check` runs the doc-sync, ADR and work-destruction content gates on the candidate tree and reports every failure. It changes nothing and skips panel review.
+- `complete --no-doc-impact "<domain>: <reason>"` records that a domain needs no doc update. Repeat it for each domain.
+- `complete --doc-owner <open-bead>` names the bead that owns deferred doc work. The owner must be another open bead in the same epic. `impl approve` checks that open doc deferrals are resolved.
+- `panel defer --to-plan` carries a spec-approval finding into the plan. `plan approve` refuses until the plan names each deferral id in its `## Resolutions` section.
+- Verdict change items accept an optional `artifact_path`. The tally refuses an unresolved finding on that artifact until it is fixed, refuted or deferred.
+- `panel create --reviewer R<n>=<model>` (or `R<n>=<family>:<model>`, repeatable) sets the model for one roster slot. Later rounds keep the choice.
+- `panel create --brief-file <absolute-path>` copies an authored brief beneath the managed review header, on creation and on a round bump. The panel workflow takes its path as `brief_file`.
 
 ### Changed
-- **Upgrade:** run `mindspec init` after upgrading to remove the two old ledger ignore exceptions. Disposition ledgers in the `.mindspec` layouts are ignored by default and stay local.
-- **Panel disposition ledgers are local** — `mindspec init` removes the former ledger ignore exceptions. Completion and implementation approval no longer refuse an ignored, untracked or dirty ledger. Implementation approval still refuses dirty tracked or unignored untracked ledgers in unfinished bead worktrees listed in the plan. Run `mindspec complete <bead>` to recover. Gate decisions still read the working ledger. Git decides what lifecycle commits include: bead close publishes tracked or unignored spec ledgers, including edits after merge-only. Unignored legacy-layout ledgers are committed with the bead artifacts.
-- `complete` reports all content-gate refusals in one run.
-- `spec approve`, `plan approve` and `impl approve` run the panel gate before their first write.
+- **Git 2.43 or later** is needed for a spec or plan panel whose target is a commit. Such a panel now follows the spec branch tip, so `verify`, `tally` and `rebind` see later edits to the spec or plan. An unreadable spec branch or an older git blocks the gate.
+- A spec or plan panel whose named target was deleted now compares the spec branch with the reviewed commit, so `verify` and `tally` block on unreviewed changes instead of passing. An uncertain branch check or git older than 2.43 blocks.
+- Panel coverage manifests and disposition rows record the model that submitted the verdict, including a substitute reviewer.
+- The reviewer-count note prints only when the count came from the config default and that default has changed. An explicit `--reviewers` count stays quiet across rounds.
+- **Panel disposition ledgers are local** — ledgers in the `.mindspec` layouts are ignored by default, and `mindspec init` removes the former ignore exceptions. `complete` and `impl approve` no longer refuse an ignored, untracked or dirty ledger. `impl approve` still refuses dirty tracked or unignored untracked ledgers in unfinished bead worktrees listed in the plan; run `mindspec complete <bead>` to recover. Gate decisions still read the working ledger. Bead close publishes tracked or unignored spec ledgers.
+- `panel create` refuses a spec, plan or final-review target other than the spec branch. A live registration with another target blocks approval.
+- `complete --allow-doc-skew` requires `--doc-owner`.
+- `complete` reports all content-gate refusals in one run. A file that no domain owns gives a warning, not an error.
 - `complete --check` refuses `--merge-only`, `--resolve-merge`, `--override-adr`, `--supersede-adr` and `--allow-net-deletion`.
-- `complete --allow-doc-skew` requires `--doc-owner` with another open bead in the same epic.
-- `panel create` refuses a document or final-review target other than the spec branch.
-- Approval skills describe document and final-review gates. Final review applies to every spec. Document and final-review panels target the spec branch.
-- The bead cycle checks content gates before each review round. Spec findings can defer to the plan.
-- Spec and Plan guidance names the required panel and when to use reviewers from more than one family. Doctor reports the panel presence policy and in-flight specs with a missing-panel record.
+- `spec approve`, `plan approve` and `impl approve` run the panel gate before their first write.
+- `panel defer` accepts a finding from an APPROVE verdict and records it as minor.
+- `panel disposition check` accepts the panel as a positional argument and reads `--spec` from its registration.
+- `panel disposition append` fills the record fields it can derive from `--panel`, `--spec` and the registration. A refused row prints the required shape with an example.
+- `next <bead>` with an explicit bead ID warns about a stale session and continues. A claim without a bead ID still needs `--force`. The bead-cycle skill claims by explicit ID without `--force`. Unmodified existing installs of the skill refresh.
+- Prompt and launch refuse a brief that is not filled in, and name its path.
+- Approval skills, Spec and Plan guidance and the bead cycle describe the document and final-review gates, when to use reviewers from more than one family, and a `complete --check` run before each bead review round.
 
 ### Fixed
-- Staged conflict-marker detection now catches bare markers with CRLF endings on newer Git versions.
-- The bead cycle claims the selected bead by its explicit ID without bypassing session freshness; refresh updates unmodified installed skills.
-- `panel create --reviewer R<n>=<model>` sets individual roster slots, accepts an optional family prefix, and carries explicit choices into later rounds.
-- Panel coverage manifests and disposition rows record the submitted model, including reviewer substitutions.
-- Spec and plan panels whose named target was deleted check the live spec branch for unreviewed changes. Uncertain branch checks block. On Git older than 2.43, these panels now block instead of passing.
-- Reviewer-count notices appear only for panels created from a default count when that default changes; an explicit `--reviewers` count stays quiet across rounds. A per-slot model override keeps the count source.
-- **Panel dispatch diagnostics and briefs** — verify errors retain their message, slot setup failures report a reason without using a reviewer retry, and prompt and launch refuse unfinished briefs. `panel create --brief-file <absolute-path>` copies the authored body beneath the managed review header; the panel workflow requires its path as `brief_file`.
+- `impl approve` diffs from the `origin/main` merge-base when local `main` is behind, so changes from `origin/main` no longer read as spec changes.
 - `impl approve` refuses unreviewed placeholder ADR changes outside its own write set.
-- `spec approve` refuses subject text in `## Approval` with a live panel before it writes the file.
+- `spec approve` refuses, before it writes the file, when `## Approval` holds subject content or its rewrite changes subject content under a live passing panel.
+- `plan approve` refuses a bead section with no content before it writes any bead.
+- The Impacted Domains parser ignores indented sub-bullets and splits "`a`, `b`" into two domains.
+- `panel defer` refusals list every missing follow-up requirement, with the exact command to add the missing edge.
+- Errors for a missing coverage manifest say to run `mindspec panel tally` first.
+- Staged conflict-marker detection catches bare markers with CRLF line endings on newer git.
+- `panel verify` errors keep their message, and slot setup failures report a reason without using a reviewer retry.
 
 ## [0.18.0] - 2026-10-22
 
@@ -350,7 +367,8 @@ A large release headlined by the **flattened `.mindspec/` layout**, plus ten spe
 
 Release notes for v0.9.0 and prior are on the [GitHub Releases](https://github.com/mrmaxsteel/mindspec/releases) page.
 
-[Unreleased]: https://github.com/mrmaxsteel/mindspec/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/mrmaxsteel/mindspec/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/mrmaxsteel/mindspec/compare/v0.15.0...v0.16.0
