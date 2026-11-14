@@ -120,9 +120,19 @@ func resetPanelCreateFlags(t *testing.T) {
 	t.Cleanup(func() { lsTreeForPanelFn = original })
 	t.Helper()
 	restore := func() {
-		for _, name := range []string{"spec", "target", "bead", "round", "gate", "reviewers", "brief-file"} {
+		for _, name := range []string{"spec", "target", "bead", "round", "gate", "reviewers", "reviewer", "brief-file"} {
 			if f := panelCreateCmd.Flags().Lookup(name); f != nil {
-				_ = f.Value.Set(f.DefValue)
+				if name == "reviewer" {
+					value, ok := f.Value.(interface{ Replace([]string) error })
+					if !ok {
+						t.Fatal("reviewer flag is not a slice")
+					}
+					if err := value.Replace(nil); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					_ = f.Value.Set(f.DefValue)
+				}
 				f.Changed = false
 			}
 		}

@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -626,4 +627,25 @@ func listAllFiles(t *testing.T, root string) []string {
 		t.Fatalf("walk %s: %v", root, err)
 	}
 	return files
+}
+
+func TestReviewerCountConfigProvenance(t *testing.T) {
+	for _, source := range []string{"", "default", "explicit"} {
+		t.Run("source="+source, func(t *testing.T) {
+			root := t.TempDir()
+			var p panel.Panel
+			data := fmt.Sprintf(`{"expected_reviewers":3,"reviewer_count_source":%q}`, source)
+			if source == "" {
+				data = `{"expected_reviewers":3}`
+			}
+			if err := json.Unmarshal([]byte(data), &p); err != nil {
+				t.Fatal(err)
+			}
+			writeConfigShowPanel(t, root, "source", p)
+			out := reviewerCountNotesFor(config.DefaultConfig(), root)
+			if got, want := out != "", source != "explicit"; got != want {
+				t.Fatalf("count note present=%t, want %t: %s", got, want, out)
+			}
+		})
+	}
 }

@@ -704,3 +704,78 @@ func TestRenderBriefHeader_GoldenUnchanged(t *testing.T) {
 		t.Fatalf("renderBriefHeader output changed (spec 126 R5 must not touch renderBriefHeader):\ngot:  %q\nwant: %q", got, want)
 	}
 }
+
+func TestCreateReviewerCountProvenance(t *testing.T) {
+	for _, override := range []bool{false, true} {
+		t.Run(fmt.Sprint(override), func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "panel")
+			in := CreateInput{Spec: "demo", Target: "HEAD", Round: 1, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:fixture", Roster: createRoster(3), ReviewersOverride: override}
+			want := "default"
+			if override {
+				want = "explicit"
+			}
+			for round := 1; round <= 2; round++ {
+				in.Round = round
+				if err := Create(dir, in); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, FileName))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields map[string]interface{}
+				if err := json.Unmarshal(data, &fields); err != nil {
+					t.Fatal(err)
+				}
+				if fields["reviewer_count_source"] != want {
+					t.Fatalf("round %d: source=%v, want %s", round, fields["reviewer_count_source"], want)
+				}
+				reg := load(dir)
+				if field, err := CheckHandEdits(dir, reg.Panel); err != nil || field != "" {
+					t.Fatalf("hand edits: %s %v", field, err)
+				}
+				reg.Panel.ReviewerCountSource = "tampered"
+				if field, err := CheckHandEdits(dir, reg.Panel); err != nil || field != "reviewer_count_source" {
+					t.Fatalf("source hand edit not detected: %s %v", field, err)
+				}
+				in.ReviewersOverride = false
+				in.Roster = createRoster(6)
+			}
+		})
+	}
+}
+
+func TestCreateLegacyReviewerCountSourceCarry(t *testing.T) {
+	for _, source := range []string{"", "default", "explicit"} {
+		t.Run("source="+source, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "panel")
+			old := Panel{Spec: "demo", Target: "HEAD", Round: 1, ReviewedHeadSHA: "abc123", ExpectedReviewers: 3, Roster: createRoster(3), ReviewerCountSource: source}
+			if err := WriteSnapshot(dir, old); err != nil {
+				t.Fatal(err)
+			}
+			lines, err := ReadLedger(dir)
+			if err != nil || len(lines) != 0 {
+				t.Fatalf("fixture must have no ledger: %v %v", lines, err)
+			}
+			in := CreateInput{Spec: "demo", Target: "HEAD", Round: 2, ReviewedHeadSHA: "abc123", SubjectDigest: "sha256:fixture", Roster: createRoster(6), HasRunner: func(string) bool { return true }}
+			if err := Create(dir, in); err != nil {
+				t.Fatal(err)
+			}
+			reg := load(dir)
+			if reg.Err != nil || reg.Panel.ReviewerCountSource != source || len(reg.Panel.Roster) != len(old.Roster) {
+				t.Fatalf("legacy count source or roster lost: panel=%+v err=%v", reg.Panel, reg.Err)
+			}
+			lines, err = ReadLedger(dir)
+			if err != nil || len(lines) != 1 {
+				t.Fatalf("missing new round event: %v %v", lines, err)
+			}
+			var round RoundRecord
+			if err := json.Unmarshal(lines[0], &round); err != nil {
+				t.Fatal(err)
+			}
+			if round.ReviewerCountSource != source {
+				t.Fatalf("legacy count source not recorded: got %q, want %q", round.ReviewerCountSource, source)
+			}
+		})
+	}
+}

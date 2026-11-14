@@ -242,7 +242,7 @@ func TestPanelGateDecision_ConfigDefaultDoesNotAlterDecision(t *testing.T) {
 	}
 
 	for _, configDefault := range []int{3, 6, 10} {
-		note := ReviewerCountNote(p.ExpectedReviewers, configDefault)
+		note := ReviewerCountNote(p.ExpectedReviewers, configDefault, p.ReviewerCountSource)
 		if configDefault == p.ExpectedReviewers && note != "" {
 			t.Errorf("ReviewerCountNote(%d, %d) = %q, want empty on match", p.ExpectedReviewers, configDefault, note)
 		}

@@ -62,12 +62,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	if verdict == panel.VerdictApprove {
 		severity = "minor"
 	}
-	model := ""
-	for _, s := range res.Panel.Roster {
-		if s.Slot == slot {
-			model = s.Model
-		}
-	}
+	model := res.ReviewerModel(slot)
 	if model == "" {
 		return panelVerbFailure(fmt.Errorf("slot must belong to the recorded roster"))
 	}
@@ -144,7 +139,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 				sourceMatches = true
 			}
 		}
-		if latest != f || !sourceMatches {
+		if latest != f || !sourceMatches || current.ReviewerModel(slot) != model {
 			return fmt.Errorf("finding changed; retry against the current verdict")
 		}
 		res = current

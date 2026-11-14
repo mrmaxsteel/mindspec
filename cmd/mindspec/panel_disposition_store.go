@@ -51,11 +51,16 @@ already exist.
   - "-" to read the line from stdin;
   - "@<path>" to read it from a file.
 
-A disposition row needs only the finding: reviewer, model, severity,
-summary and disposition. append fills record, spec and gate (from the
+A disposition row needs reviewer, severity, summary and disposition.
+It also needs model when the slot has no submission.
+append fills record, spec and gate (from the
 panel registration; spec falls back to --spec), panel (from --panel),
 created_at (now), convergent_with ([]) and backfilled (false) when they
 are absent. A rejected row prints the full shape with an example.
+
+For a roster slot with a submission, append fills an empty model with the
+submitted model. It refuses a different model. Slots without a submission
+keep the model supplied in the row.
 
 For a disposition row, the canonical "id" is COMPUTED from the record
 content (a content hash of {spec, panel, reviewer, summary}); any "id"
@@ -240,7 +245,8 @@ example: {"reviewer":"R1","model":"opus","severity":"minor","summary":"rename X"
 // panel (from --panel), spec and gate (from the panel registration; spec
 // falls back to --spec),
 // created_at (now), convergent_with ([]) and backfilled (false) when they
-// are absent; a field the caller gave is kept. Other record kinds and
+// are absent. It fills or checks the model against the slot's submission.
+// Other record kinds and
 // undecodable input pass through unchanged for the store's own validation.
 func fillDispositionRow(record []byte, specID, panelName string, now func() time.Time) ([]byte, error) {
 	var m map[string]interface{}
@@ -268,6 +274,25 @@ func fillDispositionRow(record []byte, specID, panelName string, now func() time
 		}
 		if reg.Panel.Spec != specID {
 			return nil, fmt.Errorf("panel spec must match --spec")
+		}
+		reviewer, _ := m["reviewer"].(string)
+		res, err := panel.Tally(reg.Dir)
+		if err != nil {
+			return nil, err
+		}
+		for _, verdict := range res.Verdicts {
+			if verdict.Slot != reviewer || verdict.Model == "" {
+				continue
+			}
+			model := res.ReviewerModel(reviewer)
+			if model == "" {
+				break
+			}
+			if supplied, ok := m["model"]; ok && supplied != "" && supplied != model {
+				return nil, termsafe.NewFailure("disposition model differs from the submitted model", fmt.Sprintf("set model to %s, or omit model to use the submitted model", termsafe.Escape(model)))
+			}
+			m["model"] = model
+			break
 		}
 		if !hasSpec {
 			m["spec"] = panel.RecordSpec(reg.Panel)

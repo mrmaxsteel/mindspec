@@ -32,7 +32,7 @@ Include the standard guardrails (AGENTS.md, Bead-loop guardrails) — the orches
 
 4. **Claim.**
    ```bash
-   mindspec next --spec <spec-slug> --pick <K> --force
+   mindspec next --spec <spec-slug> <bead-id>
    ```
    This claims the bead, creates `bead/<id>` off the spec branch, and creates a worktree at `<spec-worktree>/.worktrees/worktree-<bead-id>/`. The claim-failure and worktree-setup-failure recovery recipes are emitted by the CLI itself (point-of-use errors) — follow them if `mindspec next` reports a failure.
 

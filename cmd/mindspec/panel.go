@@ -67,7 +67,7 @@ var tallyWarnOut io.Writer = os.Stderr
 
 var panelCreateCmd = &cobra.Command{
 	SilenceUsage: true,
-	Use:          "create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N] [--reviewers N] [--brief-file <absolute-path>]",
+	Use:          "create <slug> --spec <id> --target <ref> [--gate bead --bead <id>] [--round N] [--reviewers N] [--reviewer R<n>=<model>] [--brief-file <absolute-path>]",
 	Short:        "Register (or re-panel) a review panel",
 	Long: `panel create registers the target's live commit and subject digest, writes a
 reviewer roster and round event, and updates BRIEF.md's managed header.
@@ -75,6 +75,9 @@ The roster lists R1..Rn with each reviewer's model and lens. Gate defaults
 are 6 reviewers for spec_approve, plan_approve, final_review and adhoc,
 and 4 for bead. --reviewers N overrides the size; N must be at least 2.
 A later round keeps the previous roster unless --reviewers is supplied.
+Repeat --reviewer R<n>=<model> to set individual slots after roster selection;
+use R<n>=<family>:<model> to change the family too. The family must have a runner.
+Slot overrides are explicit choices and carry forward into later rounds.
 
 For spec_approve, plan_approve and final_review, --target must be spec/<id>.
 These gates use a semantic subject digest. Document gates exclude the fields
@@ -85,13 +88,14 @@ For existing bead panels with a divergent recorded target, the gate compares
 that target to the live bead/<id> branch. On a SHA mismatch, a changed subject
 tree blocks; an equal subject stays fresh. A legacy panel without a digest
 blocks on a SHA mismatch.
-A spec or plan panel pinned to a commit tracks its spec branch. A hex-looking
-name is read as a commit, not as a branch or tag name. The live subject uses
+A spec or plan panel pinned to a commit, or whose named target is gone,
+tracks its spec branch. A hex-looking name is read as a commit, not as a
+branch or tag name. The live subject uses
 exactly refs/heads/<spec branch>. Only confirmed branch absence permits
 fallback to the recorded target; an unreadable branch blocks the gate.
 Confirmation uses git show-ref --exists (git 2.43 or later); lookup errors
 and older Git versions block the gate.
-Ordinary branch or tag targets keep tracking their recorded target.
+Existing ordinary branch or tag targets keep tracking their recorded target.
 Existing panel.json must parse. Verdict files prevent recreating their
 round or an older round; bump --round or use panel rebind.
 These refusals write nothing.
@@ -262,10 +266,12 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 		if cmd.Flags().Changed("brief-file") && briefFile == "" {
 			return fmt.Errorf("brief file must be an absolute path")
 		}
+		reviewerOverrides, _ := cmd.Flags().GetStringArray("reviewer")
 		in := panel.CreateInput{
-			BriefRegions: regions,
-			BriefFile:    briefFile,
-			BeadID:       beadPtr, Spec: specID, Target: target, Round: round,
+			ReviewerOverrides: reviewerOverrides,
+			BriefRegions:      regions,
+			BriefFile:         briefFile,
+			BeadID:            beadPtr, Spec: specID, Target: target, Round: round,
 			HasRunner: func(family string) bool { _, ok := cfg.RunnerFor(family); return ok },
 			Roster:    roster, ExpectedReviewers: len(roster), ReviewersOverride: override,
 			ReviewedHeadSHA: sha, SubjectDigest: digest, Gate: gate,
@@ -456,6 +462,7 @@ func init() {
 	panelCreateCmd.Flags().String("bead", "", "Optional bead ID; requires --gate bead and must match --target bead/<id>")
 	panelCreateCmd.Flags().Int("round", 1, "Panel round (default 1; bump on re-panel)")
 	panelCreateCmd.Flags().String("gate", "", "Panel gate (spec_approve|plan_approve|bead|final_review|adhoc); omit for adhoc reviewer defaults")
+	panelCreateCmd.Flags().StringArray("reviewer", nil, "Override an existing slot: R<n>=<model> or R<n>=<family>:<model>; a model id containing ':' must use R<n>=<family>:<model>; repeat for multiple slots")
 	panelCreateCmd.Flags().Int("reviewers", 0, "Set roster size (at least 2); on a round bump, omission keeps the previous roster")
 
 	panelCmd.AddCommand(panelCreateCmd)
@@ -733,9 +740,10 @@ func nonBeadTargetRevParse(reg panel.Registration) func(scanRoot, ref string) (s
 		if reg.Err != nil {
 			return "", fmt.Errorf("panel.json records no target ref: %w", reg.Err)
 		}
+		exec := newExecutor(scanRoot)
 		return panel.ResolveSubjectHead(reg.Panel, scanRoot, func(specID string) (string, error) {
 			return workspace.SpecBranch(specID)
-		}, revParseForPanelFn, newExecutor(scanRoot).ExactRefExists)
+		}, revParseForPanelFn, exec.ExactRefExists, exec.IsRefNotFound)
 	}
 }
 

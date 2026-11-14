@@ -43,21 +43,23 @@ type CarriedEntries struct {
 
 // RoundRecord captures the registration established by create.
 type RoundRecord struct {
-	VerdictSchema     int            `json:"verdict_schema,omitempty"`
-	Record            string         `json:"record"`
-	Spec              string         `json:"spec"`
-	Panel             string         `json:"panel"`
-	Round             int            `json:"round"`
-	ReviewedHeadSHA   string         `json:"reviewed_head_sha"`
-	SubjectDigest     string         `json:"subject_digest"`
-	Target            string         `json:"target"`
-	Gate              string         `json:"gate"`
-	BeadID            *string        `json:"bead_id"`
-	Roster            []RosterSlot   `json:"roster"`
-	ExpectedReviewers int            `json:"expected_reviewers"`
-	Telemetry         string         `json:"telemetry"`
-	Carried           CarriedEntries `json:"carried"`
-	CreatedAt         string         `json:"created_at"`
+	VerdictSchema     int          `json:"verdict_schema,omitempty"`
+	Record            string       `json:"record"`
+	Spec              string       `json:"spec"`
+	Panel             string       `json:"panel"`
+	Round             int          `json:"round"`
+	ReviewedHeadSHA   string       `json:"reviewed_head_sha"`
+	SubjectDigest     string       `json:"subject_digest"`
+	Target            string       `json:"target"`
+	Gate              string       `json:"gate"`
+	BeadID            *string      `json:"bead_id"`
+	Roster            []RosterSlot `json:"roster"`
+	ExpectedReviewers int          `json:"expected_reviewers"`
+	// ReviewerCountSource is default or explicit; absent legacy values mean default.
+	ReviewerCountSource string         `json:"reviewer_count_source,omitempty"`
+	Telemetry           string         `json:"telemetry"`
+	Carried             CarriedEntries `json:"carried"`
+	CreatedAt           string         `json:"created_at"`
 }
 
 // RefutationRecord and DeferralRecord share their payload with the snapshot.
@@ -144,6 +146,9 @@ func validateLedgerMap(m map[string]interface{}, kind string) error {
 	case RecordVerdict, RecordLaunch, RecordSubstitution:
 		return validateExecutionRecord(m, kind)
 	case RecordRound:
+		if source, ok := m["reviewer_count_source"]; ok && source != "default" && source != "explicit" {
+			return fmt.Errorf("round reviewer_count_source must be default or explicit")
+		}
 		gate, ok := m["gate"].(string)
 		if !ok {
 			return fmt.Errorf("round gate must be a string")

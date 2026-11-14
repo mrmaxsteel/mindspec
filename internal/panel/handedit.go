@@ -149,6 +149,7 @@ func FirstUnbackedField(p Panel, lines [][]byte) (string, error) {
 		{"target", p.Target, latest.Target},
 		{"bead_id", p.BeadID, latest.BeadID},
 		{"expected_reviewers", p.ExpectedReviewers, latest.ExpectedReviewers},
+		{"reviewer_count_source", p.ReviewerCountSource, latest.ReviewerCountSource},
 		{"verdict_schema", p.VerdictSchema, latest.VerdictSchema},
 		{"telemetry", p.Telemetry, latest.Telemetry},
 	}

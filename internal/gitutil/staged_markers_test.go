@@ -113,6 +113,84 @@ func TestStagedConflictMarkerFiles_CRLFBlock(t *testing.T) {
 	assertMarkerFiles(t, dir, []string{"f"})
 }
 
+// Simulate Git versions whose --check reports only the separator in a
+// bare CRLF block, regardless of the Git version running this test.
+func TestStagedConflictMarkerFiles_CRLFSupplement(t *testing.T) {
+	for _, tt := range []struct {
+		name, head, staged, attributes string
+		want                           []string
+	}{
+		{name: "full block", staged: "<<<<<<<\r\nours\r\n=======\r\ntheirs\r\n>>>>>>>\r\n", want: []string{"f"}},
+		{name: "bare opener", staged: "<<<<<<<\r\n", want: []string{"f"}},
+		{name: "bare closer", staged: ">>>>>>>\r\n", want: []string{"f"}},
+		{name: "labelled opener", staged: "<<<<<<< ours\r\n", want: []string{"f"}},
+		{name: "labelled closer", staged: ">>>>>>> theirs\r\n", want: []string{"f"}},
+		{name: "separator only", staged: "=======\r\n"},
+		{name: "ancestor only", staged: "|||||||\r\n"},
+		{name: "size ten opener", staged: "<<<<<<<<<<\r\n", attributes: "f conflict-marker-size=10\n", want: []string{"f"}},
+		{name: "size ten closer", staged: ">>>>>>>>>>\r\n", attributes: "f conflict-marker-size=10\n", want: []string{"f"}},
+		{name: "size ten rejects seven", staged: "<<<<<<<\r\n>>>>>>>\r\n", attributes: "f conflict-marker-size=10\n"},
+		{name: "extra marker character", staged: "<<<<<<<<\r\n>>>>>>>>\r\n"},
+		{name: "missing label space", staged: "<<<<<<<ours\r\n>>>>>>>theirs\r\n"},
+		{name: "already in HEAD", head: "<<<<<<<\r\nold\r\n=======\r\nother\r\n>>>>>>>\r\n", staged: "<<<<<<<\r\nnew\r\n=======\r\nother\r\n>>>>>>>\r\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			initMarkerRepo(t, dir)
+			stageMarkerFile(t, dir, ".gitattributes", tt.attributes)
+			stageMarkerFile(t, dir, "f", tt.head)
+			runGit(t, dir, "commit", "-q", "-m", "base")
+			stageMarkerFile(t, dir, "f", tt.staged)
+
+			original := execCommand
+			t.Cleanup(func() { execCommand = original })
+			checkCalls := 0
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				for _, arg := range args {
+					if arg == "--check" {
+						checkCalls++
+						return exec.Command("sh", "-c", "printf 'f:3: leftover conflict marker\\n'; exit 2")
+					}
+				}
+				return original(name, args...)
+			}
+			assertMarkerFiles(t, dir, tt.want)
+			if checkCalls == 0 {
+				t.Fatal("fixture: Git's main --check detector must run")
+			}
+		})
+	}
+}
+
+func TestStagedConflictMarkerFiles_SupplementReadError(t *testing.T) {
+	for _, failArg := range []string{"check-attr", "-U0"} {
+		t.Run(failArg, func(t *testing.T) {
+			dir := t.TempDir()
+			initMarkerRepo(t, dir)
+			stageMarkerFile(t, dir, "f", "base\n")
+			runGit(t, dir, "commit", "-q", "-m", "base")
+			stageMarkerFile(t, dir, "f", "resolved\n")
+
+			original := execCommand
+			t.Cleanup(func() { execCommand = original })
+			failCalls := 0
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				for _, arg := range args {
+					if arg == failArg {
+						failCalls++
+						return exec.Command("sh", "-c", "exit 1")
+					}
+				}
+				return original(name, args...)
+			}
+			assertMarkerFiles(t, dir, []string{"f"})
+			if failCalls == 0 {
+				t.Fatal("fixture: the failing Git read must run")
+			}
+		})
+	}
+}
+
 // The block's opening comes from HEAD and its closing from MERGE_HEAD,
 // but the assembled block exists in neither parent.
 func TestStagedConflictMarkerFiles_MixedParentBlock(t *testing.T) {

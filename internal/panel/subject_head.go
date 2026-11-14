@@ -11,13 +11,14 @@ import (
 var ErrSubjectHead = errors.New("cannot resolve live spec branch")
 
 // ResolveSubjectHead resolves the live panel subject. A spec or plan panel
-// pinned to a commit tracks its spec branch, using exactly refs/heads/<branch>.
+// pinned to a commit, or whose named target is gone, tracks its spec branch,
+// using exactly refs/heads/<branch>.
 // A hex-looking target is read as a commit, not as a branch or tag name.
 // Only confirmed branch absence permits fallback to the recorded target;
 // an unreadable branch or an uncertain existence check returns ErrSubjectHead.
 // Other targets and bead panels resolve their recorded target. The caller
 // supplies branch composition and Git access to keep this package a leaf.
-func ResolveSubjectHead(p Panel, workdir string, branchForSpec func(string) (string, error), revParse func(string, string) (string, error), refExists func(string, string) (bool, error)) (string, error) {
+func ResolveSubjectHead(p Panel, workdir string, branchForSpec func(string) (string, error), revParse func(string, string) (string, error), refExists func(string, string) (bool, error), isRefNotFound func(error) bool) (string, error) {
 	target := strings.TrimSpace(p.Target)
 	if target == "" {
 		return "", fmt.Errorf("panel.json records no target ref")
@@ -26,7 +27,17 @@ func ResolveSubjectHead(p Panel, workdir string, branchForSpec func(string) (str
 	if IsLifecycleGate(p.Gate) && specBranch && targetSpec == p.Spec {
 		return revParse(workdir, "refs/heads/"+target)
 	}
-	if (p.Gate == "spec_approve" || p.Gate == "plan_approve") && looksLikeCommitSHA(target) {
+	documentGate := p.Gate == "spec_approve" || p.Gate == "plan_approve"
+	var namedSHA string
+	var namedErr error
+	commitPin := looksLikeCommitSHA(target)
+	if documentGate && !commitPin {
+		namedSHA, namedErr = revParse(workdir, target)
+		if namedErr == nil || isRefNotFound == nil || !isRefNotFound(namedErr) {
+			return namedSHA, namedErr
+		}
+	}
+	if documentGate {
 		branch, err := branchForSpec(p.Spec)
 		if err != nil {
 			return "", fmt.Errorf("%w: %w", ErrSubjectHead, err)
@@ -45,6 +56,9 @@ func ResolveSubjectHead(p Panel, workdir string, branchForSpec func(string) (str
 				return "", fmt.Errorf("%w %s: empty commit", ErrSubjectHead, ref)
 			}
 			return sha, nil
+		}
+		if !commitPin {
+			return namedSHA, namedErr
 		}
 	}
 	return revParse(workdir, target)

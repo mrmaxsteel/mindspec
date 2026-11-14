@@ -419,7 +419,7 @@ func checkCompletenessAt(dir, panelName string, current *Result) error {
 }
 
 // DeriveCoverageManifest derives coverage from roster slots and latest verdicts.
-// Roster order and roster model identity are authoritative; unexpected files
+// Roster order and submitted model identity are authoritative; unexpected files
 // never contribute slots. Legacy registrations do not require coverage.
 func DeriveCoverageManifest(res *Result) CoverageManifest {
 	p := res.Panel
@@ -437,7 +437,7 @@ func DeriveCoverageManifest(res *Result) CoverageManifest {
 	}
 	for _, slot := range p.Roster {
 		if v, ok := bySlot[slot.Slot]; ok {
-			m.Slots = append(m.Slots, ManifestSlot{Slot: slot.Slot, Model: slot.Model, Verdict: v.Verdict})
+			m.Slots = append(m.Slots, ManifestSlot{Slot: slot.Slot, Model: res.ReviewerModel(slot.Slot), Verdict: v.Verdict})
 		}
 	}
 	return m
@@ -526,7 +526,7 @@ func CheckCore3(reg Registration) error {
 		return fmt.Errorf("coverage verdict files are incomplete or from another round")
 	}
 	if last.Spec != derived.Spec || last.Panel != derived.Panel || last.Gate != derived.Gate || !reflect.DeepEqual(last.Slots, derived.Slots) {
-		return fmt.Errorf("coverage manifest differs from the roster and verdict files (slots %s)", coverageSlotNames(derived))
+		return fmt.Errorf("coverage manifest differs from the roster and verdict files (slots %s)%s", coverageSlotNames(derived), tallyFirstHint(reg.Slug()))
 	}
 	return checkCompletenessAt(reg.Dir, reg.Slug(), res)
 }

@@ -15,6 +15,22 @@ import (
 const ledgerTime = "2026-10-20T10:00:00Z"
 const ledgerLater = "2026-10-20T11:00:00Z"
 
+func TestLedgerReviewerCountSourceValidation(t *testing.T) {
+	round := ledgerFixtures(t, "p")[0]
+	for _, source := range []string{"default", "explicit", "bogus"} {
+		t.Run(source, func(t *testing.T) {
+			err := Validate(changeLedger(t, round, "reviewer_count_source", source))
+			if source == "bogus" {
+				if err == nil || !strings.Contains(err.Error(), "reviewer_count_source must be default or explicit") {
+					t.Fatalf("invalid count source accepted: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("valid count source refused: %v", err)
+			}
+		})
+	}
+}
+
 func TestLedger_SubmissionHardBlockOptional(t *testing.T) {
 	legacy := []byte(`{"record":"verdict","spec":"test","panel":"p","slot":"R1","round":1,"seq":1,"status":"final","verdict":"APPROVE","family":"harness","model":"m","runner_kind":"harness","runner_source":"default","via":"direct","attempt":0,"reason":"","file_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","created_at":"2026-10-20T10:00:00Z"}`)
 	if err := Validate(legacy); err != nil {
