@@ -1053,19 +1053,16 @@ func CommitNoEdit(workdir string) error {
 	return nil
 }
 
-// StagedConflictMarkerFiles lists the files that the merge resolution
-// left conflict markers in. A file resolved by `git add` with its
-// markers still in it has no unmerged index entry, so ConflictedFiles
-// misses it.
+// StagedConflictMarkerFiles lists files with conflict markers left in the
+// staged merge resolution, even after `git add` clears their unmerged entries.
 //
-// Git does the marker detection. The files scanned are the ones git
-// reported as conflicted when the merge stopped (RecordMergeConflicts),
-// so a file changed by one side only (for example a Markdown file with a
-// '=======' setext underline) is never scanned. If that record is
-// missing, unreadable, or belongs to another merge, every path staged
-// against HEAD is scanned. For each file,
-// `git diff --cached --check HEAD` reports leftover marker lines; it
-// honors the conflict-marker-size attribute and CRLF endings.
+// The files scanned are the ones recorded as conflicted when the merge
+// stopped. If that record is missing, unreadable, or belongs to another
+// merge, every path staged against HEAD is scanned. Only lines added
+// against HEAD count. Git's `diff --cached --check` is the main detector;
+// an added-line scan also catches opening and closing markers with CRLF
+// endings. Both honor the conflict-marker-size attribute (default 7).
+// A lone separator or ancestor marker does not flag a file.
 func StagedConflictMarkerFiles(workdir string) []string {
 	candidates, ok := MergeConflictRecord(workdir)
 	if !ok {
@@ -1078,30 +1075,75 @@ func StagedConflictMarkerFiles(workdir string) []string {
 	var files []string
 	for _, path := range candidates {
 		lines := leftoverMarkerLines(workdir, path)
-		if len(lines) == 0 {
-			continue
-		}
-		staged, err := markerGit(workdir, "show", ":"+path)
-		if err != nil {
-			// Cannot read the staged content: fail closed.
-			files = append(files, path)
-			continue
-		}
-		content := strings.Split(string(staged), "\n")
-		// A file is flagged only if a reported line starts with '<' or
-		// '>': a lone `=======` or `|||||||` line is not a conflict block.
-		// Marker lines already committed in a parent are earlier damage,
-		// not leftovers of this merge, and are out of scope.
-		for _, n := range lines {
-			if n >= 1 && n <= len(content) {
-				if l := content[n-1]; strings.HasPrefix(l, "<") || strings.HasPrefix(l, ">") {
-					files = append(files, path)
-					break
+		found := false
+		if len(lines) > 0 {
+			staged, err := markerGit(workdir, "show", ":"+path)
+			if err != nil {
+				// Cannot read the staged content: fail closed.
+				files = append(files, path)
+				continue
+			}
+			content := strings.Split(string(staged), "\n")
+			for _, n := range lines {
+				if n >= 1 && n <= len(content) {
+					if l := content[n-1]; strings.HasPrefix(l, "<") || strings.HasPrefix(l, ">") {
+						found = true
+						break
+					}
 				}
 			}
 		}
+		if !found {
+			var err error
+			found, err = addedConflictMarker(workdir, path)
+			if err != nil {
+				// Cannot inspect the added lines or attributes: fail closed.
+				found = true
+			}
+		}
+		if found {
+			files = append(files, path)
+		}
 	}
 	return files
+}
+
+// addedConflictMarker supplements Git's --check for bare CRLF markers.
+func addedConflictMarker(workdir, path string) (bool, error) {
+	attr, err := markerGit(workdir, "check-attr", "-z", "conflict-marker-size", "--", path)
+	if err != nil {
+		return false, err
+	}
+	fields := splitNUL(attr)
+	if len(fields) != 3 {
+		return false, fmt.Errorf("invalid conflict-marker-size attribute output")
+	}
+	size, err := strconv.Atoi(fields[2])
+	if err != nil || size <= 0 {
+		size = 7
+	}
+	diff, err := markerGit(workdir, "diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD", "--", path)
+	if err != nil {
+		return false, err
+	}
+	inHunk := false
+	for _, line := range strings.Split(string(diff), "\n") {
+		if strings.HasPrefix(line, "@@ ") {
+			inHunk = true
+		}
+		if !inHunk || !strings.HasPrefix(line, "+") {
+			continue
+		}
+		line = strings.TrimSuffix(line[1:], "\r")
+		if len(line) == 0 || (line[0] != '<' && line[0] != '>') {
+			continue
+		}
+		rest := strings.TrimLeft(line, line[:1])
+		if len(line)-len(rest) == size && (rest == "" || strings.HasPrefix(rest, " ")) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // mergeConflictRecordName is the file, in the worktree's git dir, that

@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Spec and Plan guidance names the required panel and when to use reviewers from more than one family. Doctor reports the panel presence policy and in-flight specs with a missing-panel record.
 
 ### Fixed
+- Staged conflict-marker detection now catches bare markers with CRLF endings on newer Git versions.
 - The bead cycle claims the selected bead by its explicit ID without bypassing session freshness; refresh updates unmodified installed skills.
 - `panel create --reviewer R<n>=<model>` sets individual roster slots, accepts an optional family prefix, and carries explicit choices into later rounds.
 - Panel coverage manifests and disposition rows record the submitted model, including reviewer substitutions.
