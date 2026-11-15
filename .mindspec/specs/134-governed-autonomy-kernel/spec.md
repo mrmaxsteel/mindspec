@@ -58,14 +58,15 @@ Every requirement holds the graph model (contracts §2) and rules B1-B13 (contra
 1. **Read-only reducer.** `next-action [<spec>] [--json]` writes nothing and prints `mindspec.next-action/v1`
    (contracts §4). Failure: two skills pick the next bead by different rules (ADR-0045 Verification; #146, #187).
 2. **Materialise and enrol.** `--apply` does one reduction under the phase lock (contracts §4, §8). It is idempotent,
-   resumes after a crash (B5) and refuses a cycle-making link (B7) before any write. Implement steps: §13.10. A work
-   item closed before enrolment gets no gate (§13.8). Failure: a stalled run needs a human restart (`mindspec-qu9z`).
+   resumes after a crash (B5) and refuses a cycle-making link (B7) before any write. Implement steps: §13.10; review
+   rounds: §13.14. A work item closed before enrolment gets no gate (§13.8). Failure: a run stalls (`mindspec-qu9z`).
 3. **Lease with fencing.** `lease` claims per contracts §5. It refuses a held or blocked step, ancestor or upstream
    (B1, B2; contracts §13.1). Failure: bd accepts `--claim` on a blocked item; `panel.one-fixer` is advisory.
 4. **Submit with receipts.** `submit` checks and closes per contracts §6 (B5, B13). Failure: subagents run
    `bd close`; `lifecycle.complete-by-orchestrator` is advisory.
-5. **Hand path closes steps.** The changed verbs (contracts §7, §13.2-§13.4) close kernel steps in an enrolled spec.
-   The gate never waits on `complete`. Failure: without it, a hand fix deadlocks between `complete` and the gate.
+5. **Hand path closes steps.** An unenrolled spec runs zero new commands. In an enrolled spec, the changed verbs
+   (contracts §7, §13.2-§13.4, §14) close kernel steps, and `submit <decision> --answer <opt>` is the one new hand
+   command. The gate never waits on `complete`. Failure: a hand fix deadlocks between `complete` and the gate.
 6. **Bead gate as child.** Enrolment creates `<w>.review` under each open work item, and `<epic>.final`. A passed
    gate is frozen (B12; successor gate: §13.6). Failure: nothing deters a raw work-item close (`mindspec-xaoq`).
 7. **Mode ratchet.** Orchestrated holds if ANY witness exists (contracts §8). No flag, env variable or key sets or
@@ -76,7 +77,7 @@ Every requirement holds the graph model (contracts §2) and rules B1-B13 (contra
    (`ForBead`, `internal/panel/panel.go`), the final gate every `final_review` registration (`lifecycleRegistrations`).
    Failure: a new slug restarts at round 1 (`mindspec-ztax`; `CheckCreateRound` is per directory).
 10. **Local decisions.** A REJECT adds a decision for that gate only, `fix` or `halt`; other items continue. There is
-    no `accept`. The `halt` option halts the whole spec (§13.7). Failure: `Load` forces `on_reject: halt`.
+    no `accept` (§13.15). The `halt` option halts the whole spec (§13.7). Failure: `Load` forces `on_reject: halt`.
 11. **Unreceipted closes.** Contracts §9. Failure: closes not persisted (`mindspec-2u0u`, `mindspec-yqdf`); raw closes.
 12. **Cascades.** B10 (supersede, except during an open fix; then the next round, §13.11) and B11 (`halt`; after
     halt: §13.7). Failure: abandoned work stays dispatchable after a restart or halt.
@@ -84,11 +85,11 @@ Every requirement holds the graph model (contracts §2) and rules B1-B13 (contra
     and adds those of contracts §7 and §9 (§13.12). `--allow-not-ready` joins `escapeHatchFlags` (`selfemit.go`)
     and `EscapeHatchTokens` (`internal/redact/redact.go`). Failure: it is in no registry (`mindspec-tgns`).
 14. **Config honesty.** Delete the `loop:` block. `Load` warns once per removed key, including every `loop.halt.*`
-    key, and ignores it. The alias rule is contracts §13.9. `config show` prints one truthful label per key.
+    key, and ignores it, except the alias in contracts §13.9. `config show` prints one truthful label per key.
     Failure: inert keys look live (`Loop` comment); `runner:` is mislabelled (`mindspec-aili`).
 15. **Kernel writes only computed ids.** Contracts §12. Failure class: the finalizer once merged another spec's bead.
-16. **Skills and docs.** `ms-bead-cycle` loops `next-action --apply`, `lease`, dispatch, `submit`. Both skills drop
-    the deleted keys, `max-rounds` and every spec-wide halt row (§13.13); the Impacted Domains docs drop deleted keys.
+16. **Skills and docs.** `ms-bead-cycle` loops `next-action --apply`, `lease`, dispatch, `submit` and each `run` entry.
+    Both skills drop the deleted keys, `max-rounds` and every spec-wide halt row (§13.13); docs drop deleted keys.
     Failure: both copies of both skills name default-3 rounds, a deleted key and spec-wide halts.
 17. **Setup.** `mindspec setup` registers `step`. `doctor` reports it missing and flags a non-plan `task` child of
     an epic, suggesting `bug` or `chore`. Failure: a builder `task` under an epic counts as lifecycle work.
@@ -96,18 +97,11 @@ Every requirement holds the graph model (contracts §2) and rules B1-B13 (contra
 **Constraints.** Consumer-facing text this spec defines (CLI output, refusals, recovery lines, `next-action` output,
 skill text, setup files) cites no ADR, spec, requirement, bead or issue number. No new read or write of the committed
 `.beads/issues.jsonl`; the `impl approve` finalize path stays, and step beads reach the export until the next spec
-removes it. `next` excludes kernel types from selection. The threat model is contracts §8.
-
-## Hand Path
-
-A solo builder whose spec nobody enrols runs zero new commands; every verb behaves as today. In an enrolled spec, each
-step closes through an existing verb with one reducer pass (contracts §14); the one new command, `submit <decision>
---answer <opt>`, closes a decision. No `decide`, `halt`, `adopt`, `takeover`, `mode` or `run start` verb exists.
+removes it. `next` excludes kernel types from selection.
 
 ## Migration
 
-- Nothing enrols by itself; specs in flight stay hand-driven until `next-action --apply`. Closes before enrolment are
-  recorded, not audited (§13.8). There is no version stamp.
+- Nothing enrols by itself; specs in flight stay hand-driven until `next-action --apply`. No version stamp exists.
 - `loop:` keys load with one warning each. `panel_presence` keeps its `warn` default; a repo that needs a floor against
   an agent that never enrols sets `enforce`. Without `step`, `doctor` reports it and `--apply` refuses with a recovery.
 
@@ -138,9 +132,9 @@ All ACs run in a scratch repo and bd database on a plan-approved spec `x`: items
 
 - [ ] AC1 (R1): `next-action x --json` twice on a hand spec: the outputs are byte-identical with `"mode":"hand"` and
   an `implement` action for item 1 with `"exists":false`; the snapshot before and after is byte-identical.
-- [ ] AC2 (R2, B8): the first `--apply` creates exactly `<w>.review` for each item, `<epic>.final`, `<1>.impl.a1`
-  and `mindspec_run`; no fix, slot or item-2/3 implement step. A second `--apply` leaves the snapshot byte-identical
-  and prints the same `revision`. A run killed after its first write, then rerun, ends with the uninterrupted snapshot.
+- [ ] AC2 (R2, B8): the first `--apply` creates exactly `<w>.review` for each item, `<epic>.final`, `<1>.impl.a1` and
+  `mindspec_run`; no fix, slot or item-2/3 implement step. A second `--apply` leaves the snapshot byte-identical and
+  prints the same `revision`. A run killed after its first write, then rerun, ends with the uninterrupted snapshot.
   After item 1 closes, one `--apply` creates exactly `<2>.impl.a1` and `<3>.impl.a1` and no slot (§13.10).
 - [ ] AC3 (R4, B5): `submit` on a slot, killed after the receipt write and before the bd close, then rerun: exit 0,
   the step is closed with that receipt, no `unreceipted-close` flag. At no kill point does the store hold a closed
@@ -152,18 +146,18 @@ All ACs run in a scratch repo and bd database on a plan-approved spec `x`: items
   `lease` exits non-zero. After the TTL, `lease` prints generation 2. With a builder bug B blocking item 1,
   `lease <1>.review.r1.R1` exits non-zero and names B.
 - [ ] AC6 (R4, B13): each exits non-zero and leaves the step open: a generation-1 `submit` after `lease --take`; a
-  verdict for the previous round's subject, or for another slot; a blob that differs at the named commit; a verdict
-  to a fix step; an implement commit not past the claim base. A valid `submit` closes the slot with `mindspec_close` =
+  verdict for the previous round's subject, or for another slot; a blob that differs at the named commit; a verdict to
+  a fix step; an implement commit not past the claim base. A valid `submit` closes the slot with `mindspec_close` =
   path, commit, blob id, no verdict text. Rerun: exit 0; a different artifact: non-zero, `bd show --json` unchanged.
-- [ ] AC7 (R5): with only `next` (run twice on item 1; the rerun exits 0), commits, `panel create`, `panel submit`
-  and `complete`, `impl approve` exits 0, every kernel step is closed with `mindspec_close`, and `next-action x
-  --json` prints `"status":"done"` and exits 5. With a live `lease` on an implement step, `next <w>` exits non-zero
-  naming `lease --take`, and `panel create` without its `--lease` exits non-zero with the step open.
+- [ ] AC7 (R5): with only `next` (run twice on item 1; the rerun exits 0), commits, `panel create`, `panel submit` and
+  `complete`, `impl approve` exits 0, every kernel step is closed with `mindspec_close`, and `next-action x --json`
+  prints `"status":"done"` and exits 5. With a live `lease` on an implement step, `next <w>` exits non-zero naming
+  `lease --take`, and `panel create` without its `--lease` exits non-zero with the step open.
 - [ ] AC8 (R6, B12): `bd close <work item>` exits non-zero with bd's open-child refusal. After a pass, `panel create`
   for that item exits non-zero naming the passed gate, and a later `--apply` leaves `bd show <w>.review --json`
   unchanged. A code commit plus `panel rebind` lets `complete` exit 0. A `.mindspec/config.yaml` commit instead:
-  `complete` exits non-zero and its pass creates `<w>.review.a2` with `mindspec_from` = `<w>.review`; `panel
-  create` exits 0 and continues the round count; after a pass, `complete` exits 0 (§13.6).
+  `complete` exits non-zero and its pass creates `<w>.review.a2` with `mindspec_from` = `<w>.review`; `panel create`
+  exits 0 and continues the round count; after a pass, `complete` exits 0 (§13.6).
 - [ ] AC9 (R7): enrol, close all steps, let leases expire, set `panel_presence: warn`, retype a step to `chore`;
   `complete` with no passing panel exits non-zero. Remove `mindspec_run` from the epic: `complete` still exits
   non-zero and `next-action` flags `run-marker-missing`. With only a spec `panel.json` holding `"orchestrated":
@@ -174,15 +168,19 @@ All ACs run in a scratch repo and bd database on a plan-approved spec `x`: items
   `next-action` lists exactly one decision with `continue:<n>` and `halt`; `panel recover` of round 5 exits 0. After
   `continue:1`, one more round is created and the next one is refused.
 - [ ] AC12 (R10): item 1 done; a REJECT tally on item 2, then `--apply`, lists a decision under item 2 and an action
-  for item 3, and no step of item 3 changes. The decision text says `halt` stops the whole spec.
+  for item 3, and no step of item 3 changes. The decision text says `halt` stops the whole spec. Before the answer,
+  `lease <2>.review.r<N+1>.fix` exits non-zero and names the decision. After `--answer fix`, `--apply` lists that fix
+  as an action and `lease` on it exits 0 (§13.15).
 - [ ] AC13 (R11, R13): `bd close <slot step>` with no verdict: `next-action` flags `unreceipted-close` and offers
-  `<slot>.a2`; `impl approve` exits non-zero until resolved. A raw close of a slot with a valid verdict and the
-  current generation: `submit` writes the receipt, no `.a2` exists, and the flag clears. A raw `bd close <w>` after
-  its gate passed: `impl approve` exits non-zero and `next-action` flags `<w>`.
-- [ ] AC14 (R12): a commit on `bead/<w>` in round 2 with no fix open: in one pass the round-2 slots show `return:
-  superseded`, the gate subject is that commit, and round 3 opens with slots and counts toward the limit (§13.11);
-  a commit while `r2.fix` is open supersedes no slot. Answer `halt`: every open step shows `halted`; `next-action`
-  exits 4 twice; `lease`, `complete`, `next <w>` exit non-zero naming the halt; a builder `bug` child stays open.
+  `<slot>.a2`; `impl approve` exits non-zero until resolved. A raw close of a slot with a valid verdict and the current
+  generation: `submit` writes the receipt, no `.a2` exists, and the flag clears. A raw `bd close <w>` after its gate
+  passed: `impl approve` exits non-zero and `next-action` flags `raw-close` on `<w>`. `bd close --force <w>` with
+  `<w>.review` open: `complete` and `impl approve` exit non-zero and `next-action` flags `forced-close`.
+- [ ] AC14 (R12): a commit on `bead/<w>` in round 2, no fix open: one pass marks round-2 slots `return: superseded`,
+  sets the gate subject to it and lists `panel create <w>` in `run`, which makes counted round 3 (§13.11); at limit 2
+  the pass gives the limit decision and no `run` entry. A commit during an open `r2.fix` supersedes no slot. Answer
+  `halt`: every open step shows `halted`; `next-action` exits 4 twice; `lease`, `complete`, `next <w>`, `panel create
+  <w>` exit non-zero naming the halt, snapshot unchanged; a builder `bug` child stays open.
 - [ ] AC15 (R13): once each: `next --allow-not-ready=MF-1 --evidence <path>`, `--allow-doc-skew`, `--override-adr`,
   `--allow-net-deletion`, `lease --take`, `panel defer`, a decision answer, an unreceipted close, `MINDSPEC_SKIP_PANEL=1
   complete`: `impl approve` and a rerun print a count of 1 for each (`allow-not-ready: 1`); both registries hold it.
@@ -192,8 +190,8 @@ All ACs run in a scratch repo and bd database on a plan-approved spec `x`: items
   and a warning naming 4; with `panel.max_rounds: 6` also set, limit 6; no key enrols with limit 5.
 - [ ] AC17 (R15, B3, B6): a snapshot diff around each kernel verb: every changed id is computed, every new link is
   child or blocks in plan order or to `<epic>.final`, and a builder `task` under the epic is byte-unchanged.
-- [ ] AC18 (R16): with K = `max_rounds_per_bead|panel_deadlock_rounds|max_consecutive_impl_failures|gate_authority`
-  and H = `Any bead REJECT|consecutive impl|REJECT / HARD block|do not proceed to the next bead`, `git grep -n -i -E
+- [ ] AC18 (R16): with K = `max_rounds_per_bead|panel_deadlock_rounds|max_consecutive_impl_failures|gate_authority` and
+  H = `Any bead REJECT|consecutive impl|REJECT / HARD block|do not proceed to the next bead`, `git grep -n -i -E
   "$K|$H|on_reject|loop\.halt|max-rounds|One halted bead|keep going after a halt|default .?3" -- .claude/skills
   plugins/mindspec/skills plugins/mindspec/README.md README.md project-docs/user/guides` and `git grep -n -E
   "$K|on_reject|type Loop struct" -- .mindspec/domains` each exit 1 (`historical_skills` keeps the old text). Both
@@ -205,17 +203,20 @@ All ACs run in a scratch repo and bd database on a plan-approved spec `x`: items
   AC18 skill copies, no string literal or skill line holds an ADR, spec, requirement, bead or issue number, and no
   added line reads or writes `.beads/issues.jsonl`. The existing finalize export still runs at `impl approve`.
 - [ ] AC21 (R2): item 1 closed by `mindspec complete` with presence `warn` and no panel, then the first `--apply`: no
-  `<1>.review`, `mindspec_run` records item 1 as pre-enrolment, items 2 and 3 run, and `impl approve` exits 0
-  printing `pre-enrolment: 1`.
+  `<1>.review`, `mindspec_run` records item 1 as pre-enrolment, items 2 and 3 run, and `impl approve` exits 0 with
+  `pre-enrolment: 1`.
 - [ ] AC22 (R5): a refused tally makes `r2.fix`; `panel refute` of the only blocking finding closes the gate
   `passed` and the fix `superseded` in one pass; no child stays open; `complete` exits 0.
 - [ ] AC23 (R9, R6): a refused final tally lists a `fix` under `<epic>.final`; after `round_limit` final rounds over
   two final-review slugs, `panel create` exits non-zero and a limit decision appears. Separately: final pass on commit
   A, then a `.mindspec/config.yaml` commit B: `impl approve` exits non-zero, its pass creates `<epic>.final.a2` (a
   mutation that accepts A's pass for B goes red); final `panel create` continues the count; a pass on B lets it exit 0.
+- [ ] AC24 (R1-R5, B8): only `next-action --apply`, `lease`, `submit` and each printed `run` entry reach `impl approve`
+  exit 0 and `"status":"done"`. After `submit <1>.impl.a1`, `--apply` lists `panel create` for item 1 in `run`; after
+  it runs, `--apply` lists `<1>.review.r1.R<s>` slots, `ForBead` counts 1 round, and a rerun of it exits non-zero.
 
 ## Validation Proofs
-The scratch-repo tests for AC1-AC23 each pass and fail on a named mutation; `make test` exits 0.
+The scratch-repo tests for AC1-AC24 each pass and fail on a named mutation; `make test` exits 0.
 
 ## Open Questions
 
@@ -223,19 +224,22 @@ The scratch-repo tests for AC1-AC23 each pass and fail on a named mutation; `mak
 - [ ] OQ1: Does `bd create --id` accept word segments (`.review.r2.R3`)? Recommended: the first plan bead probes it;
   fallback: a bd-assigned id plus `mindspec_key` metadata.
 - [ ] OQ2: lease refuses an "open ancestor or upstream" (§5), but every step has one (R2 F3, R4 ccr0, R5 ccr0). §13.1.
-- [ ] OQ3: §7 is silent on hand `next` leases, `panel create` on a leased step, and refute/defer after a fix exists
-  (R3 F6; codex R4-F2, R5-F1; `cmd/mindspec/panel_refute.go`). Recommended: §13.2-§13.4.
+- [ ] OQ3: §7 omits hand `next`, leased `panel create`, refute after a fix (R3 F6; `panel_refute.go`). Use §13.2-§13.4.
 - [ ] OQ4: no final-gate fix id exists; `ForBead` skips final panels (R3 F3, `internal/panel/panel.go`). Use §13.5.
 - [ ] OQ5: B12 freezes a passed gate, but `panel rebind` refuses a `.mindspec/config.yaml` change, for bead and final
   gates (R3 F2, R4 ccr0, R2 F16; `cmd/mindspec/panel_rebind.go`). Recommended: successor gates (§13.6).
-- [ ] OQ6: `halt` "ends orchestration" (§10), but the ratchet is one-way (R3 F1, F14, F15). Recommended: §13.7.
+- [ ] OQ6: `halt` "ends orchestration" (§10), but the ratchet is one-way; verb lists left halt gaps (R3 F1, F14,
+  F15, F17). Recommended: one halt rule over every verb (§13.7).
 - [ ] OQ7: pre-enrolment closes are "recorded, not audited", yet enrolment makes every gate (codex R6-F1). Use §13.8.
 - [ ] OQ8: exits 3/4/5 conflict with ADR-0035 HC-4; `indeterminate` = 1 equals a refusal (R3 F5, F11). Amend HC-4.
-- [ ] OQ9: B8 names no outcome for an implement step; parallel waves are deferred (R2 F14; pack §D). Recommended:
-  all ready items in one pass, leased on one host (§13.10); if "parallel waves" means any concurrency, one per pass.
-- [ ] OQ10: B10 is silent on the gate after a supersede (R2 F15). Recommended: the pass opens round N+1 (§13.11).
-- [ ] OQ11: §7 lists three `impl approve` refusals, §9 adds two, and both are silent on today's gates and on skill
-  halt rows (R1 F3, R3 F13, R2 F13; `internal/approve/impl.go`). Recommended: lists add to today's (§13.12, §13.13).
+- [ ] OQ9: B8 has no implement outcome; parallel waves are deferred (R2 F14; pack §D). Use §13.10; else one per pass.
+- [ ] OQ10: B10 is silent on the gate after a supersede (R2 F15). Recommended: authorise round N+1 (§13.11).
+- [ ] OQ11: §7 and §9 list `impl approve` refusals but are silent on today's gates and skill halt rows (R1 F3, R3
+  F13, R2 F13; `internal/approve/impl.go`). Use §13.12, §13.13.
+- [ ] OQ12: B8 has no outcome for round 1 after an implement `submit`; only `panel create` writes the round `ForBead`
+  counts (R2 F17, R3 F16; `internal/panel/create.go`). Recommended: a `panel create` `run` entry (§13.14).
+- [ ] OQ13: B9 gives a refused round a fix, R10 a REJECT a decision (R2 F18; contracts §3, §10). Recommended: both;
+  the open decision holds the fix until `--answer fix` (§13.15).
 
 ## Approval
 
