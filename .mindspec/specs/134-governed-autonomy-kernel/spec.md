@@ -169,18 +169,19 @@ All ACs run in a scratch repo and bd database on a plan-approved spec `x`: items
   `continue:1`, one more round is created and the next one is refused.
 - [ ] AC12 (R10): item 1 done; a REJECT tally on item 2, then `--apply`, lists a decision under item 2 and an action
   for item 3, and no step of item 3 changes. The decision text says `halt` stops the whole spec. Before the answer,
-  `lease <2>.review.r<N+1>.fix` exits non-zero and names the decision. After `--answer fix`, `--apply` lists that fix
-  as an action and `lease` on it exits 0 (§13.15).
+  `lease <2>.review.r<N+1>.fix`, and a commit on `bead/<2>` plus `panel create <2>`, exit non-zero naming the
+  decision; the fix stays open. After `--answer fix`, `--apply` lists the fix and `lease` on it exits 0 (§13.15).
 - [ ] AC13 (R11, R13): `bd close <slot step>` with no verdict: `next-action` flags `unreceipted-close` and offers
   `<slot>.a2`; `impl approve` exits non-zero until resolved. A raw close of a slot with a valid verdict and the current
   generation: `submit` writes the receipt, no `.a2` exists, and the flag clears. A raw `bd close <w>` after its gate
   passed: `impl approve` exits non-zero and `next-action` flags `raw-close` on `<w>`. `bd close --force <w>` with
   `<w>.review` open: `complete` and `impl approve` exit non-zero and `next-action` flags `forced-close`.
 - [ ] AC14 (R12): a commit on `bead/<w>` in round 2, no fix open: one pass marks round-2 slots `return: superseded`,
-  sets the gate subject to it and lists `panel create <w>` in `run`, which makes counted round 3 (§13.11); at limit 2
-  the pass gives the limit decision and no `run` entry. A commit during an open `r2.fix` supersedes no slot. Answer
-  `halt`: every open step shows `halted`; `next-action` exits 4 twice; `lease`, `complete`, `next <w>`, `panel create
-  <w>` exit non-zero naming the halt, snapshot unchanged; a builder `bug` child stays open.
+  sets the gate subject to it and lists `panel create <w>` in `run`, which makes counted round 3 (§13.11); by hand,
+  `panel create <w>` alone exits 0 with that result (§13.16). At limit 2 the pass gives the limit decision and no
+  `run` entry. A commit during an open `r2.fix` supersedes no slot. Answer `halt`: every open step shows `halted`;
+  `next-action` exits 4 twice; `lease`, `complete`, `next <w>`, `panel create <w>` exit non-zero naming the halt,
+  snapshot unchanged; a builder `bug` child stays open; unscoped `next` claims a ready item of another spec.
 - [ ] AC15 (R13): once each: `next --allow-not-ready=MF-1 --evidence <path>`, `--allow-doc-skew`, `--override-adr`,
   `--allow-net-deletion`, `lease --take`, `panel defer`, a decision answer, an unreceipted close, `MINDSPEC_SKIP_PANEL=1
   complete`: `impl approve` and a rerun print a count of 1 for each (`allow-not-ready: 1`); both registries hold it.
@@ -228,8 +229,8 @@ The scratch-repo tests for AC1-AC24 each pass and fail on a named mutation; `mak
 - [ ] OQ4: no final-gate fix id exists; `ForBead` skips final panels (R3 F3, `internal/panel/panel.go`). Use §13.5.
 - [ ] OQ5: B12 freezes a passed gate, but `panel rebind` refuses a `.mindspec/config.yaml` change, for bead and final
   gates (R3 F2, R4 ccr0, R2 F16; `cmd/mindspec/panel_rebind.go`). Recommended: successor gates (§13.6).
-- [ ] OQ6: `halt` "ends orchestration" (§10), but the ratchet is one-way; verb lists left halt gaps (R3 F1, F14,
-  F15, F17). Recommended: one halt rule over every verb (§13.7).
+- [ ] OQ6: `halt` "ends orchestration" (§10), but the ratchet is one-way (R3 F1, F14, F15, F17, F21); B11 names
+  steps only (R1 m2). Recommended: §13.7 (one halt rule; halt closes decisions; `next` skips a halted epic).
 - [ ] OQ7: pre-enrolment closes are "recorded, not audited", yet enrolment makes every gate (codex R6-F1). Use §13.8.
 - [ ] OQ8: exits 3/4/5 conflict with ADR-0035 HC-4; `indeterminate` = 1 equals a refusal (R3 F5, F11). Amend HC-4.
 - [ ] OQ9: B8 has no implement outcome; parallel waves are deferred (R2 F14; pack §D). Use §13.10; else one per pass.
@@ -237,9 +238,8 @@ The scratch-repo tests for AC1-AC24 each pass and fail on a named mutation; `mak
 - [ ] OQ11: §7 and §9 list `impl approve` refusals but are silent on today's gates and skill halt rows (R1 F3, R3
   F13, R2 F13; `internal/approve/impl.go`). Use §13.12, §13.13.
 - [ ] OQ12: B8 has no outcome for round 1 after an implement `submit`; only `panel create` writes the round `ForBead`
-  counts (R2 F17, R3 F16; `internal/panel/create.go`). Recommended: a `panel create` `run` entry (§13.14).
-- [ ] OQ13: B9 gives a refused round a fix, R10 a REJECT a decision (R2 F18; contracts §3, §10). Recommended: both;
-  the open decision holds the fix until `--answer fix` (§13.15).
+  counts (R2 F17, R3 F16, R1 F1; `internal/panel/create.go`). Recommended: a `run` entry (§13.14), pass first (§13.16).
+- [ ] OQ13: B9 gives a refused round a fix, R10 a REJECT a decision (R2 F18, R3 F20). Both; the decision holds (§13.15).
 
 ## Approval
 
