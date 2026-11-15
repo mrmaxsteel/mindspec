@@ -1,8 +1,8 @@
 # Spec 134 contracts: governed-autonomy kernel
 
 This file is normative for spec 134. Sections 1-12 hold the operator rulings of 2026-11-15. Section 13 holds the
-readings that spec 134 applies where a ruling is silent; each one cites the ruling it reads and the open question that
-confirms it. A requirement in `spec.md` that cites `contracts.md §<n>` includes all of that section.
+readings spec 134 applies where a ruling is silent; each cites the ruling it reads and the open question that confirms
+it. Section 14 tabulates the hand path. A `spec.md` citation of `contracts.md §<n>` includes all of that section.
 
 ## 1. Rulings
 
@@ -175,24 +175,65 @@ enforces B1 except under `--force`; the kernel detects a forced close and refuse
    B1 ("a hold on a parent holds its children") and B2 ("a lease on a blocked item or its descendant"). A step or an
    ancestor with an open blocks upstream, or a halted spec, refuses. An open epic, work item or gate does not.
 2. **Hand `next` (OQ3).** In an enrolled spec, hand `mindspec next <w>` creates or claims `<w>.impl.a<k>` through the
-   claim path and writes no lease token. A rerun by hand succeeds. Only a live lease written by `lease` refuses it.
+   claim path and writes no lease token. A rerun by hand succeeds. Of the lease states, only a live lease written by
+   `lease` refuses it; a halted epic also refuses it (§13.7). `lease` on a step that hand `next` claimed (status
+   `in_progress`, no token) refuses as held; the recovery line names `lease --take --reason <text>`.
 3. **Leased hand closes (OQ3).** `panel create` closes a leased implement or fix step only with `--lease <t>` of the
    current generation. An unleased step closes without it.
 4. **Refute and defer (OQ3).** `panel refute` and `panel defer` run one reducer pass. If the retally passes, the gate
    closes `passed` and the open fix of that gate closes `superseded` in the same pass.
 5. **Final gate (OQ4).** B9 and the decision grammar apply to `<epic>.final`. A refused final tally below the limit
-   creates `<epic>.final.r<N>.fix`; its commit lands on the spec branch past the round subject. Final rounds count
-   over every `final_review` registration of the spec, abandoned included. At the limit, the decision is
-   `<epic>.final.decide.limit.r<N>`.
-6. **Subject change after a pass (OQ5).** `complete` keeps today's subject-freshness check; a frozen receipt alone
-   never authorises a changed subject. `panel rebind` refreshes a passing panel and does not write the gate. A change
-   that rebind refuses needs a successor gate `<w>.review.a2` (`mindspec_from` = the frozen gate), created by the
-   next `--apply`; rounds keep counting.
+   creates `<epic>.final.r<N>.fix`; its commit lands on the spec branch past the round subject, and the final
+   `panel create` of round N closes it. Final rounds count over every `final_review` registration of the spec,
+   abandoned included. At the limit, the decision is `<epic>.final.decide.limit.r<N>`.
+6. **Subject change after a pass (OQ5).** `complete` and `impl approve` keep today's subject-freshness checks; a
+   frozen receipt never authorises a changed subject. `panel rebind` refreshes a passing panel and does not write the
+   gate. When the subject changes in a way rebind refuses (for example `.mindspec/config.yaml`), the reducer pass
+   of any changed verb (§7) or of `--apply` creates a successor gate with `mindspec_from` = the frozen gate:
+   `<w>.review.a2` for a bead gate, `<epic>.final.a2` for the final gate (`.a<k+1>` after `.a<k>`). The verb runs
+   its pass before its own check, so a hand `panel create` targets the successor on its first call. `panel create`,
+   `complete` and `impl approve` select the highest attempt. Rounds keep counting over the same registrations
+   (§13.5, §10). A pass of the frozen attempt is never authority for the new subject.
 7. **After halt (OQ6).** The spec stays orchestrated. The reducer creates no step and offers no action;
-   `next-action` prints `halted` on every run, and `lease` and `complete` refuse. No existing verb resumes a halted
-   epic: halt is terminal for that epic, and the remaining work moves to a new spec (forward-only lifecycle).
+   `next-action` prints `halted` on every run. `lease`, `complete` and `next` (by id, and by pick for a work item of
+   the halted epic) refuse and name the halt. No existing verb resumes a halted epic: halt is terminal for that epic,
+   and the remaining work moves to a new spec (forward-only lifecycle). Each decision that offers `halt` says in its
+   text that `halt` stops every work item of the spec, not only the item of that gate.
 8. **Pre-enrolment closes (OQ7).** The first `--apply` creates no gate for a work item that is already closed. It
    records those ids in `mindspec_run.pre_enrolment`; reruns keep that set. The audit table counts them as
    `pre-enrolment`, not as unreceipted closes.
 9. **Alias value.** `loop.halt.max_rounds_per_bead` is read only when it is set and `panel.max_rounds` is not; the
    warning names the value it applies. An absent key never gives 3; the default is 5.
+10. **Implement authorisation (OQ9).** B8 names no outcome for an implement step. Reading: an open work item whose
+    plan upstreams are all closed, with no open implement step and no gate round, authorises `<w>.impl.a1`.
+    Enrolment and each later pass create it for every such item in the same pass, in plan order. Leases fence each
+    step on the one controller host (§8), so this is not the deferred parallel waves (multi-host dispatch and lease
+    compare-and-set). A later attempt `<w>.impl.a<k+1>` comes only from an unreceipted close (§9).
+11. **After a supersede (OQ10).** The pass that applies B10 also sets the gate subject to the new commit and opens
+    round N+1 on it, the same way a closed fix opens the next round (B8: "the next slots"). Round N+1 counts toward
+    `round_limit`; at the limit the pass creates the limit decision instead. Meanwhile `next-action` lists the new
+    slots or the decision, never a superseded slot. A hand builder opens the same round with `panel create`.
+12. **Refusal sets (OQ11).** No refusal list in §4-§9 or in `spec.md` is exhaustive. Each changed verb keeps today's
+    refusals and adds every refusal that §5-§9 and these readings give it. `impl approve` adds an open step, an
+    open decision, an unreceipted close (§7), a raw close of a work item, and a `--force` close over an open child
+    (§9). `complete` adds the §7 gate check, the §9 forced close and the §13.7 halt.
+13. **Skill halt rows (OQ11).** R10 makes a REJECT local to its gate. These rows in both copies of each skill
+    halt the whole spec and go: `ms-bead-cycle` "any REJECT / HARD block → halt", its NOT READY line "do not proceed
+    to the next bead", `max-rounds`; `ms-spec-autopilot` "One halted bead halts the spec", "Any bead REJECT verdict",
+    "Two consecutive impl-subagent failures", `max-rounds-per-bead`, the NOT READY row, "Don't keep going after a
+    halt". A REJECT gets the gate's decision; impl failures and NOT READY stay local to the work item. Rows that
+    stay: a failed merge (the merge is outside the kernel), a dependency mismatch, and the final-review and tally
+    halts (a decision answers them).
+
+## 14. Hand path in an enrolled spec
+
+| Step | Closed by (each verb runs one reducer pass) |
+|:-----|:----------|
+| implement `<w>.impl.a<k>` | `mindspec next <w>` (no lease token), commit, then `panel create` round 1 |
+| slot `<w>.review.r<N>.R<s>` | `panel submit` for that slot (`--lease` only on a leased slot) |
+| bead gate `<w>.review` | the pass in `panel submit`, `panel refute` or `panel defer` on a passing tally |
+| fix `<w>.review.r<N>.fix` | commit on `bead/<w>`, then `panel create` round N; `superseded` if the round passes |
+| merge | `mindspec complete <w>` (a `run` entry, never a bead); refusals per §7 and §13.12 |
+| final gate `<epic>.final` | the pass in `panel submit` of the final-review panel; a refusal makes its fix |
+| final fix `<epic>.final.r<N>.fix` | commit on the spec branch, then the final `panel create` round N |
+| decision `<gate>.decide.<cause>.r<N>` | `submit <decision> --answer <opt>` (the one new command) |
