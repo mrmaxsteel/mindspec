@@ -92,14 +92,14 @@ spec; an open decision. `--take` revokes, issues generation N+1 and records the 
 ## 6. `submit <step> --lease <t> (--artifact <path> | --commit <oid>)` | `submit <decision> --answer <opt>`
 
 Checks: the current generation; subject = the gate's active round; the artifact resolves at a commit and the blob
-matches; the artifact fits the kind (a verdict for a slot; a commit on `bead/<id>` past the round subject for a fix;
-a commit past the claim base for an implement step). It writes the receipt, closes, and runs one reducer pass.
-Refuses: an old or absent token, a stale subject, a foreign slot, a missing artifact, a different result for a closed
-step. The same receipt again exits 0 with no change. A decision needs no token and takes a listed option.
+matches; the artifact fits the kind (a verdict for a slot; a commit on `bead/<id>` past the round subject for a fix; a
+commit past the claim base for an implement step). It writes the receipt, closes, and runs one reducer pass (order:
+§13.16). Refuses: an old or absent token, a stale subject, a foreign slot, a missing artifact, a different result for
+a closed step. The same receipt again exits 0 with no change. A decision needs no token and takes a listed option.
 
 ## 7. Changed verbs
 
-Orchestrated behaviour first, hand-driven behaviour in brackets. Each verb runs one reducer pass.
+Orchestrated behaviour first, hand-driven behaviour in brackets. Each verb runs one reducer pass (order: §13.16).
 
 - `panel create`: takes the subject from the gate; refuses another `--target` or a round past the allowance; closes
   the open implement or fix step; writes `"orchestrated": true` in `panel.json`. [Warns.]
@@ -202,12 +202,13 @@ enforces B1 except under `--force`; the kernel detects a forced close and refuse
    epic `halted` (B11; the decisions are a reading beyond B11, OQ6). Then one rule covers every verb: in a halted
    spec, a verb that would create, claim or close a kernel step, or claim, close or merge a work item or the epic,
    refuses, names the halt and writes nothing. `next` selection leaves out the work items of a halted epic, as it
-   leaves out kernel types. `next <w>` and `next --spec <halted spec>` refuse and name the halt. These verbs only read
-   and still work: `next-action` with or without `--apply` (it prints `halted`, exits 4 and writes nothing), `panel
-   tally`, `panel verify`, `config show` and `doctor`. Every other verb behaves as today. No verb resumes a halted
-   epic: halt is terminal for that epic, and the remaining work moves to a new spec (forward-only lifecycle). Each
-   decision that offers `halt` says in its text that `halt` stops every work item of the spec, not only the item of
-   that gate.
+   leaves out kernel types. When a verb resolves its target spec without `--spec` (`next`, `next-action`, `complete`,
+   `impl approve`), a halted spec does not count as active (OQ6). `next <w>` and `next --spec <halted spec>` refuse
+   and name the halt. These verbs only read and still work: `next-action` with or without `--apply` (it prints
+   `halted`, exits 4 and writes nothing), `panel tally`, `panel verify`, `config show` and `doctor`. Every other verb
+   behaves as today. No verb resumes a halted epic: halt is terminal for that epic, and the remaining work moves to a
+   new spec (forward-only lifecycle). Each decision that offers `halt` says in its text that `halt` stops every work
+   item of the spec, not only the item of that gate.
 8. **Pre-enrolment closes (OQ7).** The first `--apply` creates no gate for a work item that is already closed. It
    records those ids in `mindspec_run.pre_enrolment`; reruns keep that set. The audit table counts them as
    `pre-enrolment`, not as unreceipted closes.
@@ -255,15 +256,21 @@ enforces B1 except under `--force`; the kernel detects a forced close and refuse
     `<gate>.r<N+1>.fix` (B8, B9) and the decision `<gate>.decide.reject.r<N>` with options `fix` and `halt`. While a
     decision of a gate is open (§5, "an open decision"), a verb that would claim or close another child of that gate,
     open a round on it, or close or merge what the gate decides refuses and names the decision. Examples: `lease` or
-    `submit` on the fix, `panel create`, `panel refute`, `panel defer`, `complete`. The fix stays open. `next-action`
-    lists the decision, not the fix. `--answer fix` closes the decision and releases the fix; the same pass lists the
-    fix as an action. `--answer halt` applies §13.7. The answer adds no round; round N+1, which the fix close
-    authorises (§13.14), counts toward `round_limit`. At the limit, the pass creates only the limit decision, and
-    `continue:<n>` raises the allowance and creates the fix.
+    `submit` on the fix, `panel create`, `panel refute`, `panel defer`, `complete`. The fix stays open. A limit
+    decision holds only a verb that opens a round or claims or closes a fix. While it is open, `panel refute` and
+    `panel defer` run (§13.4); a passing retally closes the gate `passed` and the limit decision `superseded`.
+    `next-action` lists the decision, not the fix. `--answer fix` closes the decision and releases the fix; the same
+    pass lists the fix as an action. `--answer halt` applies §13.7. The answer adds no round; round N+1, which the fix
+    close authorises (§13.14), counts toward `round_limit`. At the limit, the pass creates only the limit decision,
+    and `continue:<n>` raises the allowance and creates the fix.
 16. **Pass order (OQ12).** Every verb that runs a reducer pass (§4-§7, §13) runs it first, then its own refusal checks
-    against the state that pass leaves, then its own write. A write that closes a step completes the same pass (tally
-    and cascades, §6); this is the one pass of §7. When the verb then refuses, the writes of its pass stand: they are
-    the writes `--apply` makes. `next-action` without `--apply` and any pass in an unenrolled spec write nothing
+    against the state that pass leaves, then its own write. The pass then resumes after the write: one pass in two
+    parts, the one pass of §7, and the second part does the tally and cascades of a close (§6). The first part leaves
+    out the kernel step that the verb names by its id (`lease <step>`, `submit <step>`, the slot of `panel submit`).
+    After the write, the second part covers that step. When the verb refuses, the writes of its first part stand (they
+    are the writes `--apply` makes), it writes nothing on that step, and the next pass covers it. So `submit` with
+    valid evidence on an unreceipted close writes the receipt and creates no `<id>.a<k+1>`; after a refused `submit`,
+    the next pass creates it (§9). `next-action` without `--apply` and any pass in an unenrolled spec write nothing
     (§1 ruling 1).
 
 ## 14. Hand path in an enrolled spec
