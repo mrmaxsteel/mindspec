@@ -206,8 +206,8 @@ All ACs run in a scratch repo and bd database on a plan-approved spec `x`: items
   added line reads or writes `.beads/issues.jsonl`. The existing finalize export still runs at `impl approve`.
 - [ ] AC21 (R2): item 1 closed by `mindspec complete` (presence `warn`, no panel); the first `--apply` makes no
   `<1>.review` and records item 1 as pre-enrolment; items 2 and 3 run; `impl approve` exits 0 with `pre-enrolment: 1`.
-- [ ] AC22 (R5): a refused tally makes `r2.fix`; `panel refute` of the only blocking finding closes the gate
-  `passed` and the fix `superseded` in one pass; no child stays open; `complete` exits 0.
+- [ ] AC22 (R5): with `r2.fix` open, and again with a limit decision open, `panel refute` of the only blocking finding
+  exits 0; one pass closes the gate `passed` and the fix or decision `superseded`; no child is open; `complete` exits 0.
 - [ ] AC23 (R9, R6): a refused final tally lists a `fix` under `<epic>.final`; after `round_limit` final rounds over
   two final-review slugs, `panel create` exits non-zero and a limit decision appears. Separately: final pass on commit
   A, then a `.mindspec/config.yaml` commit B: `impl approve` exits non-zero, its pass creates `<epic>.final.a2` (a

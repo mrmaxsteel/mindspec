@@ -86,8 +86,8 @@ bd's lease cannot serve: its holder is the bd actor (one per clone) and its TTL 
 `lease` writes `in_progress`, a monotonic `generation`, the expiry and a token hash with bd `--if-status`
 compare-and-set. It prints the token once. An implement step reuses the `mindspec next <work item>` claim path.
 Refuses: a non-kernel bead, a gate, a decision; an open ancestor or upstream (read per §13.1); a live lease; a halted
-spec; an open decision. `--take` revokes, issues generation N+1 and records the reason. `panel.lease_ttl` defaults to
-`2h` and is renewable.
+spec; an open decision (§13.15). `--take` revokes, issues generation N+1 and records the reason. `panel.lease_ttl`
+defaults to `2h` and is renewable.
 
 ## 6. `submit <step> --lease <t> (--artifact <path> | --commit <oid>)` | `submit <decision> --answer <opt>`
 
@@ -199,16 +199,16 @@ enforces B1 except under `--force`; the kernel detects a forced close and refuse
    `<gate>.r<N>.R<s>`, the fix is `<gate>.r<N>.fix` and the decisions are `<gate>.decide.<cause>.r<N>`, each a child
    of `<gate>`.
 7. **After halt (OQ6).** The spec stays orchestrated. The `halt` answer closes every open step and decision under the
-   epic `halted` (B11; the decisions are a reading beyond B11, OQ6). Then one rule covers every verb: in a halted
-   spec, a verb that would create, claim or close a kernel step, or claim, close or merge a work item or the epic,
-   refuses, names the halt and writes nothing. `next` selection leaves out the work items of a halted epic, as it
-   leaves out kernel types. When a verb resolves its target spec without `--spec` (`next`, `next-action`, `complete`,
-   `impl approve`), a halted spec does not count as active (OQ6). `next <w>` and `next --spec <halted spec>` refuse
-   and name the halt. These verbs only read and still work: `next-action` with or without `--apply` (it prints
-   `halted`, exits 4 and writes nothing), `panel tally`, `panel verify`, `config show` and `doctor`. Every other verb
-   behaves as today. No verb resumes a halted epic: halt is terminal for that epic, and the remaining work moves to a
-   new spec (forward-only lifecycle). Each decision that offers `halt` says in its text that `halt` stops every work
-   item of the spec, not only the item of that gate.
+   epic `halted` (B11; the decisions are a reading beyond B11, OQ6). Then one rule covers every verb: in a halted spec,
+   a verb that would create, claim or close a kernel step, or claim, close or merge a work item or the epic, refuses,
+   names the halt and writes nothing. When a verb resolves its target spec without `--spec` (`next`, `next-action`,
+   `complete`, `impl approve`), a halted spec does not count as active (OQ6). `next <w>` and `next --spec <halted spec>`
+   refuse and name the halt. So `next` selection never reaches the work items of a halted epic. These verbs only read
+   and still work: `next-action <halted spec>` with or without `--apply` (it prints `halted`, exits 4 and writes
+   nothing), `panel tally`, `panel verify`, `config show` and `doctor`. Every other verb behaves as today. No verb
+   resumes a halted epic: halt is terminal for that epic, and the remaining work moves to a new spec (forward-only
+   lifecycle). Each decision that offers `halt` says in its text that `halt` stops every work item of the spec, not only
+   the item of that gate.
 8. **Pre-enrolment closes (OQ7).** The first `--apply` creates no gate for a work item that is already closed. It
    records those ids in `mindspec_run.pre_enrolment`; reruns keep that set. The audit table counts them as
    `pre-enrolment`, not as unreceipted closes.
@@ -254,11 +254,12 @@ enforces B1 except under `--force`; the kernel detects a forced close and refuse
     round past the allowance gives the limit decision, not a `run` entry.
 15. **REJECT (OQ13).** A tally with a REJECT verdict is a refused round. Below the limit, its pass creates the fix
     `<gate>.r<N+1>.fix` (B8, B9) and the decision `<gate>.decide.reject.r<N>` with options `fix` and `halt`. While a
-    decision of a gate is open (§5, "an open decision"), a verb that would claim or close another child of that gate,
-    open a round on it, or close or merge what the gate decides refuses and names the decision. Examples: `lease` or
-    `submit` on the fix, `panel create`, `panel refute`, `panel defer`, `complete`. The fix stays open. A limit
+    REJECT decision of a gate is open (§5, "an open decision"), a verb that would claim or close another child of that
+    gate, open a round on it, or close or merge what the gate decides refuses and names the decision. Examples: `lease`
+    or `submit` on the fix, `panel create`, `panel refute`, `panel defer`, `complete`. The fix stays open. A limit
     decision holds only a verb that opens a round or claims or closes a fix. While it is open, `panel refute` and
-    `panel defer` run (§13.4); a passing retally closes the gate `passed` and the limit decision `superseded`.
+    `panel defer` run (§13.4); a passing retally closes the gate `passed` and the limit decision `superseded`. This
+    difference is intended: a REJECT is a stronger verdict than a limit, and the operator answers it first.
     `next-action` lists the decision, not the fix. `--answer fix` closes the decision and releases the fix; the same
     pass lists the fix as an action. `--answer halt` applies §13.7. The answer adds no round; round N+1, which the fix
     close authorises (§13.14), counts toward `round_limit`. At the limit, the pass creates only the limit decision,
