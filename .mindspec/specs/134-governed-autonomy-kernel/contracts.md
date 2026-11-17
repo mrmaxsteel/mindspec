@@ -124,7 +124,7 @@ approve` refuses and names the link and any foreign link that closes the cycle, 
 `mindspec_run`, approval record or gate. From `mindspec_run` on, the spec is enrolled. A link that the check or bd
 refuses after that (here or at `--apply`) is not written: the step that needs it stays open, `plan approve` exits 0,
 and the next `--apply` tries again. Each pass runs the B7 check on current state for each missing mindspec link and
-flags `foreign-blocker` naming the first foreign link on the cycle from that link's downstream bead, and its bd
+flags `foreign-blocker` naming the first foreign link on each cycle from that link's downstream bead, and its bd
 removal; nothing is stored. A rerun before the approval record keeps any `mindspec_run`, reuses exactly the recorded
 ids, creates only missing items and continues the order; it may add new chunks and links. It never selects by
 `--parent` and closes or supersedes no other bead. A rerun refuses a recorded id with no chunk, names it and writes

@@ -125,7 +125,7 @@ blocks Y" = Y waits for X.
   `mindspec_run` or `panel.json`: `complete` with no passing panel exits non-zero (closed ids witness); `next-action`
   flags `run-marker-missing`. Spec `y` approved by v0.19.0: `next-action y` exits non-zero, same snapshot; `complete`
   with no panel warns, exits 0; a foreign `bd create --parent <y-epic>`, then `plan approve y`: no witness, that
-  child unchanged.
+  child unchanged and `next` does not select it.
 - [ ] AC7 (R7): 3 rounds on slug A, `panel abandon` A, 2 on slug B: round 3 of B exits non-zero; `next-action` lists
   one decision (`continue:<n>`, `halt`) and `run` has no `panel create`; after `continue:1` one more round runs and
   the next exits non-zero. The same holds for the final gate.
@@ -191,6 +191,9 @@ The scratch-repo tests for AC1-AC17 each pass and fail on a named mutation; `mak
 - [ ] OQ15-OQ18: `plan approve` enrols every new spec, no opt-in (§8); the verbs stay as `run` commands (§7); a spec
   past `plan approve` at release keeps today's rules; an enrolled spec enforces the gate. Recommended: yes.
 - [ ] OQ19: `plan approve` refuses an enrolled spec (§8); how does a plan change? Recommended: a new spec, or `halt`.
+- [ ] OQ20: a rerun on an edited plan keeps a dropped plan-order link (B6), and a new cycle refuses or exits 0 (§8;
+  R1-M20, R1-M21, R2-M27, R3-M27). Recommended: a rerun before the approval record refuses any plan change other than
+  missing items; the operator edits the plan only after removing the epic's children with bd.
 
 ## Approval
 
