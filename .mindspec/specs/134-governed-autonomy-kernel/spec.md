@@ -76,8 +76,8 @@ files) cites no ADR, spec, requirement, bead or issue number. No new use of the 
 
 ## Migration
 
-A spec past `plan approve` at release has no witness: it is pre-kernel and finishes on today's rules. Only new plan
-approvals enrol; there is no version stamp (§8). Without `step`, `plan approve` refuses and names the setup command.
+A spec past `plan approve` at release has no witness: it is pre-kernel and keeps today's rules; a `plan approve` rerun
+on it does not enrol and selects by recorded `bead_ids`, not `--parent`. Without `step`, `plan approve` refuses (§2).
 
 ## Scope
 
@@ -103,9 +103,11 @@ blocks Y" = Y waits for X.
   second, or a rerun after a kill at its first write, gives the same snapshot and `revision`. The pass of `complete 1`
   creates exactly `<2>.impl.a1` and `<3>.impl.a1`. Fresh fixtures: (a) a fake bd refuses a plan-order `dep add` as a
   cycle: exit non-zero naming the link; no gate, `mindspec_run` or approval. Then a foreign `bd create --parent
-  <epic>` and a normal-bd rerun: exit 0, no second work item, that child unchanged. (b) Killed after the creates,
-  foreign links item 3 blocks a bug blocks item 1: the rerun refuses before any `dep add`. (c) A fake bd refuses an
-  item-to-final `dep add`: exit 0, `next-action` flags `foreign-blocker`; a normal-bd `--apply` writes it.
+  <epic>` and a normal-bd rerun: exit 0, no second work item, that child unchanged. (b) With a call-logging bd
+  wrapper, killed after the creates, foreign links item 3 blocks a bug blocks item 1: the rerun exits non-zero naming
+  a chain link and its bd removal; the log has no `dep add`. (c) Killed after the `<epic>.final` create, foreign links
+  `<epic>.final` blocks a bug blocks item 3: `--apply` exits 0 without the item-3-to-final link; `next-action` flags
+  `foreign-blocker` naming a chain link. After `bd dep remove` of it: no flag; `--apply` writes the link.
 - [ ] AC3 (R3, R4): `next 1` (no `--spec`) resolves spec `x` and prints a token (generation 1); a second `next 1` or
   `lease <1>.impl.a1` exits non-zero naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug
   blocking item 1: `lease <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits
