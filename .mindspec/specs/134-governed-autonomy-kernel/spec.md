@@ -45,7 +45,7 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
 1. **Read-only reducer.** `next-action [<spec>] [--json]` writes nothing and prints `mindspec.next-action/v1` (§4).
    Failure: two skills pick the next bead by different rules (ADR-0045 Verification; #146, #187).
 2. **Just-in-time steps.** `--apply` does one idempotent reduction under the phase lock; it resumes after a crash
-   (B5) and refuses a cycle-making link (B7) before any write. Failure: a run stalls (`mindspec-qu9z`).
+   (B5); `plan approve` refuses a cycle-making link (B7) before any write. Failure: a run stalls (`mindspec-qu9z`).
 3. **Lease and submit.** `lease` (§5) refuses a held or blocked step, ancestor or upstream; `submit` (§6) checks
    evidence and writes the receipt before the close. Failure: bd accepts `--claim` on a blocked item; subagents run
    `bd close`; `panel.one-fixer` and `lifecycle.complete-by-orchestrator` are advisory.
@@ -97,47 +97,57 @@ approve` refuses and names the setup command.
 Scratch repo and bd database; spec `x` plan-approved by this binary; items 2 and 3 depend on item 1. "Snapshot" =
 `bd list --all --json`, every dependency list, `git for-each-ref`, `git status --porcelain`. "Foreign" = by `bd` only.
 
-- [ ] AC1 (R1): `next-action x --json` twice: byte-identical, item 1 `implement` with `"exists":false`; same snapshot.
+- [ ] AC1 (R1): `next-action x --json` twice: same bytes and snapshot; one action, item 1 `implement`, `"exists":false`.
 - [ ] AC2 (R2, R5, R6): `plan approve` creates exactly `<w>.review` per item, `<epic>.final` and `mindspec_run`. The
   first `--apply` creates exactly `<1>.impl.a1`; a second, or a rerun after a kill at its first write, gives the same
-  snapshot and `revision`. After item 1 closes, one `--apply` creates exactly `<2>.impl.a1` and `<3>.impl.a1`. A
-  foreign blocks link item 1 -> item 2: `--apply` exits non-zero naming it; snapshot unchanged.
+  snapshot and `revision`. The pass of `complete 1` creates exactly `<2>.impl.a1` and `<3>.impl.a1`. "X blocks Y"
+  = Y waits for X. A fake bd shows a foreign link item 2 blocks item 1, or separately `<epic>` blocks item 1: `plan
+  approve` exits non-zero naming it and writes nothing.
 - [ ] AC3 (R3, R4): `next 1` prints a token (generation 1); a second `next 1` or `lease <1>.impl.a1` exits non-zero
   naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug blocking item 1: `lease
   <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits non-zero; the slot stays open.
 - [ ] AC4 (R3, B5, B13): each exits non-zero, step open: `submit` with generation 1 after `--take`, an old subject,
   another slot, a changed blob, a verdict to a fix, an implement commit not past the claim base. A valid `submit`
-  writes `mindspec_close` = path, commit, blob id; a rerun exits 0; another artifact exits non-zero, `bd show --json`
-  unchanged. Killed between receipt and close, then rerun: exit 0, no flag.
+  writes `mindspec_close` = path, commit, blob id; a rerun exits 0 and another artifact exits non-zero, each with
+  `bd show --json` unchanged. Killed between receipt and close: step open with its receipt; a rerun closes it.
 - [ ] AC5 (R5, B12): `bd close <w>` exits non-zero (open child). After a pass, `panel create <w>` exits non-zero. A
   `.mindspec/config.yaml` commit: `complete` exits non-zero and creates `<w>.review.a2` (`mindspec_from` set); after
   its pass, `complete` exits 0. With `r2.fix` or a limit decision open, `panel refute` of the only blocking finding
   closes the gate `passed` and the fix or decision `superseded`.
-- [ ] AC6 (R6): with `panel_presence: warn`, `panel.max_rounds: 99`, a step retyped `chore` and `mindspec_run` removed,
-  `complete` with no passing panel and `panel create` round 6 exit non-zero; `next-action` flags `run-marker-missing`.
-  Spec `y` approved by v0.19.0: `next-action y` exits non-zero, same snapshot; `complete` with no panel warns, exits 0.
+- [ ] AC6 (R6): `panel_presence: warn`; each kernel step closed by `bd close --force` and retyped `chore`; no
+  `mindspec_run` or `panel.json`: `complete` with no passing panel exits non-zero (closed ids witness); `next-action`
+  flags `run-marker-missing`. Spec `y` approved by v0.19.0: `next-action y` exits non-zero, same snapshot; `complete`
+  with no panel warns, exits 0.
 - [ ] AC7 (R7): 3 rounds on slug A, `panel abandon` A, 2 on slug B: round 3 of B exits non-zero; `next-action` lists
-  one decision (`continue:<n>`, `halt`); `continue:1` allows one more round. The same holds for the final gate.
+  one decision (`continue:<n>`, `halt`) and `run` has no `panel create`; after `continue:1` one more round runs and
+  the next exits non-zero. The same holds for the final gate.
 - [ ] AC8 (R8): REJECT on item 2, `--apply`: a decision under item 2 (text: `halt` stops the spec), an action for item
   3. Before the answer, `lease` on the fix and `panel create 2` exit non-zero; after `--answer fix`, `lease` exits 0.
 - [ ] AC9 (R8): a commit on `bead/2` in round 2, no fix open: one pass marks round-2 slots `superseded` and lists
-  `panel create 2`; in an open fix, none. Answer `halt`: open steps are `halted`; `next-action x` exits 4; `lease`,
-  `complete`, `next 2`, `panel create 2` exit non-zero, snapshot unchanged; a foreign child stays open.
-- [ ] AC10 (R9): `bd close <slot>` with no verdict flags `unreceipted-close` and offers `<slot>.a2`; with a valid
-  verdict and token, `submit` writes the receipt and no `.a2` exists. `bd close <w>` after a pass flags `raw-close`;
-  `bd close --force <w>` flags `forced-close`; `complete` and `impl approve` exit non-zero for each.
+  `panel create 2`; in an open fix, none. A second REJECT on item 2, answer `halt`: open steps are `halted`;
+  `next-action x` exits 4 on each read; `lease`, `complete`, `next 2`, `panel create 2` exit non-zero, snapshot
+  unchanged; a foreign child stays open.
+- [ ] AC10 (R9): `bd close <slot>` with no verdict, or a verdict with an old token: flag `unreceipted-close`, and
+  the next `--apply` creates `<slot>.a2`. With a valid verdict and token, `submit` writes the receipt; no `.a2`. After
+  item 1's gate passes, `bd close <1>` flags `raw-close`: `impl approve` exits non-zero naming it, no `<2>.impl.a1`,
+  then `complete 1` exits 0 and clears it. `bd close --force <1>` before a pass flags `forced-close`: `complete 1`
+  exits non-zero printing `bd reopen <1>`.
 - [ ] AC11 (R9): one each of `--allow-not-ready`, `--allow-doc-skew`, `--override-adr`, `--allow-net-deletion`, `lease
-  --take`, `panel defer`, a decision answer, an unreceipted close, `MINDSPEC_SKIP_PANEL=1 complete`: `impl approve`
-  and a rerun print 1 for each; both registries hold `allow-not-ready`.
+  --take`, `panel defer`, a decision answer, an unreceipted close: `impl approve` and a rerun print 1 for each; both
+  registries hold `allow-not-ready`. `MINDSPEC_SKIP_PANEL=1 complete` with no passing gate exits non-zero naming it.
 - [ ] AC12 (R10): `loop.gate_authority`, `loop.halt.{on_reject: fix, panel_deadlock_rounds,
   max_consecutive_impl_failures}` load with exit 0, one warning each; `config show` labels them ignored and `runner:`
-  read by a skill. `loop.halt.max_rounds_per_bead: 4` gives limit 4; with `panel.max_rounds: 6`, 6.
+  read by a skill. `loop.halt.max_rounds_per_bead: 4` gives limit 4; with `panel.max_rounds: 6`, 6. With the marker, set
+  `panel.max_rounds: 99` and `panel.lease_ttl: 10m` after enrolment: round 6 exits non-zero; a new lease runs 2h.
 - [ ] AC13 (R11): foreign `bd create --parent <epic> note`, a bug blocking item 2, `bd update <1>.impl.a1 --claim`. A
   snapshot diff around each kernel verb changes only computed ids and links between them. `next-action` lists no
   action for the note and flags `raw-claim` and `foreign-child-open`; `lease <1>.impl.a1` exits 0. `bd ready` titles
-  each kernel bead `[mindspec]`; `bd ready --exclude-label mindspec` shows the foreign beads and no kernel bead.
-- [ ] AC14 (R11): a foreign `bd create --id <1>.review.r1.R1`: `panel create 1` exits non-zero printing `id-collision`;
-  that bead is unchanged. A fake bd answers exit 13 to the first `--if-status` write: `submit` exits 0 with one
+  each mindspec bead `[mindspec]`; `bd ready --exclude-label mindspec` shows the foreign beads and no epic, work item
+  or kernel bead. A foreign note under the epic at the end: `impl approve` exits non-zero naming it, writes nothing.
+- [ ] AC14 (R11): a foreign `bd create --id <1>.review.r1.R1`: `panel create 1` exits non-zero printing
+  `id-collision`; that bead is unchanged. A foreign `bd create --parent <1>.review` gives a foreign `<1>.review.1`:
+  after a passing tally the gate stays open and `next-action` exits 3 flagging `foreign-child-open`; after its close
+  the gate closes `passed`. A fake bd answers exit 13 to the first `--if-status` write: `submit` exits 0 with one
   receipt and one close; always 13: non-zero, snapshot unchanged.
 - [ ] AC15 (R12): with K = `max_rounds_per_bead|panel_deadlock_rounds|max_consecutive_impl_failures|gate_authority`,
   `git grep -n -i -E "$K|Any bead REJECT|REJECT / HARD block|do not proceed to the next bead|on_reject|loop\.halt|
@@ -145,12 +155,13 @@ Scratch repo and bd database; spec `x` plan-approved by this binary; items 2 and
   plugins/mindspec/README.md README.md project-docs/user/guides` and `git grep -n -E "$K|on_reject|type Loop struct"
   -- .mindspec/domains` each exit 1 (`historical_skills` keeps old text). Both `ms-bead-cycle` copies name
   `next-action --apply`, `lease`, `submit`; `cmp` of each skill pair exits 0. With `types.custom: gate,spike2`, `plan
-  approve` exits non-zero naming `mindspec setup`; after `setup --force`, it holds `gate,spike2,step`.
+  approve` exits non-zero naming `mindspec setup`; after plain `mindspec setup` (an old install), it holds
+  `gate,spike2,step` and each installed skill copy matches its source.
 - [ ] AC16 (constraints): added non-test Go lines under `cmd/`, `internal/` and skill lines hold no ADR, spec,
   requirement, bead or issue number and do not touch `.beads/issues.jsonl`.
 - [ ] AC17 (R1-R4, B8): only `next-action --apply`, `lease`, `submit` and each `run` entry reach `impl approve` exit 0
   and `"status":"done"`. After `submit <1>.impl.a1`, `run` lists `panel create 1`; after it, `--apply` lists slots
-  `<1>.review.r1.R<s>`, `ForBead` counts 1 round, and a rerun of `panel create 1` exits non-zero.
+  `<1>.review.r1.R<s>`, `ForBead` counts 1 round, a rerun of `panel create 1` exits non-zero; the finalize export runs.
 
 ## Validation Proofs
 The scratch-repo tests for AC1-AC17 each pass and fail on a named mutation; `make test` exits 0.
@@ -166,11 +177,10 @@ The scratch-repo tests for AC1-AC17 each pass and fail on a named mutation; `mak
 - [ ] OQ9, OQ11: B8 has no implement outcome; refusals omit today's gates and halt rows. Recommended: §13.3, §13.5-6.
 - [ ] OQ10, OQ12: B8, B10 name no next round; only `panel create` writes one. Recommended: `run` entry (§13.7, §13.9).
 - [ ] OQ13: B9 gives a refused round a fix, R8 a REJECT a decision. Recommended: both; the decision holds (§13.8).
-- [ ] OQ14: bd has no default view filter. Recommended: mark kernel beads; `bd ready --exclude-label mindspec` (§12).
-- [ ] OQ15: does `plan approve` enrol every new spec, with no hand mode or opt-in? Recommended: yes (§8).
-- [ ] OQ16: do the existing verbs stay as the `run` commands that close their steps? Recommended: yes (§7).
-- [ ] OQ17: does a spec past `plan approve` at release finish on today's rules ("no witness")? Recommended: yes (§8).
-- [ ] OQ18: does an enrolled spec always enforce the panel gate? Recommended: yes; `panel_presence` is pre-kernel only.
+- [ ] OQ14: bd has no default view filter. Recommended: mark mindspec beads; `bd ready --exclude-label mindspec` (§12).
+- [ ] OQ15-OQ18: `plan approve` enrols every new spec, no opt-in (§8); the existing verbs stay the `run` commands
+  (§7); a spec past `plan approve` at release finishes on today's rules; an enrolled spec always enforces the panel
+  gate (`panel_presence` is pre-kernel only). Recommended: yes to each.
 
 ## Approval
 

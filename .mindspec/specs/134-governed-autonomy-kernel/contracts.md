@@ -16,7 +16,7 @@ Thesis: beads hold plan and dispatch; git holds evidence; the binary holds rules
 
 ## 2. Graph model
 
-- Epic and work items `<epic>.<n>` (type `task`) stay as today. Plan order is the approved plan's `depends_on`
+- Epic and work items `<epic>.<n>` keep their types (`epic`, `task`). Plan order is the approved plan's `depends_on`
   edges (`work_chunks`), which `plan approve` already writes as bd blocks links.
 - The kernel alone creates kernel beads, type `step`: implement `<w>.impl.a<k>`; bead gate `<w>.review` and final
   gate `<epic>.final` (both at enrolment); slots `<gate>.r<N>.R<s>`; fix `<gate>.r<N>.fix` (after round N-1 is
@@ -32,7 +32,8 @@ Thesis: beads hold plan and dispatch; git holds evidence; the binary holds rules
 1. Child = sub-step. A parent closes only when all children are closed. A hold on a parent holds its children.
 2. Blocks = downstream waits for upstream to close. A lease on a blocked item or its descendant is refused.
 3. Two link kinds only: child and blocks (plus the return kind).
-4. The store knows "closed"; the reducer knows "how". Blocks releases on any close. The reducer decides what runs.
+4. The store knows "closed"; the reducer knows "how". The reducer decides what runs. It counts a work item done only
+   when its bead gate closed `passed` and `complete` merged its branch; any other close releases no dependent.
 5. Every kernel close writes a receipt (metadata `mindspec_close`) with a return kind (`passed`, `refused`,
    `superseded`, `halted`) BEFORE the bd close. A retry with the same receipt completes it.
 6. Lineage is metadata `mindspec_from`. Blocks links exist only in plan order and from each work item to
@@ -71,13 +72,13 @@ or starts an actor.
   expiries. `revision` digests them (no display times, no free text). Same inputs give the same bytes. An expiry
   changes the output (`retry_at`). A no-change `--apply` writes nothing. A removed field, a new `kind` or a new
   `status` raises `schema`.
-- Refuses: no approved plan; a pre-kernel spec (§8); a cycle-making link; `--apply` with bd silent or no `step`.
+- Refuses: no approved plan; a pre-kernel spec (§8); `--apply` with bd silent or no `step`.
 
 ## 5. `lease <step> [--renew <t> | --release <t> | --take --reason <text>]`
 
 bd's lease cannot serve: its holder is the bd actor (one per clone) and its TTL is in minutes. Under the phase lock,
 `lease` writes `in_progress`, a monotonic `generation`, the expiry and a token hash with bd `--if-status`
-compare-and-set. It prints the token once. An implement step uses the `mindspec next <work item>` claim path.
+compare-and-set. It prints the token once. `lease <w>.impl.a<k>` and `next <w>` are the same claim.
 Refuses: a foreign bead, a gate, a decision; a held or blocked ancestor or upstream (B1, B2; an open epic, work item
 or gate does not hold); a live lease; a halted spec; an open decision (§13.8). `--take` revokes, issues generation
 N+1 and records the reason. `panel.lease_ttl` defaults to `2h` and is renewable.
@@ -87,46 +88,52 @@ N+1 and records the reason. `panel.lease_ttl` defaults to `2h` and is renewable.
 Checks: the current generation; subject = the gate's active round; the artifact resolves at a commit and the blob
 matches; the artifact fits the kind (a verdict for a slot; a commit on `bead/<id>` past the round subject for a fix; a
 commit past the claim base for an implement step). It writes the receipt, closes, and runs one reducer pass (order:
-§13.9). Refuses: an old or absent token, a stale subject, a foreign slot, a missing artifact, a different result for
-a closed step. The same receipt again exits 0 with no change. A decision needs no token and takes a listed option.
+§13.9). Refuses: an old or absent token, a stale subject, a foreign slot, a missing artifact, a different result for a
+closed step. The same receipt again on a closed step exits 0 with no change; on an open step it closes it. A decision
+needs no token and takes a listed option.
 
 ## 7. Existing verbs
 
 The existing verbs stay. `run` lists them; each closes the kernel step it names, runs one reducer pass (order:
-§13.9) and keeps today's refusals. `plan approve` enrols the spec (§8).
+§13.9) and keeps today's refusals. `plan approve` enrols the spec (§8) and runs no reducer pass.
 
 - `next <w>`: takes the lease of `<w>.impl.a<k>` exactly as `lease` does and prints the token. With a live lease it
-  refuses and names `lease --take`. It excludes kernel types from selection.
+  refuses and names `lease --take`. It selects only approved work items, by computed id.
 - `panel create`: the one writer of a round record (§13.7); takes the subject from the gate; refuses another
   `--target` or a round past the allowance.
 - `panel submit`: closes the matching slot as `submit` does; it needs `--lease` of the current generation.
 - `panel refute` / `panel defer`: a passing retally closes the gate `passed` and its open fix `superseded`.
-- `complete`: refuses unless the bead gate closed `passed` and no child is open.
-- `impl approve`: prints the audit table; refuses on an open step, an open decision or an unreceipted close.
+- `complete`: refuses unless the bead gate closed `passed` and no child is open. On a raw-closed, unmerged work
+  item whose gate closed `passed`, it merges and clears `raw-close`. Otherwise, for a closed work item and for
+  `forced-close`, it refuses with the recovery line: `bd reopen <w>`, then finish the gate.
+- `impl approve`: prints the audit table and runs today's finalize export; refuses on an open step, an open
+  decision, an unreceipted close, `raw-close` or `forced-close`.
 - `config show` / `Load`: one truthful label per key; one warning per removed key. There is no `decide`, `halt`,
   `adopt`, `takeover`, `mode` or `run start` verb.
 
 ## 8. Enrolment
 
 `plan approve` enrols every new spec: under the phase lock it writes epic metadata `mindspec_run: {round_limit,
-lease_ttl, rules: "kernel-1"}` before it records the approval, then creates the gates (the next `--apply` creates a
-missing one, B5). A spec is enrolled if ANY witness exists: `mindspec_run` on the epic; a computed kernel id under the
-epic (open or closed, any type); a spec `panel.json` with `"orchestrated": true` (`panel create` writes it). A
-witness without the marker gives the default policy and the flag `run-marker-missing`. A spec with no witness is
-pre-kernel (approved before this release) and finishes on today's rules: warnings, and `panel_presence` applies.
-`next-action` and `lease` refuse it and name today's verbs; no pass writes on it. No verb, flag, env variable or key
-enrols a pre-kernel spec or clears enrolment. Policy is pinned at enrolment; config edits and retyping change nothing.
-An enrolled spec always enforces the panel gate. Threat model: the kernel governs progression, not OS access; a
-same-user process can forge an answer. One controller host.
+lease_ttl, rules: "kernel-1"}` before it records the approval, then creates the gates and nothing else (the next
+`--apply` creates a missing one, B5). Before any write it checks its blocks links against existing links (B7). A spec
+is enrolled if ANY witness exists: `mindspec_run` on the epic; a computed kernel id under the epic (open or closed,
+any type); a spec `panel.json` with `"orchestrated": true` (`panel create` writes it). A witness without the marker
+gives the default policy and the flag `run-marker-missing`. A spec with no witness is pre-kernel (approved before this
+release) and finishes on today's rules: warnings, and `panel_presence` applies. `next-action` and `lease` refuse it
+and name today's verbs; no pass writes on it. No verb, flag, env variable or key enrols a pre-kernel spec or clears
+enrolment. Policy is pinned at enrolment; config edits and retyping change nothing. An enrolled spec always enforces
+the panel gate. Threat model: the kernel governs progression, not OS access; a same-user process can forge an answer.
+One controller host.
 
 ## 9. Refused vs flagged
 
-In an enrolled spec, the verbs refuse what §7 lists. Flagged: a raw close of a kernel step (not evidence); a raw
-close of a work item (`impl approve` refuses); a `--force` close over an open child (`complete` and `impl approve`
-refuse); a raw claim (§12 item 3). Counted, never blocked: escape hatches, deferrals, `--take`, decision answers,
-`MINDSPEC_SKIP_PANEL=1` (the gate receipt is marked `waiver`). Existing floor: `FindOrphanedClosedBeads` and the
-self-orphan handling in `complete`. **Unreceipted close** (no or bad receipt): with evidence and the current
-generation, `submit` writes the receipt (no reopen); else the next pass creates `<id>.a<k+1>` with `mindspec_from`.
+In an enrolled spec, the verbs refuse what §7 lists. Flagged: a raw close of a kernel step (not evidence); a raw close
+of a work item (`raw-close`) and a `--force` close over an open child (`forced-close`), each with a §7 `complete`
+recovery; a raw claim (§12 item 3). Counted, never blocked: escape hatches, deferrals, `--take`, decision answers.
+`MINDSPEC_SKIP_PANEL=1` does not open or pass a gate: the verb refuses and names it (pre-kernel: as today). Floor:
+`FindOrphanedClosedBeads` and the self-orphan handling in `complete`. **Unreceipted close** (no or bad receipt): with
+evidence and the current generation, `submit` writes the receipt (no reopen); else the next pass creates `<id>.a<k+1>`
+with `mindspec_from`.
 
 ## 10. Rounds and decisions
 
@@ -142,7 +149,7 @@ Spec and plan gates: count and warn.
 ## 11. Audit table
 
 `impl approve` prints the table; it never blocks. It shows policy and counts of each escape hatch (`--allow-doc-skew`,
-`--override-adr`, `--allow-not-ready`, `--allow-net-deletion`, skip-panel), deferrals, takeovers, timed decision
+`--override-adr`, `--allow-not-ready`, `--allow-net-deletion`), deferrals, takeovers, timed decision
 answers, raw claims and unreceipted closes, from durable records. `--allow-not-ready` joins both friction registries.
 
 ## 12. Shared bd store
@@ -156,23 +163,27 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    and numeric child ids `<parent>.<n>`, so a bd-assigned id never has a kernel shape. Work items are the approved
    plan's ids, never "any `task` child": a foreign child `<epic>.<n>` stays foreign, and phase derivation and `next`
    selection ignore it. A bead that has a kernel-shaped id but no matching tuple (for example from `bd create --id`)
-   is a collision: the verb refuses, prints `id-collision` with the id, and never adopts, edits or closes that bead.
-   If OQ1 takes its fallback, the computed key in metadata is the identity.
+   is a collision: the verb refuses, prints `id-collision` with the id and the line "remove that bead with bd", and
+   never adopts, edits or closes it. Kernel-shaped = an exact match of the §2 grammar: a bd-numbered child such as
+   `<w>.review.1` is foreign. If OQ1 takes its fallback, the computed key in metadata is the identity.
 2. **Views.** bd 1.3.4 has no store-level default filter for `bd ready` or `bd list` (`bd config --help` lists
-   none). So open kernel beads show in a foreign user's `bd ready`. Mindspec marks every bead it creates: type `step`
-   (decisions: `decision`), label `mindspec`, and a title that starts `[mindspec]`. `bd ready --exclude-label
-   mindspec` hides them all. (OQ14.)
+   none). Every bead mindspec creates (epic, work items, steps, decisions) gets label `mindspec` and a title that
+   starts `[mindspec]`; types stay as §2 says. `bd ready --exclude-label mindspec` hides them all. (OQ14.)
 3. **Claims and closes.** bd 1.3.4 accepts `--claim` on any bead, blocked ones included. A foreign claim of a mindspec
    bead is not a lease and never advances mindspec: the pass flags `raw-claim`, and `lease` takes the step with
    compare-and-set on the status it read. A foreign close is not evidence (§9). bd's open-child refusal stays (B12).
 4. **Links.** Mindspec writes links only between computed ids. A foreign link to or from a mindspec bead is respected
    as a blocker and never removed. If it makes a link that mindspec must write a cycle, the verb refuses and names it.
 5. **Writes.** Mindspec never creates, edits, claims, closes, retypes, relabels, reparents or deletes a foreign bead.
-   It reads foreign beads, respects them as blockers, and reports `foreign-child-open`. Every query that feeds a
-   write, and every bulk write (`halt`, supersede, the finalize allow-set), selects by computed id, never by type,
-   label, parent or prefix. A deleted kernel bead is created again; its rounds stay in the ledger.
+   It reads foreign beads and respects them as blockers. When an open foreign child stops a mindspec close (gate,
+   slot, fix, decision, `halt`, `complete`, `impl approve`), the close does not happen: the verb checks before any
+   write, the pass flags `foreign-child-open` naming the child, status is `wait`, and the recovery line says to close
+   or re-parent that child. Every query that feeds a write, and every bulk write (`halt`, supersede, the finalize
+   allow-set), selects by computed id, never by type, label, parent or prefix. A deleted kernel bead is created again;
+   its rounds stay in the ledger.
 6. **Types and config.** `mindspec setup` adds `step` to `types.custom` and keeps every value already there. It
-   replaces no value of another key, `--force` included. bd treats every other type as before.
+   replaces no value of a key outside mindspec's required set, `--force` included. bd treats every other type as
+   before.
 7. **Concurrent writes.** Every kernel status write uses bd `--if-status` compare-and-set. On a mismatch (bd exit 13,
    nothing written) the verb reads again, runs its pass once more, and then refuses. Creates use computed ids, so a
    retry finds the bead and makes no second one (B5).
@@ -185,9 +196,9 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    refreshes a passing panel and does not write the gate. When rebind refuses the change (for example
    `.mindspec/config.yaml`), the next pass creates a successor `<gate>.a<k+1>` (same parent, `mindspec_from` = the
    frozen gate); verbs select the highest attempt, rounds keep counting, and §2 ids apply to it.
-3. **Implement authorisation (OQ9).** An open work item with all plan upstreams closed, no open implement step and no
-   gate round authorises `<w>.impl.a1`. Each pass creates it for every such item, in plan order, on the one controller
-   host (§8); this is not the deferred parallel waves. `<w>.impl.a<k+1>` comes only from §9.
+3. **Implement authorisation (OQ9).** An open work item with all plan upstreams done (B4), no open implement step and
+   no gate round authorises `<w>.impl.a1`. Each pass creates it for every such item, in plan order, on the one
+   controller host (§8); this is not the deferred parallel waves. `<w>.impl.a<k+1>` comes only from §9.
 4. **After halt (OQ6).** The spec stays enrolled. `halt` closes every open step and decision under the epic `halted`.
    Then a verb that would create, claim or close a kernel step, or claim, close or merge a work item or the epic,
    refuses, names the halt and writes nothing. A halted spec is not active when a verb resolves its spec without
@@ -204,7 +215,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
 7. **Round opening (OQ10, OQ12).** `panel create` is the one writer of a round record (the registration and its
    ledger `round` line, which `ForBead` and §10 count). These outcomes authorise round N on a subject commit: a closed
    implement step (round 1); a closed fix `<gate>.r<N>.fix` (round N); a supersede (B10: the same pass sets the new
-   subject, round N+1); a successor gate (§13.2); for `<epic>.final`, the close of its last blocks upstream (round 1,
+   subject, round N+1); a successor gate (§13.2); for `<epic>.final`, the last work item done (B4; round 1,
    the spec branch head). The pass records the round and subject in gate metadata and lists `panel create` for that
    gate in `run`; its pass creates the slots. While a round on the current subject has an open slot, `panel create`
    refuses and names it (redispatch: `panel recover` or `launch`). A subject move before `panel create` updates the
