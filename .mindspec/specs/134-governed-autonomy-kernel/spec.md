@@ -45,7 +45,7 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
 1. **Read-only reducer.** `next-action [<spec>] [--json]` writes nothing and prints `mindspec.next-action/v1` (§4).
    Failure: two skills pick the next bead by different rules (ADR-0045 Verification; #146, #187).
 2. **Just-in-time steps.** `--apply` does one idempotent reduction under the phase lock; it resumes after a crash
-   (B5); `plan approve` refuses a cycle-making link (B7) before any write. Failure: a run stalls (`mindspec-qu9z`).
+   (B5); `plan approve` refuses when bd refuses its link as a cycle (B7). Failure: a run stalls (`mindspec-qu9z`).
 3. **Lease and submit.** `lease` (§5) refuses a held or blocked step, ancestor or upstream; `submit` (§6) checks
    evidence and writes the receipt before the close. Failure: bd accepts `--claim` on a blocked item; subagents run
    `bd close`; `panel.one-fixer` and `lifecycle.complete-by-orchestrator` are advisory.
@@ -101,11 +101,12 @@ Scratch repo and bd database; spec `x` plan-approved by this binary; items 2 and
 - [ ] AC2 (R2, R5, R6): `plan approve` creates exactly `<w>.review` per item, `<epic>.final` and `mindspec_run`. The
   first `--apply` creates exactly `<1>.impl.a1`; a second, or a rerun after a kill at its first write, gives the same
   snapshot and `revision`. The pass of `complete 1` creates exactly `<2>.impl.a1` and `<3>.impl.a1`. "X blocks Y"
-  = Y waits for X. A fake bd shows a foreign link item 2 blocks item 1, or separately `<epic>` blocks item 1: `plan
-  approve` exits non-zero naming it and writes nothing.
-- [ ] AC3 (R3, R4): `next 1` prints a token (generation 1); a second `next 1` or `lease <1>.impl.a1` exits non-zero
-  naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug blocking item 1: `lease
-  <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits non-zero; the slot stays open.
+  = Y waits for X. A fake bd refuses one `dep add` as a cycle: `plan approve` exits non-zero naming the link, with no
+  gate and no `mindspec_run`; with a normal bd a rerun exits 0 and makes no second work item.
+- [ ] AC3 (R3, R4): `next 1` (no `--spec`) resolves spec `x` and prints a token (generation 1); a second `next 1` or
+  `lease <1>.impl.a1` exits non-zero naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug
+  blocking item 1: `lease <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits
+  non-zero; the slot stays open.
 - [ ] AC4 (R3, B5, B13): each exits non-zero, step open: `submit` with generation 1 after `--take`, an old subject,
   another slot, a changed blob, a verdict to a fix, an implement commit not past the claim base. A valid `submit`
   writes `mindspec_close` = path, commit, blob id; a rerun exits 0 and another artifact exits non-zero, each with
@@ -124,21 +125,22 @@ Scratch repo and bd database; spec `x` plan-approved by this binary; items 2 and
 - [ ] AC8 (R8): REJECT on item 2, `--apply`: a decision under item 2 (text: `halt` stops the spec), an action for item
   3. Before the answer, `lease` on the fix and `panel create 2` exit non-zero; after `--answer fix`, `lease` exits 0.
 - [ ] AC9 (R8): a commit on `bead/2` in round 2, no fix open: one pass marks round-2 slots `superseded` and lists
-  `panel create 2`; in an open fix, none. A second REJECT on item 2, answer `halt`: open steps are `halted`;
-  `next-action x` exits 4 on each read; `lease`, `complete`, `next 2`, `panel create 2` exit non-zero, snapshot
-  unchanged; a foreign child stays open.
+  `panel create 2`; in an open fix, none. A foreign child under `<2>.review`, a second REJECT on item 2, answer
+  `halt`: other open steps are `halted`, `<2>.review` stays open flagged `foreign-child-open`; `next-action x` exits 4
+  on each read; `lease`, `complete`, `next 2`, `panel create 2` exit non-zero, snapshot unchanged.
 - [ ] AC10 (R9): `bd close <slot>` with no verdict, or a verdict with an old token: flag `unreceipted-close`, and
   the next `--apply` creates `<slot>.a2`. With a valid verdict and token, `submit` writes the receipt; no `.a2`. After
   item 1's gate passes, `bd close <1>` flags `raw-close`: `impl approve` exits non-zero naming it, no `<2>.impl.a1`,
   then `complete 1` exits 0 and clears it. `bd close --force <1>` before a pass flags `forced-close`: `complete 1`
-  exits non-zero printing `bd reopen <1>`.
+  exits non-zero printing `bd reopen <1>`; after `bd reopen <1>` and a gate pass, `complete 1` exits 0 and `impl
+  approve` does not name the flag.
 - [ ] AC11 (R9): one each of `--allow-not-ready`, `--allow-doc-skew`, `--override-adr`, `--allow-net-deletion`, `lease
-  --take`, `panel defer`, a decision answer, an unreceipted close: `impl approve` and a rerun print 1 for each; both
-  registries hold `allow-not-ready`. `MINDSPEC_SKIP_PANEL=1 complete` with no passing gate exits non-zero naming it.
+  --take`, `panel defer`, a decision answer, a repaired unreceipted close: `impl approve` and a rerun exit 0, print 1
+  each; both registries hold `allow-not-ready`. `MINDSPEC_SKIP_PANEL=1 complete`, no passing gate: non-zero, names it.
 - [ ] AC12 (R10): `loop.gate_authority`, `loop.halt.{on_reject: fix, panel_deadlock_rounds,
   max_consecutive_impl_failures}` load with exit 0, one warning each; `config show` labels them ignored and `runner:`
-  read by a skill. `loop.halt.max_rounds_per_bead: 4` gives limit 4; with `panel.max_rounds: 6`, 6. With the marker, set
-  `panel.max_rounds: 99` and `panel.lease_ttl: 10m` after enrolment: round 6 exits non-zero; a new lease runs 2h.
+  read by a skill. `loop.halt.max_rounds_per_bead: 4` gives limit 4; with `panel.max_rounds: 6`, 6. On a spec enrolled
+  with the defaults, set `panel.max_rounds: 99` and `panel.lease_ttl: 10m`: round 6 exits non-zero; a new lease runs 2h.
 - [ ] AC13 (R11): foreign `bd create --parent <epic> note`, a bug blocking item 2, `bd update <1>.impl.a1 --claim`. A
   snapshot diff around each kernel verb changes only computed ids and links between them. `next-action` lists no
   action for the note and flags `raw-claim` and `foreign-child-open`; `lease <1>.impl.a1` exits 0. `bd ready` titles
