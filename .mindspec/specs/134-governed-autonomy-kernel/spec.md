@@ -45,7 +45,7 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
 1. **Read-only reducer.** `next-action [<spec>] [--json]` writes nothing and prints `mindspec.next-action/v1` (§4).
    Failure: two skills pick the next bead by different rules (ADR-0045 Verification; #146, #187).
 2. **Just-in-time steps.** `--apply` does one idempotent reduction under the phase lock; it resumes after a crash
-   (B5); `plan approve` refuses when bd refuses its link as a cycle (B7). Failure: a run stalls (`mindspec-qu9z`).
+   (B5); `plan approve` refuses a link that makes a cycle (B7). Failure: a run stalls (`mindspec-qu9z`).
 3. **Lease and submit.** `lease` (§5) refuses a held or blocked step, ancestor or upstream; `submit` (§6) checks
    evidence and writes the receipt before the close. Failure: bd accepts `--claim` on a blocked item; subagents run
    `bd close`; `panel.one-fixer` and `lifecycle.complete-by-orchestrator` are advisory.
@@ -102,7 +102,8 @@ Scratch repo and bd database; spec `x` plan-approved by this binary; items 2 and
   first `--apply` creates exactly `<1>.impl.a1`; a second, or a rerun after a kill at its first write, gives the same
   snapshot and `revision`. The pass of `complete 1` creates exactly `<2>.impl.a1` and `<3>.impl.a1`. "X blocks Y"
   = Y waits for X. A fake bd refuses one `dep add` as a cycle: `plan approve` exits non-zero naming the link, with no
-  gate and no `mindspec_run`; with a normal bd a rerun exits 0 and makes no second work item.
+  gate, no `mindspec_run` and the plan unapproved. Then a foreign `bd create --parent <epic>`: a rerun with a normal
+  bd exits 0, makes no second work item and leaves that child unchanged.
 - [ ] AC3 (R3, R4): `next 1` (no `--spec`) resolves spec `x` and prints a token (generation 1); a second `next 1` or
   `lease <1>.impl.a1` exits non-zero naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug
   blocking item 1: `lease <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits
@@ -127,11 +128,12 @@ Scratch repo and bd database; spec `x` plan-approved by this binary; items 2 and
 - [ ] AC9 (R8): a commit on `bead/2` in round 2, no fix open: one pass marks round-2 slots `superseded` and lists
   `panel create 2`; in an open fix, none. A foreign child under `<2>.review`, a second REJECT on item 2, answer
   `halt`: other open steps are `halted`, `<2>.review` stays open flagged `foreign-child-open`; `next-action x` exits 4
-  on each read; `lease`, `complete`, `next 2`, `panel create 2` exit non-zero, snapshot unchanged.
+  on each read; `lease`, `complete`, `next 2`, `panel create 2` exit non-zero, snapshot unchanged. In a new
+  fixture, killed after the `halt` receipt: `next-action x --apply` closes the decision and open steps `halted`, exits 4.
 - [ ] AC10 (R9): `bd close <slot>` with no verdict, or a verdict with an old token: flag `unreceipted-close`, and
   the next `--apply` creates `<slot>.a2`. With a valid verdict and token, `submit` writes the receipt; no `.a2`. After
   item 1's gate passes, `bd close <1>` flags `raw-close`: `impl approve` exits non-zero naming it, no `<2>.impl.a1`,
-  then `complete 1` exits 0 and clears it. `bd close --force <1>` before a pass flags `forced-close`: `complete 1`
+  then `complete 1` exits 0 and clears it. In a fresh fixture, `bd close --force <1>` flags `forced-close`: `complete 1`
   exits non-zero printing `bd reopen <1>`; after `bd reopen <1>` and a gate pass, `complete 1` exits 0 and `impl
   approve` does not name the flag.
 - [ ] AC11 (R9): one each of `--allow-not-ready`, `--allow-doc-skew`, `--override-adr`, `--allow-net-deletion`, `lease
@@ -150,7 +152,7 @@ Scratch repo and bd database; spec `x` plan-approved by this binary; items 2 and
   `id-collision`; that bead is unchanged. A foreign `bd create --parent <1>.review` gives a foreign `<1>.review.1`:
   after a passing tally the gate stays open and `next-action` exits 3 flagging `foreign-child-open`; after its close
   the gate closes `passed`. A fake bd answers exit 13 to the first `--if-status` write: `submit` exits 0 with one
-  receipt and one close; always 13: non-zero, snapshot unchanged.
+  receipt and one close; always 13: non-zero, the step open with at most its receipt.
 - [ ] AC15 (R12): with K = `max_rounds_per_bead|panel_deadlock_rounds|max_consecutive_impl_failures|gate_authority`,
   `git grep -n -i -E "$K|Any bead REJECT|REJECT / HARD block|do not proceed to the next bead|on_reject|loop\.halt|
   max-rounds|One halted bead|keep going after a halt|default .?3" -- .claude/skills plugins/mindspec/skills
