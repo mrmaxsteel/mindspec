@@ -38,8 +38,8 @@ Thesis: beads hold plan and dispatch; git holds evidence; the binary holds rules
    `superseded`, `halted`) BEFORE the bd close. A retry with the same receipt completes it.
 6. Lineage is metadata `mindspec_from`. Blocks links exist only in plan order and from each work item to
    `<epic>.final` (a `step`, so bd's epic rule does not apply), never to an already-released item.
-7. Check both kinds for cycles before a link write (§8; bd's refusal is the backstop). No blocks between ancestor
-   and descendant.
+7. Check both kinds for cycles before each mindspec link write (§8; bd's refusal is the backstop). No blocks between
+   ancestor and descendant.
 8. Just in time: a bead comes only from the outcome that authorises it (enrolment: all gates; refused round: its
    fix; passed fix: the next slots).
 9. A refused tally below the limit creates round N+1's fix under the same open gate. Attempts are counted.
@@ -80,10 +80,10 @@ or starts an actor.
 
 bd's lease cannot serve: its holder is the bd actor (one per clone) and its TTL is in minutes. Under the phase lock,
 `lease` writes `in_progress`, a monotonic `generation`, the expiry and a token hash with bd `--if-status`
-compare-and-set. It prints the token once. `lease <w>.impl.a<k>` and `next <w>` are the same claim.
-Refuses: a foreign bead, a gate, a decision; a held or blocked ancestor or upstream (B1, B2; an open epic, work item
-or gate does not hold); a live lease; a halted spec; an open decision (§13.8). `--take` revokes, issues generation
-N+1 and records the reason. `panel.lease_ttl` defaults to `2h` and is renewable.
+compare-and-set. It prints the token once. `lease <w>.impl.a<k>` and `next <w>` are the same claim. Refuses: a foreign
+bead, a gate, a decision; a held or blocked ancestor or upstream (B1, B2; an open epic, work item or gate does not
+hold); a live lease; a halted spec; an unanswered decision (§13.8). `--take` revokes, issues generation N+1 and
+records the reason. `panel.lease_ttl` defaults to `2h` and is renewable.
 
 ## 6. `submit <step> --lease <t> (--artifact <path> | --commit <oid>)` | `submit <decision> --answer <opt>`
 
@@ -120,17 +120,21 @@ recorded in the plan's `bead_ids` right after its create; a cycle check (B7) of 
 store; the plan-order blocks links; epic metadata `mindspec_run: {round_limit, lease_ttl, rules: "kernel-1"}`; the
 approval record; the gates, each with the links from the work items to `<epic>.final` (the next `--apply` creates a
 missing gate or link, B5). The plan stays unapproved until the approval record. When the check or bd refuses a link as
-a cycle, `plan approve` refuses and names the link; it writes no `mindspec_run`, approval record or gate. A rerun
-reuses exactly the recorded ids, creates only the missing items and writes the missing links. A rerun or re-approval
-selects only recorded ids, never by `--parent`, and closes or supersedes no other bead. An item created but not
-recorded is foreign (§12.5). A spec is enrolled if ANY witness exists: `mindspec_run` on the epic; a computed kernel
-id under the epic (open or closed, any type); a spec `panel.json` with `"orchestrated": true` (`panel create` writes
-it). A witness without the marker gives the default policy and the flag `run-marker-missing`. A spec with no witness
-is pre-kernel (approved before this release) and finishes on today's rules: warnings, and `panel_presence` applies.
-`next-action` and `lease` refuse it and name today's verbs; no pass writes on it. No verb, flag, env variable or key
-enrols a pre-kernel spec or clears enrolment. Policy is pinned at enrolment; config edits and retyping change nothing.
-An enrolled spec always enforces the panel gate. Threat model: the kernel governs progression, not OS access; a
-same-user process can forge an answer. One controller host.
+a cycle before `mindspec_run`, `plan approve` refuses, names the link and writes no `mindspec_run`, approval record or
+gate. From `mindspec_run` on, the spec is enrolled. A link that bd refuses after that (here or at any `--apply`) is
+not written: the step that needs it stays open, the pass flags `foreign-blocker` naming the foreign link and its bd
+removal, and the next `--apply` tries again; `plan approve` exits 0. A rerun before the approval record reuses exactly
+the recorded ids, creates only the missing items and writes the missing links; it selects only recorded ids, never by
+`--parent`, and closes or supersedes no other bead. On an enrolled spec with an approval record, `plan approve`
+refuses, names the enrolment and writes nothing. An item created but not recorded (a kill between the two) is foreign;
+its `foreign-child-open` recovery line says to close it with bd (§12.5). A spec is enrolled if ANY witness exists:
+`mindspec_run` on the epic; a computed kernel id under the epic (open or closed, any type); a spec `panel.json` with
+`"orchestrated": true` (`panel create` writes it). A witness without the marker gives the default policy and the flag
+`run-marker-missing`. A spec with no witness is pre-kernel (approved before this release) and finishes on today's
+rules: warnings, and `panel_presence` applies. `next-action` and `lease` refuse it and name today's verbs; no pass
+writes on it. No verb, flag, env variable or key enrols a pre-kernel spec or clears enrolment. Policy is pinned at
+enrolment; config edits and retyping change nothing. An enrolled spec always enforces the panel gate. Threat model:
+the kernel governs progression, not OS access; a same-user process can forge an answer. One controller host.
 
 ## 9. Refused vs flagged
 
@@ -187,11 +191,11 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    mindspec step: the pass flags `foreign-blocker` naming it, the step waits, and the recovery line says to remove
    that link or close that blocker with bd.
 5. **Writes.** Mindspec never creates, edits, claims, closes, retypes, relabels, reparents or deletes a foreign bead.
-   When an open foreign child stops a mindspec close (gate, slot, fix, `complete`, `impl approve`), the close
-   does not happen: the verb checks before any write, the pass flags `foreign-child-open` naming the child, and the
-   recovery line says to close or re-parent that child. The flag shows whenever an open foreign child is under a
-   mindspec bead; status is `wait` only when no action remains. Every query that feeds a write, and every bulk write
-   (`halt`, any supersede, the finalize allow-set), selects by computed id, never by type, label, parent or prefix. A
+   When an open foreign child stops a mindspec close (gate, slot, fix, `complete`, `impl approve`), the close does not
+   happen: the verb checks before any write, the pass flags `foreign-child-open` naming the child, and the recovery
+   line says to close or re-parent that child. The flag shows whenever an open foreign child is under a mindspec bead;
+   status is `wait` only when no action remains. Every query that feeds a write, and every bulk write (`halt`, any
+   supersede, the finalize allow-set), selects by computed or recorded id, never by type, label, parent or prefix. A
    deleted kernel bead is created again; its rounds stay in the ledger.
 6. **Types and config.** `mindspec setup` adds `step` to `types.custom` and keeps every value already there. It
    replaces no value of a key outside mindspec's required set, `--force` included.
@@ -213,12 +217,12 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
 4. **After halt (OQ6).** The spec stays enrolled. `halt` closes every open step and decision under the epic `halted`
    that it can. A step with an open foreign child, and its kernel ancestors, stay open, flagged `foreign-child-open`.
    The spec is halted from the answer's receipt. Then only writes that finish the halt run: a retry of the same answer
-   and `next-action --apply` each close the receipted decision and every other closable step `halted`, exit 4 and
-   write nothing else. Any other verb that would create, claim or close a kernel step, or claim, close or merge a work
-   item or the epic, refuses, names the halt and writes nothing (no pass). A halted spec is not active when a verb
-   resolves its spec without `--spec`. Read verbs work: `next-action` (prints `halted`, exits 4, writes nothing;
-   `halted` wins over `wait`), `panel tally`, `panel verify`, `config show`, `doctor`. Nothing resumes a halted epic.
-   Each `halt` option says it stops every work item.
+   and `next-action --apply` each close the receipted decision and every other closable step `halted`, exit 4 (not
+   §6's 0) and write nothing else. Any other verb that would create, claim or close a kernel step, or claim, close or
+   merge a work item or the epic, refuses, names the halt and writes nothing (no pass). A halted spec is not active
+   when a verb resolves its spec without `--spec`. Read verbs work: `next-action` (prints `halted`, exits 4, writes
+   nothing; `halted` wins over `wait`), `panel tally`, `panel verify`, `config show`, `doctor`. Nothing resumes a
+   halted epic. Each `halt` option says it stops every work item.
 5. **Refusal sets (OQ11).** No refusal list in §4-§9 or `spec.md` is exhaustive. Each verb keeps today's refusals
    and adds every refusal that §5-§12 give it. Flag codes: `unreceipted-close`, `raw-close`, `raw-claim`,
    `forced-close`, `run-marker-missing`, `foreign-child-open`, `foreign-blocker`, `id-collision`.
@@ -236,8 +240,8 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    refuses and names it (redispatch: `panel recover` or `launch`). A subject move before `panel create` updates the
    authorised subject only. A round past the allowance gives the limit decision, not a `run` entry.
 8. **REJECT (OQ13).** A tally with a REJECT verdict is a refused round. Below the limit, its pass creates the fix
-   `<gate>.r<N+1>.fix` and the decision `<gate>.decide.reject.r<N>` (`fix` or `halt`). While it is open, a verb that
-   would claim or close another child of that gate, open a round on it, or close or merge what it decides refuses
+   `<gate>.r<N+1>.fix` and the decision `<gate>.decide.reject.r<N>` (`fix` or `halt`). While it is unanswered, a verb
+   that would claim or close another child of that gate, open a round on it, or close or merge what it decides refuses
    and names it; `next-action` lists the decision, not the fix, until `--answer fix` releases the fix. A limit
    decision holds only a verb that opens a round or claims or closes a fix; a passing `panel refute` or `panel defer`
    retally closes the gate `passed` and the limit decision `superseded`. The answer adds no round. At the limit, the

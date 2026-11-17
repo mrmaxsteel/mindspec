@@ -45,7 +45,7 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
 1. **Read-only reducer.** `next-action [<spec>] [--json]` writes nothing and prints `mindspec.next-action/v1` (§4).
    Failure: two skills pick the next bead by different rules (ADR-0045 Verification; #146, #187).
 2. **Just-in-time steps.** `--apply` does one idempotent reduction under the phase lock; it resumes after a crash
-   (B5); `plan approve` refuses a link that makes a cycle (B7). Failure: a run stalls (`mindspec-qu9z`).
+   (B5); a cycle link is refused before enrolment, flagged after (B7, §8). Failure: a run stalls (`mindspec-qu9z`).
 3. **Lease and submit.** `lease` (§5) refuses a held or blocked step, ancestor or upstream; `submit` (§6) checks
    evidence and writes the receipt before the close. Failure: bd accepts `--claim` on a blocked item; subagents run
    `bd close`; `panel.one-fixer` and `lifecycle.complete-by-orchestrator` are advisory.
@@ -76,9 +76,8 @@ files) cites no ADR, spec, requirement, bead or issue number. No new use of the 
 
 ## Migration
 
-A spec past `plan approve` when this ships has no witness: it is pre-kernel and finishes on today's rules (warnings;
-`panel_presence` applies). Only new plan approvals enrol; there is no version stamp (§8). Without `step`, `plan
-approve` refuses and names the setup command.
+A spec past `plan approve` at release has no witness: it is pre-kernel and finishes on today's rules. Only new plan
+approvals enrol; there is no version stamp (§8). Without `step`, `plan approve` refuses and names the setup command.
 
 ## Scope
 
@@ -94,16 +93,19 @@ approve` refuses and names the setup command.
 
 ## Acceptance Criteria
 
-Scratch repo and bd database; spec `x` plan-approved by this binary; items 2 and 3 depend on item 1. "Snapshot" =
-`bd list --all --json`, every dependency list, `git for-each-ref`, `git status --porcelain`. "Foreign" = by `bd` only.
+Scratch repo and bd database; spec `x` plan-approved by this binary; items 2 and 3 depend on item 1. "Snapshot" = `bd
+list --all --json`, every dependency list, `git for-each-ref`, `git status --porcelain`. "Foreign" = by `bd` only. "X
+blocks Y" = Y waits for X.
 
 - [ ] AC1 (R1): `next-action x --json` twice: same bytes and snapshot; one action, item 1 `implement`, `"exists":false`.
-- [ ] AC2 (R2, R5, R6): `plan approve` creates exactly `<w>.review` per item, `<epic>.final` and `mindspec_run`. The
-  first `--apply` creates exactly `<1>.impl.a1`; a second, or a rerun after a kill at its first write, gives the same
-  snapshot and `revision`. The pass of `complete 1` creates exactly `<2>.impl.a1` and `<3>.impl.a1`. "X blocks Y"
-  = Y waits for X. A fake bd refuses one `dep add` as a cycle: `plan approve` exits non-zero naming the link, with no
-  gate, no `mindspec_run` and the plan unapproved. Then a foreign `bd create --parent <epic>`: a rerun with a normal
-  bd exits 0, makes no second work item and leaves that child unchanged.
+- [ ] AC2 (R2, R5, R6): `plan approve` creates exactly `<w>.review` per item, `<epic>.final` and `mindspec_run`; a
+  second run exits non-zero naming the enrolment, same snapshot. The first `--apply` creates exactly `<1>.impl.a1`; a
+  second, or a rerun after a kill at its first write, gives the same snapshot and `revision`. The pass of `complete 1`
+  creates exactly `<2>.impl.a1` and `<3>.impl.a1`. Fresh fixtures: (a) a fake bd refuses a plan-order `dep add` as a
+  cycle: exit non-zero naming the link; no gate, `mindspec_run` or approval. Then a foreign `bd create --parent
+  <epic>` and a normal-bd rerun: exit 0, no second work item, that child unchanged. (b) Killed after the creates,
+  foreign links item 3 blocks a bug blocks item 1: the rerun refuses before any `dep add`. (c) A fake bd refuses an
+  item-to-final `dep add`: exit 0, `next-action` flags `foreign-blocker`; a normal-bd `--apply` writes it.
 - [ ] AC3 (R3, R4): `next 1` (no `--spec`) resolves spec `x` and prints a token (generation 1); a second `next 1` or
   `lease <1>.impl.a1` exits non-zero naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug
   blocking item 1: `lease <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits
@@ -176,15 +178,15 @@ The scratch-repo tests for AC1-AC17 each pass and fail on a named mutation; `mak
 - [ ] OQ1: Does `bd create --id` accept word segments? Recommended: probe first; fallback `mindspec_key` (§12).
 - [ ] OQ2: lease refuses an "open ancestor or upstream", but every step has one. Recommended: held or blocked (§5).
 - [ ] OQ5: B12 freezes a passed gate; `panel rebind` refuses a config change. Recommended: successor gates (§13.2).
-- [ ] OQ4, OQ6: no final-gate fix id (`ForBead` skips finals); a halted spec is active. Recommended: §13.1, §13.4.
+- [ ] OQ4, OQ6: no final-gate fix id; a halted spec is active; halt retry exit 4 (§13.4) vs 0 (§6). Recommended: §13.
 - [ ] OQ8: exits 3/4/5 conflict with ADR-0035 HC-4; `indeterminate` = 1 equals a refusal. Recommended: amend HC-4.
 - [ ] OQ9, OQ11: B8 has no implement outcome; refusals omit today's gates and halt rows. Recommended: §13.3, §13.5-6.
 - [ ] OQ10, OQ12: B8, B10 name no next round; only `panel create` writes one. Recommended: `run` entry (§13.7, §13.9).
 - [ ] OQ13: B9 gives a refused round a fix, R8 a REJECT a decision. Recommended: both; the decision holds (§13.8).
 - [ ] OQ14: bd has no default view filter. Recommended: mark mindspec beads; `bd ready --exclude-label mindspec` (§12).
-- [ ] OQ15-OQ18: `plan approve` enrols every new spec, no opt-in (§8); the existing verbs stay the `run` commands
-  (§7); a spec past `plan approve` at release finishes on today's rules; an enrolled spec always enforces the panel
-  gate (`panel_presence` is pre-kernel only). Recommended: yes to each.
+- [ ] OQ15-OQ18: `plan approve` enrols every new spec, no opt-in (§8); the verbs stay as `run` commands (§7); a spec
+  past `plan approve` at release keeps today's rules; an enrolled spec enforces the gate. Recommended: yes.
+- [ ] OQ19: `plan approve` refuses an enrolled spec (§8); how does a plan change? Recommended: a new spec, or `halt`.
 
 ## Approval
 
