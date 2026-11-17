@@ -124,19 +124,20 @@ approve` refuses and names the link and any foreign link that closes the cycle, 
 `mindspec_run`, approval record or gate. From `mindspec_run` on, the spec is enrolled. A link that the check or bd
 refuses after that (here or at `--apply`) is not written: the step that needs it stays open, `plan approve` exits 0,
 and the next `--apply` tries again. Each pass runs the B7 check on current state for each missing mindspec link and
-flags `foreign-blocker` naming the foreign link that closes the cycle and its bd removal; nothing is stored. A rerun
-before the approval record keeps `mindspec_run`, reuses exactly the recorded ids, creates only missing items and
-continues the order; it never selects by `--parent` and closes or supersedes no other bead. A rerun refuses a changed
-plan (a recorded id with no chunk, or a written plan-order link it lacks), names the change and writes nothing. On an
-enrolled spec with an approval record, `plan approve` refuses, names the enrolment and writes nothing. An item created
-but not recorded is foreign; its `foreign-child-open` recovery line says to close it with bd. A spec is enrolled if
-ANY witness exists: `mindspec_run` on the epic; a computed kernel id under the epic (open or closed, any type); a spec
-`panel.json` with `"orchestrated": true` (`panel create` writes it). A witness without the marker gives the default
-policy and flags `run-marker-missing`. A spec with no witness (approved before this release) is pre-kernel and
-finishes on today's rules: warnings, and `panel_presence` applies. `next-action` and `lease` refuse it, naming today's
-verbs; no pass writes on it. No verb, flag, env var or key enrols a pre-kernel spec or clears enrolment. Policy is
-pinned at enrolment; config edits and retypes change nothing. An enrolled spec always enforces the panel gate. Threat
-model: the kernel governs progression, not OS access; a same-user process can forge an answer. One controller host.
+flags `foreign-blocker` naming the first foreign link on the cycle from that link's downstream bead, and its bd
+removal; nothing is stored. A rerun before the approval record keeps any `mindspec_run`, reuses exactly the recorded
+ids, creates only missing items and continues the order; it may add new chunks and links. It never selects by
+`--parent` and closes or supersedes no other bead. A rerun refuses a recorded id with no chunk, names it and writes
+nothing. On an enrolled spec with an approval record, `plan approve` refuses, names the enrolment and writes nothing.
+An item created but not recorded is foreign; its `foreign-child-open` recovery line says to close it with bd. A spec
+is enrolled if ANY witness exists: `mindspec_run` on the epic; a computed kernel id under the epic (open or closed,
+any type); a spec `panel.json` with `"orchestrated": true` (`panel create` writes it). A witness without the marker
+gives the default policy and flags `run-marker-missing`. A spec with no witness (approved before this release) is
+pre-kernel and finishes on today's rules: warnings, and `panel_presence` applies. `next-action` and `lease` refuse it,
+naming today's verbs; no pass writes on it. No verb, flag, env var or key enrols a pre-kernel spec or clears
+enrolment. Policy is pinned at enrolment; config edits and retypes change nothing. An enrolled spec always enforces
+the panel gate. Threat model: the kernel governs progression, not OS access; a same-user process can forge an answer.
+One controller host.
 
 ## 9. Refused vs flagged
 

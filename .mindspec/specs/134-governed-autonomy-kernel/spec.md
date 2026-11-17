@@ -105,9 +105,10 @@ blocks Y" = Y waits for X.
   cycle: exit non-zero naming the link; no gate, `mindspec_run` or approval. Then a foreign `bd create --parent
   <epic>` and a normal-bd rerun: exit 0, no second work item, that child unchanged. (b) With a call-logging bd
   wrapper, killed after the creates, foreign links item 3 blocks a bug blocks item 1: the rerun exits non-zero naming
-  a chain link and its bd removal; the log has no `dep add`. (c) Killed after the `<epic>.final` create, foreign links
+  a chain link and its bd removal; the log has no link write. (c) Killed after the `<epic>.final` create, foreign links
   `<epic>.final` blocks a bug blocks item 3: `--apply` exits 0 without the item-3-to-final link; `next-action` flags
-  `foreign-blocker` naming a chain link. After `bd dep remove` of it: no flag; `--apply` writes the link.
+  `foreign-blocker` naming the `<epic>.final`-blocks-bug link. After `bd dep remove` of that link, that flag is gone
+  and `--apply` writes the item-3-to-final link.
 - [ ] AC3 (R3, R4): `next 1` (no `--spec`) resolves spec `x` and prints a token (generation 1); a second `next 1` or
   `lease <1>.impl.a1` exits non-zero naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug
   blocking item 1: `lease <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits
@@ -123,7 +124,8 @@ blocks Y" = Y waits for X.
 - [ ] AC6 (R6): `panel_presence: warn`; each kernel step closed by `bd close --force` and retyped `chore`; no
   `mindspec_run` or `panel.json`: `complete` with no passing panel exits non-zero (closed ids witness); `next-action`
   flags `run-marker-missing`. Spec `y` approved by v0.19.0: `next-action y` exits non-zero, same snapshot; `complete`
-  with no panel warns, exits 0.
+  with no panel warns, exits 0; a foreign `bd create --parent <y-epic>`, then `plan approve y`: no witness, that
+  child unchanged.
 - [ ] AC7 (R7): 3 rounds on slug A, `panel abandon` A, 2 on slug B: round 3 of B exits non-zero; `next-action` lists
   one decision (`continue:<n>`, `halt`) and `run` has no `panel create`; after `continue:1` one more round runs and
   the next exits non-zero. The same holds for the final gate.
