@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
@@ -39,6 +40,20 @@ func panelHasEnrollment(root, spec string) bool {
 		}
 	}
 	return false
+}
+
+// panelCountsDocumentRounds keeps document review available without the tracker.
+func panelCountsDocumentRounds(root, specDir, spec string) bool {
+	if !strings.EqualFold(frontmatter.StatusFromPath(filepath.Join(specDir, "plan.md")), "Approved") {
+		return true
+	}
+	if panelHasEnrollment(root, spec) {
+		return true
+	}
+	// An approved plan without a local witness may still be enrolled in the store.
+	// A failed lookup does not prevent document review.
+	s, err := panelKernelStateFn(root, spec)
+	return err == nil && s != nil && s.Enrolled
 }
 
 // panelKernelStateFn resolves enrollment without changing the store.

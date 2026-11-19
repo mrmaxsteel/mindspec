@@ -119,6 +119,16 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if reg.Err != nil {
 		return reg.Err
 	}
+	rosterIndex := -1
+	for i, reviewer := range reg.Panel.Roster {
+		if reviewer.Slot == slot {
+			rosterIndex = i
+			break
+		}
+	}
+	if rosterIndex < 0 {
+		return guard.NewFailure("slot is not on the roster", "select a slot from the panel roster")
+	}
 	if inferred && (reg.Panel.Round != round || reg.Panel.Spec != spec) {
 		return guard.NewFailure("slot directory differs from the current panel", "use mindspec panel checkout for the current round")
 	}
@@ -173,7 +183,10 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if state != nil && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review") {
 		token, _ := cmd.Flags().GetString("lease")
 		gate := kernelPanelGate(*state, reg.Panel)
-		step := fmt.Sprintf("%s.r%d.%s", gateBase(*state, gate), round, slot)
+		if slot != fmt.Sprintf("R%d", rosterIndex+1) {
+			return guard.NewFailure("slot identity differs from its roster position", "select a slot from the panel roster")
+		}
+		step := fmt.Sprintf("%s.r%d.R%d", gateBase(*state, gate), round, rosterIndex+1)
 		if token == "" {
 			return guard.NewFailure("--lease is required for this slot", "mindspec lease "+step)
 		}

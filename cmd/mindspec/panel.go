@@ -288,12 +288,9 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 			return checkoutError(err, "check the panel scratch paths, then repeat panel create")
 		}
 		defer releaseCheckouts()
-		if (gate == "spec_approve" || gate == "plan_approve") && panelHasEnrollment(root, specID) {
+		if (gate == "spec_approve" || gate == "plan_approve") && panelCountsDocumentRounds(root, specDir, specID) {
 			count, err := panel.RoundsForGate(panel.Scan(root, specDir), specID, gate, "")
-			if err != nil {
-				return err
-			}
-			if count+1 > cfg.Panel.MaxRounds {
+			if err == nil && count+1 > cfg.Panel.MaxRounds {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: review round count %d exceeds the configured limit\n", count+1)
 			}
 		}

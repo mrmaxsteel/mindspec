@@ -100,10 +100,7 @@ func TestS134PanelSubmit_PublishesCommittedBytes(t *testing.T) {
 	}
 	t.Cleanup(func() { panelKernelStateFn = resolver })
 	out, err = kernelPanelRun(t, panelSubmitCmd, "1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file, "--lease", lease.Token)
-	if err != nil {
-		kernelPanelAssertUnpublished(t, f, id, filepath.Dir(file))
-		return
-	}
+	kernelPanelRequire(t, out, err)
 	subs, err := panel.LatestSubmissions(filepath.Dir(file), 1)
 	f.Must(err)
 	receipt, ok, err := kernel.Decode[kernel.Receipt](kernelPanelRecord(t, f, id).Metadata, kernel.KeyClose)
@@ -339,5 +336,142 @@ func TestS134PanelCreate_InferGateIds(t *testing.T) {
 		if got := panelCreateKernelGate(f.Root, tt.slug, tt.spec, tt.target, ""); got != tt.want {
 			t.Fatalf("%+v: got %q", tt, got)
 		}
+	}
+}
+
+func TestS134PanelCreate_DocumentRoundsWithoutWorkPanel(t *testing.T) {
+	for _, gate := range []string{"spec_approve", "plan_approve"} {
+		for _, mode := range []string{"spec", "plan", "enrolled"} {
+			t.Run(gate+"/"+mode, func(t *testing.T) {
+				f, _, _ := kernelPanelFixture(t)
+				panelKernelStateFn = panelKernelRealResolver
+				if mode == "enrolled" {
+					actorCmdStore(t, f)
+				} else {
+					if mode == "spec" {
+						f.Must(os.Rename(filepath.Join(f.SpecDir, "plan.md"), filepath.Join(t.TempDir(), "plan.md")))
+						rebindWrite(t, f.Root, filepath.Join(".mindspec/specs", f.SpecID, "spec.md"), "---\nstatus: Draft\n---\n# Spec\n")
+					} else {
+						rebindWrite(t, f.Root, filepath.Join(".mindspec/specs", f.SpecID, "plan.md"), "---\nstatus: Draft\n---\n# Plan\n")
+					}
+					actorCmdGit(t, f, "add", ".")
+					actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "document phase")
+					actorCmdGit(t, f, "update-ref", "refs/heads/spec/"+f.SpecID, "HEAD")
+					git, err := exec.LookPath("git")
+					f.Must(err)
+					path := t.TempDir()
+					f.Must(os.Symlink(git, filepath.Join(path, "git")))
+					t.Setenv("PATH", path)
+					t.Setenv("BEADS_DIR", "")
+				}
+				if regs := panel.Scan(f.SpecDir); len(regs) != 0 {
+					t.Fatal("fixture already has a panel", regs)
+				}
+				for n := 1; n <= 6; n++ {
+					out, err := kernelPanelRun(t, panelCreateCmd, "document", "--spec", f.SpecID, "--gate", gate, "--target", "spec/"+f.SpecID, "--round", fmt.Sprint(n))
+					kernelPanelRequire(t, out, err)
+					want := 0
+					if n == 6 {
+						want = 1
+					}
+					if strings.Count(out, "warning:") != want || n == 6 && !strings.Contains(out, "count 6") {
+						t.Fatalf("round %d warning: %s", n, out)
+					}
+				}
+				// A separate broken ledger must not stop another document panel.
+				rebindWrite(t, f.Root, filepath.Join(".mindspec/specs", f.SpecID, "reviews/document/dispositions.jsonl"), "bad-json\n")
+				if _, err := panel.RoundsForGate(panel.Scan(f.SpecDir), f.SpecID, gate, ""); err == nil {
+					t.Fatal("counter accepted the broken ledger")
+				}
+				out, err := kernelPanelRun(t, panelCreateCmd, "other", "--spec", f.SpecID, "--gate", gate, "--target", "spec/"+f.SpecID)
+				kernelPanelRequire(t, out, err)
+			})
+		}
+	}
+}
+
+func TestS134PanelSubmit_OffRosterRecovery(t *testing.T) {
+	for _, slot := range []string{"R1;touch pwned", "R99"} {
+		t.Run(slot, func(t *testing.T) {
+			f, gate, head := kernelPanelFixture(t)
+			kernelPanelAuthorise(f, gate, head, 1, 2)
+			out, err := kernelPanelCreate(t, f, "1")
+			kernelPanelRequire(t, out, err)
+			v := paneltest.Verdict("APPROVE")
+			v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
+			file := filepath.Join(f.SpecDir, "reviews", "1", "R1-round-1.json")
+			f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
+			before := kerneltest.Snapshot(t, f)
+			resolver := panelKernelStateFn
+			calls := 0
+			panelKernelStateFn = func(root, spec string) (*kernel.State, error) { calls++; return resolver(root, spec) }
+			t.Cleanup(func() { panelKernelStateFn = resolver })
+			out, err = kernelPanelRun(t, panelSubmitCmd, "1", "--spec", f.SpecID, "--slot", slot, "--round", "1", "--file", file)
+			if err == nil {
+				t.Fatal("off-roster submit succeeded", out)
+			}
+			for _, line := range strings.Split(out+err.Error(), "\n") {
+				if strings.HasPrefix(line, "recovery:") && strings.Contains(line, slot) {
+					t.Fatalf("caller text in recovery: %s", line)
+				}
+			}
+			kernelPanelRefusal(t, out, err, "slot is not on the roster")
+			if calls != 0 || before != kerneltest.Snapshot(t, f) {
+				t.Fatal("off-roster submit used kernel state or wrote")
+			}
+			kernelPanelAssertUnpublished(t, f, gate+".r1.R1", filepath.Dir(file))
+		})
+	}
+}
+
+func TestS134PanelSubmit_PublicationBeforeReceipt(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, err := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, err)
+	id := gate + ".r1.R1"
+	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+	f.Must(err)
+	v := paneltest.Verdict("APPROVE")
+	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
+	file := filepath.Join(f.SpecDir, "reviews", "1", "R1-round-1.json")
+	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
+	actorCmdGit(t, f, "add", ".")
+	actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verdict")
+	calls := 0
+	panelSubmitMetadataFn = func(string) (map[string]interface{}, error) { calls++; return nil, fmt.Errorf("publication refused") }
+	before := kerneltest.Snapshot(t, f)
+	out, err = kernelPanelRun(t, panelSubmitCmd, "1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file, "--lease", lease.Token)
+	kernelPanelRefusal(t, out, err, "publication refused")
+	if calls != 1 {
+		t.Fatal("publication was not attempted once", calls)
+	}
+	kernelPanelAssertUnpublished(t, f, id, filepath.Dir(file))
+	if before != kerneltest.Snapshot(t, f) {
+		t.Fatal("failed publication wrote kernel state")
+	}
+}
+
+func TestS134PanelCreate_EnrolledPanelWithoutStore(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, err := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, err)
+	f.Must(os.Rename(filepath.Join(f.Root, ".beads"), filepath.Join(t.TempDir(), "beads")))
+	t.Setenv("BEADS_DIR", "")
+	git, err := exec.LookPath("git")
+	f.Must(err)
+	path := t.TempDir()
+	f.Must(os.Symlink(git, filepath.Join(path, "git")))
+	t.Setenv("PATH", path)
+	panelKernelStateFn = panelKernelRealResolver
+	before := kerneltest.Snapshot(t, f)
+	out, err = kernelPanelCreate(t, f, "1")
+	kernelPanelRefusal(t, out, err, "the enrolled panel requires its tracker store")
+	if !strings.Contains(err.Error(), "recovery: restore the tracker store and bd on PATH, then run bd list --all --json") {
+		t.Fatal("store recovery missing", err)
+	}
+	if before != kerneltest.Snapshot(t, f) {
+		t.Fatal("missing store refusal wrote")
 	}
 }

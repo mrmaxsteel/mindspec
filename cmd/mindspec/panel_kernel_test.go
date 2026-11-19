@@ -439,6 +439,8 @@ func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
 			f.Create(fix, gate)
 			kernelPanelClose(t, f, fix, head)
 			kernelPanelAuthorise(f, gate, head, 6, 2)
+			out, e = kernelPanelCreate(t, f, "1", extra...)
+			kernelPanelRefusal(t, out, e, "recovery: mindspec submit "+d+" --answer continue:1")
 			_, e = kernel.Answer(f.State(), d, "continue:1")
 			f.Must(e)
 			if r := kernelPanelRecord(t, f, fix); r.Status != "closed" {

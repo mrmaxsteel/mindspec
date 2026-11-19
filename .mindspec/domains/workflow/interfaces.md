@@ -14,12 +14,15 @@ A closed gate, an open slot, an unanswered decision, a collision, or a halted sp
 A round must equal the total registered rounds plus one.
 All registrations count, including abandoned panels.
 A continuation answer increases the pinned allowance.
-When a local panel records enrollment, spec and plan approval panels warn after the configured count and continue.
+Spec and plan approval panels count rounds before plan approval and after enrollment.
+Past `panel.max_rounds`, they print one warning with the count and continue.
+A count or tracker read failure does not stop document panel creation.
 
 `panel submit` requires the current slot lease for an enrolled spec.
 Use a committed verdict file in the panel directory.
-The command validates the lease and evidence before it publishes the verdict.
-It writes the receipt before it closes the slot.
+The command checks roster membership before it reads kernel state.
+It validates the lease and evidence before it publishes the verdict.
+It writes the receipt after publication and before it closes the slot.
 A passing refute or defer retally supersedes the open fix or limit decision.
 The reducer then closes the gate as passed.
 A deferral also stores its audit record.
