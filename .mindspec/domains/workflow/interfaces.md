@@ -1333,6 +1333,22 @@ and ledger-only registrations. Missing ids refuse before any lifecycle write.
 A refusal does not supersede or create beads. The Approval section is optional
 in a draft spec because spec approval creates it.
 
+## Setup and skills
+
+The binary owns work selection and gate policy. The cycle skill runs
+`next-action --apply`, leases actor steps, dispatches agents and submits evidence.
+It executes each returned `run` entry. The autopilot uses the same cycle.
+Open decisions return to the user. A rejected round holds its own gate.
+A submitted halt answer stops every work item.
+
+Plugin skills are the source for their tracked Claude copies. Each pair must
+match byte for byte. Setup refreshes a file only when its bytes match a shipped
+version. It keeps user edits and reports them. Historical snapshots retain the
+prior bytes so plain setup can refresh an older install.
+
+Use `bd ready --exclude-label mindspec` to hide MindSpec work in a shared store.
+Setup preserves existing custom types when it adds required types.
+
 ## Config show and friction
 
 `config show` renders effective panel policy and supplied removed settings.

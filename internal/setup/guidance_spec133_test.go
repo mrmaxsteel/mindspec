@@ -114,7 +114,7 @@ func s133CycleOrderError(body string) error {
 			return fmt.Errorf("content check must follow commit and precede panel")
 		}
 	}
-	for _, required := range []string{"send all\nfailing gates and recovery lines to the implementer or fixer", "panel reviews the fixed diff"} {
+	for _, required := range []string{"send all\n   failing gates and recovery lines to the implementer or fixer", "panel reviews the fixed diff"} {
 		if !strings.Contains(body, required) {
 			return fmt.Errorf("missing failure routing: %s", required)
 		}
@@ -128,7 +128,7 @@ func TestS133Guidance_ContentCheckOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Keep --check present, but put it after the panel. A presence-only pin misses this.
-	wrong := strings.Replace(body, "mindspec complete <bead> --check\n  ↓ content gates PASS\n/ms-panel-run", "/ms-panel-run\nmindspec complete <bead> --check", 1)
+	wrong := strings.Replace(body, "mindspec complete <bead> --check\n  ↓ content gates PASS\nmindspec submit <step> --lease <token> --commit <oid>\n  ↓ next-action --apply → execute panel create from run\n/ms-panel-run", "/ms-panel-run\nmindspec complete <bead> --check", 1)
 	if wrong == body || !strings.Contains(wrong, "--check") {
 		t.Fatal("order mutation did not fire")
 	}

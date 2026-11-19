@@ -18,6 +18,7 @@ import (
 //go:embed historical_skills/*.md
 var historicalSkillsFS embed.FS
 
+// Orchestration snapshots retain earlier selection and halt guidance for upgrades.
 // previouslyShippedSkills returns, for each skill name, the set of byte-exact
 // SKILL.md contents MindSpec has shipped over time. The CURRENT canonical
 // content is added by the caller (installSkills); this function returns only
