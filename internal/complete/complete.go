@@ -621,7 +621,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// post-close children read is deliberately NOT memoized here — advanceState
 	// re-issues it via the uncached phase.FetchChildren so it observes the
 	// child set `bd close` mutated mid-run.
-	epicCache := phase.NewCache()
+	epicCache := phase.NewCache().WithRoot(root)
 
 	// 1.25. Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on
 	// first lifecycle command. Must precede the phase-dependent guard
