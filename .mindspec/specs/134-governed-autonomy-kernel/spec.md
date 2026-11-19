@@ -1,7 +1,7 @@
 ---
-status: Draft
-approved_at: ""
-approved_by: ""
+approved_at: "2026-11-19T06:51:51Z"
+approved_by: operator (lane chat 2026-11-18)
+status: Approved
 ---
 # Spec 134-governed-autonomy-kernel: Governed Autonomy Kernel
 
@@ -220,7 +220,7 @@ The scratch-repo tests for AC1-AC18 each pass and fail on a named mutation; `mak
 
 ## Approval
 
-- **Status**: DRAFT
-- **Approved By**: -
-- **Approval Date**: -
-- **Notes**: -
+- **Status**: APPROVED
+- **Approved By**: operator (lane chat 2026-11-18)
+- **Approval Date**: 2026-11-19
+- **Notes**: Approved via mindspec approve spec
