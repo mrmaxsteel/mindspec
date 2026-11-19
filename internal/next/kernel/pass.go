@@ -198,3 +198,8 @@ func applyWrite(s *Store, w Write) error {
 	}
 	return fmt.Errorf("unknown write kind")
 }
+
+// PassExcept reduces other steps before a verb checks its named step.
+func PassExcept(reg *Registry, state State, apply bool, step string) (PassResult, error) {
+	return passExcept(reg, state, apply, step)
+}

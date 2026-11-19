@@ -177,6 +177,10 @@ func pickFinding(v panel.FindingVerdict, id string) (panel.Finding, error) {
 }
 
 func runPanelRefute(cmd *cobra.Command, args []string) error {
+	return withKernelPanelVerb(cmd, args[0], false, func() error { return runPanelRefuteBody(cmd, args) })
+}
+
+func runPanelRefuteBody(cmd *cobra.Command, args []string) error {
 	root, reg, err := resolvePanelVerb(cmd, args[0])
 	if err != nil {
 		return panelVerbFailure(err)

@@ -2,7 +2,7 @@
   "verdict_schema": 2,
   "bead_id": "test-1.1",
   "spec": "001-x",
-  "target": "spec/001-x",
+  "target": "bead/test-1.1",
   "round": 2,
   "expected_reviewers": 2,
   "reviewer_count_source": "explicit",
@@ -12,13 +12,15 @@
   "roster": [
     {
       "slot": "R1",
-      "model": "test-model",
-      "lens": "test-lens"
+      "model": "harness",
+      "lens": "author-of-record",
+      "family": "harness"
     },
     {
       "slot": "R2",
-      "model": "test-model",
-      "lens": "test-lens"
+      "model": "harness",
+      "lens": "empirical-prober",
+      "family": "harness"
     }
   ],
   "telemetry": "required",

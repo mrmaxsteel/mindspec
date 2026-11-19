@@ -155,6 +155,9 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "cmd/mindspec/panel_kernel.go", Func: "panelKernelGuard", Detail: "arg1:unprovable", Rationale: "The recovery answers the computed gate decision with a listed option. It executes no command.", Obligation: "TestS134PanelCreate_LocalDecisionAndLease pins the decision and runnable answer before the fix can be leased."},
+	{File: "cmd/mindspec/panel_kernel.go", Func: "tryKernelPanelCreate", Detail: "arg1:unprovable", Rationale: "The recovery launches the recorded panel slot. The slug and spec are shell quoted; the slot is computed from the tuple.", Obligation: "TestS134PanelCreate_CollisionHaltAndOpenSlot pins the runnable slot command and unchanged snapshot."},
+	{File: "cmd/mindspec/panel_submit.go", Func: "runPanelSubmit", Detail: "arg1:unprovable", Rationale: "The recovery requests a lease for the slot computed from the active gate, round and roster position. Membership and canonical slot identity are checked first. It executes no command.", Obligation: "TestS134PanelSubmit_OffRosterRecovery rejects caller slots before kernel state is read; TestS134PanelSubmit_LeaseReceiptAndForeignSnapshot pins the computed lease command and unchanged slot."},
 	{File: "internal/approve/impl_kernel.go", Func: "implKernelPreflight", Detail: "arg1:unprovable",
 		Rationale:  "The recovery asks to resolve the listed records and retry implementation approval. Its ID operand uses idrender.Spec. The scan cannot fold this runtime operand to a literal.",
 		Obligation: "internal/approve TestS134ImplApprove_RefusalTable checks the actual recovery text against the destructive floor and checks that refusal preserves state."},
@@ -189,7 +192,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	{File: "internal/complete/check.go", Func: "reportContentGates", Detail: "arg1:unprovable",
 		Rationale:  "Recovery asks for domain docs, then retries completion with an ID-rendered bead. It offers a reasoned doc deferral and executes no command.",
 		Obligation: "internal/complete TestS133CompleteCheck_ReportParity pins every content refusal and state preservation. TestS133CompleteCheck_RecoveryOperands checks the real recovery against the destructive floor."},
-	{File: "cmd/mindspec/panel_defer.go", Func: "runPanelDefer", Detail: "arg1:unprovable", Rationale: "CheckDeferral builds a non-destructive dependency command from validated IDs; no destructive constructor applies.", Obligation: "TestPanelDefer_RefusalListsEveryMissingRequirement pins the dependency command and finding text."},
+	{File: "cmd/mindspec/panel_defer.go", Func: "runPanelDeferBody", Detail: "arg1:unprovable", Rationale: "CheckDeferral builds a non-destructive dependency command from validated IDs; no destructive constructor applies.", Obligation: "TestPanelDefer_RefusalListsEveryMissingRequirement pins the dependency command and finding text."},
 	{File: "cmd/mindspec/reattest.go", Func: "reattestRefusalFailure", Detail: "variadic-spread:recovery", Rationale: "The ancestor reader renders each dependent ID with idrender.Bead. The default recovery inspects first-parent merges for no-owned and unknown-base refusals or runs doctor for other diagnoses.", Obligation: mindspecVerbTemplateObligation},
 	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.finalizeBeadWorktrees", Detail: "arg1:unprovable",
 		Rationale:  "The recovery substitutes idrender.Spec(specID). Both callers validate specID before this helper runs. The command repeats implementation approval and does not remove work.",

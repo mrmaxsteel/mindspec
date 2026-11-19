@@ -10,6 +10,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/safefile"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -118,6 +119,16 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if reg.Err != nil {
 		return reg.Err
 	}
+	rosterIndex := -1
+	for i, reviewer := range reg.Panel.Roster {
+		if reviewer.Slot == slot {
+			rosterIndex = i
+			break
+		}
+	}
+	if rosterIndex < 0 {
+		return guard.NewFailure("slot is not on the roster", "select a slot from the panel roster")
+	}
 	if inferred && (reg.Panel.Round != round || reg.Panel.Spec != spec) {
 		return guard.NewFailure("slot directory differs from the current panel", "use mindspec panel checkout for the current round")
 	}
@@ -143,22 +154,63 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 		return guard.NewFailure(termsafe.Escape(err.Error()), "select a readable verdict file and submit it again")
 	}
 	target := panel.SubmitTarget{Dir: reg.Dir, Spec: spec, Panel: slug, Slot: slot, Round: round, File: file, SlotDir: layout.Dir}
-	_, err = panel.Submit(target, data, func(p panel.Panel, roster panel.RosterSlot) (panel.SubmitResolution, error) {
-		cfg, err := config.Load(root)
-		if err != nil {
-			return panel.SubmitResolution{}, err
-		}
-		resolved, err := resolveEffectivePanelSlot(cfg, reg.Dir, p, roster)
-		if err != nil {
+	submit := func() error {
+		_, err := panel.Submit(target, data, func(p panel.Panel, roster panel.RosterSlot) (panel.SubmitResolution, error) {
+			cfg, err := config.Load(root)
+			if err != nil {
+				return panel.SubmitResolution{}, err
+			}
+			resolved, err := resolveEffectivePanelSlot(cfg, reg.Dir, p, roster)
+			if err != nil {
+				return resolved, err
+			}
+			beadID := ""
+			if p.BeadID != nil {
+				beadID = *p.BeadID
+			}
+			resolved.Landed, err = landedBindingFor(panelSubmitMetadataFn, beadID, slug, round)
 			return resolved, err
+		})
+		return err
+	}
+	var state *kernel.State
+	if reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review" {
+		state, err = panelKernelStateFn(root, spec)
+		if err != nil {
+			return err
 		}
-		beadID := ""
-		if p.BeadID != nil {
-			beadID = *p.BeadID
+	}
+	if state != nil && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review") {
+		token, _ := cmd.Flags().GetString("lease")
+		gate := kernelPanelGate(*state, reg.Panel)
+		if slot != fmt.Sprintf("R%d", rosterIndex+1) {
+			return guard.NewFailure("slot identity differs from its roster position", "select a slot from the panel roster")
 		}
-		resolved.Landed, err = landedBindingFor(panelSubmitMetadataFn, beadID, slug, round)
-		return resolved, err
-	})
+		step := fmt.Sprintf("%s.r%d.R%d", gateBase(*state, gate), round, rosterIndex+1)
+		if token == "" {
+			return guard.NewFailure("--lease is required for this slot", "mindspec lease "+step)
+		}
+		if file == "-" {
+			return panelVerbFailure(fmt.Errorf("use a committed verdict file for this slot"))
+		}
+		artifact, e := filepath.Abs(file)
+		if e != nil {
+			return e
+		}
+		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: func(receipt kernel.Receipt) error {
+			committed, exists, e := newExecutor(root).FileAtRefOrAbsent(receipt.Commit, receipt.Path)
+			if e != nil {
+				return e
+			}
+			if !exists {
+				return panelVerbFailure(fmt.Errorf("committed verdict is missing"))
+			}
+			data = committed
+			return submit()
+		}})
+	} else {
+		err = submit()
+	}
 	if err != nil {
 		return err
 	}
@@ -180,6 +232,7 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 }
 
 func init() {
+	panelSubmitCmd.Flags().String("lease", "", "Current slot lease token")
 	panelSubmitCmd.Flags().String("file", "", "Verdict file; - reads stdin")
 	panelSubmitCmd.Flags().String("slot", "", "Roster slot")
 	panelSubmitCmd.Flags().Int("round", 0, "Panel round")

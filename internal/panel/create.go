@@ -48,6 +48,9 @@ Use the quoted acceptance criteria in the managed region above.
 // CreateInput contains caller-resolved registration values. The caller resolves
 // the roster from config and the reviewed commit and digest from the target.
 type CreateInput struct {
+	Orchestrated      bool
+	KernelGate        string
+	Scope             []string
 	BriefRegions      BriefRegions
 	BriefFile         string
 	BeadID            *string
@@ -354,7 +357,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		}
 	}
 	gate := in.Gate
-	p := Panel{VerdictSchema: 2, BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
+	p := Panel{Orchestrated: in.Orchestrated, KernelGate: in.KernelGate, Scope: in.Scope, VerdictSchema: 2, BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
 		ExpectedReviewers: len(roster), ReviewerCountSource: countSource, Roster: roster, ReviewedHeadSHA: in.ReviewedHeadSHA,
 		SubjectDigest: in.SubjectDigest, Gate: gate, Telemetry: "required",
 		Refutations: carried.Refutations, Deferrals: carried.Deferrals, PlanDeferrals: carriedPlan, Rebinds: carried.Rebinds,
@@ -371,7 +374,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	if spec == "" {
 		spec = "adhoc"
 	}
-	event := RoundRecord{VerdictSchema: 2, Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
+	event := RoundRecord{Scope: in.Scope, VerdictSchema: 2, Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
 		ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target,
 		Gate: p.Gate, BeadID: p.BeadID, Roster: p.Roster, ExpectedReviewers: p.ExpectedReviewers,
 		ReviewerCountSource: p.ReviewerCountSource, Telemetry: p.Telemetry, Carried: baseline, CreatedAt: now}

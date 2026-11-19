@@ -43,6 +43,7 @@ type CarriedEntries struct {
 
 // RoundRecord captures the registration established by create.
 type RoundRecord struct {
+	Scope             []string     `json:"scope,omitempty"`
 	VerdictSchema     int          `json:"verdict_schema,omitempty"`
 	Record            string       `json:"record"`
 	Spec              string       `json:"spec"`
