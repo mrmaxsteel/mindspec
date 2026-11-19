@@ -271,7 +271,10 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    item done (B4; round 1, the spec branch head). The pass records the round and subject in gate metadata and lists
    `panel create` for that gate in `run`; its pass creates the slots. While a round on the current subject has an open
    slot, `panel create` refuses and names it (redispatch: `panel recover` or `launch`). A subject move before `panel
-   create` updates the authorised subject only. A round past the allowance gives the limit decision, not a `run` entry.
+   create` updates the authorised subject only, except after a `re-panel` judgement: a later non-panel commit before
+   `panel create` moves the subject and restores the full roster with no path limit; a panel-only commit does not move
+   the subject. The re-panel record states what the judge authorised; the gate round record alone states the slots
+   that run. A round past the allowance gives the limit decision, not a `run` entry.
 8. **REJECT (OQ13).** A tally with a REJECT verdict is a refused round. Below the limit, its pass creates the fix
    `<gate>.r<N+1>.fix` and the decision `<gate>.decide.reject.r<N>` (`fix` or `halt`). While it is unanswered, a verb
    that would claim or close another child of that gate, open a round on it, or close or merge what it decides refuses
