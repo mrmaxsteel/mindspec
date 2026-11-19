@@ -93,7 +93,7 @@ func s134Slot(f *kerneltest.Fixture) string {
 	return id
 }
 func TestS134ImplApprove_RefusalTable(t *testing.T) {
-	for _, code := range []string{"open-step", "open-decision", "unreceipted-close", "raw-close", "forced-close", "foreign-child-open"} {
+	for _, code := range []string{"open-step", "open-decision", "unreceipted-close", "raw-close", "forced-close", "foreign-child-open", "id-collision"} {
 		t.Run(code, func(t *testing.T) {
 			f, mock, _ := s134ApproveFixture(t)
 			id := ""
@@ -119,6 +119,13 @@ func TestS134ImplApprove_RefusalTable(t *testing.T) {
 				s134Slot(f)
 				// A direct child of the item holds the close even though its gate passed.
 				f.Create(id+".impl.a1", id)
+			case "id-collision":
+				id = f.Items[0] + ".impl.a1"
+				r := f.Create(id, f.Items[0])
+				delete(r.Metadata, kernel.KeyTuple)
+				r.Status = "closed"
+				f.Fake.Records[r.ID] = *r
+				repair = "bd delete " + r.ID
 			case "foreign-child-open":
 				id = "foreign-note"
 				f.Fake.Records[id] = kernel.Record{ID: id, Parent: f.Epic, Type: "task", Status: "open", Title: "note"}
@@ -226,28 +233,131 @@ func TestS134ImplApprove_AuditAndRerun(t *testing.T) {
 	}
 }
 func TestS134ImplApprove_ReadEnrolmentWitnesses(t *testing.T) {
-	for _, witness := range []string{"marker", "kernel-key", "panel", "legacy"} {
+	for _, witness := range []string{"marker", "kernel-key", "grandchild", "dependency-id", "dependency-target", "wrong-tuple", "detached", "panel", "legacy"} {
 		t.Run(witness, func(t *testing.T) {
 			f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
+			gates := f.State().Gates
 			if witness != "marker" {
 				r := f.Fake.Records[f.Epic]
 				delete(r.Metadata, kernel.KeyRun)
 				f.Fake.Records[f.Epic] = r
 			}
-			if witness == "panel" || witness == "legacy" {
-				for _, gate := range f.State().Gates {
-					delete(f.Fake.Records, f.ID(gate))
+			keep := ""
+			switch witness {
+			case "kernel-key", "dependency-id", "dependency-target", "wrong-tuple", "detached":
+				keep = f.Epic + ".final"
+			case "grandchild":
+				keep = f.Items[0] + ".review"
+			}
+			for _, gate := range gates {
+				id := f.ID(gate)
+				if gate != keep {
+					delete(f.Fake.Records, id)
+					continue
 				}
+				r := f.Fake.Records[id]
+				switch witness {
+				case "dependency-id", "dependency-target":
+					r.Parent = ""
+					d := kernel.Dependency{ID: f.Epic, Type: "parent-child"}
+					if witness == "dependency-target" {
+						d.ID = "link-id"
+						d.DependsOnID = f.Epic
+					}
+					r.Dependencies = []kernel.Dependency{d}
+				case "wrong-tuple":
+					tuple, _, err := r.Tuple()
+					f.Must(err)
+					tuple.Attempt++
+					r.Metadata[kernel.KeyTuple] = tuple
+				case "detached":
+					r.Parent = ""
+					r.Dependencies = nil
+				}
+				f.Fake.Records[id] = r
 			}
 			if witness == "panel" {
 				dir := filepath.Join(f.SpecDir, "reviews", "witness")
 				f.Must(os.MkdirAll(dir, 0755))
 				f.Must(os.WriteFile(filepath.Join(dir, "panel.json"), []byte(`{"orchestrated":true}`), 0644))
 			}
+			want := witness != "legacy" && witness != "wrong-tuple" && witness != "detached"
+			before := kerneltest.Snapshot(t, f)
+			enrolled, err := implKernelEnrolled(f.Store, f.SpecDir)
+			f.Must(err)
+			if enrolled != want {
+				t.Fatalf("witness %s: pre-check enrolled=%t want=%t", witness, enrolled, want)
+			}
 			s, err := implKernelState(f.Store, f.SpecID, f.SpecDir)
 			f.Must(err)
-			if (s != nil) != (witness != "legacy") {
+			if (s != nil) != want {
 				t.Fatalf("witness %s: %+v", witness, s)
+			}
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("enrolment read changed state")
+			}
+		})
+	}
+}
+
+func TestS134ImplApprove_EnrolmentReadErrorRefuses(t *testing.T) {
+	for _, tc := range []struct {
+		name, command string
+		marker        bool
+	}{
+		{name: "show", command: "show"},
+		{name: "list", command: "list"},
+		{name: "state", command: "list", marker: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, mock, _ := s134ApproveFixture(t)
+			r := f.Fake.Records[f.Epic]
+			if !tc.marker {
+				delete(r.Metadata, kernel.KeyRun)
+			}
+			f.Fake.Records[f.Epic] = r
+			readErr := errors.New("enrolment read failed")
+			store := kernel.NewStore(f.Root, f.Epic, func(args ...string) ([]byte, error) {
+				if args[0] == tc.command {
+					return nil, readErr
+				}
+				return f.Fake.Run(args...)
+			})
+			implKernelStateFn = func(_, id string) (*kernel.State, error) {
+				return implKernelState(store, id, f.SpecDir)
+			}
+			before := kerneltest.Snapshot(t, f)
+			_, err := ApproveImpl(f.Root, f.SpecID, mock)
+			if !errors.Is(err, readErr) {
+				t.Fatalf("enrolment read error did not refuse approval: %v", err)
+			}
+			if before != kerneltest.Snapshot(t, f) || len(mock.CallsTo("FinalizeEpic")) != 0 {
+				t.Fatal("read error changed state or finalized")
+			}
+		})
+	}
+}
+
+func TestS134ImplApprove_MissingRuleRefuses(t *testing.T) {
+	for _, missing := range []string{"unreceipted-close", "raw-close", "forced-close", "id-collision"} {
+		t.Run(missing, func(t *testing.T) {
+			f, mock, _ := s134ApproveFixture(t)
+			reg := kernel.NewRegistry("unreceipted-close", "raw-close", "forced-close", "id-collision")
+			for _, name := range []string{"unreceipted-close", "raw-close", "forced-close", "id-collision"} {
+				if name != missing {
+					f.Must(reg.Register(name, kernel.FlagOnly, func(kernel.State) (kernel.Changes, error) {
+						return kernel.Changes{}, nil
+					}))
+				}
+			}
+			kerneltest.WithRules(t, reg)
+			before := kerneltest.Snapshot(t, f)
+			_, err := ApproveImpl(f.Root, f.SpecID, mock)
+			if err == nil || !strings.Contains(err.Error(), "approval rule "+missing+" is missing") {
+				t.Fatalf("missing rule did not refuse approval: %v", err)
+			}
+			if before != kerneltest.Snapshot(t, f) || len(mock.CallsTo("FinalizeEpic")) != 0 {
+				t.Fatal("missing rule changed state or finalized")
 			}
 		})
 	}
@@ -298,7 +408,7 @@ func TestS134ImplApprove_NoEpicUsesLegacyError(t *testing.T) {
 	}
 }
 
-func TestS134ImplApprove_LegacyAvoidsKernelStoreRead(t *testing.T) {
+func TestS134ImplApprove_LegacyAvoidsKernelEvidenceRead(t *testing.T) {
 	f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
 	r := f.Fake.Records[f.Epic]
 	delete(r.Metadata, kernel.KeyRun)
@@ -306,17 +416,22 @@ func TestS134ImplApprove_LegacyAvoidsKernelStoreRead(t *testing.T) {
 	for _, gate := range f.State().Gates {
 		delete(f.Fake.Records, f.ID(gate))
 	}
-	fullRead := false
+	// Invalid kernel links must not affect an approval with no witness.
+	r.Metadata[kernel.KeyLinks] = "damaged kernel links"
+	f.Fake.Records[f.Epic] = r
+	listReads := 0
 	store := kernel.NewStore(f.Root, f.Epic, func(args ...string) ([]byte, error) {
-		if args[0] == "list" && !contains(args, "--parent") {
-			fullRead = true
-			return nil, errors.New("kernel store read failed")
+		if args[0] == "list" {
+			listReads++
+			if listReads > 1 {
+				return nil, errors.New("kernel evidence read failed")
+			}
 		}
 		return f.Fake.Run(args...)
 	})
 	s, err := implKernelState(store, f.SpecID, f.SpecDir)
-	if err != nil || s != nil || fullRead {
-		t.Fatalf("legacy read kernel store: state=%+v err=%v read=%v", s, err, fullRead)
+	if err != nil || s != nil || listReads != 1 {
+		t.Fatalf("legacy read kernel evidence: state=%+v err=%v reads=%d", s, err, listReads)
 	}
 }
 

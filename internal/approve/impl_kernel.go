@@ -44,7 +44,7 @@ func implKernelState(store *kernel.Store, specID, dir string) (*kernel.State, er
 	return &s, nil
 }
 
-// implKernelEnrolled checks only the epic subtree before reading the full store.
+// implKernelEnrolled checks the same subtree as ReadState before reading evidence.
 // A pre-kernel approval needs no kernel graph or evidence read.
 func implKernelEnrolled(store *kernel.Store, dir string) (bool, error) {
 	out, err := store.Run("show", store.Epic, "--json")
@@ -66,30 +66,19 @@ func implKernelEnrolled(store *kernel.Store, dir string) (bool, error) {
 	if err != nil || orchestrated {
 		return orchestrated, err
 	}
-	seen := map[string]bool{}
-	pending := []string{store.Epic}
-	for len(pending) > 0 {
-		id := pending[0]
-		pending = pending[1:]
-		if seen[id] {
+	all, err := store.All()
+	if err != nil {
+		return false, err
+	}
+	subtree := kernel.Subtree(all, store.Epic)
+	for _, r := range all {
+		if !subtree[r.ID] {
 			continue
 		}
-		seen[id] = true
-		out, err := store.Run("list", "--parent", id, "--all", "--json", "-n", "0")
-		if err != nil {
-			return false, err
-		}
-		var children []kernel.Record
-		if err := json.Unmarshal(out, &children); err != nil {
-			return false, err
-		}
-		for _, r := range children {
-			tuple, parseErr := kernelid.Parse(r.Key())
-			have, ok, tupleErr := r.Tuple()
-			if parseErr == nil && tuple.Epic == store.Epic && tupleErr == nil && ok && have == tuple {
-				return true, nil
-			}
-			pending = append(pending, r.ID)
+		tuple, parseErr := kernelid.Parse(r.Key())
+		have, ok, tupleErr := r.Tuple()
+		if parseErr == nil && tuple.Epic == store.Epic && tupleErr == nil && ok && have == tuple {
+			return true, nil
 		}
 	}
 	return false, nil

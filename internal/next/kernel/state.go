@@ -77,7 +77,7 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	if present {
 		s.Policy = policy
 	}
-	subtree := map[string]bool{s.Epic: true}
+	subtree := Subtree(all, s.Epic)
 	selected := map[string]bool{s.Epic: true}
 	for _, id := range s.Items {
 		selected[id] = true
@@ -85,21 +85,7 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	for changed := true; changed; {
 		changed = false
 		for _, r := range all {
-			parent := r.Parent
-			if parent == "" {
-				for _, d := range r.Dependencies {
-					if d.Type == "parent-child" {
-						parent = d.ID
-						if d.DependsOnID != "" {
-							parent = d.DependsOnID
-						}
-					}
-				}
-			}
-			if !subtree[r.ID] && subtree[parent] {
-				subtree[r.ID] = true
-				changed = true
-			}
+			parent := recordParent(r)
 			if !selected[r.ID] && (selected[parent] || kernelid.UnderEpic(r.Key(), s.Epic) || kernelid.UnderEpic(r.ID, s.Epic)) {
 				selected[r.ID] = true
 				changed = true
