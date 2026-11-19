@@ -1,7 +1,7 @@
 # mindspec — autonomous spec-driven implementation, with multi-reviewer panels
 
 A skills package that takes an approved MindSpec plan through implementation and panel review.
-The binary owns the panel roster, prompts, submissions and decision. Skills dispatch the work.
+The binary owns work selection, leases, receipts, panels and decisions. Skills dispatch the work.
 Zero config uses one harness family. Add process runners for other review tools.
 
 ## What this plugin replaces
@@ -10,14 +10,14 @@ Zero config uses one harness family. Add process runners for other review tools.
 |:--------|:-----|
 | "Implement bead. Eyeball diff. Merge." | "Implement → configured panel → fix → re-panel → merge" |
 | Single-reviewer LLM gating | Independent slots with configured models and lenses |
-| Manual "what's the next ready bead?" | `/ms-bead-cycle` step 0 reads `bd ready` + the plan dep graph, claims, sets up the worktree |
+| Manual "what's the next ready bead?" | `/ms-bead-cycle` executes the actions from `mindspec next-action --apply` |
 | Manual fix-up after review | `/ms-bead-fix` consolidates verdicts and dispatches a fix subagent |
 | Manual per-bead orchestration | `/ms-bead-cycle` runs the whole pick → impl → review → merge loop |
 | Manual per-spec orchestration | `/ms-spec-autopilot` cycles every bead until the spec is done |
 
 ## Skills
 
-Eleven skills total: four lifecycle gates + seven plugin skills. This is the
+Twelve skills total: four lifecycle gates + eight plugin skills. This is the
 post-thin-down inventory — orchestration only; operational
 knowledge (recovery recipes, gate semantics) lives in CLI point-of-use output
 and hook messages, not in skill prose. Following the Anthropic agent-skills
@@ -52,52 +52,35 @@ These are the existing mindspec gating skills. The new skills in this plugin ass
 
 | Skill | Purpose |
 |:------|:--------|
-| `/ms-bead-cycle` | Single bead end-to-end: pick + claim (step 0) → impl → panel → fix → re-panel → merge terminal (`mindspec complete`) |
-| `/ms-spec-autopilot` | Whole spec: keep calling `/ms-bead-cycle` until no beads remain |
+| `/ms-bead-cycle` | Execute returned actions: lease → dispatch → submit → run commands |
+| `/ms-spec-autopilot` | Whole spec: execute the binary workflow until its status is `done` |
 | `/ms-spec-final-review` | Final panel of the whole spec branch vs main, before `/ms-impl-approve` |
-
-Pick + claim and merge are folded into `/ms-bead-cycle` (step 0 and the merge terminal); prompt-staging is folded into `/ms-bead-impl` (Phase A); panel-dir creation is folded into `/ms-panel-run` (step 0).
 
 ## The autonomous loop
 
-`/ms-spec-autopilot` is the headline skill. It:
+`/ms-spec-autopilot` uses `/ms-bead-cycle` to execute one binary workflow:
 
-1. Calls `/ms-bead-cycle`, whose step 0 claims the next ready bead.
-2. The cycle drives it through impl → panel → fix → merge.
-3. Repeats until `bd ready` shows no spec-owned beads.
-4. Calls `/ms-spec-final-review`, then `/ms-impl-approve` to close the spec.
+1. Run `mindspec next-action --apply <spec> --json`.
+2. Lease each returned actor step with `mindspec lease`.
+3. Dispatch the actor with its brief, subject and token.
+4. Submit committed evidence with `mindspec submit`.
+5. Execute each returned `run` entry's `argv`.
+6. Return open decisions to the user. Repeat until the binary reports `done`.
 
-Each cycle iteration:
+The binary selects work, applies dependencies and authorises each panel round.
+The adapters preserve the returned gate, subject and scope.
+The `run` entries include panel creation, completion and final approval.
+Use `mindspec next-action <spec> --json` for a read that writes nothing.
 
-```
-step 0              → pick + claim next bead, create worktree
-/ms-bead-impl       → implementation subagent commits to bead/<id>
-/ms-panel-run       → step 0 writes BRIEF + panel.json at <spec-dir>/reviews/<panel>/; configured reviewers run in parallel
-/ms-panel-tally     → tally PASS → done; tally BLOCK → fix, refute or defer
-/ms-bead-fix        → consolidated changes → fix subagent → new commit
-/ms-panel-run       → round 2 re-bumps round + reviewed_head_sha, verifies the fix
-... repeat until tally PASS or the round limit
-merge terminal      → mindspec complete <bead-id> "<summary>" (hook-gated)
-```
+A REJECT opens a local `fix` or `halt` decision. Other eligible work can continue.
+The round allowance counts all registrations for the gate. At the limit, the
+user chooses `continue:<n>` or `halt`. A halt stops every work item in the spec.
+The policy defaults are `panel.max_rounds: 5` and `panel.lease_ttl: 2h`.
+Plan approval pins the policy. Later config edits do not change that spec.
 
-> **Why a second panel round instead of one-shot review.** The
-> fix commit is new, unreviewed code, written by an author (the
-> fix subagent) responding to instructions the original BRIEF
-> could not have anticipated. Round 2 reviews the *fix author*,
-> not the bead again: each reviewer re-checks only its own
-> `concrete_changes_required` (ADDRESSED / PARTIAL / MISSED /
-> NEW_ISSUE) plus the deviations the fix author explicitly
-> flagged. That structure catches the failure mode one-shot
-> review cannot: defects introduced *while addressing feedback*.
-> In practice, a round-2 panel caught a routing bug that the
-> round-1 panel had approved — it didn't exist in round 1; the
-> round-1 fix created it. The cost is bounded — round 2 is scoped
-> to deltas, so it runs faster than round 1, and most beads
-> converge in exactly one fix round. The corollary is the
-> artifact-gate rule: a round-2 APPROVE earned by *describing* a
-> fix (PR-body precision) instead of *making* it is the known
-> bypass, which is why missing-artifact
-> findings HARD-block regardless of vote count.
+People who work without MindSpec can use bd and git in the same store.
+Run `bd ready --exclude-label mindspec` to hide MindSpec work.
+MindSpec keeps external items and respects their blocking links.
 
 ## Panel defaults
 
@@ -188,12 +171,9 @@ notice.
   + rebuilding the binary is the iteration path; the on-disk copy under
   `plugins/mindspec/skills/` is the source of truth.
 
-## Stop conditions for autopilot
+## Decisions and recovery
 
-`/ms-spec-autopilot` halts on any of:
-
-- No more ready beads → `/ms-impl-approve` and exit.
-- A REJECT verdict from any reviewer → halt; ask user (usually means the brief or plan needs work, not just a code fix).
-- `max-rounds` exceeded on a bead (default 3) → halt with the bead in `in_progress`.
-- Implementation subagent fails twice in a row on the same bead → halt.
-- `bd dolt` push fails → halt before merging more beads.
+Return open decisions to the user with their listed options.
+Report `wait`, `halted` and `indeterminate` states from the binary.
+Return failed merges and dependency mismatches before more dispatches.
+Follow the printed recovery lines. Keep pending work and committed evidence.
