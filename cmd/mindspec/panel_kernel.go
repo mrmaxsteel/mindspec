@@ -140,7 +140,11 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 		target, _ := cmd.Flags().GetString("target")
 		item, _ := cmd.Flags().GetString("bead")
 		if item == "" && strings.HasPrefix(target, "bead/") {
-			item = strings.TrimPrefix(target, "bead/")
+			derived, err := panel.CreateBeadID("bead", target, "")
+			if err != nil {
+				return panelVerbFailure(err)
+			}
+			item = *derived
 		}
 		if item == "" && kind != "final_review" {
 			for i, id := range s.Items {
@@ -160,7 +164,10 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 			return panelVerbFailure(fmt.Errorf("a bead gate requires a recorded work item"))
 		}
 		p := panel.Panel{Gate: "final_review"}
-		expected := "spec/" + s.SpecID
+		expected, e := workspace.SpecBranch(s.SpecID)
+		if e != nil {
+			return panelVerbFailure(e)
+		}
 		if item != "" {
 			found := false
 			for _, id := range s.Items {
@@ -171,7 +178,10 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 			}
 			p.BeadID = &item
 			p.Gate = "bead"
-			expected = "bead/" + item
+			expected, e = workspace.BeadBranch(item)
+			if e != nil {
+				return panelVerbFailure(e)
+			}
 		}
 		gate := kernelPanelGate(*s, p)
 		if e = panelKernelGuard(*s, gate, true); e != nil {

@@ -9,6 +9,10 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"cmd/mindspec/panel_kernel.go panelKernelStateFn workspace.SpecDir":                                                 {Count: 1, Gate: "SpecDir validates the resolved spec ID before path composition; an error returns before the state read."},
+	"cmd/mindspec/panel_kernel.go tryKernelPanelCreate workspace.SpecBranch":                                            {Count: 1, Gate: "SpecBranch validates the state spec ID before target composition; an error refuses panel creation."},
+	"cmd/mindspec/panel_kernel.go tryKernelPanelCreate workspace.BeadBranch":                                            {Count: 1, Gate: "BeadBranch validates the recorded work item before target composition; an error refuses panel creation."},
+	"internal/next/kernel/kerneltest/seed.go Register workspace.BeadBranch":                                             {Count: 1, Gate: "BeadBranch validates the parsed work item before target composition; an error fails the fixture."},
 	"internal/next/kernel/lease.go Lease workspace.BeadBranch":                                                          {Count: 1, Gate: "BeadBranch validates the tuple work item before claim-base ref construction. Lease returns an error before git runs."},
 	"internal/next/kernel/submit.go checkImplement workspace.BeadBranch":                                                {Count: 1, Gate: "BeadBranch validates the tuple work item before commitPast reads its branch ref. The check returns an error on an invalid ID."},
 	"internal/next/kernel/submit.go checkFix workspace.BeadBranch":                                                      {Count: 1, Gate: "BeadBranch validates the tuple work item before commitPast reads its branch ref. The check returns an error on an invalid ID."},

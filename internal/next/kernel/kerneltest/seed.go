@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 func PassGate(f *Fixture, gate, subject string) {
@@ -75,7 +76,8 @@ func Register(f *Fixture, gate string, registration kernel.RegistrationRecord) {
 	}
 	target := "spec/" + f.SpecID
 	if beadID != nil {
-		target = "bead/" + *beadID
+		target, err = workspace.BeadBranch(*beadID)
+		f.Must(err)
 	}
 	digest := "subject-digest"
 	if len(registration.Subject) == 40 || len(registration.Subject) == 64 {
