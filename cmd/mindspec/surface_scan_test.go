@@ -83,7 +83,7 @@ type surfaceScanner struct {
 func surfaceGit(repo string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "advice.graftFileDeprecated=false"}, args...)...)
 	cmd.Dir = repo
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "GIT_") {
@@ -91,7 +91,7 @@ func surfaceGit(repo string, args ...string) (string, error) {
 		}
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false", "GIT_NO_REPLACE_OBJECTS=1")
+		"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false", "GIT_NO_REPLACE_OBJECTS=1", "GIT_GRAFT_FILE=/dev/null")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, out)
@@ -359,6 +359,7 @@ func TestS134SurfaceDiffFn_MergedMainBase(t *testing.T) {
 	surfaceTestWrite(t, s.repo, "cmd/base.go", "package main\n// ADR-0035\n// spec line\n")
 	specCommit := surfaceTestCommit(t, s.repo)
 	surfaceTestWrite(t, s.repo, "cmd/base.go", "package main\n// ADR-0035\n// main ADR-0036 line\n")
+	surfaceTestWrite(t, s.repo, "internal/main.go", "// ADR-0037\n")
 	candidate := surfaceTestCommit(t, s.repo)
 	tree := surfaceTestGit(t, s.repo, "rev-parse", candidate+"^{tree}")
 	mainCommit := surfaceTestGit(t, s.repo, "-c", "user.name=Surface Test", "-c", "user.email=surface@example.invalid",
@@ -373,8 +374,14 @@ func TestS134SurfaceDiffFn_MergedMainBase(t *testing.T) {
 	if err := s.scan(mainCommit, merge, "origin/main"); err != nil {
 		t.Fatalf("merged main's lines must pass: %v", err)
 	}
-	if err := s.scan(base, merge, "origin/main"); err == nil || !strings.Contains(err.Error(), `cmd/base.go:3: internal references ["ADR-0036"]`) {
-		t.Fatalf("old base must still expose main's planted line: %v", err)
+	err := s.scan(base, merge, "origin/main")
+	for _, line := range []string{
+		`cmd/base.go:3: internal references ["ADR-0036"]`,
+		`internal/main.go:1: internal references ["ADR-0037"]`,
+	} {
+		if err == nil || !strings.Contains(err.Error(), line) {
+			t.Errorf("old base must still expose main's planted line %q: %v", line, err)
+		}
 	}
 }
 
@@ -389,6 +396,8 @@ func TestS134SurfaceDiffFn_ReplaceBlobCannotHideLine(t *testing.T) {
 	if got := surfaceTestGit(t, s.repo, "cat-file", "blob", "refs/replace/"+dirtyBlob); got != "// plain text" {
 		t.Fatalf("replacement must contain clean text: %q", got)
 	}
+	// A legacy graft must not sever the head's ancestry from the base.
+	surfaceTestWrite(t, s.repo, ".git/info/grafts", head+"\n")
 	if err := s.scan(base, head, "origin/main"); err == nil || !strings.Contains(err.Error(), `cmd/new.go:1: internal references ["ADR-0035"]`) {
 		t.Fatalf("blob replacement must not hide the planted line: %v", err)
 	}
