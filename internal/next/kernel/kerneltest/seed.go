@@ -36,14 +36,21 @@ func Authorise(f *Fixture, gate string, round kernel.GateRound) {
 }
 func OpenDecision(f *Fixture, gate, cause string, round int, options ...string) string {
 	id := fmt.Sprintf("%s.decide.%s.r%d", gate, cause, round)
-	f.Create(id, gate)
-	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyDecision, kernel.DecisionRecord{Gate: gate, Cause: cause, Options: options})))
+	tuple, err := kernelid.Parse(id)
+	f.Must(err)
+	_, err = f.Store.Create(kernel.CreateRecord{ID: id, Parent: gate, Type: "decision", Title: "decision: halt stops the spec and every work item", Tuple: tuple, Metadata: kernel.Metadata(kernel.KeyDecision, kernel.DecisionRecord{Gate: tuple.Gate, Cause: cause, Options: options})})
+	f.Must(err)
 	return id
 }
 func Answer(f *Fixture, decision, option string) {
 	answer := kernel.DecisionAnswer{Option: option, At: kernel.Now().UTC(), Actor: "operator"}
 	f.Must(f.Store.WriteMetadata(decision, kernel.Metadata(kernel.KeyAnswer, answer)))
-	f.Must(f.Store.WriteReceipt(decision, kernel.Receipt{Kind: "passed", Answer: &answer}))
+	receipt := kernel.Receipt{Kind: "passed", Answer: &answer}
+	if option == "halt" {
+		receipt.Kind = "halted"
+		receipt.HaltAnswer = decision
+	}
+	f.Must(f.Store.WriteReceipt(decision, receipt))
 	closeRecord(f, decision)
 }
 

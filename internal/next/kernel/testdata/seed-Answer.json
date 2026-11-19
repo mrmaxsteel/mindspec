@@ -1,7 +1,7 @@
 {
   "id": "test-1.1.review.decide.reject.r1",
   "parent": "test-1.1.review",
-  "title": "[mindspec] decision",
+  "title": "[mindspec] decision: halt stops the spec and every work item",
   "issue_type": "decision",
   "status": "closed",
   "labels": [
@@ -32,7 +32,8 @@
       "actor": "operator"
     },
     "mindspec_close": {
-      "kind": "passed",
+      "kind": "halted",
+      "halt_answer": "test-1.1.review.decide.reject.r1",
       "answer": {
         "option": "halt",
         "at": "2026-01-02T03:04:05Z",

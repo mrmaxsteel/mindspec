@@ -284,7 +284,7 @@ func repairPhaseRunE(cmd *cobra.Command, args []string) error {
 		// for the stored-phase read; the derr check below is a defensive
 		// (currently unreachable) guard against the day that contract
 		// changes, kept honest rather than silently assumed impossible.
-		c := phase.NewCache()
+		c := phase.NewCache().WithRoot(root)
 		detail, derr := phase.DerivePhaseDetailWithCache(c, epicID)
 		if derr != nil {
 			return nil, fmt.Errorf("%w for spec %s (epic %s): %v", errRepairDerivationFailed, idrender.Spec(specID), idrender.Bead(epicID), derr)

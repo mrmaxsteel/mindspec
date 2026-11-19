@@ -114,7 +114,7 @@ var findEpicForBeadFn = phase.FindEpicLineageWithCache
 // BuildReadySet classifies one uncapped global ready set with the same lineage
 // resolver and positional plan mapping that readiness uses.
 func BuildReadySet(root, specFlag string) (ReadySet, error) {
-	rs := ReadySet{SpecFlag: specFlag, Cache: phase.NewCache()}
+	rs := ReadySet{SpecFlag: specFlag, Cache: phase.NewCache().WithRoot(root)}
 	if specFlag != "" {
 		epic, err := rs.Cache.FindEpicBySpecID(specFlag)
 		if err != nil || epic == "" {
@@ -240,7 +240,7 @@ func scopeResolutionRefusal(root, specFlag string, epicErr error) error {
 	// carry wrapBDError'd raw bd stderr (AllEpics / draft discovery /
 	// FindEpicBySpecID) — wrap each in bdRenderedError so the rendered
 	// text is per-line escaped while errors.Is/As still reach the chain.
-	c := phase.NewCache()
+	c := phase.NewCache().WithRoot(root)
 	if _, allErr := c.AllEpics(); allErr != nil {
 		return fmt.Errorf("resolving --spec %s: querying epics failed: %w", idrender.Spec(specFlag), &bdRenderedError{err: allErr})
 	}
