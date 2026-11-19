@@ -105,7 +105,7 @@ func gateRebind(s State, g Record) (string, string, error) {
 	return accepted, evidence, nil
 }
 
-func judgePanelPath(_ State, dir string) (string, error) {
+func judgePanelPath(dir string) (string, error) {
 	prefix, err := actorGit(dir, "rev-parse", "--show-prefix")
 	return strings.TrimSuffix(prefix, "/"), err
 }
@@ -143,7 +143,7 @@ func newestJudgeSubject(s State, gate string) (string, error) {
 		if !registeredJudgePanel(s, t, p) {
 			continue
 		}
-		rel, err := judgePanelPath(s, p.Dir)
+		rel, err := judgePanelPath(p.Dir)
 		if err != nil {
 			return "", err
 		}
@@ -394,7 +394,7 @@ func validateJudgement(s State, r Record, receipt Receipt, current bool) error {
 			break
 		}
 	}
-	rel, err := judgePanelPath(s, dir)
+	rel, err := judgePanelPath(dir)
 	if err != nil {
 		return err
 	}

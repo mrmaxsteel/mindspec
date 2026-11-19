@@ -562,6 +562,33 @@ func TestS134Judge_HighestGateAndSeparateAttempts(t *testing.T) {
 	}
 }
 
+func TestS134Judge_SecondRePanel(t *testing.T) {
+	f, gate, old := judgeFixture(t)
+	newest := judgeChange(t, f)
+	reduce(t, f, true)
+	judgeSubmit(t, f, gate, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}})
+	successor := gate + ".a2"
+	kerneltest.Register(f, successor, kernel.RegistrationRecord{Slug: "panel", Round: 2, Subject: newest, Slots: []string{"R1", "R2"}})
+	kerneltest.PassGate(f, successor, newest)
+	latest := judgeCommit(t, f, ".mindspec/config.yaml", "panel:\n  reviewers:\n    - family: harness\n      count: 3\n  lease_ttl: 4h\n")
+	reduce(t, f, true)
+	id := gate + ".judge.a2"
+	lease := leaseActor(t, f, id, kernel.LeaseDeps{})
+	artifact := judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: newest, NewSubject: latest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}})
+	if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact}); err != nil {
+		t.Fatalf("second re-panel refused: %v", err)
+	}
+	reduce(t, f, true)
+	if r, _ := f.Store.Lookup(gate + ".a3"); r == nil {
+		t.Fatal("second re-panel created no successor a3")
+	}
+	scope, ok, err := kernel.Decode[kernel.RePanel](actorRecord(t, f, gate+".a3").Metadata, kernel.KeyRePanel)
+	f.Must(err)
+	if !ok || scope.Judge != id {
+		t.Fatalf("second re-panel record names the wrong judge: %+v", scope)
+	}
+}
+
 func TestS134Judge_ResumeReceiptBeforeNewCommit(t *testing.T) {
 	f, gate, old := judgeFixture(t)
 	newest := judgeChange(t, f)
@@ -624,15 +651,33 @@ func TestS134Judge_RePanelSubjectBound(t *testing.T) {
 	newest := judgeChange(t, f)
 	reduce(t, f, true)
 	judgeSubmit(t, f, gate, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}})
+	successor := gate + ".a2"
+	scope, ok, err := kernel.Decode[kernel.RePanel](actorRecord(t, f, successor).Metadata, kernel.KeyRePanel)
+	f.Must(err)
+	if !ok || scope.Judge != gate+".judge.a1" || scope.SlotCount != 2 || !reflect.DeepEqual(scope.Paths, []string{".mindspec/config.yaml"}) {
+		t.Fatalf("missing judge authorisation: %+v", scope)
+	}
+	// The committed judgement is panel-only and must retain the reduced round.
+	reduce(t, f, true)
+	round, _, err := kernel.Decode[kernel.GateRound](actorRecord(t, f, successor).Metadata, kernel.KeyRound)
+	f.Must(err)
+	if round.Subject != newest || round.SlotCount != 2 || !reflect.DeepEqual(round.Paths, scope.Paths) {
+		t.Fatalf("panel-only commit changed the authorised round: %+v", round)
+	}
 	later := judgeCommit(t, f, "evil.go", "package evil\n")
 	reduce(t, f, true)
-	round, _, err := kernel.Decode[kernel.GateRound](actorRecord(t, f, gate+".a2").Metadata, kernel.KeyRound)
+	round, _, err = kernel.Decode[kernel.GateRound](actorRecord(t, f, successor).Metadata, kernel.KeyRound)
 	f.Must(err)
 	if round.Subject == later && (round.SlotCount == 2 || len(round.Paths) != 0) {
 		t.Fatalf("unjudged commit inherited reduced scope: %+v", round)
 	}
-	if round.Subject != later || round.Round != 2 || round.SlotCount != 3 || len(round.Paths) != 0 {
+	if round.Subject != later || round.Round != 2 || round.SlotCount != 3 || len(round.Slots) != 3 || len(round.Paths) != 0 {
 		t.Fatalf("later subject needs the next full round: %+v", round)
+	}
+	saved, ok, err := kernel.Decode[kernel.RePanel](actorRecord(t, f, successor).Metadata, kernel.KeyRePanel)
+	f.Must(err)
+	if !ok || !reflect.DeepEqual(saved, scope) {
+		t.Fatalf("full round changed the judge authorisation: got %+v, want %+v", saved, scope)
 	}
 	before := kerneltest.Snapshot(t, f)
 	reduce(t, f, true)

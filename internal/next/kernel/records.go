@@ -101,9 +101,12 @@ type Judgement struct {
 	Paths      []string `json:"paths,omitempty"`
 }
 type RePanel struct {
-	Judge     string   `json:"judge,omitempty"`
-	SlotCount int      `json:"slot_count"`
-	Paths     []string `json:"paths"`
+	Judge string `json:"judge,omitempty"`
+	// SlotCount is the count the judge authorized. It stays unchanged when the
+	// subject moves. GateRound alone states the slots that run.
+	SlotCount int `json:"slot_count"`
+	// Paths is the scope the judge authorized. It stays unchanged when the subject moves.
+	Paths []string `json:"paths"`
 }
 type CarryOver struct {
 	Rebind     string   `json:"rebind,omitempty"`

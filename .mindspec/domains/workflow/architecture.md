@@ -1704,7 +1704,12 @@ Use `re-panel` with changed paths to request another round.
 Set at least two slots and no more than the passing round used.
 The successor gate records its predecessor, the judge ID, and the requested scope.
 The scope applies only to the subject the judge saw.
-A later code commit needs a full round.
-The next panel-create entry carries that scope.
+After a `re-panel` judgement, a later non-panel commit before `panel create`
+moves the subject and restores the full roster with no path limit.
+A panel-only commit does not move the subject.
+The re-panel record states what the judge authorised.
+Its slot count and paths stay unchanged when the subject moves.
+The gate round record alone states the slots that run.
+The next panel-create entry carries the gate round scope.
 Submission checks committed evidence and subject identity.
 It does not assess the judgement content.
