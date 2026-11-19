@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -106,6 +107,10 @@ func kernelCommandState(spec, target string) (kernel.State, error) {
 	store.Epic = epic.ID
 	state, err := kernel.ReadState(store, spec, dir)
 	if err != nil {
+		var failure *termsafe.Failure
+		if errors.As(err, &failure) {
+			return state, termsafe.PrefixFailure(err, "read kernel state: ")
+		}
 		return state, fmt.Errorf("read kernel state: %s\nrecovery: mindspec state show", termsafe.Escape(err.Error()))
 	}
 	return state, nil

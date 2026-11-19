@@ -76,7 +76,7 @@ func TestS134Allowance_LedgerOnlyAndMalformed(t *testing.T) {
 		}
 		before := kerneltest.Snapshot(t, f)
 		_, err = kernel.NextAction(state, true)
-		if err == nil || !strings.Contains(err.Error(), dir) || before != kerneltest.Snapshot(t, f) {
+		if err == nil || !strings.Contains(err.Error(), dir) || !strings.Contains(err.Error(), "\nrecovery: in "+dir+", repair the ledger or move it out of the review root, then rerun the command") || before != kerneltest.Snapshot(t, f) {
 			t.Fatalf("malformed ledger wrote or was hidden: %v", err)
 		}
 	})

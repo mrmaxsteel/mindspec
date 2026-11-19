@@ -181,7 +181,7 @@ func TestS134NextAction_StatusExits(t *testing.T) {
 		f := nextActionFixture(t)
 		id := f.Items[0] + ".impl.a1"
 		f.Create(id, f.Items[0])
-		expires := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+		expires := time.Date(9999, time.January, 1, 0, 0, 0, 0, time.UTC)
 		f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyLease, kernel.LeaseRecord{Generation: 2, Expires: expires})))
 		nextActionSave(t, f)
 		out, code := nextActionRun(t, f, bin, "--json")
@@ -189,4 +189,20 @@ func TestS134NextAction_StatusExits(t *testing.T) {
 			t.Fatalf("wait exit %d: %s", code, out)
 		}
 	})
+}
+
+func TestS134NextAction_MalformedLedgerRecovery(t *testing.T) {
+	bin := buildMindspecBinary(t)
+	f := nextActionFixture(t)
+	dir := filepath.Join(f.Root, ".mindspec", "reviews", "broken")
+	f.Must(os.MkdirAll(dir, 0755))
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	f.Must(err)
+	f.Must(os.WriteFile(filepath.Join(dir, "dispositions.jsonl"), []byte("{not json\n"), 0644))
+	for _, args := range [][]string{{"--json"}, {"--apply", "--json"}} {
+		out, code := nextActionRun(t, f, bin, args...)
+		if code == 0 || !strings.Contains(string(out), dir) || !strings.Contains(string(out), "\nrecovery: in "+resolvedDir+", repair the ledger or move it out of the review root, then rerun the command") {
+			t.Fatalf("ledger recovery lacks repair: exit %d: %s", code, out)
+		}
+	}
 }

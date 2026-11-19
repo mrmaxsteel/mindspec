@@ -16,7 +16,7 @@ func TestS134Output_RevisionInputs(t *testing.T) {
 	reduce(t, f, true)
 	id := f.Items[0] + ".impl.a1"
 	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyLease, kernel.LeaseRecord{Expires: fixedTime.Add(time.Hour), Generation: 1})))
-	for _, input := range []string{"bd", "ref", "ledger", "verdict", "expiry", "display", "free-text"} {
+	for _, input := range []string{"bd", "status", "metadata", "dependencies", "ref", "ledger", "verdict", "expiry", "display", "free-text"} {
 		t.Run(input, func(t *testing.T) {
 			state := f.State()
 			base, err := kernel.NextAction(state, false)
@@ -25,6 +25,19 @@ func TestS134Output_RevisionInputs(t *testing.T) {
 			case "bd":
 				r := state.Records[id]
 				r.Labels = append(r.Labels, "changed")
+				state.Records[id] = r
+			case "status":
+				r := state.Records[id]
+				r.Status = "in_progress"
+				state.Records[id] = r
+			case "metadata":
+				r := state.Records[id]
+				r.Metadata[kernel.KeyLease] = kernel.LeaseRecord{Expires: fixedTime.Add(time.Hour), Generation: 2}
+				state.Records[id] = r
+			case "dependencies":
+				r := state.Records[id]
+				// Both endpoints already belong to the digest; this edge adds no records.
+				r.Dependencies = []kernel.Dependency{{ID: f.Items[0], Type: "related"}}
 				state.Records[id] = r
 			case "ref":
 				state.Refs["refs/heads/bead/"+f.Items[0]] = "changed"
@@ -90,7 +103,21 @@ func TestS134Output_Done(t *testing.T) {
 		kerneltest.PassGate(f, item+".review", reducerGit(t, f, "rev-parse", "bead/"+item))
 		f.Must(f.Store.SetStatusIf(item, "open", "closed"))
 	}
+	f.Must(f.Store.SetStatusIf(f.Epic, "open", "closed"))
+	t.Run("final-open", func(t *testing.T) {
+		out := reduce(t, f, false)
+		if out.Status == "done" || kernel.OutputExitCode(out) == 5 {
+			t.Fatalf("open final gate reported done: %+v", out)
+		}
+	})
+	f.Must(f.Store.SetStatusIf(f.Epic, "closed", "open"))
 	kerneltest.PassGate(f, f.Epic+".final", reducerGit(t, f, "rev-parse", "spec/"+f.SpecID))
+	t.Run("epic-open", func(t *testing.T) {
+		out := reduce(t, f, false)
+		if out.Status == "done" || kernel.OutputExitCode(out) == 5 {
+			t.Fatalf("open epic reported done: %+v", out)
+		}
+	})
 	f.Must(f.Store.SetStatusIf(f.Epic, "open", "closed"))
 	out := reduce(t, f, false)
 	if out.Status != "done" || kernel.OutputExitCode(out) != 5 {
@@ -115,5 +142,24 @@ func TestS134Output_EarliestExpiryAndSafeText(t *testing.T) {
 		if r < 32 {
 			t.Fatalf("unsafe terminal text: %q", out.Flags[0].Step)
 		}
+	}
+}
+
+func TestS134Output_RevisionAcrossRoots(t *testing.T) {
+	a, b := reducerFixture(t), reducerFixture(t)
+	if a.Root == b.Root {
+		t.Fatal("fixtures must use different roots")
+	}
+	for _, f := range []*kerneltest.Fixture{a, b} {
+		registerRound(t, f, 1)
+		put(t, filepath.Join(f.SpecDir, "reviews", "panel", "R1-round-1.json"), `{"schema":2,"verdict":"APPROVE"}`)
+		state := f.State()
+		if len(state.Ledgers) != 1 || len(state.Verdicts) != 1 {
+			t.Fatal("fixture must read a registered round and a verdict")
+		}
+	}
+	left, right := reduce(t, a, false), reduce(t, b, false)
+	if left.Revision != right.Revision {
+		t.Fatalf("checkout root changed revision: %s != %s", left.Revision, right.Revision)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -171,6 +172,21 @@ func revision(s State) string {
 			expired[id] = !s.At.Before(lease.Expires)
 		}
 	}
+	// Checkout locations identify files for reading, but are not revision inputs.
+	key := func(path string) string {
+		if filepath.IsAbs(path) {
+			path, _ = filepath.Rel(s.Root, path)
+		}
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	ledgers := map[string][][]byte{}
+	for path, lines := range s.Ledgers {
+		ledgers[key(path)] = lines
+	}
+	verdicts := map[string]json.RawMessage{}
+	for path, data := range s.Verdicts {
+		verdicts[key(path)] = data
+	}
 	data, _ := json.Marshal(struct {
 		Records  map[string]any
 		Refs     map[string]string
@@ -178,7 +194,7 @@ func revision(s State) string {
 		Verdicts map[string]json.RawMessage
 		Policy   Policy
 		Expired  map[string]bool
-	}{records, s.Refs, s.Ledgers, s.Verdicts, s.Policy, expired})
+	}{records, s.Refs, ledgers, verdicts, s.Policy, expired})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

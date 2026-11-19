@@ -1450,6 +1450,8 @@ A foreign blocker flag names the link and its removal command.
 Foreign records receive no kernel action or write.
 An open foreign child holds its parent close and produces a flag.
 A missing run marker retains the default policy and produces a flag.
+An epic, work item or gate with status `in_progress` does not hold work.
+The `raw-claim` flag names that record and gives its status repair command.
 An occupied computed identity is a collision and remains unchanged.
 
 The revision hashes state, named refs, ledgers, verdicts, policy and lease expiry state.

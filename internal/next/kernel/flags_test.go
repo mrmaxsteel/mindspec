@@ -179,3 +179,35 @@ func TestS134Flags_ApplyDiffOnlyComputedWrites(t *testing.T) {
 		t.Fatalf("expected one computed link write, got %d", writes)
 	}
 }
+
+func TestS134Flags_RawClaimAncestor(t *testing.T) {
+	for _, ancestor := range []string{"epic", "item", "gate"} {
+		t.Run(ancestor, func(t *testing.T) {
+			f := reducerFixture(t)
+			id := f.Epic
+			if ancestor == "item" {
+				id = f.Items[0]
+			}
+			if ancestor == "gate" {
+				closePass(t, f, f.Items[0]+".impl.a1")
+				reduce(t, f, true)
+				registerRound(t, f, 1)
+				id = f.Items[0] + ".review"
+			}
+			f.Must(f.Store.SetStatusIf(id, "open", "in_progress"))
+			out := reduce(t, f, true)
+			if len(out.Actions) == 0 || out.Status != "work" || kernel.OutputExitCode(out) != 0 {
+				t.Errorf("raw claim held work: %+v", out)
+			}
+			named := false
+			for _, flag := range out.Flags {
+				if flag.Code == "raw-claim" && flag.Step == id {
+					named = true
+				}
+			}
+			if !named {
+				t.Errorf("raw claim did not name %s: %+v", id, out.Flags)
+			}
+		})
+	}
+}

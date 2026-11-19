@@ -10,7 +10,7 @@ func init() {
 		fn   Rule
 	}{
 		{"run-marker-missing", markerFlag}, {"foreign-child-open", childFlags},
-		{"foreign-blocker", blockerFlags}, {"id-collision", collisionFlags},
+		{"foreign-blocker", blockerFlags}, {"id-collision", collisionFlags}, {"raw-claim", ancestorClaimFlags},
 	} {
 		if err := RegisterRule(r.name, FlagOnly, r.fn); err != nil {
 			panic(err)
@@ -88,7 +88,7 @@ func blocked(s State, id string) bool {
 		}
 		seen[node] = true
 		r := records[node]
-		if node != id && (r.Status == "blocked" || r.Status == "deferred" || r.Status == "in_progress") {
+		if node != id && (r.Status == "blocked" || r.Status == "deferred" || (r.Status == "in_progress" && !owned(s, node))) {
 			return true
 		}
 		for _, e := range edges {
@@ -251,6 +251,19 @@ func collisionFlags(s State) (Changes, error) {
 	for _, id := range s.Collisions {
 		r := s.Records[id]
 		c.Flags = append(c.Flags, Flag{Code: "id-collision", Step: id, Repair: []string{"bd", "delete", r.ID}})
+	}
+	return c, nil
+}
+
+func ancestorClaimFlags(s State) (Changes, error) {
+	c := Changes{}
+	ids := append([]string{s.Epic}, s.Items...)
+	ids = append(ids, s.Gates...)
+	for _, id := range ids {
+		r := s.Records[id]
+		if r.Status == "in_progress" {
+			c.Flags = append(c.Flags, Flag{Code: "raw-claim", Step: id, Repair: []string{"bd", "update", r.ID, "--status", "open"}})
+		}
 	}
 	return c, nil
 }

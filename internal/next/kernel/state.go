@@ -11,6 +11,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -136,7 +137,7 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 		}
 		lines, err := panel.ReadLedger(p.Dir)
 		if err != nil {
-			return s, fmt.Errorf("read panel ledger in %s: %w", p.Dir, err)
+			return s, termsafe.NewWrappedFailure(err, fmt.Sprintf("read panel ledger in %s: %s", p.Dir, err), fmt.Sprintf("in %s, repair the ledger or move it out of the review root, then rerun the command", p.Dir))
 		}
 		s.Ledgers[p.Dir] = lines
 		if p.Panel.Round == 0 {

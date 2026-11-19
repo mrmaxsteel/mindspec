@@ -125,7 +125,7 @@ func TestS134Reducer_ReadOnlyAndApply(t *testing.T) {
 	}
 	out := reduce(t, f, true)
 	snap := kerneltest.Snapshot(t, f)
-	if len(out.Actions) != 1 || !out.Actions[0].Exists || len(f.State().Steps) != 1 {
+	if len(out.Actions) != 1 || out.Actions[0].Step != f.Items[0]+".impl.a1" || !out.Actions[0].Exists || !reflect.DeepEqual(f.State().Steps, []string{f.Items[0] + ".impl.a1"}) {
 		t.Fatalf("apply created wrong steps: %+v", out)
 	}
 	f.Fake.Calls = nil
@@ -530,5 +530,74 @@ func TestS134Reducer_UnapprovedReadOnlyWritesNothing(t *testing.T) {
 	_, err := kernel.NextAction(f.State(), false)
 	if err == nil || !strings.Contains(err.Error(), "plan is not approved") || before != kerneltest.Snapshot(t, f) {
 		t.Fatalf("unapproved read did not refuse without writes: %v", err)
+	}
+}
+
+func TestS134Reducer_TallyFreshSubjectAndRound(t *testing.T) {
+	for _, mismatch := range []string{"subject", "round"} {
+		t.Run(mismatch, func(t *testing.T) {
+			f := reducerFixture(t)
+			passingPanel(t, f)
+			gate := f.Items[0] + ".review"
+			if mismatch == "subject" {
+				newCommit(t, f, "bead/"+f.Items[0])
+			}
+			state := f.State()
+			if mismatch == "round" {
+				// The real tally still passes round 1; this candidate is a different round.
+				state.Panels[0].Panel.Round = 2
+			}
+			out, err := kernel.NextAction(state, false)
+			f.Must(err)
+			if hasRun(out, "mindspec", "complete", f.Items[0]) {
+				t.Fatalf("mismatched %s tally passed the gate: %+v", mismatch, out)
+			}
+			// Also inspect the overlaid state, independent of the completion command.
+			result, err := kernel.Pass(kernel.Rules(), state, false)
+			f.Must(err)
+			if result.State.Records[gate].Status == "closed" {
+				t.Fatalf("mismatched %s tally closed the gate", mismatch)
+			}
+		})
+	}
+}
+
+func TestS134Reducer_SlotsNeedRegisteredSubject(t *testing.T) {
+	f := reducerFixture(t)
+	authorise(t, f, 1)
+	registerRound(t, f, 1)
+	state := f.State()
+	gate := f.Items[0] + ".review"
+	r := state.Records[gate]
+	reg, _, err := kernel.Decode[kernel.RegistrationRecord](r.Metadata, kernel.KeyRegistration)
+	f.Must(err)
+	reg.Subject = "different-subject"
+	r.Metadata[kernel.KeyRegistration] = reg
+	state.Records[gate] = r
+	result, err := kernel.Pass(kernel.Rules(), state, false)
+	f.Must(err)
+	if len(result.State.Steps) != 0 || len(result.Output.Actions) != 0 {
+		t.Fatalf("stale registration created slots: %v", result.State.Steps)
+	}
+}
+
+func TestS134Reducer_BranchRemovalRejectsWrongParent(t *testing.T) {
+	f := reducerFixture(t)
+	item := f.Items[0]
+	base := reducerGit(t, f, "rev-parse", "spec/"+f.SpecID)
+	head := newCommit(t, f, "bead/"+item)
+	kerneltest.PassGate(f, item+".review", head)
+	f.Must(f.Store.SetStatusIf(item, "open", "closed"))
+	tree := reducerGit(t, f, "rev-parse", head+"^{tree}")
+	merge := reducerGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit-tree", tree, "-p", base, "-p", head, "-m", "Merge bead/"+item)
+	reducerGit(t, f, "update-ref", "refs/heads/spec/"+f.SpecID, merge)
+	// A valid two-parent merge exists, but its second parent is not the recorded commit.
+	f.Must(f.Store.WriteMetadata(item, map[string]any{"mindspec_landed_merge_sha": merge, "mindspec_landed_second_parent": base}))
+	reducerGit(t, f, "update-ref", "-d", "refs/heads/bead/"+item)
+	if f.State().Merged[item] {
+		t.Fatal("wrong second parent counted as merged")
+	}
+	if out := reduce(t, f, true); len(out.Actions) != 0 {
+		t.Fatalf("wrong second parent released downstream: %+v", out)
 	}
 }
