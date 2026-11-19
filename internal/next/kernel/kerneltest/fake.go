@@ -3,6 +3,7 @@ package kerneltest
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,7 +79,7 @@ func (f *FakeBD) Run(args ...string) ([]byte, error) {
 		if title == "" && len(args) > 1 && !strings.HasPrefix(args[1], "--") {
 			title = args[1]
 		}
-		r := kernel.Record{ID: id, Parent: value("--parent"), Title: title, Type: value("--type"), Status: "open", Metadata: map[string]any{}}
+		r := kernel.Record{ID: id, Parent: value("--parent"), Title: title, Description: value("--description"), Type: value("--type"), Status: "open", Metadata: map[string]any{}}
 		if m := value("--metadata"); m != "" {
 			if err := json.Unmarshal([]byte(m), &r.Metadata); err != nil {
 				return nil, err
@@ -97,6 +98,21 @@ func (f *FakeBD) Run(args ...string) ([]byte, error) {
 		if expected := value("--if-status"); expected != "" && r.Status != expected {
 			return nil, ExitError(13)
 		}
+		if title := value("--title"); title != "" {
+			r.Title = title
+		}
+		if label := value("--add-label"); label != "" {
+			found := false
+			for _, old := range r.Labels {
+				found = found || old == label
+			}
+			if !found {
+				r.Labels = append(r.Labels, label)
+			}
+		}
+		if typ := value("--type"); typ != "" {
+			r.Type = typ
+		}
 		if status := value("--status"); status != "" {
 			r.Status = status
 		}
@@ -110,6 +126,21 @@ func (f *FakeBD) Run(args ...string) ([]byte, error) {
 				return nil, err
 			}
 		}
+		f.Records[r.ID] = r
+		return json.Marshal(r)
+	case "close":
+		r, ok := f.Records[args[1]]
+		if !ok {
+			return nil, ExitError(1)
+		}
+		if !slices.Contains(args, "--force") {
+			for _, child := range f.Records {
+				if child.Parent == r.ID && child.Status != "closed" {
+					return nil, fmt.Errorf("open child %s", child.ID)
+				}
+			}
+		}
+		r.Status = "closed"
 		f.Records[r.ID] = r
 		return json.Marshal(r)
 	case "dep":

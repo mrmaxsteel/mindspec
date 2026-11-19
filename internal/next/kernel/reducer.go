@@ -57,7 +57,7 @@ func activeGate(s State, base string) string {
 	return best
 }
 func itemDone(s State, id string) bool {
-	return s.Records[id].Status == "closed" && passed(s, s.Records[activeGate(s, id+".review")]) && s.Merged[id]
+	return s.Records[id].Status == "closed" && !ForcedClose(s, id) && passed(s, s.Records[activeGate(s, id+".review")]) && s.Merged[id]
 }
 func upstreamsDone(s State, item string) bool {
 	for _, link := range s.Links {
@@ -333,7 +333,7 @@ func tally(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
-		if !ok || reg.Round != round.Round || reg.Subject != round.Subject {
+		if !ok || reg.Round != round.Round || reg.Subject != round.Subject || !receiptedSlots(s, round) {
 			continue
 		}
 		for _, p := range s.Panels {

@@ -51,6 +51,7 @@ func TestS134Records_RoundTrips(t *testing.T) {
 		"run":          kernel.DefaultPolicy,
 		"lease":        kernel.LeaseRecord{Generation: 2, Expires: fixedTime, TokenHash: "sha256:token", ClaimBase: "base"},
 		"round":        kernel.GateRound{Round: 2, Subject: "subject", Slots: []string{"slot"}, SlotCount: 2, Paths: []string{"app.go"}},
+		"raw-claims":   []kernel.RawClaim{{At: fixedTime}},
 		"take":         kernel.TakeReason{Reason: "operator", At: fixedTime, Generation: 2},
 		"decision":     kernel.DecisionRecord{Options: []string{"fix", "halt"}, Cause: "reject", Gate: "test-abc.1.review"},
 		"answer":       kernel.DecisionAnswer{Option: "fix", At: fixedTime, Actor: "operator"},
@@ -78,7 +79,7 @@ func TestS134Records_RoundTrips(t *testing.T) {
 			}
 		})
 	}
-	keys := []string{kernel.KeyPlanApproval, kernel.KeyTuple, kernel.KeyID, kernel.KeyFrom, kernel.KeyLinks, kernel.KeyRun, kernel.KeyLease, kernel.KeyRound, kernel.KeyTake, kernel.KeyDecision, kernel.KeyAnswer, kernel.KeyDefer, kernel.KeyJudgement, kernel.KeyRePanel, kernel.KeyClose, kernel.KeySubject, kernel.KeyRegistration}
+	keys := []string{kernel.KeyPlanApproval, kernel.KeyTuple, kernel.KeyID, kernel.KeyFrom, kernel.KeyLinks, kernel.KeyRun, kernel.KeyLease, kernel.KeyRound, kernel.KeyTake, kernel.KeyDecision, kernel.KeyAnswer, kernel.KeyDefer, kernel.KeyJudgement, kernel.KeyRePanel, kernel.KeyClose, kernel.KeySubject, kernel.KeyRegistration, kernel.KeyRawClaims}
 	golden(t, "record-keys", keys)
 }
 func TestS134Records_PassReceipts(t *testing.T) {

@@ -214,6 +214,16 @@ func (s *Store) WriteMetadata(key string, updates map[string]any) error {
 	for k, v := range updates {
 		metadata[k] = v
 	}
+	// Retain a raw claim when a lease replaces it. Flag rules stay read-only.
+	newLease, granting, leaseErr := Decode[LeaseRecord](updates, KeyLease)
+	oldLease, leased, oldErr := Decode[LeaseRecord](r.Metadata, KeyLease)
+	if granting && leaseErr == nil && newLease.Generation > 0 && newLease.TokenHash != "" && r.Status == "in_progress" && (oldErr != nil || !leased || oldLease.Generation < 1 || oldLease.TokenHash == "") {
+		claims, _, err := Decode[[]RawClaim](r.Metadata, KeyRawClaims)
+		if err != nil {
+			return err
+		}
+		metadata[KeyRawClaims] = append(claims, RawClaim{At: Now().UTC()})
+	}
 	data, err := json.Marshal(metadata)
 	if err != nil {
 		return err

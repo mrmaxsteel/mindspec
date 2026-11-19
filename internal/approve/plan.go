@@ -50,6 +50,9 @@ var planRunBDCombinedFn = bead.RunBDCombined
 // planRunBDFn is for JSON-returning bd commands (stdout only, no stderr mixing).
 var planRunBDFn = bead.RunBD
 
+// enrolOnApprove keeps enrolment internal until the kernel verbs are connected.
+var enrolOnApprove bool
+
 // planListJSONFn wraps bead.ListJSON for testability.
 var planListJSONFn = bead.ListJSON
 
@@ -302,6 +305,9 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	}
 	result := &PlanResult{SpecID: specID}
 	appendDocumentGateWarnings(&result.Warnings, gateWarnings.String())
+	if enrolOnApprove {
+		return approveEnrolment(root, specID, approvedBy, specDir, filepath.Join(specDir, "plan.md"), result, outcome, exec)
+	}
 
 	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
 	vr := validate.ValidatePlan(root, specID)

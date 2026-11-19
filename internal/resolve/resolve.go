@@ -31,6 +31,7 @@ func ActiveSpecs(root string) ([]SpecStatus, error) {
 
 // ActiveSpecsWithCache is the cache-aware variant of ActiveSpecs.
 func ActiveSpecsWithCache(c *phase.Cache, root string) ([]SpecStatus, error) {
+	c = c.WithRoot(root)
 	activeSpecs, err := phase.DiscoverActiveSpecsWithCache(c)
 	if err != nil {
 		return nil, err
@@ -80,6 +81,7 @@ func ResolveMode(root, specID string) (string, error) {
 // first call, with a real in_progress epic, fabricated idle instead of
 // the epic's real derived phase).
 func ResolveModeWithCache(c *phase.Cache, root, specID string) (string, error) {
+	c = c.WithRoot(root)
 	epicID, err := phase.FindEpicBySpecIDWithCache(c, specID)
 	if err != nil || epicID == "" {
 		if _, epicsErr := c.AllEpics(); epicsErr != nil {

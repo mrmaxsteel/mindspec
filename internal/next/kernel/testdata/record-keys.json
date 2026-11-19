@@ -15,5 +15,6 @@
   "mindspec_repanel",
   "mindspec_close",
   "mindspec_subject",
-  "mindspec_registration"
+  "mindspec_registration",
+  "mindspec_raw_claims"
 ]

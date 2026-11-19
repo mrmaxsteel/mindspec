@@ -498,3 +498,18 @@ Read all decision inputs inside `fn`.
 Do not acquire the lock again inside `fn`.
 The operating system releases the lock when the process exits.
 The function returns lock errors and callback errors to the caller.
+
+## Phase derivation
+
+An enrolled epic counts recorded work items and kernel identities.
+The issue type does not decide ownership.
+A foreign task under the epic does not affect its phase.
+A closed kernel identity still witnesses enrolment after its type changes.
+The shared identity package checks enrolment. Phase code does not import the
+kernel workflow package.
+
+An epic policy record, a kernel identity, or an orchestrated panel can witness
+enrolment. The reader uses the plan-order record to select work items.
+It uses recorded plan IDs when that record is absent.
+An older approval with no witness keeps the task-type rule.
+The stored phase remains a cache. The derived phase uses the selected children.
