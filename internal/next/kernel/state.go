@@ -17,7 +17,9 @@ import (
 
 // State is a fresh read of one epic's recorded work and evidence.
 type State struct {
-	Store         *Store `json:"-"`
+	Store *Store `json:"-"`
+	// ExcludedStep preserves holds while a verb omits its own step.
+	ExcludedStep  *Record `json:"-"`
 	Root          string
 	SpecID        string
 	SpecDir       string

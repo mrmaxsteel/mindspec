@@ -1652,3 +1652,24 @@ Each step resumes from its own done signal.
 A closed resume keeps all gates and tip checks. It skips the presence check.
 An absent worktree passes the user-changes check. In a non-flat layout with
 panel enforcement, no worktree and no surviving registration refuses.
+
+## Rounds, decisions and halt
+
+Count registered rounds across all panels for a gate. Include abandoned panels.
+A refused round creates a fix for the next round. A REJECT also creates a local
+decision. Answer `fix` to release that fix. Other work items can continue.
+At the round limit, answer `continue:<n>` to add an allowance and create a fix.
+The answer does not authorise a round. A passed fix authorises the next round.
+
+A new subject during a review supersedes its open slots and authorises the next
+round. A commit during an open fix does not supersede the review.
+The final review starts on the spec branch head after every work item has a
+passed gate, a closed work item and a merged branch. It uses the same limits
+and decisions as a work item review.
+
+The `halt` option stops the spec and every work item. Its answer receipt is
+durable before any close. A halt pass closes only computed steps and decisions.
+It records each close as `halted`. It leaves the epic and work items open.
+An open foreign child prevents its parent and kernel ancestors from closing.
+The pass reports that child. A retry finishes the remaining permitted closes.
+Halted reads and retries return exit status 4. They create no steps.

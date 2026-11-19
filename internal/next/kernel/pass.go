@@ -62,6 +62,8 @@ func reduce(reg *Registry, state State, apply bool, step string) (PassResult, er
 		for key, record := range input.Records {
 			if step != "" && (key == step || record.ID == step) {
 				excluded[key], excluded[record.ID] = true, true
+				copy := record
+				input.ExcludedStep = &copy
 				delete(input.Records, key)
 			}
 		}
