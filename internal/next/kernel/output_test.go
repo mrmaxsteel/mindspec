@@ -2,8 +2,10 @@ package kernel_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -161,5 +163,62 @@ func TestS134Output_RevisionAcrossRoots(t *testing.T) {
 	left, right := reduce(t, a, false), reduce(t, b, false)
 	if left.Revision != right.Revision {
 		t.Fatalf("checkout root changed revision: %s != %s", left.Revision, right.Revision)
+	}
+}
+
+func TestS134Output_RevisionSameBasenameEvidence(t *testing.T) {
+	f := reducerFixture(t)
+	dirs := []string{
+		filepath.Join(f.Root, "review", "panel"),
+		filepath.Join(f.Root, ".mindspec", "reviews", "panel"),
+	}
+	for _, dir := range dirs {
+		registerRound(t, f, 1)
+		f.Must(os.MkdirAll(filepath.Dir(dir), 0755))
+		f.Must(os.Rename(filepath.Join(f.SpecDir, "reviews", "panel"), dir))
+		put(t, filepath.Join(dir, "R1-round-1.json"), `{"schema":2,"verdict":"APPROVE"}`)
+	}
+	ledger, err := os.ReadFile(filepath.Join(dirs[0], "dispositions.jsonl"))
+	f.Must(err)
+	ledgers := []string{string(ledger), strings.Replace(string(ledger), fixedTime.Format(time.RFC3339), fixedTime.Add(time.Second).Format(time.RFC3339), 1)}
+	if ledgers[0] == ledgers[1] {
+		t.Fatal("ledger variants must have different created_at values")
+	}
+	verdicts := []string{`{"schema":2,"verdict":"APPROVE"}`, `{"schema":2,"verdict":"REQUEST_CHANGES"}`}
+	for _, input := range []string{"ledger", "verdict"} {
+		t.Run(input, func(t *testing.T) {
+			seen := map[string][2]int{}
+			// All four combinations must have distinct revisions. A collapsed key can
+			// encode only two values, so this catches collisions in any map order.
+			for _, variant := range [][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}} {
+				for i, dir := range dirs {
+					ledgerIndex, verdictIndex := 0, 0
+					if input == "ledger" {
+						ledgerIndex = variant[i]
+					} else {
+						verdictIndex = variant[i]
+					}
+					put(t, filepath.Join(dir, "dispositions.jsonl"), ledgers[ledgerIndex])
+					put(t, filepath.Join(dir, "R1-round-1.json"), verdicts[verdictIndex])
+				}
+				state := f.State()
+				if len(state.Ledgers) != 2 || len(state.Verdicts) != 2 {
+					t.Fatalf("reader must retain both ledgers and verdicts: %d ledgers, %d verdicts", len(state.Ledgers), len(state.Verdicts))
+				}
+				for _, dir := range dirs {
+					if _, ok := state.Ledgers[dir]; !ok {
+						t.Fatalf("reader missed ledger in %s", dir)
+					}
+					if _, ok := state.Verdicts[filepath.Join(dir, "R1-round-1.json")]; !ok {
+						t.Fatalf("reader missed verdict in %s", dir)
+					}
+				}
+				out := kernel.OutputForPass(kernel.PassResult{State: state}, state, false)
+				if previous, exists := seen[out.Revision]; exists {
+					t.Fatalf("revision lost same-basename %s evidence: variants %v and %v collide", input, previous, variant)
+				}
+				seen[out.Revision] = variant
+			}
+		})
 	}
 }

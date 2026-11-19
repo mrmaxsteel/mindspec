@@ -203,11 +203,52 @@ func TestS134Flags_RawClaimAncestor(t *testing.T) {
 			for _, flag := range out.Flags {
 				if flag.Code == "raw-claim" && flag.Step == id {
 					named = true
+					want := []string{"bd", "update", f.ID(id), "--status", "open"}
+					if !reflect.DeepEqual(flag.Repair, want) {
+						t.Errorf("raw claim repair for %s = %q, want %q", id, flag.Repair, want)
+					}
 				}
 			}
 			if !named {
 				t.Errorf("raw claim did not name %s: %+v", id, out.Flags)
 			}
 		})
+	}
+}
+
+func TestS134Flags_ForeignInProgressParentHoldsWork(t *testing.T) {
+	f := reducerFixture(t)
+	foreign := "foreign-parent"
+	f.Fake.Records[foreign] = kernel.Record{ID: foreign, Type: "epic", Status: "open"}
+	epic := f.Fake.Records[f.Epic]
+	epic.Parent = foreign
+	f.Fake.Records[epic.ID] = epic
+	if out := reduce(t, f, false); len(out.Actions) == 0 {
+		t.Fatalf("open foreign parent must allow work: %+v", out)
+	}
+	parent := f.Fake.Records[foreign]
+	parent.Status = "in_progress"
+	f.Fake.Records[foreign] = parent
+	state := f.State()
+	if _, inside := state.Records[foreign]; inside {
+		t.Fatal("foreign parent must be outside the spec records")
+	}
+	out, err := kernel.NextAction(state, true)
+	f.Must(err)
+	if len(out.Actions)+len(out.Run)+len(out.Decisions) != 0 || out.Status == "work" {
+		t.Fatalf("in_progress foreign parent did not hold descendant work: %+v", out)
+	}
+	for _, item := range f.Items {
+		if _, exists := f.State().Records[item+".impl.a1"]; exists {
+			t.Errorf("held descendant %s acquired an implementation step", item)
+		}
+	}
+	if !reflect.DeepEqual(parent, f.Fake.Records[foreign]) {
+		t.Fatal("foreign parent was changed")
+	}
+	parent.Status = "open"
+	f.Fake.Records[foreign] = parent
+	if out := reduce(t, f, true); len(out.Actions) == 0 || out.Status != "work" {
+		t.Fatalf("reopening foreign parent did not release work: %+v", out)
 	}
 }
