@@ -66,7 +66,7 @@ var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Print the effective config (defaults merged with .mindspec/config.yaml)",
 	Long: `Print the effective config with defaults merged into the project settings.
-Removed loop keys are labelled ignored. The round-limit alias is labelled as
+Removed loop keys are labeled ignored. The round-limit alias is labeled as
 an alias. The runner setting is read by a skill. Reviewer-family model keys
 select reviewer models. Commands supply the managed Build & Test guidance.
 

@@ -31,7 +31,7 @@ func (c *Config) RemovedLoopKeys() []string {
 // RemovedLoopValue returns the original value for display only.
 func (c *Config) RemovedLoopValue(key string) any { return c.removedLoop[key] }
 
-func (c *Config) readRemovedLoop(raw map[string]any) error {
+func (c *Config) readRemovedLoop(raw map[string]any) {
 	c.removedLoop = nil
 	var collect func(string, map[string]any)
 	collect = func(prefix string, entries map[string]any) {
@@ -74,5 +74,4 @@ func (c *Config) readRemovedLoop(raw map[string]any) error {
 		}
 		fmt.Fprintf(os.Stderr, "warning: loop.%s value %s is a deprecated alias for panel.max_rounds; effective value %d\n", termsafe.Escape(key), termsafe.Escape(fmt.Sprint(value)), c.RoundLimit())
 	}
-	return nil
 }

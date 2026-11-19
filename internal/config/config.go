@@ -480,9 +480,7 @@ func loadUncached(root string) (*Config, error) {
 		cfg.Panel.ApproveThreshold = "n-1"
 	}
 
-	if err := cfg.readRemovedLoop(raw); err != nil {
-		return nil, err
-	}
+	cfg.readRemovedLoop(raw)
 	if cfg.Runner == "" {
 		cfg.Runner = runnerSkillsAdapter
 	}
