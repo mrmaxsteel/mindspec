@@ -118,29 +118,32 @@ The existing verbs stay. `run` lists them; each closes the kernel step it names,
 ## 8. Enrolment
 
 `plan approve` enrols every new spec. Under the phase lock it writes in this order: each work item, with its id recorded
-in the plan's `bead_ids` right after its create; epic metadata `mindspec_links` (the plan-order links between recorded
-ids); a B7 cycle check of its links against the store; the plan-order blocks links; epic metadata `mindspec_run:
-{round_limit, lease_ttl, rules: "kernel-1"}`; the approval record; the gates, with the work-item links to `<epic>.final`
-(B5: `--apply` creates a missing one). The plan is unapproved until the approval record. If the check or bd refuses a
-link as a cycle before `mindspec_run`, `plan approve` refuses and names the link and any foreign link that closes the
-cycle, with its bd removal; it writes no `mindspec_run`, approval record or gate. From `mindspec_run` on, the spec is
-enrolled. A link that the check or bd refuses after that (here or at `--apply`) is not written: the step that needs it
-stays open, `plan approve` exits 0, and the next `--apply` tries again. Each pass runs the B7 check on current state for
-each missing mindspec link and flags `foreign-blocker` naming the first foreign link on each cycle from that link's
-downstream bead, and its bd removal; nothing is stored. A rerun before the approval record keeps any `mindspec_run`,
-reuses exactly the recorded ids, creates only chunks with no recorded id and continues the order. It never selects by
-`--parent` and closes or supersedes no other bead. It refuses every other plan change, names it and writes nothing: a
-recorded id with no chunk, or links between recorded ids that differ from a written `mindspec_links` (it adds no link
-between existing items and keeps no dropped plan-order link). On an enrolled spec with an approval record, `plan
-approve` refuses, names the enrolment and writes nothing. An item created but not recorded is foreign; its
-`foreign-child-open` recovery line says to close it with bd. A spec is enrolled if ANY witness exists: `mindspec_run` on
-the epic; a computed kernel id under the epic (open or closed, any type); a spec `panel.json` with `"orchestrated":
-true` (`panel create` writes it). A witness without the marker gives the default policy and flags `run-marker-missing`.
-A spec with no witness (approved before this release) is pre-kernel and finishes on today's rules: warnings, and
-`panel_presence` applies. `next-action` and `lease` refuse it, naming today's verbs; no pass writes on it. No verb,
-flag, env var or key enrols a pre-kernel spec or clears enrolment. Policy is pinned at enrolment; config edits and
-retypes change nothing. An enrolled spec always enforces the panel gate. Threat model: the kernel governs progression,
-not OS access; a same-user process can forge an answer. One controller host.
+in the plan's `bead_ids` right after its create; epic metadata `mindspec_links` (each recorded id with its plan-order
+upstream ids; each run writes it whole here); a B7 cycle check of its links against the store; the plan-order blocks
+links; epic metadata `mindspec_run: {round_limit, lease_ttl, rules: "kernel-1"}`; the approval record; the gates, with
+the work-item links to `<epic>.final` (B5: `--apply` creates a missing one). The plan is unapproved until the approval
+record. If the check or bd refuses a link as a cycle before `mindspec_run`, `plan approve` refuses and names the link
+and any foreign link that closes the cycle, with its bd removal; it writes no `mindspec_run`, approval record or gate.
+From `mindspec_run` on, the spec is enrolled. A link that the check or bd refuses after that (here or at `--apply`) is
+not written: the step that needs it stays open, `plan approve` exits 0, and the next `--apply` tries again. Each pass
+runs the B7 check on current state for each missing mindspec link and flags `foreign-blocker` naming the first foreign
+link on each cycle from that link's downstream bead, and its bd removal; nothing is stored. A rerun before the approval
+record keeps any `mindspec_run`, reuses exactly the recorded ids, creates only chunks with no recorded id and continues
+the order. It compares first: each id in a written `mindspec_links` against the plan. An id not in it (created by a
+killed run) takes its links from the plan. With no child under the epic, it ignores a written `mindspec_links`. It never
+selects by `--parent` and closes or supersedes no other bead. It refuses every other plan change, names it and writes
+nothing: a recorded id with no chunk, a recorded chunk whose text differs from its item, or an id in a written
+`mindspec_links` whose plan-order upstreams differ from it (it adds no link between existing items and keeps no dropped
+plan-order link). On an enrolled spec with an approval record, `plan approve` refuses, names the enrolment and writes
+nothing. An item created but not recorded is foreign; its `foreign-child-open` recovery line says to close it with bd. A
+spec is enrolled if ANY witness exists: `mindspec_run` on the epic; a computed kernel id under the epic (open or closed,
+any type); a spec `panel.json` with `"orchestrated": true` (`panel create` writes it). A witness without the marker
+gives the default policy and flags `run-marker-missing`. A spec with no witness (approved before this release) is
+pre-kernel and finishes on today's rules: warnings, and `panel_presence` applies. `next-action` and `lease` refuse it,
+naming today's verbs; no pass writes on it. No verb, flag, env var or key enrols a pre-kernel spec or clears enrolment.
+Policy is pinned at enrolment; config edits and retypes change nothing. An enrolled spec always enforces the panel gate.
+Threat model: the kernel governs progression, not OS access; a same-user process can forge an answer. One controller
+host.
 
 ## 9. Refused vs flagged
 
@@ -215,27 +218,28 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
 1. **Final gate (OQ4).** B9 and the decision grammar apply to `<epic>.final`. A final fix commit lands on the spec
    branch, which the §6 fix check reads. Final rounds count over all `final_review` registrations, abandoned too.
 2. **Subject change after a pass (OQ5).** A move of a passed gate's subject commit never by itself forces a new panel,
-   and a frozen receipt never by itself authorises the new subject. The accepted subject is the later of the passing
-   panel's subject as a successful `panel rebind` refreshes it (rebind does not write the gate; it runs one pass) and
-   the new subject of the last `carry-over`. A commit that changes only the panel directory of any registration of the
-   gate does not move the subject. When a pass finds the newest subject commit of a passed gate (highest attempt) is not
-   its accepted subject, no judge is open on that commit, the work item of a bead gate is not merged and `impl approve`
-   has not finalized the epic, it creates the actor step `<gate>.judge.a<k>` (`<gate>` is the base id `<w>.review` or
-   `<epic>.final` for every attempt; kind `change-judge`, child of the gate's parent, subject = that commit), leased and
-   submitted as §5 and §6 say. One subject change has one live judge: a pass closes an open judge `superseded` when its
-   subject is not the newest commit or is the accepted subject (a successful rebind; the receipt names the rebind), then
-   applies the rule above, so any `.a<k+1>` judges the newest commit. The artifact, in the gate's panel directory like a
-   verdict, is a judgement with one of two values: `carry-over` with a reason, or `re-panel` with a slot count n (from 2
-   to the slot count of the gate's passing round; after a 1-slot pass only `carry-over` fits) and the changed paths.
-   `submit` checks the shape, the old subject (the accepted subject), the new subject and the frozen gate's receipt; it
-   never judges the content. A judgement that does not fit is refused, step open. On `carry-over` the gate stays
-   `passed`; its receipt adds the old subject, the new subject and the judge's receipt, and verbs accept the new
-   subject. On `re-panel` the pass creates the successor `<gate>.a<k+1>` (same parent, `mindspec_from` = the frozen
-   gate) and authorises a round of n slots on the new subject; its `panel create` entry in `run` (§13.7) carries the
-   changed paths as the round's scope. Verbs select the highest attempt, rounds keep counting, and §2 ids apply to it.
-   Judge and gate attempts count apart. Applied readings, not in the ruling: the accepted subject and its precedence,
-   rebind's pass, the panel-directory exemption, the end state, judge parent and id, supersede, separate attempt
-   counters, slot ceiling, scope carrier.
+   and a frozen receipt never by itself authorises the new subject. The accepted subject is the later, in pass order,
+   of the passing panel's subject as a successful `panel rebind` refreshes it (rebind does not write the gate; it runs
+   one pass) and the new subject of the last `carry-over`. A commit that changes only the panel directory of any
+   registration of the gate does not move the subject. When a pass finds the newest subject commit of a passed gate
+   (highest attempt) is not its accepted subject, no judge is open on that commit, the work item of a bead gate is not
+   merged and `impl approve` has not closed the epic, it creates the actor step `<gate>.judge.a<k>` (`<gate>` is the
+   base id `<w>.review` or `<epic>.final` for every attempt; kind `change-judge`, child of the gate's parent, subject =
+   that commit), leased and submitted as §5 and §6 say. One subject change has one live judge: a pass closes an open
+   judge `superseded` when its subject is not the newest commit or is the accepted subject (a successful rebind; the
+   receipt names the rebind), then applies the rule above, so any `.a<k+1>` judges the newest commit. The artifact, in
+   the gate's panel directory like a verdict, is a judgement with one of two values: `carry-over` with a reason, or
+   `re-panel` with a slot count n (from 2 to the slot count of the gate's passing round; after a 1-slot pass only
+   `carry-over` fits) and the changed paths. `submit` checks the shape, the old subject (the accepted subject), the new
+   subject and the frozen gate's receipt; it never judges the content. A judgement that does not fit is refused, step
+   open. On `carry-over` the gate stays `passed`; its receipt adds the old subject, the new subject and the judge's
+   receipt, and verbs accept the new subject. On `re-panel` the pass creates the successor `<gate>.a<k+1>` (same parent,
+   `mindspec_from` = the frozen gate) and authorises a round of n slots on the new subject; its `panel create` entry in
+   `run` (§13.7) carries the changed paths as the round's scope. Verbs select the highest attempt, rounds keep counting,
+   and §2 ids apply to it. Judge and gate attempts count apart. An `impl approve` killed after its finalize export
+   commit, before the epic closes, leaves a final judge that `carry-over` clears. Applied readings, not in the ruling:
+   the accepted subject and its precedence, rebind's pass, the panel-directory exemption, the end state, judge parent
+   and id, supersede, separate attempt counters, slot ceiling, scope carrier.
 3. **Implement authorisation (OQ9).** An open work item with all plan upstreams done (B4), no open implement step and
    no gate round authorises `<w>.impl.a1`. Each pass creates it for every such item, in plan order, on the one
    controller host (§8); this is not the deferred parallel waves. `<w>.impl.a<k+1>` comes only from §9.

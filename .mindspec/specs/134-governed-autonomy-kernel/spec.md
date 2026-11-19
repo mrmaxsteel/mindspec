@@ -101,18 +101,20 @@ list --all --json`, every dependency list, `git for-each-ref`, `git status --por
 blocks Y" = Y waits for X.
 
 - [ ] AC1 (R1): `next-action x --json` twice: same bytes and snapshot; one action, item 1 `implement`, `"exists":false`.
-- [ ] AC2 (R2, R5, R6): `plan approve` creates exactly `<w>.review` per item, `<epic>.final` and `mindspec_run`; a
-  second run exits non-zero naming the enrolment, same snapshot. The first `--apply` creates exactly `<1>.impl.a1`; a
-  second, or a rerun after a kill at its first write, gives the same snapshot and `revision`. The pass of `complete 1`
-  creates exactly `<2>.impl.a1` and `<3>.impl.a1`. Fresh fixtures: (a) a fake bd refuses a plan-order `dep add` as a
-  cycle: exit non-zero naming the link; no gate, `mindspec_run` or approval. Then a foreign `bd create --parent
-  <epic>` and a normal-bd rerun: exit 0, no second work item, that child unchanged. (b) With a call-logging bd
-  wrapper, killed after the creates, foreign links item 3 blocks a bug blocks item 1: the rerun exits non-zero naming
-  a chain link and its bd removal; the log has no link write. (c) Killed after the `<epic>.final` create, foreign links
-  `<epic>.final` blocks a bug blocks item 3: `--apply` exits 0 without the item-3-to-final link; `next-action` flags
-  `foreign-blocker` naming the `<epic>.final`-blocks-bug link. After `bd dep remove` of that link, that flag is gone
-  and `--apply` writes the item-3-to-final link. (d) Killed after the plan-order links, the plan edited to drop the
-  item-2-on-1 link, or separately to add an item-3-on-2 link: the rerun exits non-zero naming it, same snapshot.
+- [ ] AC2 (R2, R5, R6): `plan approve` creates exactly `<w>.review` per item, `<epic>.final`, `mindspec_links` and
+  `mindspec_run`; a second run exits non-zero naming the enrolment, same snapshot. The first `--apply` creates exactly
+  `<1>.impl.a1`; a second, or a rerun after a kill at its first write, gives the same snapshot and `revision`. The
+  pass of `complete 1` creates exactly `<2>.impl.a1` and `<3>.impl.a1`. Fresh fixtures: (a) a fake bd refuses a
+  plan-order `dep add` as a cycle: exit non-zero naming the link; no gate, `mindspec_run` or approval. Then a foreign
+  `bd create --parent <epic>` and a normal-bd rerun: exit 0, no second work item, that child unchanged. (b) With a
+  call-logging bd wrapper, killed after the creates, foreign links item 3 blocks a bug blocks item 1: the rerun exits
+  non-zero naming a chain link and its bd removal; the log has no link write. (c) Killed after the `<epic>.final`
+  create, foreign links `<epic>.final` blocks a bug blocks item 3: `--apply` exits 0 without the item-3-to-final link;
+  `next-action` flags `foreign-blocker` naming the `<epic>.final`-blocks-bug link. After `bd dep remove` of that link,
+  that flag is gone and `--apply` writes the item-3-to-final link. (d) Killed after the plan-order links, the plan
+  edited to drop the item-2-on-1 link, or separately to add an item-3-on-2 link: the rerun exits non-zero naming it,
+  same snapshot. (e) Killed after the plan-order links, a chunk 4 on item 1 added, the rerun killed again after its
+  links: a further rerun exits 0 with item 4 and its item-4-on-1 link.
 - [ ] AC3 (R3, R4): `next 1` (no `--spec`) resolves spec `x` and prints a token (generation 1); a second `next 1` or
   `lease <1>.impl.a1` exits non-zero naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug
   blocking item 1: `lease <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits
@@ -146,9 +148,9 @@ blocks Y" = Y waits for X.
   exits non-zero printing `bd reopen <1>`; after `bd reopen <1>` and a gate pass, `complete 1` exits 0 and `impl
   approve` does not name the flag.
 - [ ] AC11 (R9): one each of `--allow-not-ready`, `--allow-doc-skew`, `--override-adr`, `--allow-net-deletion`, `lease
-  --take`, `panel defer`, a decision answer, a repaired unreceipted close, a `carry-over`, a 3-slot `re-panel`: `impl
-  approve` and a rerun exit 0, print 1 each (the re-panel row also 3 slots); both registries hold `allow-not-ready`.
-  `MINDSPEC_SKIP_PANEL=1 complete`, no passing gate: non-zero, names it.
+  --take`, `panel defer`, a decision answer, a repaired unreceipted close, a `carry-over`, a 3-slot `re-panel` after a
+  passing round of at least 3 slots: `impl approve` and a rerun exit 0, print 1 each (the re-panel row also 3 slots);
+  both registries hold `allow-not-ready`. `MINDSPEC_SKIP_PANEL=1 complete`, no passing gate: non-zero, names it.
 - [ ] AC12 (R10): `loop.gate_authority`, `loop.halt.{on_reject: fix, panel_deadlock_rounds,
   max_consecutive_impl_failures}` load with exit 0, one warning each; `config show` labels them ignored and `runner:`
   read by a skill. `loop.halt.max_rounds_per_bead: 4` gives limit 4; with `panel.max_rounds: 6`, 6. On a spec enrolled
