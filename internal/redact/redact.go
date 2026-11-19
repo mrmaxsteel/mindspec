@@ -75,6 +75,7 @@ var EscapeHatchTokens = map[string]struct{}{
 	"override-adr":       {},
 	"allow-doc-skew":     {},
 	"supersede-adr":      {},
+	"allow-not-ready":    {},
 	"repair-phase":       {},
 	"allow-net-deletion": {}, // spec 127 R4(b): the work-destruction preflight's audited override
 }
