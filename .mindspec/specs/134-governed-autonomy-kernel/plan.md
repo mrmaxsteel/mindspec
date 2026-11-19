@@ -89,8 +89,10 @@ own file and returning `ErrNotBuilt` until its bead fills it. **Rule registry.**
 name. `DefaultRegistry` is `NewRegistry` over the names `contract.go` lists; `RegisterRule` registers into it, and rule
 beads fill it through `init` in their own files. `Pass(reg, state, apply)` in `pass.go` is the real dispatcher: it runs
 the rules of `reg` in that registry's order, never in registration order, and with `apply` writes their result (receipts
-before closes, `WithCASRetry` on each status write). On an empty registry it writes nothing; it returns every rule and
-store error. Entry points and verbs call `Pass(kernel.Rules(), ...)`; `Rules()` is `DefaultRegistry` unless
+before closes, `WithCASRetry` on each status write). Each rule reads `State` with the results of the earlier rules of
+this pass applied in memory, with and without `apply`; `Pass` returns its write list in both modes, and with `apply`
+it writes the same list that the read-only pass returns. On an empty registry it writes nothing; it returns every rule
+and store error. Entry points and verbs call `Pass(kernel.Rules(), ...)`; `Rules()` is `DefaultRegistry` unless
 `kerneltest.WithRules(t, reg)` replaces it for one test (restored by `t.Cleanup`; no `t.Parallel`). Bead 1's dispatcher
 tests use their own `NewRegistry`, so later rules do not change them; Bead 7's failing rule and Bead 10's counting rule
 use `WithRules`. A test over the default registry asserts only writes and output that no later rule bead changes.
@@ -99,7 +101,7 @@ return an error. When `State.Halted()`, `Pass` runs only `halt` and `flag` rules
 `apply` writes only the `halted` closes and receipts of `halt` rules; it creates no bead. Flags are read-only, so a
 halted read shows every flag. Otherwise `Pass` runs every rule. No bead after Bead 1 edits the dispatcher. **Rule
 list.** Bead 1 owns the list in `contract.go`: each name with its mode, in this order (owner in brackets). `ordinary`:
-`missing-link` (6), `recreate` (6), `tally` (6), `supersede` (8), `refused-round` (8), `final-round` (8), `judge-apply`
+`recreate` (6), `missing-link` (6), `tally` (6), `supersede` (8), `refused-round` (8), `final-round` (8), `judge-apply`
 (11), `judge-supersede` (11), `judge-create` (11), `round-open` (6), `slots` (6), `implement` (6), `retry-attempt` (9),
 `complete-entry` (6). `halt`: `halt` (8). `flag`: `run-marker-missing`, `foreign-child-open`, `foreign-blocker`,
 `id-collision` (6), `unreceipted-close`, `raw-close`, `forced-close`, `raw-claim` (9). Later beads only register a
@@ -311,6 +313,9 @@ tests in the same bead.
       restores `DefaultRegistry` after it.
 - [ ] Order: two test rules registered in the reverse of their fixed order run in the fixed order; a dispatcher that
       runs rules in registration order fails the test.
+- [ ] Visibility: test rule A creates a step; a later test rule B finds that step in its `State` and a test rule before
+      A does not, with and without `apply`. The write list `Pass` returns without `apply` equals the writes that `Pass`
+      with `apply` makes (snapshot diff). A dispatcher that gives every rule the input `State` fails the test.
 - [ ] Halt mode: on a seeded `halt` answer, an `ordinary` test rule that creates a step is not called and the snapshot
       shows no create; a `halt` test rule is called and its `halted` close is written; a `flag` test rule is called and
       its flag is in the output. On a state that is not halted all three are called. A `flag` rule that returns a write
@@ -494,15 +499,18 @@ Bead 1, Bead 2
    and the contracts §4 output. Core rules: implement authorisation (§13.3), round opening on a closed implement step or
    a closed fix and the `panel create` entry in `run` (§13.7; the one writer of these two authorisations; a close with
    no valid receipt authorises nothing), slots after `panel create`, the inline tally, a passing gate close (frozen),
-   the `complete` entry, re-creation of a deleted kernel bead (its rounds stay in the ledger) and `missing-link`: with
-   `--apply` it writes each missing mindspec link that passes the B7 check (§8). A work item is done only when its gate
-   closed `passed` and its branch is merged; any other state releases no dependent (B4). The slot rule creates slots
-   only for a registered round that matches the gate's authorised round. A subject move before `panel create` updates
-   the authorised subject only (§13.7).
+   the `complete` entry (not listed while a judge under that gate is open, as `complete` refuses then), re-creation of a
+   deleted kernel bead (its rounds stay in the ledger) and `missing-link`: with `--apply` it writes each missing
+   mindspec link that passes the B7 check (§8). A work item is done only when its gate closed `passed` and its branch is
+   merged; any other state releases no dependent (B4). The slot rule creates slots only for a registered round that
+   matches the gate's authorised round. A subject move before `panel create` updates the authorised subject only
+   (§13.7).
 2. Add `allowance.go`: `Allowance(state, gate)` is the pinned limit plus each `continue:<n>` answer; rounds count
    through `panel.RoundsForGate`. A round past the allowance gets no `run` entry.
 3. Add `flags.go` (rules in mode `flag`) for `run-marker-missing`, `foreign-child-open`, `foreign-blocker` (B7 check on
-   each missing link, naming the first foreign link and its bd removal) and `id-collision`.
+   each missing link, naming the first foreign link and its bd removal) and `id-collision`. No rule finishes a
+   decision, slot or fix close that an open foreign child stopped: after that child closes, the recovery is a rerun
+   of the same `submit` (or `panel submit`), which closes the open step with its receipt (§6).
 4. Add `output.go`: schema `mindspec.next-action/v1`, `revision` digest (no display time, no free text), `waiting`
    entries with lease generation and expiry, `retry_at` from the earliest expiry, statuses and exits 0/3/4/5/1, order
    plan-kind-slot, argv arrays, `termsafe` on text.
@@ -525,7 +533,12 @@ Bead 1, Bead 2
 - [ ] A live lease gives a `waiting` entry and `retry_at` at its expiry; moving the clock past it changes the output.
       `--apply` with a bd that exits non-zero on every call exits non-zero and writes nothing.
 - [ ] A fake bd answers 13 to the first `--if-status` close of an `--apply`: exit 0, one close.
-- [ ] A deleted `<1>.impl.a1` is created again by the next `--apply`.
+- [ ] A deleted `<1>.impl.a1` is created again by the next `--apply`. After `bd delete` of `<epic>.final`, one
+      `--apply` creates it again with each work-item link to it, and a second `--apply` writes nothing; a rule order
+      that runs `missing-link` before `recreate` fails the test.
+- [ ] Complete entry: after `kerneltest.PassGate`, a commit on `bead/1` and `<1>.review.judge.a1` created open on
+      that commit through the store, `run` lists no `complete 1` (later judge rules write nothing on this state). A
+      rule that lists `complete` with a judge open fails; "Core rules, positive" holds the case with no judge.
 - [ ] Core rules, positive: with a seeded receipted close of `<1>.impl.a1`, `run` lists `panel create 1`; after
       `kerneltest.Register` of round 1 with 3 slots, `--apply` creates exactly `<1>.review.r1.R1`..`R3`; with 4 rounds
       counted and a closed `<1>.review.r5.fix` seeded, `run` lists `panel create 1`; after `kerneltest.PassGate`,
@@ -664,7 +677,8 @@ Bead 1
 - [ ] AC8 (reducer): REJECT on item 2, `--apply`: a decision under item 2 whose `halt` text says it stops the spec, and
       an action for item 3.
 - [ ] AC9 (reducer): a commit on `bead/2` in round 2 with no fix open: one pass marks round-2 slots `superseded` and
-      lists `panel create 2`; in an open fix, none. A foreign child under `<2>.review`, a second REJECT, answer `halt`:
+      lists `panel create 2`; a second `--apply` creates no fix for the superseded round and lists the same `panel
+      create 2`; in an open fix, none. A foreign child under `<2>.review`, a second REJECT, answer `halt`:
       other open steps `halted`, `<2>.review` open flagged `foreign-child-open` (a `flag` rule, run in halt mode),
       `next-action x` exits 4 on each read.
 - [ ] AC9 (halt kill): in a new fixture, the `halt` answer's receipt is seeded with no close (the state a kill after the
@@ -881,8 +895,8 @@ Bead 6, Bead 7
 - [ ] AC3 (part): `next 1` with no `--spec` resolves `x` and prints a token (generation 1); a second `next 1`, and
       separately `lease <1>.impl.a1` after `next 1`, each exit non-zero naming `lease --take`.
 - [ ] AC6 (part): `panel_presence: warn`, kernel steps force-closed and retyped `chore`, no `mindspec_run` or
-      `panel.json`: `complete` with no passing panel exits non-zero. On `PreKernelSpec` `y`, `complete` with no panel warns and exits 0; `next` does not select the foreign
-      child.
+      `panel.json`: `complete` with no passing panel exits non-zero. On `PreKernelSpec` `y`, `complete` with no panel
+      warns and exits 0; `next` does not select the foreign child.
 - [ ] AC9 (verbs): on the halted spec (seeded `halt` answer) `lease`, `complete` and `next 2` exit non-zero, same
       snapshot. `panel tally`, `panel verify`, `config show` and `doctor` are not refused for the halt. With a second
       enrolled spec `z` active, `next` with no argument and no `--spec` skips the halted `x` and selects an item of `z`.
