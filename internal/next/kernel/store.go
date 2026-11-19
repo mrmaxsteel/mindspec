@@ -74,13 +74,17 @@ func (s *Store) Lookup(key string) (*Record, error) {
 	for _, r := range records {
 		if r.ID == key || r.Key() == key {
 			if found != nil {
-				return nil, fmt.Errorf("id-collision: %s; remove that bead with bd", termsafe.Escape(key))
+				return nil, collisionError(key)
 			}
 			copy := r
 			found = &copy
 		}
 	}
 	return found, nil
+}
+
+func collisionError(key string) error {
+	return fmt.Errorf("id-collision: %s; remove that bead with bd", termsafe.Escape(key))
 }
 
 // Collision refuses an identity occupied by a record without the matching tuple.
@@ -91,7 +95,7 @@ func (s *Store) Collision(key string, t Tuple) error {
 	}
 	have, ok, err := r.Tuple()
 	if err != nil || !ok || !reflect.DeepEqual(have, t) {
-		return fmt.Errorf("id-collision: %s; remove that bead with bd", termsafe.Escape(key))
+		return collisionError(key)
 	}
 	return nil
 }
@@ -230,6 +234,10 @@ func (s *Store) Create(c CreateRecord) (*Record, error) {
 	t, err := kernelid.Parse(c.ID)
 	if err != nil || t != c.Tuple || t.Epic != s.Epic {
 		return nil, fmt.Errorf("create needs a matching kernel tuple")
+	}
+	canonical, err := kernelid.Format(t)
+	if err != nil || c.ID != canonical {
+		return nil, fmt.Errorf("create needs a canonical kernel identity")
 	}
 	if c.Type != "step" && c.Type != "decision" {
 		return nil, fmt.Errorf("kernel type must be step or decision")

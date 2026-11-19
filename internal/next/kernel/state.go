@@ -29,6 +29,7 @@ type State struct {
 	Gates         []string
 	Steps         []string
 	Foreign       []string
+	Collisions    []string
 	Links         Links
 	Refs          map[string]string
 	Panels        []panel.Registration
@@ -67,6 +68,7 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	if present {
 		s.Policy = policy
 	}
+	subtree := map[string]bool{s.Epic: true}
 	selected := map[string]bool{s.Epic: true}
 	for _, id := range s.Items {
 		selected[id] = true
@@ -85,7 +87,11 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 					}
 				}
 			}
-			if !selected[r.ID] && (selected[parent] || kernelid.UnderEpic(r.Key(), s.Epic)) {
+			if !subtree[r.ID] && subtree[parent] {
+				subtree[r.ID] = true
+				changed = true
+			}
+			if !selected[r.ID] && (selected[parent] || kernelid.UnderEpic(r.Key(), s.Epic) || kernelid.UnderEpic(r.ID, s.Epic)) {
 				selected[r.ID] = true
 				changed = true
 			}
@@ -96,11 +102,12 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 		if selected[r.ID] {
 			key := r.Key()
 			if _, ok := s.Records[key]; ok {
-				return s, fmt.Errorf("id-collision: duplicate computed identity")
+				return s, collisionError(key)
 			}
 			s.Records[key] = r
-			w.IDs = append(w.IDs, r.ID)
-			if key != r.ID {
+			tuple, parseErr := kernelid.Parse(key)
+			have, ok, tupleErr := r.Tuple()
+			if subtree[r.ID] && parseErr == nil && tuple.Epic == s.Epic && tupleErr == nil && ok && have == tuple {
 				w.Keys = append(w.Keys, key)
 			}
 		}
@@ -156,6 +163,7 @@ func (s *State) classify() {
 	s.Gates = nil
 	s.Steps = nil
 	s.Foreign = nil
+	s.Collisions = nil
 	recorded := map[string]bool{s.Epic: true}
 	for _, id := range s.Items {
 		recorded[id] = true
@@ -168,6 +176,11 @@ func (s *State) classify() {
 		have, ok, e := r.Tuple()
 		if err != nil || e != nil || !ok || have != t || t.Epic != s.Epic {
 			s.Foreign = append(s.Foreign, key)
+			if err == nil && t.Epic == s.Epic {
+				s.Collisions = append(s.Collisions, key)
+			} else if kernelid.UnderEpic(r.ID, s.Epic) {
+				s.Collisions = append(s.Collisions, r.ID)
+			}
 			continue
 		}
 		if t.Kind == "bead-gate" || t.Kind == "final-gate" {
@@ -179,6 +192,7 @@ func (s *State) classify() {
 	sort.Strings(s.Gates)
 	sort.Strings(s.Steps)
 	sort.Strings(s.Foreign)
+	sort.Strings(s.Collisions)
 }
 func (s State) OpenDecisions() []Record {
 	var result []Record

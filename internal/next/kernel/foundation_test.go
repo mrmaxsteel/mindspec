@@ -310,3 +310,119 @@ func TestS134Store_RequireStepType(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestS134State_PreKernelForeignWitness(t *testing.T) {
+	for _, mode := range []string{"fallback", "native", "real"} {
+		t.Run(mode, func(t *testing.T) {
+			var options []kerneltest.Option
+			if mode != "real" {
+				options = append(options, kerneltest.WithFake(mode == "native"))
+			}
+			f := kerneltest.PreKernelSpec(t, options...)
+			if f.State().Enrolled {
+				t.Fatal("fixture is already enrolled")
+			}
+			key := f.Epic + ".final"
+			if _, err := f.Store.Run("create", "foreign", "--id", key, "--type", "bug", "--json"); err != nil {
+				t.Fatal(err)
+			}
+			before := kerneltest.Snapshot(t, f)
+			s := f.State()
+			if s.Enrolled {
+				t.Error("foreign kernel-shaped bead enrolled a pre-kernel spec")
+			}
+			if !reflect.DeepEqual(s.Collisions, []string{key}) {
+				t.Errorf("foreign identity not reported as a collision: %v", s.Collisions)
+			}
+			if _, err := kernel.NextAction(s, false); !errors.Is(err, kernel.ErrPreKernel) {
+				t.Errorf("wrong refusal: %v", err)
+			}
+			if kerneltest.Snapshot(t, f) != before {
+				t.Fatal("foreign witness check wrote")
+			}
+		})
+	}
+}
+
+func TestS134Store_NonCanonicalCreate(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		t.Run(fmt.Sprint(native), func(t *testing.T) {
+			f := kerneltest.Enrolled(t, kerneltest.WithFake(native))
+			gate := f.Items[0] + ".review"
+			for _, id := range []string{f.Items[0] + ".impl", gate + ".r1.R1.a1", gate + ".judge", gate + ".a1", gate + ".r2.fix.a1", gate + ".decide.reject.r1.a1"} {
+				before := kerneltest.Snapshot(t, f)
+				typ := "step"
+				if mustTuple(t, id).Kind == "decision" {
+					typ = "decision"
+				}
+				if _, err := f.Store.Create(kernel.CreateRecord{ID: id, Parent: f.Items[0], Type: typ, Tuple: mustTuple(t, id)}); err == nil {
+					t.Errorf("non-canonical create accepted: %s", id)
+				}
+				if kerneltest.Snapshot(t, f) != before {
+					t.Errorf("non-canonical create wrote: %s", id)
+				}
+			}
+		})
+	}
+}
+
+func TestS134State_DuplicateKeyRecovery(t *testing.T) {
+	f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
+	key := f.Items[0] + ".impl.a1"
+	f.Create(key, f.Items[0])
+	f.Fake.Records[key] = kernel.Record{ID: key, Parent: f.Items[0], Type: "bug", Status: "open"}
+	_, err := kernel.ReadState(f.Store, f.SpecID, f.SpecDir)
+	if err == nil || !strings.Contains(err.Error(), "id-collision: "+key) || !strings.Contains(err.Error(), "remove that bead with bd") {
+		t.Fatalf("collision recovery lacks identity or action: %v", err)
+	}
+}
+
+func TestS134State_WitnessNeedsSubtreeAndTuple(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		for _, tc := range []struct {
+			name                    string
+			parent, tuple, mismatch bool
+		}{
+			{name: "detached-matching-tuple", tuple: true},
+			{name: "child-no-tuple", parent: true},
+			{name: "child-wrong-tuple", parent: true, tuple: true, mismatch: true},
+			{name: "child-matching-tuple", parent: true, tuple: true},
+		} {
+			t.Run(fmt.Sprintf("native=%t/%s", native, tc.name), func(t *testing.T) {
+				f := kerneltest.PreKernelSpec(t, kerneltest.WithFake(native))
+				key := f.Epic + ".final"
+				id := key
+				metadata := map[string]any{}
+				if !native {
+					id = "foreign-physical"
+					metadata[kernel.KeyID] = key
+				}
+				if tc.tuple {
+					tuple := mustTuple(t, key)
+					if tc.mismatch {
+						tuple.Attempt++
+					}
+					metadata[kernel.KeyTuple] = tuple
+				}
+				parent := ""
+				if tc.parent {
+					parent = f.Epic
+				}
+				f.Fake.Records[id] = kernel.Record{ID: id, Parent: parent, Type: "step", Status: "open", Metadata: metadata}
+				s := f.State()
+				want := tc.parent && tc.tuple && !tc.mismatch
+				if s.Enrolled != want {
+					t.Errorf("enrolled=%t want=%t", s.Enrolled, want)
+				}
+				if !want {
+					if _, err := kernel.NextAction(s, false); !errors.Is(err, kernel.ErrPreKernel) {
+						t.Errorf("wrong refusal: %v", err)
+					}
+				}
+				if (!tc.tuple || tc.mismatch) && !reflect.DeepEqual(s.Collisions, []string{key}) {
+					t.Errorf("collision not reported: %v", s.Collisions)
+				}
+			})
+		}
+	}
+}

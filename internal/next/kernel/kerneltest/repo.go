@@ -36,9 +36,22 @@ func command(t testing.TB, root, name string, args ...string) ([]byte, error) {
 	cmd.Dir = root
 	for _, e := range os.Environ() {
 		key, _, _ := strings.Cut(e, "=")
-		if !strings.HasPrefix(key, "BEADS_") && !strings.HasPrefix(key, "BD_") && !strings.HasPrefix(key, "DOLT_") && !strings.HasPrefix(key, "GIT_") {
+		if key != "HOME" && !strings.HasPrefix(key, "XDG_") && !strings.HasPrefix(key, "BEADS_") && !strings.HasPrefix(key, "BD_") && !strings.HasPrefix(key, "DOLT_") && !strings.HasPrefix(key, "GIT_") {
 			cmd.Env = append(cmd.Env, e)
 		}
+	}
+	// Keep configuration outside the repository so snapshots contain only fixture data.
+	homeRoot := root
+	if homeRoot == "" {
+		homeRoot = t.TempDir()
+	}
+	home := filepath.Join(filepath.Dir(homeRoot), ".kernel-home")
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmd.Env = append(cmd.Env, "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, "config"), "XDG_DATA_HOME="+filepath.Join(home, "data"), "XDG_CACHE_HOME="+filepath.Join(home, "cache"))
+	if root != "" {
+		cmd.Env = append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(root), "BEADS_DIR="+filepath.Join(root, ".beads"))
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
 	out, err := cmd.Output()
@@ -68,7 +81,9 @@ func NewRepo(t testing.TB) string {
 	t.Helper()
 	path := RequireBD(t)
 	root := gitRepo(t)
-	if out, err := command(t, root, path, "init", "--sandbox", "--skip-hooks", "-q", "--database", "beads", "--prefix", "kernel"); err != nil {
+	// Pin a local store before init can search enclosing configuration.
+	write(t, filepath.Join(root, ".beads", "config.yaml"), []byte("sync.remote: \"\"\n"))
+	if out, err := command(t, root, path, "init", "--sandbox", "--skip-hooks", "--skip-agents", "--non-interactive", "--remote=", "-q", "--database", "beads", "--prefix", "kernel"); err != nil {
 		t.Fatalf("bd init: %v %s", err, out)
 	}
 	if _, err := bead.EnsureBeadsConfig(root, false); err != nil {

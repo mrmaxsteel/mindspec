@@ -42,7 +42,7 @@ func Pass(reg *Registry, state State, apply bool) (PassResult, error) {
 	return result, err
 }
 func reduce(reg *Registry, state State, apply bool) (PassResult, error) {
-	result := PassResult{State: state.Clone(), Output: Output{Schema: "mindspec.next-action/v1", Status: "wait", Applied: apply, Policy: state.Policy, Actions: []Action{}, Waiting: []Waiting{}, Decisions: []Decision{}, Run: []Run{}, Flags: []Flag{}}, Writes: []Write{}}
+	result := PassResult{State: state.Clone(), Output: Output{Schema: "mindspec.next-action/v1", Status: "wait", Applied: apply, Policy: PolicyView{RoundLimit: state.Policy.RoundLimit, LeaseTTL: state.Policy.LeaseTTL}, Actions: []Action{}, Waiting: []Waiting{}, Decisions: []Decision{}, Run: []Run{}, Flags: []Flag{}}, Writes: []Write{}}
 	for _, name := range reg.names {
 		entry, ok := reg.entries[name]
 		if !ok {

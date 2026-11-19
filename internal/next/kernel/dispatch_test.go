@@ -235,7 +235,11 @@ func TestS134Dispatch_FlagWriteRefusesBeforeWrites(t *testing.T) {
 	id := f.Items[0] + ".impl.a1"
 	create := kernel.Write{Kind: "create", ID: id, Create: &kernel.CreateRecord{ID: id, Parent: f.Items[0], Type: "step", Tuple: mustTuple(t, id)}}
 	register(t, reg, "create", kernel.Ordinary, func(kernel.State) (kernel.Changes, error) { return kernel.Changes{Writes: []kernel.Write{create}}, nil })
-	register(t, reg, "bad-flag", kernel.FlagOnly, func(kernel.State) (kernel.Changes, error) { return kernel.Changes{Writes: []kernel.Write{create}}, nil })
+	flagID := f.Items[1] + ".impl.a1"
+	flagCreate := kernel.Write{Kind: "create", ID: flagID, Create: &kernel.CreateRecord{ID: flagID, Parent: f.Items[1], Type: "step", Tuple: mustTuple(t, flagID)}}
+	register(t, reg, "bad-flag", kernel.FlagOnly, func(kernel.State) (kernel.Changes, error) {
+		return kernel.Changes{Writes: []kernel.Write{flagCreate}}, nil
+	})
 	before := kerneltest.Snapshot(t, f)
 	for _, apply := range []bool{false, true} {
 		if _, err := kernel.Pass(reg, f.State(), apply); err == nil {

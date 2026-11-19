@@ -14,7 +14,7 @@ import (
 func TestS134VerbStub_PreKernelNoWrites(t *testing.T) {
 	f := kerneltest.PreKernelSpec(t)
 	bin := buildMindspecBinary(t)
-	for _, args := range [][]string{{"next-action", "y"}, {"lease", f.Items[0] + ".impl.a1"}, {"submit", f.Items[0] + ".impl.a1", "--lease", "token", "--commit", "HEAD"}} {
+	for _, args := range [][]string{{"next-action", "y"}, {"lease", f.Items[0]}, {"submit", f.Items[0], "--lease", "token", "--commit", "HEAD"}, {"lease", f.Items[0] + ".impl.a1"}, {"submit", f.Items[0] + ".impl.a1", "--lease", "token", "--commit", "HEAD"}} {
 		before := kerneltest.Snapshot(t, f)
 		out, err := f.Command(bin, args...)
 		if err != nil {

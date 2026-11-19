@@ -65,7 +65,7 @@ func kernelCommandState(spec, target string) (kernel.State, error) {
 			}
 		}
 		if epicID == "" {
-			return kernel.State{}, fmt.Errorf("step is not a kernel identity\nrecovery: mindspec next")
+			return kernel.State{}, fmt.Errorf("step is not a kernel identity\nrecovery: use mindspec next, mindspec complete and mindspec impl approve")
 		}
 	}
 	candidates := []kernel.Record{}

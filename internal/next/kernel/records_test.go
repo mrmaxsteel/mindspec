@@ -145,16 +145,20 @@ func TestS134Records_ArtifactReceipt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(f.Root, path), []byte(`{"verdict":"APPROVE"}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, f.Root, "add", path)
+	if err := os.WriteFile(filepath.Join(f.Root, "other.json"), []byte(`{"verdict":"REJECT"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, f.Root, "add", path, "other.json")
 	git(t, f.Root, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "evidence")
 	commit := git(t, f.Root, "rev-parse", "HEAD")
 	blob := git(t, f.Root, "rev-parse", "HEAD:"+path)
+	otherBlob := git(t, f.Root, "rev-parse", "HEAD:other.json")
 	receipt := kernel.Receipt{Kind: "passed", Path: path, Commit: commit, Blob: blob}
 	if err := kernel.ValidReceipt(f.Root, receipt); err != nil {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*kernel.Receipt){"mutable-commit": func(r *kernel.Receipt) { r.Commit = "HEAD" },
-		"missing-blob": func(r *kernel.Receipt) { r.Blob = "" }, "missing-commit": func(r *kernel.Receipt) { r.Commit = strings.Repeat("0", 40) }, "wrong-blob": func(r *kernel.Receipt) { r.Blob = strings.Repeat("1", 40) }} {
+		"missing-blob": func(r *kernel.Receipt) { r.Blob = "" }, "missing-commit": func(r *kernel.Receipt) { r.Commit = strings.Repeat("0", 40) }, "wrong-blob": func(r *kernel.Receipt) { r.Blob = otherBlob }} {
 		t.Run(name, func(t *testing.T) {
 			bad := receipt
 			mutate(&bad)
@@ -181,4 +185,24 @@ func TestS134Records_ArtifactReceipt(t *testing.T) {
 	if !reflect.DeepEqual(stored, receipt) {
 		t.Fatal("artifact identity lost at store boundary")
 	}
+}
+
+func TestS134Records_ReceiptNeedsEvidence(t *testing.T) {
+	if err := kernel.ValidReceipt(t.TempDir(), kernel.Receipt{Kind: "passed"}); err == nil {
+		t.Fatal("receipt without artifact or reason accepted")
+	}
+}
+
+func TestS134Contract_OutputGolden(t *testing.T) {
+	out := kernel.Output{
+		Schema: "mindspec.next-action/v1", Status: "work", Applied: true,
+		Revision: "sha256:revision", RetryAt: "2026-01-02T03:04:05Z", Policy: kernel.PolicyView{RoundLimit: kernel.DefaultPolicy.RoundLimit, LeaseTTL: kernel.DefaultPolicy.LeaseTTL},
+		Actions: []kernel.Action{{Step: "test-abc.1.review.r2.R3", Kind: "review-slot", Exists: true, Round: 2,
+			Subject: kernel.Subject{Commit: "subject"}, Claim: []string{"mindspec", "lease", "step"}, Brief: []string{"brief"}, Submit: []string{"submit"}}},
+		Waiting:   []kernel.Waiting{{Step: "test-abc.1.impl.a1", Lease: kernel.LeaseView{Generation: 1, Expires: fixedTime}}},
+		Decisions: []kernel.Decision{{Step: "decision", Options: []string{"fix", "halt"}, Submit: []string{"submit"}}},
+		Run:       []kernel.Run{{Actor: "binary", Argv: []string{"mindspec", "complete", "work"}, Paths: []string{"app.go"}}},
+		Flags:     []kernel.Flag{{Code: "unreceipted-close", Step: "step", Repair: []string{"repair"}}},
+	}
+	golden(t, "output", out)
 }

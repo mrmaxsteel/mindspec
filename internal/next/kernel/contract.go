@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 var ErrNotBuilt = errors.New("this kernel operation is not available yet\nrecovery: mindspec next")
@@ -22,9 +23,21 @@ type Action struct {
 	Brief   []string `json:"brief"`
 	Submit  []string `json:"submit"`
 }
+
+// LeaseView contains the public lease fields.
+type LeaseView struct {
+	Generation int       `json:"generation"`
+	Expires    time.Time `json:"expires"`
+}
+
+// PolicyView contains the public policy fields.
+type PolicyView struct {
+	RoundLimit int    `json:"round_limit"`
+	LeaseTTL   string `json:"lease_ttl"`
+}
 type Waiting struct {
-	Step  string      `json:"step"`
-	Lease LeaseRecord `json:"lease"`
+	Step  string    `json:"step"`
+	Lease LeaseView `json:"lease"`
 }
 type Decision struct {
 	Step    string   `json:"step"`
@@ -47,7 +60,7 @@ type Output struct {
 	Applied   bool       `json:"applied"`
 	Revision  string     `json:"revision"`
 	RetryAt   string     `json:"retry_at"`
-	Policy    Policy     `json:"policy"`
+	Policy    PolicyView `json:"policy"`
 	Actions   []Action   `json:"actions"`
 	Waiting   []Waiting  `json:"waiting"`
 	Decisions []Decision `json:"decisions"`

@@ -1,0 +1,11 @@
+{
+  "schema": "mindspec.next-action/v1", "status": "work", "applied": true,
+  "revision": "sha256:revision", "retry_at": "2026-01-02T03:04:05Z",
+  "policy": {"round_limit": 5, "lease_ttl": "2h"},
+  "actions": [{"step": "test-abc.1.review.r2.R3", "kind": "review-slot", "exists": true, "round": 2,
+    "subject": {"commit": "subject"}, "claim": ["mindspec", "lease", "step"], "brief": ["brief"], "submit": ["submit"]}],
+  "waiting": [{"step": "test-abc.1.impl.a1", "lease": {"generation": 1, "expires": "2026-01-02T03:04:05Z"}}],
+  "decisions": [{"step": "decision", "options": ["fix", "halt"], "submit": ["submit"]}],
+  "run": [{"actor": "binary", "argv": ["mindspec", "complete", "work"], "paths": ["app.go"]}],
+  "flags": [{"code": "unreceipted-close", "step": "step", "repair": ["repair"]}]
+}
