@@ -116,11 +116,31 @@ type exitCoder interface{ ExitCode() int }
 
 // SetStatusIf makes one compare-and-set write and preserves the mismatch sentinel.
 func (s *Store) SetStatusIf(key, from, to string) error {
+	return s.SetStatusMetadataIf(key, from, to, nil)
+}
+
+// SetStatusMetadataIf commits a status and its lease metadata in one guarded write.
+func (s *Store) SetStatusMetadataIf(key, from, to string, updates map[string]any) error {
 	r, err := s.owned(key)
 	if err != nil {
 		return err
 	}
-	_, err = s.Run("update", r.ID, "--status", to, "--if-status", from)
+	args := []string{"update", r.ID, "--status", to, "--if-status", from}
+	if updates != nil {
+		metadata := map[string]any{}
+		for k, v := range r.Metadata {
+			metadata[k] = v
+		}
+		for k, v := range updates {
+			metadata[k] = v
+		}
+		data, e := json.Marshal(metadata)
+		if e != nil {
+			return e
+		}
+		args = append(args, "--metadata", string(data))
+	}
+	_, err = s.Run(args...)
 	var code exitCoder
 	if errors.As(err, &code) && code.ExitCode() == 13 {
 		return ErrCASMismatch
