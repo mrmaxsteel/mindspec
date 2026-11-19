@@ -1,8 +1,10 @@
 package kernel_test
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -80,6 +82,9 @@ func actorReceipt(t *testing.T, f *kerneltest.Fixture, id string) kernel.Receipt
 }
 func actorRefusal(t *testing.T, f *kerneltest.Fixture, call func() error, contains string) {
 	t.Helper()
+	if contains == "" {
+		t.Fatal("refusal must name its expected text")
+	}
 	before := kerneltest.Snapshot(t, f)
 	err := call()
 	if err == nil || !strings.Contains(err.Error(), contains) {
@@ -101,7 +106,10 @@ func TestS134Lease_GenerationsPinnedTTLAndTokens(t *testing.T) {
 	}
 	stored, _, err := kernel.Decode[kernel.LeaseRecord](actorRecord(t, f, id).Metadata, kernel.KeyLease)
 	f.Must(err)
-	if !reflect.DeepEqual(stored, result.Lease) || stored.TokenHash == result.Token || !strings.HasPrefix(stored.TokenHash, "sha256:") {
+	raw, err := json.Marshal(actorRecord(t, f, id))
+	f.Must(err)
+	expectedHash := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(result.Token)))
+	if !reflect.DeepEqual(stored, result.Lease) || stored.TokenHash != expectedHash || strings.Contains(string(raw), result.Token) {
 		t.Fatal("lease not persisted or token leaked")
 	}
 	actorRefusal(t, f, func() error { _, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, deps); return err }, "lease --take")
@@ -122,7 +130,11 @@ func TestS134Lease_GenerationsPinnedTTLAndTokens(t *testing.T) {
 		t.Fatalf("missing take reason: %+v", take)
 	}
 	for _, o := range []kernel.LeaseOptions{{Step: id, Renew: result.Token}, {Step: id, Release: result.Token}, {Step: id, Take: true}} {
-		actorRefusal(t, f, func() error { _, err := kernel.Lease(f.State(), o, deps); return err }, "")
+		want := "lease token is not current"
+		if o.Take {
+			want = "lease --take requires --reason"
+		}
+		actorRefusal(t, f, func() error { _, err := kernel.Lease(f.State(), o, deps); return err }, want)
 	}
 	_, err = kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Release: taken.Token}, deps)
 	f.Must(err)
@@ -134,6 +146,8 @@ func TestS134Lease_GenerationsPinnedTTLAndTokens(t *testing.T) {
 	if third.Lease.Generation != 3 {
 		t.Fatal("release reset generation")
 	}
+	kerneltest.SetClock(t, third.Lease.Expires.Add(-30*time.Second))
+	actorRefusal(t, f, func() error { _, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, deps); return err }, "lease --take")
 	kerneltest.SetClock(t, third.Lease.Expires.Add(time.Second))
 	fourth := leaseActor(t, f, id, deps)
 	if fourth.Lease.Generation != 4 {
@@ -161,13 +175,17 @@ func TestS134Lease_RefusalTable(t *testing.T) {
 				var foreign kernel.Record
 				f.Must(json.Unmarshal(raw, &foreign))
 				id = foreign.ID
+				want = "foreign step"
 			case "gate":
 				id = f.Items[0] + ".review"
+				want = "identity is not an actor step"
 			case "decision":
 				id = kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
+				want = "identity is not an actor step"
 			case "pre-kernel":
 				f = kerneltest.PreKernelSpec(t, kerneltest.WithFake(false))
 				id = f.Items[0]
+				want = "this spec uses the existing lifecycle"
 			case "halted":
 				d := kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
 				kerneltest.Answer(f, d, "halt")
@@ -303,7 +321,7 @@ func TestS134Submit_ImplementReceiptGoldenAndRetry(t *testing.T) {
 	actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, "different result")
 }
 func TestS134Submit_BadImplement(t *testing.T) {
-	for _, name := range []string{"old-token", "no-token", "pre-lease", "not-descendant", "wrong-branch", "missing-commit", "no-artifact", "verdict-instead", "expired", "forged-kind"} {
+	for _, name := range []string{"old-token", "bad-token", "no-token", "pre-lease", "not-descendant", "wrong-branch", "missing-commit", "no-artifact", "verdict-instead", "expired", "forged-kind", "new-blocker"} {
 		t.Run(name, func(t *testing.T) {
 			f, id, deps := actorFixture(t)
 			base := actorCommand(t, f, "rev-parse", "HEAD")
@@ -311,19 +329,22 @@ func TestS134Submit_BadImplement(t *testing.T) {
 				base = actorCommit(t, f, "earlier.json", "{}", "bead/"+f.Items[0])
 			}
 			lease := leaseActor(t, f, id, deps)
+			if name == "old-token" {
+				_, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace"}, deps)
+				f.Must(err)
+			}
 			commit := actorCommit(t, f, "proof.json", "{}", "bead/"+f.Items[0])
 			o := kernel.SubmitOptions{Step: id, Lease: lease.Token, Commit: commit}
 			switch name {
-			case "old-token":
-				_, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace"}, deps)
-				f.Must(err)
+			case "bad-token":
+				o.Lease = "invalid-token"
 			case "no-token":
 				o.Lease = ""
 			case "pre-lease":
 				o.Commit = base
 			case "not-descendant":
-				root := actorCommand(t, f, "rev-list", "--max-parents=0", "HEAD")
-				o.Commit = root
+				tree := actorCommand(t, f, "rev-parse", commit+"^{tree}")
+				o.Commit = actorCommand(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit-tree", tree, "-m", "unrelated evidence")
 			case "wrong-branch":
 				actorCommand(t, f, "update-ref", "refs/heads/bead/"+f.Items[0], base)
 			case "missing-commit":
@@ -337,8 +358,16 @@ func TestS134Submit_BadImplement(t *testing.T) {
 				kerneltest.SetClock(t, lease.Lease.Expires.Add(time.Second))
 			case "forged-kind":
 				f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Retally: "forged"}))
+			case "new-blocker":
+				f.Must(f.Store.AddLink(id, f.Items[1]))
 			}
-			actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, "")
+			want := map[string]string{
+				"old-token": "lease token is not current", "bad-token": "lease token is not current", "no-token": "lease token is not current",
+				"pre-lease": "commit is not past the claim base or round subject", "not-descendant": "commit is not past the claim base or round subject",
+				"wrong-branch": "commit must be on bead/", "missing-commit": "cannot resolve committed evidence", "no-artifact": "submit needs one artifact or commit",
+				"verdict-instead": "artifact does not fit the step kind", "expired": "lease has expired", "forged-kind": "step already has a different result", "new-blocker": "step is held or blocked by " + f.Items[1],
+			}[name]
+			actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, want)
 			if actorRecord(t, f, id).Status == "closed" {
 				t.Fatal("bad submit closed step")
 			}
@@ -361,7 +390,7 @@ func verdictBytes(subject, slot string) string {
 	return `{"schema":2,"slot":"` + slot + `","round":1,"reviewed_sha":"` + subject + `","status":"final","verdict":"APPROVE","model":"test","rationale":"reviewed","concrete_changes_required":[],"commands_run":[]}`
 }
 func TestS134Submit_BadVerdictsAndFix(t *testing.T) {
-	for _, name := range []string{"old-subject", "another-slot", "changed-blob", "uncommitted", "missing", "stale-round", "stale-step-subject", "draft", "foreign-slot"} {
+	for _, name := range []string{"old-subject", "another-slot", "changed-blob", "uncommitted", "missing", "stale-round", "stale-step-subject", "draft", "foreign-slot", "verdict-round", "unlisted-slot", "old-token", "bad-token"} {
 		t.Run(name, func(t *testing.T) {
 			f, id, lease, subject := slotFixture(t)
 			data := verdictBytes(subject, "R1")
@@ -371,11 +400,21 @@ func TestS134Submit_BadVerdictsAndFix(t *testing.T) {
 			if name == "another-slot" {
 				data = verdictBytes(subject, "R2")
 			}
+			if name == "verdict-round" {
+				data = strings.Replace(data, `"round":1`, `"round":2`, 1)
+			}
 			if name == "draft" {
 				data = strings.Replace(data, `"final"`, `"draft"`, 1)
 			}
 			actorCommit(t, f, "verdict.json", data, "")
 			switch name {
+			case "old-token":
+				_, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace"}, kernel.LeaseDeps{})
+				f.Must(err)
+			case "bad-token":
+				lease.Token = "invalid-token"
+			case "unlisted-slot":
+				kerneltest.Authorise(f, f.Items[0]+".review", kernel.GateRound{Round: 1, Subject: subject, Slots: []string{"R2"}, SlotCount: 1})
 			case "changed-blob":
 				f.Must(os.WriteFile(filepath.Join(f.Root, "verdict.json"), []byte(data+" "), 0644))
 			case "uncommitted":
@@ -396,10 +435,17 @@ func TestS134Submit_BadVerdictsAndFix(t *testing.T) {
 			if name == "uncommitted" {
 				artifact = "new.json"
 			}
+			want := map[string]string{
+				"old-subject": "verdict slot, round or subject does not match the step", "another-slot": "verdict slot, round or subject does not match the step",
+				"verdict-round": "verdict slot, round or subject does not match the step", "draft": "verdict slot, round or subject does not match the step",
+				"changed-blob": "artifact blob differs from its holding commit", "uncommitted": "artifact has no holding commit", "missing": "artifact must be a regular committed file",
+				"stale-round": "step subject or round is stale", "stale-step-subject": "step subject is stale", "foreign-slot": "foreign step", "unlisted-slot": "slot is not in the active gate round",
+				"old-token": "lease token is not current", "bad-token": "lease token is not current",
+			}[name]
 			actorRefusal(t, f, func() error {
 				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
 				return err
-			}, "")
+			}, want)
 			if actorRecord(t, f, id).Status == "closed" {
 				t.Fatal("bad verdict closed slot")
 			}
@@ -466,8 +512,23 @@ func TestS134Submit_ReceiptBeforeCloseCrashAndCAS(t *testing.T) {
 				if mode == "always-conflict" && closes != 2 {
 					t.Fatal("unbounded retry")
 				}
+				passes := 0
+				reg := kernel.NewRegistry("spy")
+				f.Must(reg.Register("spy", kernel.Ordinary, func(s kernel.State) (kernel.Changes, error) {
+					if r, exists := s.Records[id]; exists {
+						if r.Status != "closed" {
+							t.Fatal("retry pass preceded close")
+						}
+						passes++
+					}
+					return kernel.Changes{}, nil
+				}))
+				kerneltest.WithRules(t, reg)
 				_, err = kernel.Submit(f.State(), o)
 				f.Must(err)
+				if passes != 1 {
+					t.Fatalf("receipt retry post-close passes=%d", passes)
+				}
 				if actorRecord(t, f, id).Status != "closed" || !reflect.DeepEqual(receipt, actorReceipt(t, f, id)) {
 					t.Fatal("receipt retry did not finish close")
 				}
@@ -485,6 +546,9 @@ func TestS134Submit_PassOnceAfterCloseAndError(t *testing.T) {
 			count := 0
 			reg := kernel.NewRegistry("spy")
 			f.Must(reg.Register("spy", kernel.Ordinary, func(s kernel.State) (kernel.Changes, error) {
+				if _, exists := s.Records[id]; !exists {
+					return kernel.Changes{}, nil
+				}
 				count++
 				if s.Records[id].Status != "closed" || actorRecord(t, f, id).Status != "closed" {
 					t.Fatal("pass preceded close")
@@ -502,7 +566,7 @@ func TestS134Submit_PassOnceAfterCloseAndError(t *testing.T) {
 		})
 	}
 }
-func TestS134Submit_HaltedNoWrites(t *testing.T) {
+func TestS134Submit_HaltedPassBeforeRefusal(t *testing.T) {
 	for _, kind := range []string{"implement", "verdict"} {
 		t.Run(kind, func(t *testing.T) {
 			f, id, deps := actorFixture(t)
@@ -517,13 +581,35 @@ func TestS134Submit_HaltedNoWrites(t *testing.T) {
 			}
 			d := kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
 			kerneltest.Answer(f, d, "halt")
+			other := f.Items[1] + ".impl.a1"
+			f.Create(other, f.Items[1])
+			before := actorRecord(t, f, id)
 			count := 0
-			reg := kernel.NewRegistry("spy")
+			reg := kernel.NewRegistry("ordinary", "halt", "spy")
+			f.Must(reg.Register("ordinary", kernel.Ordinary, func(kernel.State) (kernel.Changes, error) {
+				t.Fatal("halted pass ran an ordinary rule")
+				return kernel.Changes{}, nil
+			}))
+			f.Must(reg.Register("halt", kernel.Halt, func(s kernel.State) (kernel.Changes, error) {
+				if !s.Halted() {
+					t.Fatal("halt rule lost halt state")
+				}
+				if _, exists := s.Records[id]; exists {
+					t.Fatal("halt pass saw named step")
+				}
+				return kernel.Changes{Writes: []kernel.Write{{Kind: "close", ID: other, Receipt: &kernel.Receipt{Kind: "halted", HaltAnswer: d}}}}, nil
+			}))
 			f.Must(reg.Register("spy", kernel.FlagOnly, func(kernel.State) (kernel.Changes, error) { count++; return kernel.Changes{}, nil }))
 			kerneltest.WithRules(t, reg)
-			actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, d)
-			if count != 0 {
-				t.Fatal("halt refusal ran a pass")
+			_, err := kernel.Submit(f.State(), o)
+			if err == nil || !strings.Contains(err.Error(), "spec is halted by "+d) {
+				t.Fatalf("halt refusal: %v", err)
+			}
+			if count != 1 || actorRecord(t, f, other).Status != "closed" || actorReceipt(t, f, other).Kind != "halted" {
+				t.Fatal("halt refusal lost its first pass")
+			}
+			if !reflect.DeepEqual(before, actorRecord(t, f, id)) {
+				t.Fatal("halt refusal touched named step")
 			}
 		})
 	}
@@ -657,6 +743,12 @@ func TestS134Submit_HaltRetryFinishesPass(t *testing.T) {
 	fail := true
 	count := 0
 	f.Must(reg.Register("finish", kernel.Halt, func(s kernel.State) (kernel.Changes, error) {
+		if _, exists := s.Records[d]; !exists {
+			if s.Halted() != f.State().Halted() {
+				t.Fatal("first pass lost the halt state")
+			}
+			return kernel.Changes{}, nil
+		}
 		count++
 		if s.Records[d].Status != "closed" {
 			t.Fatal("halt pass before decision close")
@@ -754,5 +846,78 @@ func TestS134Submit_VerdictWorktreeIdentity(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestS134Submit_PassBeforeRefusal(t *testing.T) {
+	for _, verb := range []string{"submit", "answer"} {
+		for _, native := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/native=%t", verb, native), func(t *testing.T) {
+				f, id, deps := actorFixture(t)
+				f.Store.NativeIDs = native
+				lease := leaseActor(t, f, id, deps)
+				commit := actorCommit(t, f, "proof.json", "{}", "bead/"+f.Items[0])
+				if verb == "answer" {
+					id = kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
+				}
+				before := actorRecord(t, f, id)
+				physical := before.ID
+				other := f.Items[1] + ".review"
+				calls := 0
+				reg := kernel.NewRegistry("spy", "after")
+				f.Must(reg.Register("spy", kernel.Ordinary, func(s kernel.State) (kernel.Changes, error) {
+					calls++
+					for key, row := range s.Records {
+						if key == id || row.ID == physical {
+							t.Fatal("first pass saw the named step")
+						}
+					}
+					for _, step := range s.Steps {
+						if step == id {
+							t.Fatal("first pass listed the named step")
+						}
+					}
+					if !reflect.DeepEqual(before, actorRecord(t, f, id)) {
+						t.Fatal("first pass followed the verb write")
+					}
+					return kernel.Changes{Writes: []kernel.Write{
+						{Kind: "metadata", ID: other, Metadata: kernel.Metadata("pass_seen", true)},
+						{Kind: "metadata", ID: id, Metadata: kernel.Metadata("must_not_write", true)},
+					}}, nil
+				}))
+				f.Must(reg.Register("after", kernel.FlagOnly, func(s kernel.State) (kernel.Changes, error) {
+					if _, exists := s.Records[id]; exists {
+						t.Fatal("later rule saw the named step")
+					}
+					if s.Records[other].Metadata["pass_seen"] != true {
+						t.Fatal("first pass lost its overlay")
+					}
+					return kernel.Changes{}, nil
+				}))
+				kerneltest.WithRules(t, reg)
+				var err error
+				if verb == "submit" {
+					_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: physical, Lease: lease.Token + "wrong", Commit: commit})
+				} else {
+					_, err = kernel.Answer(f.State(), physical, "invalid")
+				}
+				want := "lease token is not current"
+				if verb == "answer" {
+					want = "answer must be a listed decision option"
+				}
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("wanted %q, got %v", want, err)
+				}
+				if calls != 1 {
+					t.Fatalf("first pass calls=%d", calls)
+				}
+				if !reflect.DeepEqual(before, actorRecord(t, f, id)) {
+					t.Fatal("refusal touched named step")
+				}
+				if actorRecord(t, f, other).Metadata["pass_seen"] != true {
+					t.Fatal("refusal lost first pass write")
+				}
+			})
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -141,7 +142,9 @@ func TestS134LeaseCmd_GenerationAndTakeRecovery(t *testing.T) {
 	row := actorCmdRead(t, store, id)
 	lease, _, err := kernel.Decode[kernel.LeaseRecord](row.Metadata, kernel.KeyLease)
 	f.Must(err)
-	if lease.Generation != 1 || lease.TokenHash == token {
+	raw, err := json.Marshal(row)
+	f.Must(err)
+	if lease.Generation != 1 || lease.TokenHash != fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(token))) || strings.Contains(string(raw), token) {
 		t.Fatal("binary did not store fenced lease")
 	}
 	before, err := os.ReadFile(store)
@@ -155,17 +158,30 @@ func TestS134LeaseCmd_GenerationAndTakeRecovery(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("live refusal wrote")
 	}
-	lease.Expires = time.Now().Add(-time.Hour)
-	row.Metadata[kernel.KeyLease] = lease
-	var rows map[string]kernel.Record
-	f.Must(json.Unmarshal(after, &rows))
-	rows[row.ID] = row
-	data, err := json.Marshal(rows)
-	f.Must(err)
-	f.Must(os.WriteFile(store, data, 0600))
-	out, code = actorCmdRun(t, f, bin, "lease", id)
-	if code != 0 || !strings.Contains(out, "generation 2") || strings.Contains(out, token) {
-		t.Fatalf("expiry: %d %s", code, out)
+	for _, test := range []struct {
+		at   time.Time
+		live bool
+	}{
+		{lease.Expires.Add(2 * time.Hour), true},
+		{lease.Expires.Add(-2 * time.Hour), false},
+	} {
+		kerneltest.SetClock(t, test.at)
+		lease.Expires = kernel.Now().Add(-time.Hour)
+		row.Metadata[kernel.KeyLease] = lease
+		var rows map[string]kernel.Record
+		f.Must(json.Unmarshal(after, &rows))
+		rows[row.ID] = row
+		data, err := json.Marshal(rows)
+		f.Must(err)
+		f.Must(os.WriteFile(store, data, 0600))
+		out, code = actorCmdRun(t, f, bin, "lease", id)
+		if test.live {
+			if code == 0 || !strings.Contains(out, "lease --take") {
+				t.Fatalf("injected future expiry: %d %s", code, out)
+			}
+		} else if code != 0 || !strings.Contains(out, "generation 2") || strings.Contains(out, token) {
+			t.Fatalf("expiry: %d %s", code, out)
+		}
 	}
 }
 func TestS134SubmitCmd_ImplementAndHalt(t *testing.T) {
@@ -205,7 +221,7 @@ func TestS134SubmitCmd_ImplementAndHalt(t *testing.T) {
 		store := actorCmdStore(t, f)
 		for i := 0; i < 2; i++ {
 			out, code := actorCmdRun(t, f, bin, "submit", d, "--answer", "halt")
-			if code != 4 || !strings.Contains(out, `"status":"halted"`) {
+			if code != 4 || !strings.Contains(out, `"status":"halted"`) || !strings.Contains(out, "spec is halted by "+d) {
 				t.Fatalf("halt exit: %d %s", code, out)
 			}
 			row := actorCmdRead(t, store, d)

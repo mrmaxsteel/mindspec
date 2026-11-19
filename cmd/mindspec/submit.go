@@ -3,9 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
-	"github.com/spf13/cobra"
 	"path/filepath"
+	"sort"
+
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/spf13/cobra"
 )
 
 var submitCmd = &cobra.Command{Use: "submit <step-or-decision>", Short: "Submit evidence or answer a kernel decision", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
@@ -37,7 +40,21 @@ var submitCmd = &cobra.Command{Use: "submit <step-or-decision>", Short: "Submit 
 		return err
 	}
 	if out.Status == "halted" {
-		return exitErr(4, fmt.Errorf("spec is halted\nrecovery: mindspec next-action"))
+		fresh, err := kernel.ReadState(state.Store, state.SpecID, state.SpecDir)
+		if err != nil {
+			return err
+		}
+		var halts []string
+		for id, answer := range fresh.Answers() {
+			if answer.Option == "halt" {
+				halts = append(halts, id)
+			}
+		}
+		sort.Strings(halts)
+		if len(halts) == 0 {
+			return exitErr(4, fmt.Errorf("spec is halted\nrecovery: mindspec next-action"))
+		}
+		return exitErr(4, fmt.Errorf("spec is halted by %s\nrecovery: mindspec next-action", termsafe.Escape(halts[0])))
 	}
 	return nil
 }}

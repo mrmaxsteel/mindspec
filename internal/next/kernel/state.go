@@ -16,6 +16,7 @@ import (
 
 // State is a fresh read of one epic's recorded work and evidence.
 type State struct {
+	passHalted    bool
 	Store         *Store `json:"-"`
 	Root          string
 	SpecID        string
@@ -231,6 +232,9 @@ func (s State) Answers() map[string]DecisionAnswer {
 	return out
 }
 func (s State) Halted() bool {
+	if s.passHalted {
+		return true
+	}
 	for _, answer := range s.Answers() {
 		if answer.Option == "halt" {
 			return true

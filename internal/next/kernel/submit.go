@@ -59,6 +59,9 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 	}
 	var output Output
 	err := withActorLock(state, func(s State) error {
+		if _, err := passExcept(Rules(), s, true, options.Step); err != nil {
+			return err
+		}
 		changed := false
 		err := WithCASRetry(func() error {
 			fresh, err := refreshActorState(s)
@@ -408,6 +411,9 @@ func decisionOption(record DecisionRecord, option string) bool {
 
 // answerLocked writes the answer before a close, so a child cannot erase a halt.
 func answerLocked(s State, decision, option string) (Output, error) {
+	if _, err := passExcept(Rules(), s, true, decision); err != nil {
+		return Output{}, err
+	}
 	changed := false
 	err := WithCASRetry(func() error {
 		fresh, err := refreshActorState(s)

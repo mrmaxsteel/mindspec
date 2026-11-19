@@ -9,6 +9,11 @@ import (
 
 // Pass dispatches the fixed rule order and overlays every write for later rules.
 func Pass(reg *Registry, state State, apply bool) (PassResult, error) {
+	return passExcept(reg, state, apply, "")
+}
+
+// passExcept keeps the named step out of rule inputs and writes.
+func passExcept(reg *Registry, state State, apply bool, step string) (PassResult, error) {
 	var result PassResult
 	if !state.Enrolled {
 		return result, ErrPreKernel
@@ -18,7 +23,7 @@ func Pass(reg *Registry, state State, apply bool) (PassResult, error) {
 	}
 	err := WithCASRetry(func() error {
 		var err error
-		result, err = reduce(reg, state, apply)
+		result, err = reduce(reg, state, apply, step)
 		if err != nil {
 			return err
 		}
@@ -41,7 +46,7 @@ func Pass(reg *Registry, state State, apply bool) (PassResult, error) {
 	})
 	return result, err
 }
-func reduce(reg *Registry, state State, apply bool) (PassResult, error) {
+func reduce(reg *Registry, state State, apply bool, step string) (PassResult, error) {
 	result := PassResult{State: state.Clone(), Output: Output{Schema: "mindspec.next-action/v1", Status: "wait", Applied: apply, Policy: PolicyView{RoundLimit: state.Policy.RoundLimit, LeaseTTL: state.Policy.LeaseTTL}, Actions: []Action{}, Waiting: []Waiting{}, Decisions: []Decision{}, Run: []Run{}, Flags: []Flag{}}, Writes: []Write{}}
 	for _, name := range reg.names {
 		entry, ok := reg.entries[name]
@@ -52,7 +57,17 @@ func reduce(reg *Registry, state State, apply bool) (PassResult, error) {
 		if halted && entry.mode == Ordinary {
 			continue
 		}
-		changes, err := entry.fn(result.State.Clone())
+		input := result.State.Clone()
+		input.passHalted = halted
+		excluded := map[string]bool{step: step != ""}
+		for key, record := range input.Records {
+			if step != "" && (key == step || record.ID == step) {
+				excluded[key], excluded[record.ID] = true, true
+				delete(input.Records, key)
+			}
+		}
+		input.classify()
+		changes, err := entry.fn(input)
 		if err != nil {
 			return result, fmt.Errorf("rule %s: %w", name, err)
 		}
@@ -60,6 +75,9 @@ func reduce(reg *Registry, state State, apply bool) (PassResult, error) {
 			return result, fmt.Errorf("flag rule %s returned writes", name)
 		}
 		for _, write := range changes.Writes {
+			if excluded[write.ID] {
+				continue
+			}
 			if halted && (write.Kind != "close" || write.Receipt == nil || write.Receipt.Kind != "halted") {
 				return result, fmt.Errorf("halt rule may only finish halted closes")
 			}
