@@ -116,6 +116,11 @@ func (f *FakeBD) Run(args ...string) ([]byte, error) {
 		if status := value("--status"); status != "" {
 			r.Status = status
 		}
+		for _, arg := range args {
+			if arg == "--claim" {
+				r.Status = "in_progress"
+			}
+		}
 		if m := value("--metadata"); m != "" {
 			if err := json.Unmarshal([]byte(m), &r.Metadata); err != nil {
 				return nil, err
