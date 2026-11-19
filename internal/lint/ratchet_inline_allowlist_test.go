@@ -5,6 +5,7 @@ package lint
 // inlineCompositionAllowlist: audited inline-composition concat
 // chains outside the waist, each with its justification.
 var inlineCompositionAllowlist = map[string]inlineEntry{
+	"internal/next/kernel/kerneltest/seed.go Register concat lit:spec/":                                               {Count: 1, Justification: "Test fixture: the target uses the fixture's fixed spec ID literal to write a panel snapshot."},
 	"internal/lifecycle/landed.go reviewedTreeProvenance concat lit:reviews/-with-id":                                 {Count: 1, Justification: "idvalidate.SpecID validates the lifecycle spec ID before narrowing the artifact review glob"},
 	"internal/approve/impl.go implObligationRefusal concat const:workspace.BeadBranchPrefix":                          {Count: 1, Justification: "display-only concat of the idrender.Bead-quoted copy (safeBeadID); beadID itself is gated by readPlanBeadIDs (AC-25) and functional branch composition routes the waist above"},
 	"internal/harness/scenario_bead_lifecycle.go ScenarioBeadsArtifactPassthrough concat lit:.mindspec/specs/":        {Count: 2, Justification: "mindspec-authored provenance: the scenario mints its own literal spec/bead ids in-file (harness fixture composition, spec 120 round-4 F2); no agent-writable value reaches the concat"},
@@ -51,6 +52,7 @@ var inlineCompositionAllowlist = map[string]inlineEntry{
 // joinWithIDAllowlist: audited filepath.Join-with-ID sites, each
 // naming its covering gate.
 var joinWithIDAllowlist = map[string]joinEntry{
+	"internal/next/kernel/kerneltest/fixture.go fixture filepath.Join(...SpecID...)":       {Count: 1, Gate: "Test fixture: SpecID is selected from fixed literals in this function; the join must keep the flat fixture layout."},
 	"internal/approve/document_gate.go trackedPlanDeferralIDs filepath.Join(...specID...)": {Count: 1, Gate: "ApprovePlan validates specID with validate.SpecID before trackedPlanDeferralIDs; the join selects tracked ledger paths and performs no write"},
 	"internal/complete/closing.go SpecLedgerPaths filepath.Join(...specID...)":             {Count: 1, Gate: "SpecDir(root, specID) validated the ID immediately above; its error returns before this flat-layout comparison Join (spec 130 R6.6)"},
 	"internal/contextpack/budgeter.go BuildBead filepath.Join(...specID...)":               {Count: 1, Gate: "in-func idvalidate.SpecID immediately before the Join - agent-writable bd-metadata spec_id provenance (round 6 O3), GATED, never allowlisted-with-a-false-gate"},

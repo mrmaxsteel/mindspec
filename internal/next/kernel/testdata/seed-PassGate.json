@@ -1,0 +1,25 @@
+{
+  "id": "test-1.1.review",
+  "parent": "test-1.1",
+  "title": "[mindspec] bead-gate",
+  "issue_type": "step",
+  "status": "closed",
+  "labels": [
+    "mindspec"
+  ],
+  "metadata": {
+    "mindspec_key": "test-1.1.review",
+    "mindspec_tuple": {
+      "epic": "test-1",
+      "kind": "bead-gate",
+      "attempt": 1,
+      "work_item": "test-1.1",
+      "gate": "test-1.1.review"
+    },
+    "mindspec_close": {
+      "kind": "passed",
+      "subject": "subject",
+      "retally": "passing-tally"
+    }
+  }
+}

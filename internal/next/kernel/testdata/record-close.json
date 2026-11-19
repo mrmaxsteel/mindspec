@@ -1,0 +1,15 @@
+{
+  "kind": "passed",
+  "path": "proof",
+  "commit": "commit",
+  "blob": "blob",
+  "repaired": true,
+  "rebind": "rebind",
+  "carry_overs": [
+    {
+      "old_subject": "old",
+      "new_subject": "new",
+      "judge": "judge"
+    }
+  ]
+}

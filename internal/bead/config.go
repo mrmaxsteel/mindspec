@@ -16,7 +16,7 @@ import (
 //
 // Exported so downstream checks (e.g. doctor) can reference the same source.
 var RequiredBeadsConfigKeys = []RequiredKey{
-	{Key: "types.custom", Value: "gate"},
+	{Key: "types.custom", Value: "gate,step"},
 	{Key: "status.custom", Value: "resolved"},
 	{Key: "export.git-add", Value: false},
 }
@@ -136,7 +136,9 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 		switch {
 		case !ok:
 			res.Added = append(res.Added, rk.Key)
-		case scalarEquals(valNode, rk.Value):
+		case rk.Key == "types.custom" && !hasRequiredTypes(valNode):
+			res.Added = append(res.Added, "types.custom (missing "+strings.Join(missingTypes(valNode), ",")+")")
+		case rk.Key == "types.custom" || scalarEquals(valNode, rk.Value):
 			res.AlreadyCorrect = append(res.AlreadyCorrect, rk.Key)
 		default:
 			res.UserAuthored = append(res.UserAuthored, ConfigDrift{
@@ -157,7 +159,8 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 //   - issue-prefix: written only when absent; the value defaults to
 //     filepath.Base(root). An existing issue-prefix is never overwritten and
 //     never reported as drift (the user's project-naming choice is sovereign).
-//   - types.custom / status.custom / export.git-add: if absent, added. If
+//   - types.custom: add missing required members and keep all existing members.
+//   - status.custom / export.git-add: if absent, added. If
 //     present with the canonical value, counted in AlreadyCorrect. If present
 //     with a different value, recorded in UserAuthored and left alone unless
 //     force=true, in which case they are replaced and reported in Added.
@@ -283,6 +286,17 @@ func applyRequiredKey(mapping *yaml.Node, rk RequiredKey, force bool, res *Confi
 		res.Added = append(res.Added, rk.Key)
 		return
 	}
+	if rk.Key == "types.custom" {
+		if hasRequiredTypes(valNode) {
+			res.AlreadyCorrect = append(res.AlreadyCorrect, rk.Key)
+			return
+		}
+		values := splitCustomList(nodeValue(valNode))
+		values = append(values, missingTypes(valNode)...)
+		setScalarValue(valNode, strings.Join(values, ","))
+		res.Added = append(res.Added, rk.Key)
+		return
+	}
 	if scalarEquals(valNode, rk.Value) {
 		res.AlreadyCorrect = append(res.AlreadyCorrect, rk.Key)
 		return
@@ -318,6 +332,9 @@ func renderNodeValue(n *yaml.Node) string {
 // A zero-content document (empty file) is promoted to an empty mapping in
 // place so callers can append keys.
 func rootMapping(doc *yaml.Node) *yaml.Node {
+	if doc.Kind == 0 {
+		doc.Kind = yaml.DocumentNode
+	}
 	if doc.Kind != yaml.DocumentNode {
 		return nil
 	}
@@ -492,3 +509,39 @@ func splitCustomList(raw interface{}) []string {
 	}
 	return out
 }
+
+// CustomTypes reads the custom issue types from the local Beads configuration.
+func CustomTypes(root string) []string {
+	data, err := os.ReadFile(filepath.Join(root, ".beads", "config.yaml"))
+	if err != nil {
+		return nil
+	}
+	var cfg map[string]any
+	if yaml.Unmarshal(data, &cfg) != nil {
+		return nil
+	}
+	return splitCustomList(cfg["types.custom"])
+}
+
+func nodeValue(n *yaml.Node) any {
+	var value any
+	_ = n.Decode(&value)
+	return value
+}
+func missingTypes(n *yaml.Node) []string {
+	values := splitCustomList(nodeValue(n))
+	var missing []string
+	for _, required := range []string{"gate", "step"} {
+		found := false
+		for _, value := range values {
+			if value == required {
+				found = true
+			}
+		}
+		if !found {
+			missing = append(missing, required)
+		}
+	}
+	return missing
+}
+func hasRequiredTypes(n *yaml.Node) bool { return len(missingTypes(n)) == 0 }

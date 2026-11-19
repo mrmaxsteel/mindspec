@@ -93,6 +93,10 @@ var EscapeHatchTokens = map[string]struct{}{
 // Keep this in lockstep with cmd/mindspec command registration; a new
 // top-level command must be added here or its success events drop.
 var CommandTokens = map[string]struct{}{
+	"next-action": {},
+	"lease":       {},
+	"submit":      {},
+
 	"":          {},
 	"adr":       {},
 	"approve":   {}, // hidden backward-compat alias

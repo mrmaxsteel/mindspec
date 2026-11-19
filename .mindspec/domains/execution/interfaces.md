@@ -461,3 +461,14 @@ error refuse with a completion retry command. A worktree list read error also
 refuses before the executor can remove a checkout by name. The pending file, worktree, and
 branch remain. A removal error also refuses. A retry finishes the remaining work. `MockExecutor` exposes the
 same methods and records calls.
+
+## bd types and sandbox
+
+`bead.EnsureBeadsConfig` adds `gate` and `step` to `types.custom`.
+It keeps all existing type members, including when force is set.
+It leaves keys outside the required set unchanged.
+`bead.CustomTypes` reads the configured members.
+Doctor reports each missing required member.
+Plain `mindspec setup` adds missing members in an existing Beads repository.
+The harness applies these settings after sandbox initialization.
+`bead.RunBDAt` runs a command in the specified repository without a process directory change.

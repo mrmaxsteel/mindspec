@@ -1,0 +1,94 @@
+[
+  {
+    "name": "recreate",
+    "mode": "ordinary"
+  },
+  {
+    "name": "missing-link",
+    "mode": "ordinary"
+  },
+  {
+    "name": "tally",
+    "mode": "ordinary"
+  },
+  {
+    "name": "supersede",
+    "mode": "ordinary"
+  },
+  {
+    "name": "refused-round",
+    "mode": "ordinary"
+  },
+  {
+    "name": "final-round",
+    "mode": "ordinary"
+  },
+  {
+    "name": "judge-apply",
+    "mode": "ordinary"
+  },
+  {
+    "name": "judge-supersede",
+    "mode": "ordinary"
+  },
+  {
+    "name": "judge-create",
+    "mode": "ordinary"
+  },
+  {
+    "name": "round-open",
+    "mode": "ordinary"
+  },
+  {
+    "name": "slots",
+    "mode": "ordinary"
+  },
+  {
+    "name": "implement",
+    "mode": "ordinary"
+  },
+  {
+    "name": "retry-attempt",
+    "mode": "ordinary"
+  },
+  {
+    "name": "complete-entry",
+    "mode": "ordinary"
+  },
+  {
+    "name": "halt",
+    "mode": "halt"
+  },
+  {
+    "name": "run-marker-missing",
+    "mode": "flag"
+  },
+  {
+    "name": "foreign-child-open",
+    "mode": "flag"
+  },
+  {
+    "name": "foreign-blocker",
+    "mode": "flag"
+  },
+  {
+    "name": "id-collision",
+    "mode": "flag"
+  },
+  {
+    "name": "unreceipted-close",
+    "mode": "flag"
+  },
+  {
+    "name": "raw-close",
+    "mode": "flag"
+  },
+  {
+    "name": "forced-close",
+    "mode": "flag"
+  },
+  {
+    "name": "raw-claim",
+    "mode": "flag"
+  }
+]

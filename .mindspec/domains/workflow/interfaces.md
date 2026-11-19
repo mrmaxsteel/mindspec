@@ -1390,3 +1390,29 @@ Abandoned registrations retain their rounds. Snapshot edits do not change
 history. Launch and recovery records add no round. Duplicate directory
 paths count once. A malformed ledger returns an error.
 The panel package imports only the standard library and leaf utilities.
+
+## Kernel store and ids
+
+`kernelid` defines exact kernel identities and enrolment witnesses.
+It imports only the standard library.
+A numbered child of a kernel record is foreign.
+An enrolment marker, a kernel identity, or an orchestrated panel is an enrolment witness.
+A computed identity in `mindspec_key` is also a witness.
+A missing marker uses the default policy and sets the missing-marker signal.
+
+The store uses `mindspec_key` because bd refuses an explicit id with a parent.
+Each kernel record has a tuple, a `mindspec` label, and a `[mindspec]` title prefix.
+The store refuses a computed identity without its matching tuple.
+Writes select recorded work items or computed kernel identities.
+Status writes use compare-and-set and retry one mismatch.
+Every close writes its receipt first.
+Artifact receipts retain the path, holding commit, and blob id.
+Reducer receipts retain the close reason.
+
+`Pass` dispatches rules in registry order.
+Each rule reads the prior rules' projected writes.
+A read-only pass returns the same write list that an apply pass uses.
+A halted pass runs only halt rules and flag rules.
+Flag rules cannot write.
+The command entry points refuse a pre-kernel spec and name its existing lifecycle verbs.
+The action, lease, submit, and answer entry points reserve their public contracts.
