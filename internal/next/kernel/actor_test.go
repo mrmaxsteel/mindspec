@@ -97,11 +97,14 @@ func actorRefusal(t *testing.T, f *kerneltest.Fixture, call func() error, contai
 
 func TestS134Lease_GenerationsPinnedTTLAndTokens(t *testing.T) {
 	f, id, deps := actorFixture(t)
+	policy := kernel.DefaultPolicy
+	policy.LeaseTTL = "90m"
+	f.Must(f.Store.WriteMetadata(f.Epic, kernel.Metadata(kernel.KeyRun, policy)))
 	if err := os.WriteFile(filepath.Join(f.Root, ".mindspec", "config.yaml"), []byte("panel:\n  lease_ttl: 10m\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	result := leaseActor(t, f, id, deps)
-	if result.Token == "" || result.Lease.Generation != 1 || result.Lease.ClaimBase != actorCommand(t, f, "rev-parse", "bead/"+f.Items[0]) || !result.Lease.Expires.Equal(fixedTime.Add(2*time.Hour)) {
+	if result.Token == "" || result.Lease.Generation != 1 || result.Lease.ClaimBase != actorCommand(t, f, "rev-parse", "bead/"+f.Items[0]) || !result.Lease.Expires.Equal(fixedTime.Add(90*time.Minute)) {
 		t.Fatalf("bad first lease: %+v", result)
 	}
 	stored, _, err := kernel.Decode[kernel.LeaseRecord](actorRecord(t, f, id).Metadata, kernel.KeyLease)
@@ -116,7 +119,7 @@ func TestS134Lease_GenerationsPinnedTTLAndTokens(t *testing.T) {
 	kerneltest.SetClock(t, fixedTime.Add(time.Hour))
 	renewed, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Renew: result.Token}, deps)
 	f.Must(err)
-	if !renewed.Lease.Expires.Equal(fixedTime.Add(3*time.Hour)) || renewed.Lease.Generation != 1 || renewed.Token != "" {
+	if !renewed.Lease.Expires.Equal(fixedTime.Add(150*time.Minute)) || renewed.Lease.Generation != 1 || renewed.Token != "" {
 		t.Fatal("renew did not use pinned duration or exposed token")
 	}
 	taken, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace actor"}, deps)
@@ -762,11 +765,12 @@ func TestS134Submit_HaltRetryFinishesPass(t *testing.T) {
 	d := kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
 	reg := kernel.NewRegistry("finish")
 	fail := true
+	retry := false
 	count := 0
 	f.Must(reg.Register("finish", kernel.Halt, func(s kernel.State) (kernel.Changes, error) {
 		if _, exists := s.Records[d]; !exists {
-			if s.Halted() != f.State().Halted() {
-				t.Fatal("first pass lost the halt state")
+			if retry {
+				t.Fatal("halt retry ran a pass before the answer check")
 			}
 			return kernel.Changes{}, nil
 		}
@@ -785,6 +789,7 @@ func TestS134Submit_HaltRetryFinishesPass(t *testing.T) {
 		t.Fatal("did not leave interrupted halt")
 	}
 	fail = false
+	retry = true
 	out, err := kernel.Answer(f.State(), d, "halt")
 	f.Must(err)
 	if count != 2 || out.Status != "halted" || actorRecord(t, f, id).Status != "closed" || actorReceipt(t, f, id).Kind != "halted" {

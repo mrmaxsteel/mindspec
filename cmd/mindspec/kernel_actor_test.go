@@ -159,29 +159,33 @@ func TestS134LeaseCmd_GenerationAndTakeRecovery(t *testing.T) {
 		t.Fatal("live refusal wrote")
 	}
 	for _, test := range []struct {
-		at   time.Time
-		live bool
+		name   string
+		offset time.Duration
+		live   bool
 	}{
-		{lease.Expires.Add(2 * time.Hour), true},
-		{lease.Expires.Add(-2 * time.Hour), false},
+		{"live", time.Hour, true},
+		{"near expiry", 5 * time.Minute, true},
+		{"expired", -5 * time.Minute, false},
 	} {
-		kerneltest.SetClock(t, test.at)
-		lease.Expires = kernel.Now().Add(-time.Hour)
-		row.Metadata[kernel.KeyLease] = lease
-		var rows map[string]kernel.Record
-		f.Must(json.Unmarshal(after, &rows))
-		rows[row.ID] = row
-		data, err := json.Marshal(rows)
-		f.Must(err)
-		f.Must(os.WriteFile(store, data, 0600))
-		out, code = actorCmdRun(t, f, bin, "lease", id)
-		if test.live {
-			if code == 0 || !strings.Contains(out, "lease --take") {
-				t.Fatalf("injected future expiry: %d %s", code, out)
+		t.Run(test.name, func(t *testing.T) {
+			// The binary uses the real clock. Allow five minutes for each boundary case.
+			lease.Expires = time.Now().UTC().Add(test.offset)
+			row.Metadata[kernel.KeyLease] = lease
+			var rows map[string]kernel.Record
+			f.Must(json.Unmarshal(after, &rows))
+			rows[row.ID] = row
+			data, err := json.Marshal(rows)
+			f.Must(err)
+			f.Must(os.WriteFile(store, data, 0600))
+			out, code := actorCmdRun(t, f, bin, "lease", id)
+			if test.live {
+				if code == 0 || !strings.Contains(out, "lease --take") {
+					t.Fatalf("live expiry: %d %s", code, out)
+				}
+			} else if code != 0 || !strings.Contains(out, "generation 2") || strings.Contains(out, token) {
+				t.Fatalf("expiry: %d %s", code, out)
 			}
-		} else if code != 0 || !strings.Contains(out, "generation 2") || strings.Contains(out, token) {
-			t.Fatalf("expiry: %d %s", code, out)
-		}
+		})
 	}
 }
 func TestS134SubmitCmd_ImplementAndHalt(t *testing.T) {
