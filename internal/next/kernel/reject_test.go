@@ -566,3 +566,69 @@ func TestS134Final_LimitUsesInitialRound(t *testing.T) {
 	}
 	assertNoPanel(t, out, f.SpecID)
 }
+
+func TestS134Supersede_ExcludedDecisionAnswerHoldsRound(t *testing.T) {
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	registerGate(t, f, gate, "review", 1)
+	reduce(t, f, true)
+	d := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
+	before, has, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+	f.Must(err)
+	if !has || before.Round != 1 || len(before.Slots) == 0 {
+		t.Fatalf("missing initial round: %+v", before)
+	}
+	beadCommit(t, f, "bead/"+f.Items[0])
+	out, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: d, Answer: "fix"})
+	f.Must(err)
+	after, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+	f.Must(err)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("answer pre-pass changed the round: before=%+v after=%+v", before, after)
+	}
+	for _, id := range before.Slots {
+		if record(t, f, id).Status != "open" {
+			t.Fatalf("answer pre-pass superseded slot %s", id)
+		}
+	}
+	assertNoPanel(t, out, f.Items[0])
+	if !action(out, gate+".r2.fix") || record(t, f, d).Status != "closed" {
+		t.Fatalf("answer did not release the fix: %+v", out)
+	}
+}
+
+func TestS134Supersede_ExcludedClosedFixHoldsRound(t *testing.T) {
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	registerGate(t, f, gate, "review", 1)
+	reduce(t, f, true)
+	fix := gate + ".r2.fix"
+	f.Create(fix, gate)
+	// A raw close has no passed receipt. It also bypasses the open-fix hold.
+	f.Must(f.Store.SetStatusIf(fix, "open", "closed"))
+	before, has, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+	f.Must(err)
+	if !has || before.Round != 1 || len(before.Slots) == 0 {
+		t.Fatalf("missing initial round: %+v", before)
+	}
+	head := beadCommit(t, f, "bead/"+f.Items[0])
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: fix, Lease: "stale-token", Commit: head})
+	if err == nil || !strings.Contains(err.Error(), "lease token is not current") {
+		t.Fatalf("submit did not refuse the stale lease: %v", err)
+	}
+	// The pre-pass stands after refusal, but must not open a round for this fix.
+	after, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+	f.Must(err)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("fix pre-pass changed the round: before=%+v after=%+v", before, after)
+	}
+	for _, id := range before.Slots {
+		if record(t, f, id).Status != "open" {
+			t.Fatalf("fix pre-pass superseded slot %s", id)
+		}
+	}
+	if _, has, err := kernel.Decode[kernel.Receipt](record(t, f, fix).Metadata, kernel.KeyClose); err != nil || has {
+		t.Fatalf("refused fix gained a receipt: present=%t err=%v", has, err)
+	}
+	assertNoPanel(t, reduce(t, f, false), f.Items[0])
+}

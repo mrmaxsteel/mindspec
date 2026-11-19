@@ -30,7 +30,7 @@ func seedHalt(t *testing.T, f *kerneltest.Fixture, d string) {
 	answer := kernel.DecisionAnswer{Option: "halt", At: kernel.Now().UTC(), Actor: "operator"}
 	f.Must(f.Store.WriteMetadata(d, map[string]any{kernel.KeyAnswer: answer, kernel.KeyClose: kernel.Receipt{Kind: "passed", Answer: &answer}}))
 }
-func assertHaltWrites(t *testing.T, before, after kernel.State) {
+func assertHaltWrites(t *testing.T, before, after kernel.State, answerID string) {
 	t.Helper()
 	if !reflect.DeepEqual(before.Refs, after.Refs) || len(before.Records) != len(after.Records) {
 		t.Fatal("halt created records or changed refs")
@@ -44,8 +44,8 @@ func assertHaltWrites(t *testing.T, before, after kernel.State) {
 			continue
 		}
 		receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
-		if err != nil || !has || receipt.Kind != "halted" || old.Status == "closed" || r.Status != "closed" || kernel.ValidReceipt(after.Root, receipt) != nil {
-			t.Fatalf("halt made a write other than a halted close: %s %+v", id, r)
+		if err != nil || !has || receipt.Kind != "halted" || receipt.HaltAnswer != answerID || old.Status == "closed" || r.Status != "closed" || kernel.ValidReceipt(after.Root, receipt) != nil {
+			t.Fatalf("halt close must name answer %s: %s %+v", answerID, id, receipt)
 		}
 		old.Status = r.Status
 		if old.Metadata == nil {
@@ -96,7 +96,7 @@ func TestS134Halt_ReceiptKillAndRetry(t *testing.T) {
 			if kernel.OutputExitCode(out) != 4 {
 				t.Fatalf("halt retry exited successfully: %+v", out)
 			}
-			assertHaltWrites(t, before, f.State())
+			assertHaltWrites(t, before, f.State(), d)
 			if record(t, f, d).Status != "closed" || record(t, f, f.Items[1]+".review").Status != "open" || !hasFlag(out, "foreign-child-open") {
 				t.Fatalf("halt did not close decision or preserve foreign parent: %+v", out)
 			}
@@ -125,10 +125,10 @@ func TestS134Halt_ReceiptKillAndRetry(t *testing.T) {
 			if kernel.OutputExitCode(out) != 4 || record(t, f, f.Items[1]+".review").Status != "closed" {
 				t.Fatal("same halt answer did not finish remaining closes with exit 4")
 			}
-			assertHaltWrites(t, before, f.State())
+			assertHaltWrites(t, before, f.State(), d)
 			before = f.State()
 			out = reduce(t, f, true)
-			assertHaltWrites(t, before, f.State())
+			assertHaltWrites(t, before, f.State(), d)
 			if kernel.OutputExitCode(out) != 4 {
 				t.Fatal("halted apply lost exit 4")
 			}
@@ -174,8 +174,8 @@ func TestS134Halt_LocalRejectAndForeignDescendant(t *testing.T) {
 		}
 		if before.Records[id].Status != "closed" {
 			receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
-			if err != nil || !has || receipt.Kind != "halted" || kernel.ValidReceipt(f.Root, receipt) != nil {
-				t.Fatalf("halt close lacks a halted receipt: %s %+v", id, receipt)
+			if err != nil || !has || receipt.Kind != "halted" || receipt.HaltAnswer != d || kernel.ValidReceipt(f.Root, receipt) != nil {
+				t.Fatalf("halt close must name answer %s: %s %+v", d, id, receipt)
 			}
 		}
 	}
