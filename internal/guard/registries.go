@@ -155,6 +155,9 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/approve/impl_kernel.go", Func: "implKernelPreflight", Detail: "arg1:unprovable",
+		Rationale:  "The recovery asks to resolve the listed records and retry implementation approval. Its ID operand uses idrender.Spec. The scan cannot fold this runtime operand to a literal.",
+		Obligation: "internal/approve TestS134ImplApprove_RefusalTable checks the actual recovery text against the destructive floor and checks that refusal preserves state."},
 	{File: "internal/approve/enrol.go", Func: "approveEnrolment", Detail: "arg1:unprovable",
 		Rationale:  "The retry uses mindspec next-action with --apply and an idrender.Spec operand.",
 		Obligation: "TestOpaqueOperandRegistry_EnrolmentRecoveries checks each real command template, its ID renderers and its rendered values against the destructive floor."},

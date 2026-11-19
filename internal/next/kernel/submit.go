@@ -484,6 +484,16 @@ func answerLocked(s State, decision, option string) (Output, error) {
 			}
 			return err
 		}
+		if option == "halt" {
+			receipt := Receipt{Kind: "halted", HaltAnswer: r.Key(), Answer: old.Answer}
+			if receipt.Answer == nil {
+				answer := DecisionAnswer{Option: option, At: s.At, Actor: "operator"}
+				receipt.Answer = &answer
+			}
+			if err = s.Store.WriteReceipt(r.Key(), receipt); err != nil {
+				return err
+			}
+		}
 		if err = s.Store.SetStatusIf(r.Key(), r.Status, "closed"); err != nil {
 			return err
 		}

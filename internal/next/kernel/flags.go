@@ -259,9 +259,13 @@ func ancestorClaimFlags(s State) (Changes, error) {
 	c := Changes{}
 	ids := append([]string{s.Epic}, s.Items...)
 	ids = append(ids, s.Gates...)
+	ids = append(ids, s.Steps...)
 	for _, id := range ids {
 		r := s.Records[id]
-		if r.Status == "in_progress" {
+		lease, leased, err := Decode[LeaseRecord](r.Metadata, KeyLease)
+		step, _, _ := r.Tuple()
+		actorLease := step.Kind != "" && step.Kind != "bead-gate" && step.Kind != "final-gate" && step.Kind != "decision" && err == nil && leased && lease.Generation > 0 && lease.TokenHash != ""
+		if r.Status == "in_progress" && !actorLease {
 			c.Flags = append(c.Flags, Flag{Code: "raw-claim", Step: id, Repair: []string{"bd", "update", r.ID, "--status", "open"}})
 		}
 	}

@@ -9,6 +9,7 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/approve/impl_kernel.go readImplKernelState workspace.SpecDir":                                             {Count: 1, Gate: "SpecDir validates the spec ID before path composition. An error returns before the kernel state read. ApproveImpl also validates the ID at entry."},
 	"internal/next/kernel/judge.go judgeEnded workspace.SpecBranch":                                                     {Count: 1, Gate: "SpecBranch validates the state spec ID before historical merge lookup. The caller returns the validation error before git runs. TestS134Judge_FinalGateAndEndStates covers the end-state lookup."},
 	"internal/phase/kernel_children.go lifecycleChildrenWithCache workspace.SpecDir":                                    {Count: 1, Gate: "ResolveSpec validates the spec identity. SpecDir validates it again before path composition; on error the optional files provide no enrolment witness."},
 	"internal/next/kernel/lease.go Lease workspace.BeadBranch":                                                          {Count: 1, Gate: "BeadBranch validates the tuple work item before claim-base ref construction. Lease returns an error before git runs."},

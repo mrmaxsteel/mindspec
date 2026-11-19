@@ -17,7 +17,9 @@ import (
 
 // State is a fresh read of one epic's recorded work and evidence.
 type State struct {
-	Store         *Store `json:"-"`
+	Store *Store `json:"-"`
+	// ExcludedStep preserves holds while a verb omits its own step.
+	ExcludedStep  *Record `json:"-"`
 	Root          string
 	SpecID        string
 	SpecDir       string
@@ -77,7 +79,7 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	if present {
 		s.Policy = policy
 	}
-	subtree := map[string]bool{s.Epic: true}
+	subtree := Subtree(all, s.Epic)
 	selected := map[string]bool{s.Epic: true}
 	for _, id := range s.Items {
 		selected[id] = true
@@ -85,21 +87,7 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	for changed := true; changed; {
 		changed = false
 		for _, r := range all {
-			parent := r.Parent
-			if parent == "" {
-				for _, d := range r.Dependencies {
-					if d.Type == "parent-child" {
-						parent = d.ID
-						if d.DependsOnID != "" {
-							parent = d.DependsOnID
-						}
-					}
-				}
-			}
-			if !subtree[r.ID] && subtree[parent] {
-				subtree[r.ID] = true
-				changed = true
-			}
+			parent := recordParent(r)
 			if !selected[r.ID] && (selected[parent] || kernelid.UnderEpic(r.Key(), s.Epic) || kernelid.UnderEpic(r.ID, s.Epic)) {
 				selected[r.ID] = true
 				changed = true
@@ -127,6 +115,9 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	}
 	s.Enrolled, s.MarkerMissing = kernelid.Enrolled(w)
 	s.classify()
+	if !s.Enrolled {
+		return s, nil
+	}
 	s.Panels, err = panelDirectories(s.Root, specDir)
 	if err != nil {
 		return s, err
@@ -199,6 +190,13 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 			}
 		}
 		target := s.Refs["refs/heads/"+specBranch]
+		if target == "" {
+			// Finalization retains the publication tip after removing the branch.
+			publication, _ := epic.Metadata["mindspec_finalize_tip"].(string)
+			if objectID(publication) {
+				target = publication
+			}
+		}
 		if tip == "" || target == "" {
 			continue
 		}

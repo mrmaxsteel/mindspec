@@ -57,7 +57,7 @@ func activeGate(s State, base string) string {
 	return best
 }
 func itemDone(s State, id string) bool {
-	return s.Records[id].Status == "closed" && passed(s, s.Records[activeGate(s, id+".review")]) && s.Merged[id]
+	return s.Records[id].Status == "closed" && !ForcedClose(s, id) && passed(s, s.Records[activeGate(s, id+".review")]) && s.Merged[id]
 }
 func upstreamsDone(s State, item string) bool {
 	for _, link := range s.Links {
@@ -300,7 +300,11 @@ func implement(s State) (Changes, error) {
 		if v, ok, _ := Decode[Subject](r.Metadata, KeySubject); ok {
 			sub = v.Commit
 		}
-		brief := []string{"mindspec", "next", t.WorkItem, "--emit-only"}
+		target := t.WorkItem
+		if target == "" {
+			target = id
+		}
+		brief := []string{"mindspec", "next", target, "--emit-only"}
 		if t.Kind == "review-slot" {
 			gate := activeGate(s, t.Gate)
 			reg, _, err := Decode[RegistrationRecord](s.Records[gate].Metadata, KeyRegistration)
@@ -347,7 +351,7 @@ func tally(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
-		if !ok || reg.Round != round.Round || reg.Subject != round.Subject {
+		if !ok || reg.Round != round.Round || reg.Subject != round.Subject || !receiptedSlots(s, round) {
 			continue
 		}
 		for _, p := range s.Panels {
