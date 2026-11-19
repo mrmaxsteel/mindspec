@@ -11,6 +11,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -32,6 +33,8 @@ type State struct {
 	Foreign       []string
 	Collisions    []string
 	Links         Links
+	Graph         map[string]Record
+	Merged        map[string]bool
 	Refs          map[string]string
 	Panels        []panel.Registration
 	Ledgers       map[string][][]byte
@@ -57,6 +60,11 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	links, _, err := Decode[Links](epic.Metadata, KeyLinks)
 	if err != nil {
 		return s, err
+	}
+	s.Graph = map[string]Record{}
+	s.Merged = map[string]bool{}
+	for _, r := range all {
+		s.Graph[r.ID] = r
 	}
 	s.Links = links
 	for _, link := range links {
@@ -119,16 +127,22 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	}
 	s.Enrolled, s.MarkerMissing = kernelid.Enrolled(w)
 	s.classify()
-	s.Panels = panel.Scan(specDir)
+	s.Panels, err = panelDirectories(s.Root, specDir)
+	if err != nil {
+		return s, err
+	}
 	for _, p := range s.Panels {
 		if p.Err != nil {
 			return s, p.Err
 		}
 		lines, err := panel.ReadLedger(p.Dir)
 		if err != nil {
-			return s, err
+			return s, termsafe.NewWrappedFailure(err, fmt.Sprintf("read panel ledger in %s: %s", p.Dir, err), fmt.Sprintf("in %s, repair the ledger or move it out of the review root, then rerun the command", p.Dir))
 		}
 		s.Ledgers[p.Dir] = lines
+		if p.Panel.Round == 0 {
+			continue
+		}
 		paths, err := filepath.Glob(filepath.Join(p.Dir, "*-round-*.json"))
 		if err != nil {
 			return s, err
@@ -163,6 +177,37 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 		parts := strings.Fields(line)
 		if len(parts) == 2 {
 			s.Refs[parts[0]] = parts[1]
+		}
+	}
+	for i, id := range s.Items {
+		tip := s.Refs[names[i+1]]
+		if tip == "" {
+			// Completion retains the landed tip when it removes the branch.
+			recorded, _ := s.Records[id].Metadata["mindspec_landed_second_parent"].(string)
+			merge, _ := s.Records[id].Metadata["mindspec_landed_merge_sha"].(string)
+			if objectID(recorded) && objectID(merge) {
+				cmd := exec.Command("git", "rev-list", "--parents", "-n", "1", merge, "--")
+				cmd.Dir = s.Root
+				out, err := cmd.Output()
+				if err != nil {
+					return s, fmt.Errorf("read landed merge: %w", err)
+				}
+				parts := strings.Fields(string(out))
+				if len(parts) == 3 && parts[2] == recorded {
+					tip = merge
+				}
+			}
+		}
+		target := s.Refs["refs/heads/"+specBranch]
+		if tip == "" || target == "" {
+			continue
+		}
+		cmd := exec.Command("git", "merge-base", "--is-ancestor", tip, target)
+		cmd.Dir = s.Root
+		if err := cmd.Run(); err == nil {
+			s.Merged[id] = true
+		} else if e, ok := err.(*exec.ExitError); !ok || e.ExitCode() != 1 {
+			return s, fmt.Errorf("read merge state: %w", err)
 		}
 	}
 	return s, nil

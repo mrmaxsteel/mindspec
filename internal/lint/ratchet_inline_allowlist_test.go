@@ -77,6 +77,8 @@ var rootEnumerationAllowlist = map[string]rootEnumEntry{
 // renders raw (correct class behavior — "validated IDs stay raw"),
 // each naming its covering gate.
 var rawIDRenderAllowlist = map[string]renderEntry{
+	"internal/next/kernel/nextaction.go NextAction fmt.Errorf(...SpecID...)":                                        {Count: 2, Gate: "The production caller kernelCommandState returns only after workspace.SpecDir and ReadState's workspace.SpecBranch validate the spec ID. Apply refreshes through ReadState before the second render. termsafe.Escape preserves the existing error text."},
+	"internal/next/kernel/nextaction.go actionError fmt.Errorf(...SpecID...)":                                       {Count: 1, Gate: "Called only by NextAction with the state returned by kernelCommandState, whose workspace.SpecDir and ReadState's workspace.SpecBranch validate the spec ID before success. termsafe.Escape preserves the existing recovery text."},
 	"internal/lifecycle/reattest.go ancestorWithoutNamingMerge fmt.Sprintf(...beadID...)":                           {Count: 3, Gate: "The caller validates the bead ID before this classifier. All display values use termsafe.Escape."},
 	"cmd/mindspec/bead.go beadWorktreeCmd fmt.Sprintf(...beadID...)":                                                {Count: 1, Gate: "in-func R3 early gate: idvalidate.BeadID on args[0] before any render or composition (AC-6)"},
 	"cmd/mindspec/bead_clarify.go beadClarifyCmd fmt.Sprintf(...beadID...)":                                         {Count: 1, Gate: "in-func early gate: idvalidate.BeadID on args[0] before any file read or evaluation, rendered via termsafe.Escape (the bead.go beadWorktreeCmd / bead_ready.go pattern, spec 124 R8)"},

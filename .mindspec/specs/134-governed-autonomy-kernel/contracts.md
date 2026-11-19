@@ -85,6 +85,7 @@ compare-and-set. It prints the token once. `lease <w>.impl.a<k>` and `next <w>` 
 bead, a gate, a decision; a held or blocked ancestor or upstream (B1, B2; an open epic, work item or gate does not
 hold); a live lease; a halted spec; an unanswered decision (§13.8). `--take` revokes, issues generation N+1 and
 records the reason. `panel.lease_ttl` defaults to `2h` and is renewable.
+An epic, work item or gate with status `in_progress` does not hold work. The pass flags `raw-claim` and names the record.
 
 ## 6. `submit <step> --lease <t> (--artifact <path> | --commit <oid>)` | `submit <decision> --answer <opt>`
 
