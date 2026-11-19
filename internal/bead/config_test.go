@@ -1,6 +1,7 @@
 package bead
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -136,7 +137,7 @@ func TestScanBeadsConfig_ReportsDriftWithoutWriting(t *testing.T) {
 	tmp := t.TempDir()
 	writeBeadsConfig(t, tmp,
 		"issue-prefix: \"proj\"\n"+
-			"types.custom: \"gate\"\n"+
+			"types.custom: \"gate,step\"\n"+
 			"status.custom: \"resolved\"\n"+
 			"export.git-add: true\n")
 
@@ -321,7 +322,7 @@ func TestEnsureBeadsConfig_NeverOverwritesIssuePrefix(t *testing.T) {
 func TestEnsureBeadsConfig_AlreadyCorrect(t *testing.T) {
 	tmp := t.TempDir()
 	body := `issue-prefix: "myproj"
-types.custom: "gate"
+types.custom: "gate,step"
 status.custom: "resolved"
 export.git-add: false
 `
@@ -347,7 +348,7 @@ func TestEnsureBeadsConfig_Golden_TopOfFileComment(t *testing.T) {
 	body := `# Top-of-file banner
 # Second header line
 issue-prefix: "myproj"
-types.custom: "gate"
+types.custom: "gate,step"
 status.custom: "resolved"
 export.git-add: false
 `
@@ -367,7 +368,7 @@ func TestEnsureBeadsConfig_Golden_InterleavedComments(t *testing.T) {
 	tmp := t.TempDir()
 	body := `issue-prefix: "myproj"
 # comment before types
-types.custom: "gate"
+types.custom: "gate,step"
 # comment between types and status
 status.custom: "resolved"
 # comment before export
@@ -392,7 +393,7 @@ export.git-add: false
 func TestEnsureBeadsConfig_Golden_BlockStyleValue(t *testing.T) {
 	tmp := t.TempDir()
 	body := `issue-prefix: "myproj"
-types.custom: "gate"
+types.custom: "gate,step"
 status.custom: "resolved"
 export.git-add: false
 description: |
@@ -426,7 +427,7 @@ func TestEnsureBeadsConfig_Golden_AnchorReference(t *testing.T) {
 	body := `defaults: &defaults
   owner: "team@example.com"
 issue-prefix: "myproj"
-types.custom: "gate"
+types.custom: "gate,step"
 status.custom: "resolved"
 export.git-add: false
 overrides: *defaults
@@ -476,20 +477,14 @@ func TestEnsureBeadsConfig_WhitespaceOnlyFileTreatedAsMissing(t *testing.T) {
 	}
 }
 
-func TestEnsureBeadsConfig_NonScalarDriftRenderedInHaveRaw(t *testing.T) {
-	tmp := t.TempDir()
-	// User wrote a list where mindspec expects a scalar.
-	writeBeadsConfig(t, tmp, "types.custom:\n  - gate\n  - paused\n")
-	res, err := EnsureBeadsConfig(tmp, false)
-	if err != nil {
+func TestEnsureBeadsConfig_SequenceKeepsMembers(t *testing.T) {
+	root := t.TempDir()
+	writeBeadsConfig(t, root, "types.custom:\n  - gate\n  - paused\n")
+	if _, err := EnsureBeadsConfig(root, false); err != nil {
 		t.Fatal(err)
 	}
-	if len(res.UserAuthored) != 1 || res.UserAuthored[0].Key != "types.custom" {
-		t.Fatalf("expected UserAuthored=[types.custom]; got %v", res.UserAuthored)
-	}
-	have := res.UserAuthored[0].HaveRaw
-	if !strings.Contains(have, "gate") || !strings.Contains(have, "paused") {
-		t.Errorf("HaveRaw should render the user's sequence; got %q", have)
+	if got := CustomTypes(root); !reflect.DeepEqual(got, []string{"gate", "paused", "step"}) {
+		t.Fatalf("sequence members lost: %v", got)
 	}
 }
 
@@ -547,4 +542,39 @@ func sortedCopy(ss []string) []string {
 	copy(out, ss)
 	sort.Strings(out)
 	return out
+}
+
+func TestS134Setup_CustomTypeSet(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprint(force), func(t *testing.T) {
+			root := t.TempDir()
+			writeBeadsConfig(t, root, "issue-prefix: project\ntypes.custom: gate,spike2\nforeign: keep\n")
+			if _, err := EnsureBeadsConfig(root, force); err != nil {
+				t.Fatal(err)
+			}
+			if got := CustomTypes(root); !reflect.DeepEqual(got, []string{"gate", "spike2", "step"}) {
+				t.Fatalf("force=%t lost types: %v", force, got)
+			}
+			if !strings.Contains(readConfig(t, root), "foreign: keep") {
+				t.Fatal("foreign key changed")
+			}
+			before := readConfig(t, root)
+			if _, err := EnsureBeadsConfig(root, force); err != nil {
+				t.Fatal(err)
+			}
+			if readConfig(t, root) != before {
+				t.Fatal("not idempotent")
+			}
+		})
+	}
+}
+func TestS134Setup_CommentsOnlyConfig(t *testing.T) {
+	root := t.TempDir()
+	writeBeadsConfig(t, root, "# config\n")
+	if _, err := EnsureBeadsConfig(root, false); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(CustomTypes(root), []string{"gate", "step"}) {
+		t.Fatal("comments-only configuration not initialized")
+	}
 }

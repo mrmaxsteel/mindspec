@@ -1,0 +1,8 @@
+{
+  "options": [
+    "fix",
+    "halt"
+  ],
+  "cause": "reject",
+  "gate": "test-abc.1.review"
+}

@@ -1,0 +1,11 @@
+{
+  "round": 2,
+  "subject": "subject",
+  "slots": [
+    "slot"
+  ],
+  "slot_count": 2,
+  "paths": [
+    "app.go"
+  ]
+}

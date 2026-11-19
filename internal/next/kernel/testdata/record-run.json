@@ -1,0 +1,5 @@
+{
+  "round_limit": 5,
+  "lease_ttl": "2h",
+  "rules": "kernel-1"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "test-1.1.review.judge.a1",
+  "parent": "test-1.1",
+  "title": "[mindspec] change-judge",
+  "issue_type": "step",
+  "status": "open",
+  "labels": [
+    "mindspec"
+  ],
+  "metadata": {
+    "mindspec_key": "test-1.1.review.judge.a1",
+    "mindspec_tuple": {
+      "epic": "test-1",
+      "kind": "change-judge",
+      "attempt": 1,
+      "work_item": "test-1.1",
+      "gate": "test-1.1.review"
+    },
+    "mindspec_subject": {
+      "commit": "new"
+    }
+  }
+}

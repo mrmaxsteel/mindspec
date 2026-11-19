@@ -1,0 +1,26 @@
+{
+  "verdict_schema": 2,
+  "bead_id": "test-1.1",
+  "spec": "001-x",
+  "target": "spec/001-x",
+  "round": 2,
+  "expected_reviewers": 2,
+  "reviewer_count_source": "explicit",
+  "reviewed_head_sha": "subject",
+  "subject_digest": "subject-digest",
+  "gate": "bead",
+  "roster": [
+    {
+      "slot": "R1",
+      "model": "test-model",
+      "lens": "test-lens"
+    },
+    {
+      "slot": "R2",
+      "model": "test-model",
+      "lens": "test-lens"
+    }
+  ],
+  "telemetry": "required",
+  "orchestrated": true
+}

@@ -285,3 +285,14 @@ func acquirePhaseLock(root string) (func(), error) {
 	}
 	return unlock, nil
 }
+
+// WithPhaseLock serializes a kernel operation with other phase writers.
+// Read all decision inputs inside fn. This lock is not reentrant.
+func WithPhaseLock(root string, fn func() error) error {
+	unlock, err := acquirePhaseLock(root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
+}

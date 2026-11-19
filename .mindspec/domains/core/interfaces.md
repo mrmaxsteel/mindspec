@@ -500,3 +500,11 @@ epics. The cache stores these resolution errors. It retries I/O errors.
 `warn`. Config load refuses other values and names
 `enforcement.panel_presence`. The policy controls only a missing panel.
 A registered panel with a failed decision leg still refuses.
+
+## Phase lock
+
+`phase.WithPhaseLock(root, fn)` holds the repository phase lock while `fn` runs.
+Read all decision inputs inside `fn`.
+Do not acquire the lock again inside `fn`.
+The operating system releases the lock when the process exits.
+The function returns lock errors and callback errors to the caller.

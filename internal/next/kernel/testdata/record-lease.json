@@ -1,0 +1,6 @@
+{
+  "generation": 2,
+  "expires": "2026-01-02T03:04:05Z",
+  "token_hash": "sha256:token",
+  "claim_base": "base"
+}

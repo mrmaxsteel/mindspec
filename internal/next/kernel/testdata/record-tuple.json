@@ -1,0 +1,9 @@
+{
+  "epic": "test-abc",
+  "work_item": "test-abc.1",
+  "gate": "test-abc.1.review",
+  "kind": "review-slot",
+  "round": 2,
+  "slot": 3,
+  "attempt": 2
+}

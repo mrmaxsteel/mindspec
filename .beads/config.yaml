@@ -52,7 +52,7 @@ sync-branch: "beads-sync"
 #     - ~/work-planning   # Work planning repo
 
 # Custom issue types used by MindSpec (gates for spec/plan approval)
-types.custom: "gate"
+types.custom: "gate,step"
 
 # Custom statuses used by MindSpec (gates resolve rather than close)
 status.custom: "resolved"
