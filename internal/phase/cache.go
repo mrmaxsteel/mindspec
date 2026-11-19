@@ -67,8 +67,8 @@ func NewCache() *Cache {
 	}
 }
 
-// WithRoot sets the repository context on this cache and returns the receiver.
-// An empty root keeps the current context. Use one cache for one repository.
+// WithRoot sets the repository context, clears cached reads if a set root changes, and returns the receiver.
+// An empty root keeps the current context.
 // A nil receiver returns a context holder that does not cache tracker reads.
 func (c *Cache) WithRoot(root string) *Cache {
 	if c == nil {
@@ -76,6 +76,15 @@ func (c *Cache) WithRoot(root string) *Cache {
 	}
 	c.mu.Lock()
 	if root != "" {
+		if c.root != "" && c.root != root {
+			c.epicsAll, c.epicsAllLoaded = nil, false
+			c.openAll, c.openAllLoaded = nil, false
+			c.recordsAll, c.recordsAllLoaded = nil, false
+			clear(c.epicByID)
+			clear(c.children)
+			clear(c.specErrors)
+			clear(c.specToEpic)
+		}
 		c.root = root
 	}
 	c.mu.Unlock()

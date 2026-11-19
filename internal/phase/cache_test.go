@@ -500,3 +500,39 @@ func TestCache_AllRecordsRetriesErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCache_WithRootInvalidatesRecords(t *testing.T) {
+	calls := 0
+	payload := `[{"id":"record-a"}]`
+	t.Cleanup(SetListJSONForTest(func(args ...string) ([]byte, error) {
+		calls++
+		return []byte(payload), nil
+	}))
+	rootA, rootB := t.TempDir(), t.TempDir()
+	c := NewCache().WithRoot(rootA)
+	for _, root := range []string{rootA, rootA, ""} {
+		c.WithRoot(root)
+		records, err := c.allRecords()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) != 1 || records[0].ID != "record-a" {
+			t.Fatalf("records = %+v, want record-a", records)
+		}
+		if calls != 1 {
+			t.Fatalf("tracker reads = %d, want 1", calls)
+		}
+	}
+	payload = `[{"id":"record-b"}]`
+	c.WithRoot(rootB)
+	records, err := c.allRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("tracker reads after root change = %d, want 2", calls)
+	}
+	if len(records) != 1 || records[0].ID != "record-b" {
+		t.Fatalf("records = %+v, want record-b", records)
+	}
+}
