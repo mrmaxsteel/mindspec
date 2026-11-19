@@ -168,6 +168,14 @@ func roundOpen(s State) (Changes, error) {
 			continue
 		}
 		head := subject(s, gate)
+		if _, repanel, err := Decode[RePanel](g.Metadata, KeyRePanel); err != nil {
+			return c, err
+		} else if repanel {
+			head, err = newestJudgeSubject(s, gate)
+			if err != nil {
+				return c, err
+			}
+		}
 		if head == "" {
 			continue
 		}

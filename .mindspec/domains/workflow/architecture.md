@@ -1680,3 +1680,30 @@ An older approval with no witness keeps its existing lifecycle.
 
 The epic and work items carry the `mindspec` label and title tag.
 Title parsers skip this tag.
+
+
+## Change judge
+
+A passed gate keeps its original receipt.
+`AcceptedSubject` reads the highest gate attempt.
+It uses a ledger-backed panel rebind or the latest carry-over.
+A commit that changes only a panel directory for that gate needs no judge.
+
+A later subject commit creates one change-judge step.
+The step is a child of the work item or the epic.
+A newer commit supersedes the open judge.
+A successful panel rebind also supersedes that judge.
+Its receipt identifies the rebind.
+Merged work items and closed epics create no judges.
+
+Lease the judge before submission.
+Commit its judgement file in the registered panel directory.
+Use `carry-over` with a reason to retain the passing gate.
+The gate receipt records both subjects and the judge receipt.
+The carry-over also records the current rebind identity.
+Use `re-panel` with changed paths to request another round.
+Set at least two slots and no more than the passing round used.
+The successor gate records its predecessor and the requested scope.
+The next panel-create entry carries that scope.
+Submission checks committed evidence and subject identity.
+It does not assess the judgement content.

@@ -105,6 +105,7 @@ type RePanel struct {
 	Paths     []string `json:"paths"`
 }
 type CarryOver struct {
+	Rebind     string   `json:"rebind,omitempty"`
 	OldSubject string   `json:"old_subject"`
 	NewSubject string   `json:"new_subject"`
 	Judge      string   `json:"judge"`

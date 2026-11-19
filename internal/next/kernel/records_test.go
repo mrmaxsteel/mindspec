@@ -57,7 +57,7 @@ func TestS134Records_RoundTrips(t *testing.T) {
 		"defer":        kernel.DeferRecord{Finding: "finding", To: "follow-up", Reason: "bounded", At: fixedTime},
 		"judgement":    kernel.Judgement{Value: "re-panel", OldSubject: "old", NewSubject: "new", Reason: "changed", SlotCount: 2, Paths: []string{"app.go"}},
 		"repanel":      kernel.RePanel{SlotCount: 2, Paths: []string{"app.go"}},
-		"carry":        kernel.CarryOver{OldSubject: "old", NewSubject: "new", Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", Path: "judge.json", Commit: "commit", Blob: "blob"}},
+		"carry":        kernel.CarryOver{Rebind: "accepted-rebind", OldSubject: "old", NewSubject: "new", Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", Path: "judge.json", Commit: "commit", Blob: "blob"}},
 		"close":        kernel.Receipt{Kind: "passed", Path: "proof", Commit: "commit", Blob: "blob", Repaired: true, Rebind: "rebind", CarryOvers: []kernel.CarryOver{{OldSubject: "old", NewSubject: "new", Judge: "judge"}}},
 		"registration": kernel.RegistrationRecord{Slug: "panel", Round: 2, Subject: "subject", Slots: []string{"R1", "R2"}},
 		"subject":      kernel.Subject{Commit: "subject"},
