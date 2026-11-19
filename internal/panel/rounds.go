@@ -40,7 +40,7 @@ func RoundsForGate(regs []Registration, spec, gate, beadID string) (int, error) 
 		for _, line := range lines {
 			var round RoundRecord
 			if err := json.Unmarshal(line, &round); err != nil {
-				return 0, err
+				return 0, fmt.Errorf("read panel rounds in %s: %w", termsafe.Escape(dir), err)
 			}
 			if round.Record != RecordRound {
 				continue

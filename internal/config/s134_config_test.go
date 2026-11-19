@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -100,19 +101,35 @@ func TestS134Config_RoundLimitAlias(t *testing.T) {
 	for _, tc := range []struct {
 		name, content string
 		want          int
+		ignored       bool
 	}{
-		{"default", "", 5},
-		{"alias", "loop:\n  halt:\n    max_rounds_per_bead: 4\n", 4},
-		{"precedence", "panel:\n  max_rounds: 6\nloop:\n  halt:\n    max_rounds_per_bead: 4\n", 6},
-		{"explicit-default", "panel:\n  max_rounds: 5\nloop:\n  halt:\n    max_rounds_per_bead: 4\n", 5},
+		{"default", "", 5, false},
+		{"alias", "loop:\n  halt:\n    max_rounds_per_bead: 4\n", 4, false},
+		{"precedence", "panel:\n  max_rounds: 6\nloop:\n  halt:\n    max_rounds_per_bead: 4\n", 6, false},
+		{"explicit-default", "panel:\n  max_rounds: 5\nloop:\n  halt:\n    max_rounds_per_bead: 4\n", 5, false},
+		{"zero", "loop:\n  halt:\n    max_rounds_per_bead: 0\n", 5, true},
+		{"negative", "loop:\n  halt:\n    max_rounds_per_bead: -1\n", 5, true},
+		{"non-integer", "loop:\n  halt:\n    max_rounds_per_bead: \"three\"\n", 5, true},
+		{"invalid-with-panel", "panel:\n  max_rounds: 6\nloop:\n  halt:\n    max_rounds_per_bead: 0\n", 6, true},
+		{"null", "panel:\n  max_rounds: null\nloop:\n  halt:\n    max_rounds_per_bead: 4\n", 4, false},
+		{"tilde", "panel:\n  max_rounds: ~\nloop:\n  halt:\n    max_rounds_per_bead: 4\n", 4, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, warnings := s134Load(t, tc.content)
 			if cfg.RoundLimit() != tc.want {
 				t.Fatalf("RoundLimit = %d, want %d", cfg.RoundLimit(), tc.want)
 			}
-			if tc.content != "" && (strings.Count(warnings, "warning:") != 1 || !strings.Contains(warnings, "value 4")) {
+			if tc.content != "" && (strings.Count(warnings, "warning:") != 1 || !strings.Contains(warnings, "value ")) {
 				t.Fatalf("alias warning: %q", warnings)
+			}
+			if tc.ignored && (!strings.Contains(warnings, "ignored") || !strings.Contains(warnings, "applies")) {
+				t.Fatalf("invalid alias warning: %q", warnings)
+			}
+			if tc.content != "" {
+				value := cfg.RemovedLoopValue("halt.max_rounds_per_bead")
+				if !strings.Contains(warnings, "value "+fmt.Sprint(value)) {
+					t.Fatalf("warning omits alias value: %q", warnings)
+				}
 			}
 		})
 	}
@@ -137,5 +154,16 @@ func TestS134Config_PanelPolicy(t *testing.T) {
 		if _, err := Load(root); err == nil {
 			t.Fatalf("accepted invalid policy %q", content)
 		}
+	}
+}
+
+func TestS134Config_NonMapLoopWarnsOnce(t *testing.T) {
+	for _, content := range []string{"loop: true", "loop: 7", "loop: [ignored]"} {
+		t.Run(content, func(t *testing.T) {
+			cfg, warnings := s134Load(t, content)
+			if cfg.RoundLimit() != 5 || strings.Count(warnings, "warning:") != 1 || !strings.Contains(warnings, "loop is removed and ignored") {
+				t.Fatalf("non-map loop: limit %d, warnings %q", cfg.RoundLimit(), warnings)
+			}
+		})
 	}
 }

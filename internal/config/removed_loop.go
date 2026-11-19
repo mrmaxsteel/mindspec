@@ -6,7 +6,6 @@ import (
 	"sort"
 
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
-	"gopkg.in/yaml.v3"
 )
 
 // RoundLimit returns the configured round allowance, or the default of five.
@@ -45,27 +44,32 @@ func (c *Config) readRemovedLoop(raw map[string]any) error {
 			}
 		}
 	}
-	if entries, ok := raw["loop"].(map[string]any); ok && len(entries) > 0 {
-		c.removedLoop = map[string]any{}
-		collect("", entries)
+	if value, present := raw["loop"]; present && value != nil {
+		if entries, ok := value.(map[string]any); ok {
+			c.removedLoop = map[string]any{}
+			collect("", entries)
+		} else {
+			fmt.Fprintln(os.Stderr, "warning: loop is removed and ignored")
+		}
 	}
 	panel, _ := raw["panel"].(map[string]any)
-	_, explicit := panel["max_rounds"]
+	explicit := panel["max_rounds"] != nil
 	for _, key := range c.RemovedLoopKeys() {
 		if key != "halt.max_rounds_per_bead" {
 			fmt.Fprintf(os.Stderr, "warning: loop.%s is removed and ignored\n", termsafe.Escape(key))
 			continue
 		}
 		value := c.removedLoop[key]
-		data, err := yaml.Marshal(value)
-		if err != nil {
-			return err
-		}
-		var n int
-		if !explicit {
-			if err := yaml.Unmarshal(data, &n); err != nil || n < 1 {
-				return termsafe.NewFailure("the deprecated round limit must be a positive integer", "set panel.max_rounds to at least 1")
+		n, valid := value.(int)
+		if !valid || n < 1 {
+			fallback := "the default applies"
+			if explicit {
+				fallback = "panel.max_rounds applies"
 			}
+			fmt.Fprintf(os.Stderr, "warning: loop.%s value %s is ignored; %s; effective value %d\n", termsafe.Escape(key), termsafe.Escape(fmt.Sprint(value)), fallback, c.RoundLimit())
+			continue
+		}
+		if !explicit {
 			c.Panel.MaxRounds = n
 		}
 		fmt.Fprintf(os.Stderr, "warning: loop.%s value %s is a deprecated alias for panel.max_rounds; effective value %d\n", termsafe.Escape(key), termsafe.Escape(fmt.Sprint(value)), c.RoundLimit())

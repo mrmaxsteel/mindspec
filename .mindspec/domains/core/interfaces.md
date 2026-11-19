@@ -301,10 +301,11 @@ Used by workflow: `internal/panel` stays a config-free leaf and never imports th
 
 `panel.max_rounds` sets the round allowance. It defaults to 5.
 `Config.RoundLimit()` returns this value. The deprecated loop alias applies
-only when `panel.max_rounds` is absent. Its warning names the supplied value.
+only when `panel.max_rounds` is unset or null. Its warning names the supplied value.
 `panel.lease_ttl` sets the lease duration. It defaults to `2h`.
 The round limit must be positive. The lease duration must be positive.
-Enrolment pins both values for that spec.
+The enrolment step will add the "set at enrolment" behaviour: it will pin
+`round_limit` and `lease_ttl` for that spec.
 
 The loader ignores removed loop settings. It emits one warning per setting
 on the first load of a root. It caches later loads for that root.
