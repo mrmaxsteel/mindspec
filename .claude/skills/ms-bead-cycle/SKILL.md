@@ -1,103 +1,110 @@
 ---
 name: ms-bead-cycle
-description: Single-bead orchestrator — pick + claim (step 0) → impl → panel → fix → re-panel → merge until the bead lands
+description: Execute binary-selected steps through implementation, review, fixes and completion
 ---
 
 # Bead Cycle Orchestrator
 
-Drive one bead from claim to merge using the panel review loop. Compose the smaller skills; don't reimplement them. The cycle owns step 0 (pick + claim) and the merge terminal (`mindspec complete`) directly — these were previously the separate `/ms-bead-next` and `/ms-bead-merge` skills, folded in here so the orchestrator that owns sequencing also owns the bead's entry and exit.
-
-Include the standard guardrails (AGENTS.md, Bead-loop guardrails) — the orchestrator rules (only the cycle runs `mindspec complete`, after the panel gate passes; never raw-merge a bead branch; one push at end-of-spec).
+The binary selects work and enforces the gates. This skill leases actor steps,
+dispatches agents, submits evidence and executes the returned commands.
+Apply the repository's Bead-loop guardrails. Only the cycle runs `mindspec complete`.
 
 ## Inputs
 
-- `bead-id` (optional) — if absent, step 0 picks the next eligible bead for the active spec.
-- `spec-slug` (optional) — restrict step 0 to a given spec; otherwise honour the active spec.
-- `max-rounds` (default `3`) — stop iterating after this many panel rounds.
-- `prompt-path` (optional) — pre-staged impl prompt at `<spec-dir>/reviews/prep/bead<N>_impl_prompt.md`.
+- `spec-slug` (optional): select the spec. Ask the user when active specs are ambiguous.
+- `bead-id` (optional): restrict actor dispatch to this work item.
+- `prompt-path` (optional): use a staged implementation prompt.
 
-> `<spec-dir>` is the spec's flat directory `<repo>/.mindspec/specs/<spec-slug>/`; panel and prep artifacts are co-located under `<spec-dir>/reviews/`.
+## Loop
 
-## Step 0 — pick + claim the next bead
+1. Run `mindspec next-action --apply <spec-slug> --json`.
+   Read `actions`, `run`, `waiting`, `decisions`, `flags` and `status`.
+   Use the returned order. The binary owns selection, dependencies and round limits.
+   Never select work from `bd ready` or claim a step with `bd update`.
+2. For each selected action, execute its `claim` argv (`mindspec lease <step>`).
+   Capture the token. Execute the action's `brief` argv to obtain its dispatch context.
+   Pass the step, subject, context, worktree and token to the actor.
+   If the lease is held or blocked, follow the refusal's recovery line.
+   Do not take a lease that your own still-running actor holds.
+   Wait for that actor or stop it first.
+   Renew a live lease with `mindspec lease <step> --renew <token>` when needed.
+3. Dispatch by the returned kind:
+   - `implement`: use `/ms-bead-impl` to stage and dispatch the implementation.
+   - `review-slot`: use the panel prompt and isolated slot tree.
+   - `fix`: use `/ms-bead-fix` for one fixer in the target worktree.
+   - `change-judge`: dispatch an agent with the old and new subjects and frozen gate receipt.
+     Return a `carry-over` judgement with a reason or a `re-panel` judgement with paths and slot count.
 
-1. **List ready beads scoped to the spec.**
-   ```bash
-   bd ready 2>&1 | grep "<spec-prefix>"
-   ```
-   `bd ready` already filters to beads with no blocking deps. **Cross-check against the plan's `Depends on:` lines** for each bead — `bd` and the plan can disagree (for example, `bd` can show a bead as ready while the plan says it depends on earlier beads). When they disagree, **trust the plan**, and fix `bd` (`bd update <bead> --add-dep <blocker>`) before proceeding.
-
-2. **Disambiguate multiple active specs.** If `mindspec state show` reports more than one active spec, ask the user which to focus on — never guess.
-
-3. **Pick deterministically.** Among the plan-eligible ready beads, pick the lowest-numbered one (`.3` before `.4` before `.5`). If two beads of the same depth are eligible, pick the one with the smaller `bd id`.
-
-4. **Claim.**
-   ```bash
-   mindspec next --spec <spec-slug> <bead-id>
-   ```
-   This claims the bead, creates `bead/<id>` off the spec branch, and creates a worktree at `<spec-worktree>/.worktrees/worktree-<bead-id>/`. The claim-failure and worktree-setup-failure recovery recipes are emitted by the CLI itself (point-of-use errors) — follow them if `mindspec next` reports a failure.
-
-   Belt-and-braces fallback for CLI-down failures the CLI error paths never reach (e.g. the whole `mindspec` binary is unavailable):
-   ```bash
-   bd update <bead-id> --claim --status in_progress
-   git -C <spec-worktree> worktree add .worktrees/worktree-<bead-id> -b bead/<bead-id> <spec-branch>
-   ```
-
-5. **Verify state.** `bd show <bead-id>` shows `in_progress`; the worktree dir exists; `git -C <worktree> branch --show-current` reports `bead/<bead-id>`.
-
-Don't claim multiple beads at once — the cycle is serial per bead by design (parallelism happens *inside* each cycle, across reviewers + impl agent).
+   Actor agents return evidence. They never claim, complete, merge or push lifecycle work.
+   After each implementation or fix commit, run `mindspec complete <bead> --check`.
+   Run this check inside the leased step before submission.
+   This check writes nothing and does not run the panel gate.
+   If it fails, send all
+   failing gates and recovery lines to the implementer or fixer under the same lease.
+   Keep the same actor. Do not submit a failed check.
+   Wait for the fixed commit and run the check again.
+   Submit only after the check passes so the panel reviews the fixed diff.
+4. Submit the evidence with the action's `submit` argv and current token.
+   Use `mindspec submit <step> --lease <token> --commit <oid>` for an implementation or fix.
+   Use `mindspec submit <step> --lease <token> --artifact <path>` for a verdict or judgement.
+   Keep the evidence in git. A refusal leaves the step open; follow its recovery line.
+5. Execute each `run` entry's `argv` as returned. These entries include panel creation,
+   work-item completion and implementation approval. Do not invent a next round or merge.
+   For a panel creation entry, write the brief file before running it;
+   then the configured reviewers fan out through the returned review-slot actions.
+   After creation, use only `/ms-panel-run`'s dispatch steps and `/ms-panel-tally`'s report.
+   Skip adapter panel creation and automatic fix or halt routing. Return to this loop.
+   Lease each review-slot action before its dispatch. Pass its token to submission.
+   Preserve the returned gate, subject, round and scope when calling these adapters.
+6. Return each open decision to the user with its listed options.
+   A REJECT decision belongs to its gate. Other eligible work can continue.
+   Submit only the user's selected option with `mindspec submit <decision> --answer <option>`.
+   The `halt` option stops every work item in the spec.
+7. Run the loop again after each submission or command. For `wait`, report blockers and
+   `retry_at`; wait for the input or lease change. For `halted`, report the durable halt.
+   For `done`, return the completion result. For `indeterminate`, surface the diagnostic.
+   Follow flag recovery lines. Stop on a failed merge or a dependency mismatch and return it to the user.
 
 ## Sequence
 
+This example shows an implementation and a later fix when the binary returns them.
+Each transition returns to `next-action --apply`. The returned commands control progression.
+
 ```
-step 0                 (pick + claim the next eligible bead, create worktree)
-  ↓ bead-id + worktree + branch
-/ms-bead-impl          (round 1 implementation — Phase A stages the prompt, Phase B dispatches)
+lease implement → /ms-bead-impl
   ↓ implementation commit SHA + flagged deviations
 mindspec complete <bead> --check
   ↓ content gates PASS
-/ms-panel-run          (round 1 — the caller writes the brief file; create copies it into BRIEF.md, then the configured reviewers fan out)
-  ↓ wait for completions
-/ms-panel-tally        (round 1 verdicts — single decision authority)
-  ↓ decide:
-       tally PASS  → merge terminal → exit
-       tally BLOCK → fix, refute or defer each finding
-                   → /ms-bead-fix or re-panel → continue
-       any REJECT / HARD block → halt (see /ms-panel-tally recovery)
-
-/ms-bead-fix           (round 1 → round 2 fix commit)
+mindspec submit <step> --lease <token> --commit <oid>
+  ↓ next-action --apply → execute panel create from run
+/ms-panel-run          (execute panel create from run, then lease review slots)
+  ↓ submit review evidence → next-action --apply → open decision, if any
+lease fix → /ms-bead-fix
   ↓ new implementation commit SHA + flagged deviations
 mindspec complete <bead> --check
   ↓ content gates PASS
-/ms-panel-run          (round 2 — the caller writes a fresh brief file; create bumps the round + reviewed_head_sha)
-  ↓
-/ms-panel-tally        (round 2 verdicts)
-  ↓ decide as above
-
-... iterate until APPROVE or max-rounds reached ...
-
-merge terminal         (panel-approved bead — mindspec complete)
+mindspec submit <step> --lease <token> --commit <oid>
+  ↓ next-action --apply → execute panel create from run
+/ms-panel-run          (execute the next panel create entry)
+  ↓ submit review evidence → next-action --apply → execute each run entry
 ```
 
-## Content check before the bead panel
-
-After each implementation or fix commit, run `mindspec complete <bead> --check`.
-This check writes nothing and does not run the panel gate. If it fails, send all
-failing gates and recovery lines to the implementer or fixer. Wait for the fixed
-commit and run the check again. Convene the bead panel only after the check passes,
-so the panel reviews the fixed diff.
-
-## NOT READY — pre-damage triage
+## NOT READY — dispatch triage
 
 `/ms-bead-impl`'s dispatch ingress (`mindspec bead ready-check`, plus the staged prompt's Phase 0) can refuse a bead before any code is written. A subagent return whose first line is `NOT READY: <bead-id>` is its OWN outcome, handled distinctly from every other outcome:
 
 - **No panel round is consumed** — nothing was implemented, so there is nothing to review.
-- **Excluded from `loop.halt.max_consecutive_impl_failures`** — that brake stops *repeated failed implementations* (post-damage); NOT READY is the pre-damage refusal that PREVENTS them. Counting it toward the same brake would punish the gate for working.
 - **Never routed to `/ms-bead-fix`** — there is no implementation to fix.
 - **The bead worktree remains intact** — zero commits were made.
 
 On a NOT READY, choose exactly one of two dispositions:
 
-- **ACCEPT (the default)** — halt the bead and surface the reasons (the full ordinal-numbered report) to the user/orchestrator, with the routing instruction: revise the plan/spec section the reasons quote, then re-dispatch (back to `/ms-bead-impl`, which re-runs the ingress ready-check and re-stages Phase 0 fresh). `/ms-spec-autopilot` treats an ACCEPTed NOT READY as its existing bead-level halt class — do not proceed to the next bead.
+- **ACCEPT (the default)** — pause this dispatch and surface the reasons to the user.
+  Return the full ordinal-numbered report. Revise the plan or spec text that the reasons quote.
+  Return through `mindspec next-action --apply` and `mindspec lease` before a new dispatch.
+  Reuse the current lease only while it is valid.
+  Use `/ms-bead-impl` to run the ingress check and stage Phase 0 again.
+  Other gates remain governed by the binary output.
 - **DISAGREE / clarify** — once per bead: author a grounded, reason-keyed record (one entry for EVERY cited ordinal, each: `{ordinal, verbatim reason, concrete answer, authoritative source span}` — the verb REFUSES a partial record (an unanswered cited reason means the bead is still not ready — that is ACCEPT territory) and a paraphrased reason (the pairing must repeat the cited reason verbatim); a clarification may DISAMBIGUATE existing spec/plan/landed-code authority, but may never CREATE new normative behavior; when no span supports the answer, ACCEPT is the correct disposition, not clarify) and write it via:
   ```bash
   mindspec bead clarify <bead-id> --file <record.json>
@@ -108,59 +115,31 @@ On a NOT READY, choose exactly one of two dispositions:
 
 **Clarify vs. `--allow-not-ready=<ids> --evidence <path>` — never interchangeable.** `bead clarify` resolves a SEMANTIC Phase-0 concern with cited evidence (SR-1..SR-5 — implementability, decidability, helper existence, contradiction, ambiguity); it can never move a MECHANICAL MF-1..MF-4 signal (the layer boundary holds by construction — a clarification's dedicated metadata key is off the mechanical scan surface). `mindspec next --allow-not-ready=<ids> --evidence <path>` is the signal-scoped, evidence-recorded bypass of a failing mechanical floor at claim time — a deliberate "proceed anyway," not a resolution. Never substitute one for the other: clarifying a mechanical FAIL does nothing (the floor still refuses), and `--allow-not-ready=<ids> --evidence <path>` does not touch the semantic Phase-0 review at all.
 
-## Merge terminal — `mindspec complete`
+## Completion
 
-The panel gate passed (`/ms-panel-tally` decided merge; the in-binary `mindspec complete` gate enforces it). Close the bead in `bd`, merge `bead/<id>` into the spec branch, and remove the bead worktree — this is `mindspec complete` plus a one-line verify.
+Execute `mindspec complete` only when its command appears in `run`, except for the content check.
+The only exception is `mindspec complete <bead> --check` inside a leased implement or fix step.
+This is the only `complete` call allowed outside `run`. It must carry `--check`.
+Check `git status --porcelain` in the target worktree before completion.
+Preserve pending changes and follow the CLI recovery line if completion refuses.
+Never merge a bead branch with raw `git merge bead/<id>`.
+Push once at the end of the spec through the orchestrator's publication path.
 
-1. **Run the merge.**
-   ```bash
-   mindspec complete <bead-id> "<summary>"
-   ```
-   `<summary>` is a 1-2 sentence positional argument describing what landed, used for the merge commit message. `complete` runs from the repo root and is location-agnostic — do NOT `cd` into the bead worktree first. It auto-commits any stray staged files, closes the bead in `bd`, merges `bead/<id>` into the spec branch with a `Merge bead/<id>` commit, and removes the bead worktree.
+If a check stopped between bd-close and the actual git merge, recover it before another dispatch.
+Re-run the returned completion command.
 
-   Architecture-divergence and claim/worktree failures surface their own repair ladders in the CLI error (point-of-use) — follow those; no skill prose duplicates them.
+## Review discipline
 
-2. **Verify the merge.**
-   ```bash
-   git -C <spec-worktree> log --oneline -3   # should show `Merge bead/<bead-id>` at top
-   ```
-   (`mindspec complete` prints no merge SHA, so the `git log` is the merge-commit verify.)
-
-3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).
-
-> The Step-1 pre-merge checklist that `/ms-bead-merge` used to carry (bd-show / clean-tree / commits-visible rows, "if anything is uncommitted, abort") is **superseded by CLI checks**: `mindspec complete`'s user-dirt blocking and its closure/worktree-removal output cover the bd-show / clean-tree / commits-visible rows, and the "if anything is uncommitted, abort" line is now MECHANIZED by the in-binary `mindspec complete` gate's dirty-tree Block. Don't re-add the checklist as prose.
-
-**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.
-
-## Implementation notes
-
-- Use one panel slug, `<spec-prefix>-bead<N>`, for all rounds. Set `--round <R>` to the next round.
-- **Flagged deviations carry across rounds.** When the impl or fix subagent reports deviations from its prompt, those become "Fix-author deviations (assess these)" sections in the next BRIEF — the panel must explicitly assess whether the deviation is acceptable. Don't bury them.
-- Use `panel prompt` for each slot and round. The binary includes that slot's prior-round findings.
-- **Test-suite truth wins over reviewer opinion.** If the panel splits and one reviewer's REQUEST_CHANGES rests on a claim that tests pass disproves, the orchestrator should note the contradiction. Don't blindly trust either side; the synthesis is your job.
-
-## Findings across families
-
-Apply `review.reproduce`: reproduce each blocking claim in an isolated slot tree before a fix dispatch or refutation.
-Apply `review.no-vote`: an approval count does not resolve a finding.
-Apply `panel.fix-after-final` and `panel.one-fixer`: wait for verify exit 0, then dispatch one fixer in the target worktree.
+Use one panel slug for all rounds. Set `--round <R>` to the next round.
+Take that round from the binary's `run` entry.
+Carry implementation and fixer deviations into the next brief.
+Use `panel prompt` for each slot and round.
+Apply `review.reproduce`: reproduce each blocking claim in an isolated slot tree.
+Apply `review.no-vote`: approval counts do not resolve findings.
+Apply `panel.fix-after-final` and `panel.one-fixer`: wait for verify exit 0 before one fixer.
 
 | Pattern | Action |
 |:--------|:-------|
 | One family approves; another requests changes | Reproduce each blocking claim and compare the evidence |
-| All slots approve | Check the tally and artifact gates before completion |
-| All slots request changes | Consolidate the findings before the fix dispatch |
-
-## Anti-patterns
-
-- Don't skip the panel even when "the diff looks fine to me". The point of the panel is that *your* judgement is one of the configured reviewers — don't pre-empt it.
-- Don't run multiple fix-cycles inside a round. One panel → one fix → one re-panel. Compounding fixes within a round makes the next panel's job ambiguous.
-- Don't exceed `max-rounds` silently. If you reach the cap, halt and report; the user may want to revise the plan or split the bead.
-- Resolve each REQUEST_CHANGES finding before merge. Fix it, refute it with evidence, or defer it to a validated follow-up bead. Re-run tally.
-- Don't run `mindspec complete` until `/ms-panel-tally` decided merge — the merge is destructive of the bead branch.
-- Don't run `mindspec complete` with a dirty worktree. Verify `git status --porcelain` is EMPTY and remove any strays yourself before completing — this is the advisory complement of the mechanized dirty-tree Block in the `mindspec complete` gate, not a replacement for it.
-
-## Then
-
-- Successful merge → caller (`/ms-spec-autopilot`) picks the next bead.
-- Halt → return to user with the panel state and the bead worktree intact.
+| All slots approve | Check the binary's tally and returned commands |
+| All slots request changes | Consolidate the findings for the authorised fix |

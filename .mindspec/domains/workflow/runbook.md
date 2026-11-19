@@ -89,7 +89,7 @@ Use `/spec-init` or create manually:
 
 A subagent return whose first line is `NOT READY: <bead-id>` is a
 pre-damage refusal, not an implementation failure: no panel round is
-consumed, it does not count toward `max_consecutive_impl_failures`, it
+consumed. It does not add an implementation failure. It
 never routes to `/ms-bead-fix`, and the worktree is intact (zero
 commits). Choose exactly one disposition:
 

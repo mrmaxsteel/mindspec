@@ -15,12 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// inertAnnotation marks a config block that is parsed, defaulted, validated,
-// and surfaced here, but INERT: nothing in this binary reads it to change
-// behavior yet (spec 109 R9). Only panel: and the pre-existing top-level
-// keys drive in-binary behavior today.
-const inertAnnotation = "declared, not yet enforced"
-
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Inspect the effective mindspec orchestration config",
@@ -71,14 +65,10 @@ var configResolveCmd = &cobra.Command{
 var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Print the effective config (defaults merged with .mindspec/config.yaml)",
-	Long: `Print the effective config — including the panel:, models:, commands:,
-loop:, and runner: orchestration blocks alongside the
-pre-existing keys — to stdout. Read-only: it writes no file and exits 0
-on a valid config. The loop: and runner: blocks are annotated
-"` + inertAnnotation + `" because they supply orchestration guidance. Reviewer-family model keys
-select reviewer models. The commands: block is
-NOT annotated inert — a populated commands: key changes the managed
-AGENTS.md "Build & Test" section init/setup render today.
+	Long: `Print the effective config with defaults merged into the project settings.
+Removed loop keys are labelled ignored. The round-limit alias is labelled as
+an alias. The runner setting is read by a skill. Reviewer-family model keys
+select reviewer models. Commands supply the managed Build & Test guidance.
 
 With --gate <name>, prints that single gate's resolved
 creation-time defaults instead — the expanded reviewer slots, expected
@@ -149,35 +139,12 @@ func init() {
 	})
 }
 
-// escapeConfigValue renders a config-controlled string, s, safely for
-// inclusion in `mindspec config show`'s YAML-like stdout (final-review G2).
-// Every string in this render path — protected-branch names, source globs,
-// reviewer family names, the raw approve_threshold expression, models: keys
-// and values, loop.gate_authority keys and values, on_reject,
-// controller_handoff, handoff_log, and runner — is read from
-// .mindspec/config.yaml, a file a repo-write attacker can poison; without
-// escaping, a value carrying ANSI/control bytes or an embedded newline
-// reaches the terminal raw and can forge extra, attacker-chosen display
-// lines.
-//
-// Safe-set rule: s renders UNCHANGED iff every rune in it is printable
-// ASCII in [0x20, 0x7e] (space through `~`) — this covers letters, digits,
-// and all ASCII punctuation, so every existing plain value (including the
-// R9 AC's `approve_threshold: n-1`) is byte-for-byte identical to before.
-// Anything else — C0/C1 control bytes (including ESC/BEL and \n/\r), DEL,
-// or non-ASCII/invalid-UTF-8 runes — is rendered as a single-line,
-// double-quoted Go string literal via strconv.Quote, which cannot itself
-// contain a raw control byte or a literal newline, so a hostile value can
-// never span or forge additional output lines.
+// escapeConfigValue quotes text that could forge terminal output.
 func escapeConfigValue(s string) string {
 	return termsafe.Escape(s)
 }
 
-// renderConfig renders the effective config, cfg, as human-readable
-// YAML-like text (spec 109 R9). It is a PURE function over *config.Config —
-// no fs, no panel scan — so `mindspec config show` is exercised without
-// spawning a process. The caller-side panel.ReviewerCountNote scan (R8)
-// lives in reviewerCountNotesFor, not here.
+// renderConfig renders effective settings without I/O.
 func renderConfig(cfg *config.Config) (string, error) {
 	if cfg == nil {
 		return "", fmt.Errorf("renderConfig: nil config")
@@ -231,6 +198,8 @@ func renderConfig(cfg *config.Config) (string, error) {
 	// panel: drives in-binary behavior today (creation-time defaults for a
 	// fresh panel.json, spec 109 R2) — NOT annotated inert.
 	fmt.Fprintln(&b, "panel:")
+	fmt.Fprintf(&b, "  max_rounds: %d\n", cfg.RoundLimit())
+	fmt.Fprintf(&b, "  lease_ttl: %s\n", escapeConfigValue(cfg.Panel.LeaseTTL))
 	fmt.Fprintln(&b, "  reviewers:")
 	for _, r := range cfg.Panel.Reviewers {
 		renderReviewerEntry(&b, "    ", r)
@@ -327,37 +296,22 @@ func renderConfig(cfg *config.Config) (string, error) {
 	}
 	fmt.Fprintln(&b)
 
-	// loop: governance skeleton, INERT (spec 109 R4). GateAuthority is a
-	// map — its keys are sorted for deterministic output (Bead 2/3 panel
-	// note: an unsorted map range would make this command's output
-	// nondeterministic).
-	fmt.Fprintf(&b, "loop:  # %s\n", inertAnnotation)
-	fmt.Fprintf(&b, "  enabled: %t\n", cfg.Loop.Enabled)
-	fmt.Fprintln(&b, "  gate_authority:")
-	gateKeys := make([]string, 0, len(cfg.Loop.GateAuthority))
-	for k := range cfg.Loop.GateAuthority {
-		gateKeys = append(gateKeys, k)
+	if keys := cfg.RemovedLoopKeys(); len(keys) > 0 {
+		fmt.Fprintln(&b, "loop:  # removed settings")
+		for _, key := range keys {
+			value, err := json.Marshal(cfg.RemovedLoopValue(key))
+			if err != nil {
+				value, _ = json.Marshal(fmt.Sprint(cfg.RemovedLoopValue(key)))
+			}
+			label := "ignored"
+			if key == "halt.max_rounds_per_bead" {
+				label = "deprecated alias for panel.max_rounds; panel.max_rounds takes precedence"
+			}
+			fmt.Fprintf(&b, "  %s: %s  # %s\n", escapeConfigValue(key), escapeConfigValue(string(value)), label)
+		}
+		fmt.Fprintln(&b)
 	}
-	sort.Strings(gateKeys)
-	for _, k := range gateKeys {
-		fmt.Fprintf(&b, "    %s: %s\n", escapeConfigValue(k), escapeConfigValue(cfg.Loop.GateAuthority[k]))
-	}
-	fmt.Fprintln(&b, "  halt:")
-	fmt.Fprintf(&b, "    max_rounds_per_bead: %d\n", cfg.Loop.Halt.MaxRoundsPerBead)
-	fmt.Fprintf(&b, "    panel_deadlock_rounds: %d\n", cfg.Loop.Halt.PanelDeadlockRounds)
-	fmt.Fprintf(&b, "    max_consecutive_impl_failures: %d\n", cfg.Loop.Halt.MaxConsecutiveImplFailures)
-	fmt.Fprintf(&b, "    on_reject: %s\n", escapeConfigValue(cfg.Loop.Halt.OnReject))
-	fmt.Fprintln(&b, "  budget:")
-	fmt.Fprintf(&b, "    max_beads_per_wake: %d\n", cfg.Loop.Budget.MaxBeadsPerWake)
-	fmt.Fprintf(&b, "    token_budget: %d\n", cfg.Loop.Budget.TokenBudget)
-	fmt.Fprintln(&b, "  context:")
-	fmt.Fprintf(&b, "    controller_handoff: %s\n", escapeConfigValue(cfg.Loop.Context.ControllerHandoff))
-	fmt.Fprintf(&b, "  handoff_log: %s\n", escapeConfigValue(cfg.Loop.HandoffLog))
-	fmt.Fprintln(&b)
-
-	// runner: orchestration adapter selector, INERT (spec 109 R10) — no
-	// adapter dispatch is wired in this release.
-	fmt.Fprintf(&b, "runner: %s  # %s\n", escapeConfigValue(cfg.Runner), inertAnnotation)
+	fmt.Fprintf(&b, "runner: %s  # read by a skill\n", escapeConfigValue(cfg.Runner))
 
 	return b.String(), nil
 }

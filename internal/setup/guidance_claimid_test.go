@@ -71,7 +71,7 @@ func TestClaimIDGuidanceRefreshAndPreserve(t *testing.T) {
 
 func TestClaimIDGuidance(t *testing.T) {
 	body := skillFiles()["ms-bead-cycle"]
-	if !strings.Contains(body, "mindspec next --spec <spec-slug> <bead-id>") || strings.Contains(body, "--pick <K> --force") {
-		t.Fatal("claim must name the selected bead without --force")
+	if !strings.Contains(body, "execute its `claim` argv (`mindspec lease <step>`)") || strings.Contains(body, "--pick <K> --force") || strings.Contains(body, "mindspec next --spec") {
+		t.Fatal("claim must execute the binary-selected step's lease command")
 	}
 }
