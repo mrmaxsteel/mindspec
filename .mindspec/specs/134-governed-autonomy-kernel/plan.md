@@ -1,47 +1,180 @@
 ---
-status: Draft
+adr_citations:
+    - ADR-0045
+    - ADR-0023
+    - ADR-0040
+    - ADR-0038
+    - ADR-0037
+    - ADR-0035
+    - ADR-0043
+approved_at: "2026-11-19T09:06:53Z"
+approved_by: user
+bead_ids:
+    - mindspec-crsz.1
+    - mindspec-crsz.2
+    - mindspec-crsz.3
+    - mindspec-crsz.4
+    - mindspec-crsz.5
+    - mindspec-crsz.6
+    - mindspec-crsz.7
+    - mindspec-crsz.8
+    - mindspec-crsz.9
+    - mindspec-crsz.10
+    - mindspec-crsz.11
+    - mindspec-crsz.12
+    - mindspec-crsz.13
 spec_id: 134-governed-autonomy-kernel
+status: Approved
 version: "1"
-adr_citations: [ADR-0045, ADR-0023, ADR-0040, ADR-0038, ADR-0037, ADR-0035, ADR-0043]
 work_chunks:
-  - {id: 1, depends_on: [], key_file_paths: [internal/next/kernel/kernelid/kernelid.go,
-      internal/next/kernel/kernelid/witness.go, internal/next/kernel/idmode.go, internal/next/kernel/store.go,
-      internal/next/kernel/records.go, internal/next/kernel/clock.go, internal/next/kernel/state.go,
-      internal/next/kernel/contract.go, internal/next/kernel/pass.go, internal/next/kernel/lease.go,
-      internal/next/kernel/submit.go, internal/next/kernel/kerneltest/fixture.go,
-      internal/next/kernel/kerneltest/repo.go, internal/next/kernel/kerneltest/seed.go, cmd/mindspec/next_action.go,
-      cmd/mindspec/lease.go, cmd/mindspec/submit.go, cmd/mindspec/ceremony_guard_test.go, internal/phase/phaselock.go,
-      internal/bead/config.go, internal/harness/sandbox.go, internal/doctor/beads.go, .beads/config.yaml,
-      .github/workflows/ci.yml, scripts/ci-install-bd.sh]}
-  - {id: 2, depends_on: [], key_file_paths: [internal/config/config.go, cmd/mindspec/config.go,
-      internal/redact/redact.go, cmd/mindspec/selfemit.go, cmd/mindspec/ceremony_guard_test.go,
-      internal/panel/rounds.go]}
-  - {id: 3, depends_on: [], key_file_paths: [cmd/mindspec/surface_scan_test.go,
-      cmd/mindspec/surface_scan_branch_test.go, .mindspec/adr/ADR-0035-agent-error-contract.md,
-      cmd/mindspec/adr0035_amendment_test.go]}
-  - {id: 4, depends_on: [], key_file_paths: [.claude/skills/ms-bead-cycle/SKILL.md,
-      plugins/mindspec/skills/ms-bead-cycle/SKILL.md, .claude/skills/ms-spec-autopilot/SKILL.md,
-      plugins/mindspec/skills/ms-spec-autopilot/SKILL.md, internal/setup/skills.go,
-      project-docs/user/guides/autonomy.md, README.md, plugins/mindspec/README.md]}
-  - {id: 5, depends_on: [1, 2], key_file_paths: [internal/approve/plan.go, internal/approve/enrol.go,
-      internal/phase/derive.go, internal/phase/lineage.go, internal/next/mode.go, .mindspec/adr/ADR-0023.md]}
-  - {id: 6, depends_on: [1, 2], key_file_paths: [internal/next/kernel/reducer.go,
-      internal/next/kernel/allowance.go, internal/next/kernel/output.go, internal/next/kernel/flags.go,
-      internal/next/kernel/nextaction.go, internal/panel/tally.go]}
-  - {id: 7, depends_on: [1], key_file_paths: [internal/next/kernel/lease.go, internal/next/kernel/submit.go,
-      cmd/mindspec/lease.go, cmd/mindspec/submit.go, internal/rules/rules.yaml]}
-  - {id: 8, depends_on: [6, 7], key_file_paths: [internal/next/kernel/reject.go, internal/next/kernel/halt.go,
-      internal/next/kernel/final.go]}
-  - {id: 9, depends_on: [2, 6], key_file_paths: [internal/next/kernel/closes.go, internal/next/kernel/audit.go,
-      internal/approve/impl.go, internal/approve/impl_final_gate.go]}
-  - {id: 10, depends_on: [2, 6, 7], key_file_paths: [cmd/mindspec/panel.go, cmd/mindspec/panel_defer.go,
-      cmd/mindspec/panel_rebind.go, internal/panel/create.go, internal/panel/submit.go, internal/panel/refute.go]}
-  - {id: 11, depends_on: [6, 7], key_file_paths: [internal/next/kernel/judge.go]}
-  - {id: 12, depends_on: [5, 6, 7, 8, 9, 10, 11], key_file_paths: [cmd/mindspec/next.go, internal/next/select.go,
-      internal/complete/complete.go, internal/complete/panel_presence.go, internal/approve/plan.go,
-      internal/approve/impl_final_gate.go, internal/approve/lifecycle_gate.go,
-      internal/harness/lifecycle_scenario_test.go]}
-  - {id: 13, depends_on: [8, 9, 10, 11, 12], key_file_paths: [cmd/mindspec/kernel_e2e_test.go]}
+    - depends_on: []
+      id: 1
+      key_file_paths:
+        - internal/next/kernel/kernelid/kernelid.go
+        - internal/next/kernel/kernelid/witness.go
+        - internal/next/kernel/idmode.go
+        - internal/next/kernel/store.go
+        - internal/next/kernel/records.go
+        - internal/next/kernel/clock.go
+        - internal/next/kernel/state.go
+        - internal/next/kernel/contract.go
+        - internal/next/kernel/pass.go
+        - internal/next/kernel/lease.go
+        - internal/next/kernel/submit.go
+        - internal/next/kernel/kerneltest/fixture.go
+        - internal/next/kernel/kerneltest/repo.go
+        - internal/next/kernel/kerneltest/seed.go
+        - cmd/mindspec/next_action.go
+        - cmd/mindspec/lease.go
+        - cmd/mindspec/submit.go
+        - cmd/mindspec/ceremony_guard_test.go
+        - internal/phase/phaselock.go
+        - internal/bead/config.go
+        - internal/harness/sandbox.go
+        - internal/doctor/beads.go
+        - .beads/config.yaml
+        - .github/workflows/ci.yml
+        - scripts/ci-install-bd.sh
+    - depends_on: []
+      id: 2
+      key_file_paths:
+        - internal/config/config.go
+        - cmd/mindspec/config.go
+        - internal/redact/redact.go
+        - cmd/mindspec/selfemit.go
+        - cmd/mindspec/ceremony_guard_test.go
+        - internal/panel/rounds.go
+    - depends_on: []
+      id: 3
+      key_file_paths:
+        - cmd/mindspec/surface_scan_test.go
+        - cmd/mindspec/surface_scan_branch_test.go
+        - .mindspec/adr/ADR-0035-agent-error-contract.md
+        - cmd/mindspec/adr0035_amendment_test.go
+    - depends_on: []
+      id: 4
+      key_file_paths:
+        - .claude/skills/ms-bead-cycle/SKILL.md
+        - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
+        - .claude/skills/ms-spec-autopilot/SKILL.md
+        - plugins/mindspec/skills/ms-spec-autopilot/SKILL.md
+        - internal/setup/skills.go
+        - project-docs/user/guides/autonomy.md
+        - README.md
+        - plugins/mindspec/README.md
+    - depends_on:
+        - 1
+        - 2
+      id: 5
+      key_file_paths:
+        - internal/approve/plan.go
+        - internal/approve/enrol.go
+        - internal/phase/derive.go
+        - internal/phase/lineage.go
+        - internal/next/mode.go
+        - .mindspec/adr/ADR-0023.md
+    - depends_on:
+        - 1
+        - 2
+      id: 6
+      key_file_paths:
+        - internal/next/kernel/reducer.go
+        - internal/next/kernel/allowance.go
+        - internal/next/kernel/output.go
+        - internal/next/kernel/flags.go
+        - internal/next/kernel/nextaction.go
+        - internal/panel/tally.go
+    - depends_on:
+        - 1
+      id: 7
+      key_file_paths:
+        - internal/next/kernel/lease.go
+        - internal/next/kernel/submit.go
+        - cmd/mindspec/lease.go
+        - cmd/mindspec/submit.go
+        - internal/rules/rules.yaml
+    - depends_on:
+        - 6
+        - 7
+      id: 8
+      key_file_paths:
+        - internal/next/kernel/reject.go
+        - internal/next/kernel/halt.go
+        - internal/next/kernel/final.go
+    - depends_on:
+        - 2
+        - 6
+      id: 9
+      key_file_paths:
+        - internal/next/kernel/closes.go
+        - internal/next/kernel/audit.go
+        - internal/approve/impl.go
+        - internal/approve/impl_final_gate.go
+    - depends_on:
+        - 2
+        - 6
+        - 7
+      id: 10
+      key_file_paths:
+        - cmd/mindspec/panel.go
+        - cmd/mindspec/panel_defer.go
+        - cmd/mindspec/panel_rebind.go
+        - internal/panel/create.go
+        - internal/panel/submit.go
+        - internal/panel/refute.go
+    - depends_on:
+        - 6
+        - 7
+      id: 11
+      key_file_paths:
+        - internal/next/kernel/judge.go
+    - depends_on:
+        - 5
+        - 6
+        - 7
+        - 8
+        - 9
+        - 10
+        - 11
+      id: 12
+      key_file_paths:
+        - cmd/mindspec/next.go
+        - internal/next/select.go
+        - internal/complete/complete.go
+        - internal/complete/panel_presence.go
+        - internal/approve/plan.go
+        - internal/approve/impl_final_gate.go
+        - internal/approve/lifecycle_gate.go
+        - internal/harness/lifecycle_scenario_test.go
+    - depends_on:
+        - 8
+        - 9
+        - 10
+        - 11
+        - 12
+      id: 13
+      key_file_paths:
+        - cmd/mindspec/kernel_e2e_test.go
 ---
 # Plan: 134-governed-autonomy-kernel
 
