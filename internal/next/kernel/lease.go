@@ -12,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // LeaseDeps supplies the workflow worktree adapter without importing it.
@@ -109,7 +110,11 @@ func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, erro
 					if err != nil {
 						return err
 					}
-					lease.ClaimBase, err = actorGit(s.Root, "rev-parse", "--verify", "refs/heads/bead/"+t.WorkItem+"^{commit}")
+					branch, err := workspace.BeadBranch(t.WorkItem)
+					if err != nil {
+						return err
+					}
+					lease.ClaimBase, err = actorGit(s.Root, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
 					if err != nil {
 						return err
 					}

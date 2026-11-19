@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 )
@@ -276,14 +277,43 @@ func TestS134Lease_AtomicCASAndForeignIsolation(t *testing.T) {
 	assertOnlyActorChanged(beforeLease, leaseRow)
 	commit := actorCommit(t, f, "proof.json", "{}", "bead/"+f.Items[0])
 	beforeSubmit := kerneltest.Snapshot(t, f)
+	gateID := f.Items[0] + ".review"
+	gateBefore := actorRecord(t, f, gateID)
 	submitRow := actorRecord(t, f, id)
 	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Commit: commit})
 	f.Must(err)
+	// The close authorises a review round. Check that write in full before
+	// checking that all other rows, links and git state stay the same.
+	n, err := config.DefaultConfig().PanelGateExpectedReviewers("bead")
+	f.Must(err)
+	wantRound := kernel.GateRound{Round: 1, Subject: commit, SlotCount: n, Slots: []string{}}
+	for i := 1; i <= n; i++ {
+		wantRound.Slots = append(wantRound.Slots, fmt.Sprintf("%s.r1.R%d", gateID, i))
+	}
+	gateAfter := actorRecord(t, f, gateID)
+	wantGate := gateBefore
+	wantGate.Metadata = map[string]any{}
+	for key, value := range gateBefore.Metadata {
+		wantGate.Metadata[key] = value
+	}
+	wantGate.Metadata[kernel.KeyRound] = wantRound
+	wantJSON, err := json.Marshal(wantGate)
+	f.Must(err)
+	gotJSON, err := json.Marshal(gateAfter)
+	f.Must(err)
+	var wantValue, gotValue any
+	f.Must(json.Unmarshal(wantJSON, &wantValue))
+	f.Must(json.Unmarshal(gotJSON, &gotValue))
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Fatalf("unexpected gate write: got %s want %s", gotJSON, wantJSON)
+	}
+	f.Fake.Records[gateBefore.ID] = gateBefore
 	assertOnlyActorChanged(beforeSubmit, submitRow)
+	f.Fake.Records[gateBefore.ID] = gateAfter
 	after, err := f.Store.All()
 	f.Must(err)
 	for i, r := range before {
-		if r.ID != f.ID(id) && !reflect.DeepEqual(r, after[i]) {
+		if r.ID != f.ID(id) && r.ID != gateBefore.ID && !reflect.DeepEqual(r, after[i]) {
 			t.Fatalf("foreign or other record changed: %s", r.ID)
 		}
 	}
@@ -304,6 +334,20 @@ func TestS134Submit_ImplementReceiptGoldenAndRetry(t *testing.T) {
 	normal.Commit = "commit"
 	normal.Blob = "blob"
 	golden(t, "receipt-implement", normal) // R1-F2: real producer, not a hand-built receipt
+	// Register the authorised round before testing retries as the branch moves.
+	gate := f.Items[0] + ".review"
+	round, ok, err := kernel.Decode[kernel.GateRound](actorRecord(t, f, gate).Metadata, kernel.KeyRound)
+	f.Must(err)
+	if !ok || round.Round != 1 || round.Subject != commit || round.SlotCount < 1 {
+		t.Fatalf("submit did not authorise its review: %+v", round)
+	}
+	slots := []string{}
+	for i := 1; i <= round.SlotCount; i++ {
+		slots = append(slots, fmt.Sprintf("R%d", i))
+	}
+	kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "panel", Round: 1, Subject: commit, Slots: slots})
+	_, err = kernel.Pass(kernel.Rules(), f.State(), true)
+	f.Must(err)
 	before, err := f.Store.Run("show", f.ID(id), "--json")
 	f.Must(err)
 	calls := len(f.Fake.Calls)
@@ -384,7 +428,7 @@ func slotFixture(t *testing.T) (*kerneltest.Fixture, string, kernel.LeaseResult,
 	id := gate + ".r1.R1"
 	subject := actorCommand(t, f, "rev-parse", "HEAD")
 	f.Create(id, gate)
-	kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: subject, Slots: []string{"R1", "R2"}, SlotCount: 2})
+	kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: subject, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}, SlotCount: 2})
 	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: subject})))
 	lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 	return f, id, lease, subject
@@ -475,8 +519,9 @@ func TestS134Submit_ReceiptBeforeCloseCrashAndCAS(t *testing.T) {
 			commit := actorCommit(t, f, "proof.json", "{}", "bead/"+f.Items[0])
 			o := kernel.SubmitOptions{Step: id, Lease: lease.Token, Commit: commit}
 			writes, closes := 0, 0
+			physical := f.ID(id)
 			f.Fake.Hook = func(args []string) error {
-				if args[0] != "update" {
+				if len(args) < 2 || args[0] != "update" || args[1] != physical {
 					return nil
 				}
 				joined := strings.Join(args, " ")
@@ -655,7 +700,10 @@ func TestS134Submit_FinalFixBranch(t *testing.T) {
 			subject := actorCommand(t, f, "rev-parse", "HEAD")
 			id := gate + ".r2.fix"
 			f.Create(id, gate)
-			kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: subject, Slots: []string{"R1"}, SlotCount: 1})
+			kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: subject, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}, SlotCount: 2})
+			kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "panel", Round: 1, Subject: subject, Slots: []string{"R1", "R2"}})
+			_, err := kernel.Pass(kernel.Rules(), f.State(), true)
+			f.Must(err)
 			lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 			commit := actorCommit(t, f, "proof.json", "{}", "bead/"+f.Items[0])
 			o := kernel.SubmitOptions{Step: id, Lease: lease.Token, Commit: commit}
@@ -663,7 +711,7 @@ func TestS134Submit_FinalFixBranch(t *testing.T) {
 				actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, branch)
 				actorCommand(t, f, "update-ref", "refs/heads/"+branch, commit)
 			}
-			_, err := kernel.Submit(f.State(), o)
+			_, err = kernel.Submit(f.State(), o)
 			f.Must(err)
 			if actorRecord(t, f, id).Status != "closed" || actorReceipt(t, f, id).Kind != "passed" {
 				t.Fatal("valid fix not passed")
@@ -847,6 +895,8 @@ func TestS134Submit_VerdictWorktreeIdentity(t *testing.T) {
 			f, id, lease, subject := slotFixture(t)
 			gate := f.Items[0] + ".review"
 			kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "panel", Round: 1, Subject: subject, Slots: []string{"R1", "R2"}})
+			_, err := kernel.Pass(kernel.Rules(), f.State(), true)
+			f.Must(err)
 			var source *kerneltest.Fixture
 			if otherRepo {
 				source = kerneltest.Enrolled(t, kerneltest.WithFake(false))

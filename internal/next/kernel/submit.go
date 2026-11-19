@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 type SubmitOptions struct {
@@ -302,7 +303,11 @@ func checkImplement(s State, r Record, receipt Receipt) error {
 	if err != nil {
 		return err
 	}
-	return commitPast(s, receipt, lease.ClaimBase, "bead/"+tuple.WorkItem)
+	branch, err := workspace.BeadBranch(tuple.WorkItem)
+	if err != nil {
+		return err
+	}
+	return commitPast(s, receipt, lease.ClaimBase, branch)
 }
 func activeActorRound(s State, r Record) (GateRound, error) {
 	t, _, _ := r.Tuple()
@@ -347,9 +352,14 @@ func checkFix(s State, r Record, receipt Receipt) error {
 	if err != nil {
 		return err
 	}
-	branch := "bead/" + t.WorkItem
+	var branch string
 	if t.WorkItem == "" {
-		branch = "spec/" + s.SpecID
+		branch, err = workspace.SpecBranch(s.SpecID)
+	} else {
+		branch, err = workspace.BeadBranch(t.WorkItem)
+	}
+	if err != nil {
+		return err
 	}
 	return commitPast(s, receipt, round.Subject, branch)
 }
