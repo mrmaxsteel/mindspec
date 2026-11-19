@@ -647,6 +647,7 @@ func ResolveContextFromDir(root, dir string) (*Context, error) {
 
 // ResolveContextFromDirWithCache is the cache-aware variant of ResolveContextFromDir.
 func ResolveContextFromDirWithCache(c *Cache, root, dir string) (*Context, error) {
+	c = c.WithRoot(root)
 	kind, specID, beadID := workspace.DetectWorktreeContext(dir)
 
 	ctx := &Context{

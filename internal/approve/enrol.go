@@ -64,6 +64,7 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 		if err != nil {
 			return err
 		}
+		_, runPresent := metadata[kernel.KeyRun]
 		approved, _, err := kernel.Decode[kernel.PlanApproval](metadata, kernel.KeyPlanApproval)
 		if err != nil {
 			return err
@@ -102,6 +103,17 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 		cfg, err := config.Load(root)
 		if err != nil {
 			return err
+		}
+		// Check existing gate identities before any enrolment write.
+		for _, record := range records {
+			for _, key := range []string{record.ID, record.Key()} {
+				tuple, parseErr := kernelid.Parse(key)
+				if parseErr == nil && tuple.Epic == epic && (tuple.Kind == "bead-gate" || key == epic+".final") {
+					if err = store.Collision(key, tuple); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		if err = enrolMarkEpic(store); err != nil {
 			return err
@@ -152,25 +164,29 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 			return err
 		}
 		enrolStage("links-record")
-		graph, err := enrolGraph(store)
+		graph, err := enrolGraph(store, append([]string{epic + ".final"}, ids...))
 		if err != nil {
 			return err
 		}
 		// Check the entire proposed graph before writing the first plan link.
+		proposed := enrolWaits{}
+		for down, ups := range graph {
+			proposed[down] = append([]string{}, ups...)
+		}
 		for _, link := range links {
 			for _, upstream := range link.Upstream {
-				if err = graph.check(link.ID, upstream); err != nil && !enrolled {
+				if err = proposed.check(link.ID, upstream); err != nil && !runPresent {
 					return err
 				}
 				if err == nil {
-					graph.add(link.ID, upstream)
+					proposed.add(link.ID, upstream)
 				}
 			}
 		}
 		for _, link := range links {
 			for _, upstream := range link.Upstream {
-				if err = enrolAddLink(store, link.ID, upstream); err != nil {
-					if enrolled {
+				if err = enrolAddLink(store, graph, link.ID, upstream); err != nil {
+					if runPresent {
 						result.Warnings = append(result.Warnings, err.Error())
 						continue
 					}
@@ -179,7 +195,7 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 			}
 		}
 		enrolStage("links")
-		if !enrolled {
+		if !runPresent {
 			policy := kernel.Policy{RoundLimit: cfg.RoundLimit(), LeaseTTL: cfg.Panel.LeaseTTL, Rules: "kernel-1"}
 			if err = store.WriteMetadata(epic, kernel.Metadata(kernel.KeyRun, policy)); err != nil {
 				return err
@@ -194,17 +210,17 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 		}
 		enrolStage("approval")
 		for _, item := range ids {
-			if err = enrolGate(store, item+".review", item); err != nil {
+			if err = enrolGate(store, graph, item+".review", item); err != nil {
 				return err
 			}
 			enrolStage("gate")
 		}
-		if err = enrolGate(store, epic+".final", epic); err != nil {
+		if err = enrolGate(store, graph, epic+".final", epic); err != nil {
 			return err
 		}
 		enrolStage("final")
 		for _, item := range ids {
-			if err = enrolAddLink(store, epic+".final", item); err != nil {
+			if err = enrolAddLink(store, graph, epic+".final", item); err != nil {
 				result.Warnings = append(result.Warnings, err.Error())
 			}
 		}
@@ -359,12 +375,15 @@ func enrolMarkEpic(store *kernel.Store) error {
 	return err
 }
 
-func enrolGate(store *kernel.Store, id, parent string) error {
+func enrolGate(store *kernel.Store, graph enrolWaits, id, parent string) error {
 	tuple, err := kernelid.Parse(id)
 	if err != nil {
 		return err
 	}
-	_, err = store.Create(kernel.CreateRecord{ID: id, Parent: parent, Type: "step", Title: tuple.Kind, Tuple: tuple})
+	record, err := store.Create(kernel.CreateRecord{ID: id, Parent: parent, Type: "step", Title: tuple.Kind, Tuple: tuple})
+	if err == nil {
+		graph.add(record.Parent, record.ID)
+	}
 	return err
 }
 
@@ -407,16 +426,30 @@ func (g enrolWaits) check(down, up string) error {
 	link := chain[0]
 	return guard.NewFailure(fmt.Sprintf("foreign-blocker: link %s -> %s forms a cycle through %s -> %s", termsafe.Escape(down), termsafe.Escape(up), termsafe.Escape(link.down), termsafe.Escape(link.up)), fmt.Sprintf("bd dep remove %s %s", idrender.Bead(link.down), idrender.Bead(link.up)))
 }
-func enrolGraph(store *kernel.Store) (enrolWaits, error) {
+func enrolGraph(store *kernel.Store, starts []string) (enrolWaits, error) {
 	records, err := store.All()
 	if err != nil {
 		return nil, err
 	}
 	graph := enrolWaits{}
+	byID := map[string]kernel.Record{}
 	for _, record := range records {
+		byID[record.ID] = record
+		byID[record.Key()] = record
 		if record.Parent != "" {
 			graph.add(record.Parent, record.ID)
 		}
+	}
+	pending := append([]string{}, starts...)
+	seen := map[string]bool{}
+	for len(pending) > 0 {
+		id := pending[0]
+		pending = pending[1:]
+		record, exists := byID[id]
+		if !exists || seen[record.ID] {
+			continue
+		}
+		seen[record.ID] = true
 		out, err := store.Run("dep", "list", record.ID, "--json")
 		if err != nil {
 			return nil, err
@@ -446,10 +479,11 @@ func enrolGraph(store *kernel.Store) (enrolWaits, error) {
 				graph.add(up, record.ID)
 			}
 		}
+		pending = append(pending, graph[record.ID]...)
 	}
 	return graph, nil
 }
-func enrolAddLink(store *kernel.Store, down, up string) error {
+func enrolAddLink(store *kernel.Store, graph enrolWaits, down, up string) error {
 	d, err := store.Lookup(down)
 	if err != nil {
 		return err
@@ -461,10 +495,6 @@ func enrolAddLink(store *kernel.Store, down, up string) error {
 	if d == nil || u == nil {
 		return fmt.Errorf("link endpoint is missing")
 	}
-	graph, err := enrolGraph(store)
-	if err != nil {
-		return err
-	}
 	if slices.Contains(graph[d.ID], u.ID) {
 		return nil
 	}
@@ -474,5 +504,6 @@ func enrolAddLink(store *kernel.Store, down, up string) error {
 	if err = store.AddLink(down, up); err != nil {
 		return guard.NewFailure(fmt.Sprintf("link %s -> %s refused: %s", termsafe.Escape(down), termsafe.Escape(up), termsafe.Escape(err.Error())), fmt.Sprintf("bd dep list %s --json", idrender.Bead(down)))
 	}
+	graph.add(d.ID, u.ID)
 	return nil
 }

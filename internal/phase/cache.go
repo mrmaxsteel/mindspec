@@ -36,7 +36,8 @@ var ErrNoEpicForSpec = errors.New("no epic found for spec")
 // bd call without memoization. This lets call sites be cache-aware without
 // nil checks; the legacy non-cache wrappers also exploit this.
 type Cache struct {
-	mu sync.Mutex
+	mu   sync.Mutex
+	root string
 
 	// Whole-list memoization.
 	epicsAll       []EpicInfo
@@ -61,6 +62,34 @@ func NewCache() *Cache {
 		specToEpic: make(map[string]string),
 		specErrors: make(map[string]error),
 	}
+}
+
+// WithRoot binds repository reads to the caller's context.
+func (c *Cache) WithRoot(root string) *Cache {
+	if c == nil {
+		c = NewCache()
+	}
+	c.mu.Lock()
+	c.root = root
+	c.mu.Unlock()
+	return c
+}
+
+func (c *Cache) repositoryRoot() string {
+	if c != nil {
+		c.mu.Lock()
+		root := c.root
+		c.mu.Unlock()
+		if root != "" {
+			return root
+		}
+	}
+	// Legacy callers have no repository context.
+	if cwd, err := os.Getwd(); err == nil {
+		root, _ := workspace.FindRoot(cwd)
+		return root
+	}
+	return ""
 }
 
 // AllEpics returns every epic (open + in_progress + closed) from bd in a single

@@ -291,8 +291,9 @@ func enrolKill(t *testing.T, f *kerneltest.Fixture, stage string) {
 	enrolWrite(t, storePath, string(data))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	t.Setenv("S134_UNEXPECTED", "caller-only")
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestS134EnrolHelper$")
-	cmd.Env = append(os.Environ(), "S134_KILL_AT="+stage, "S134_ROOT="+f.Root, "S134_EPIC="+f.Epic)
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + f.Root, "TMPDIR=" + f.Root, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false", "S134_KILL_AT=" + stage, "S134_ROOT=" + f.Root, "S134_EPIC=" + f.Epic}
 	out, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 137 {
@@ -306,6 +307,9 @@ func TestS134EnrolHelper(t *testing.T) {
 	stage := os.Getenv("S134_KILL_AT")
 	if stage == "" {
 		return
+	}
+	if os.Getenv("S134_UNEXPECTED") != "" {
+		t.Fatal("helper inherited caller environment")
 	}
 	root, epic := os.Getenv("S134_ROOT"), os.Getenv("S134_EPIC")
 	fake := kerneltest.NewFakeBD()
@@ -383,7 +387,13 @@ func TestS134Enrol_KillLinksRejectsPlanEdits(t *testing.T) {
 			} else {
 				enrolSetDeps(t, f, 3, []int{1, 2})
 			}
-			enrolAssertRefusal(t, f, map[string]string{"drop": "link", "add": "link", "text": "text"}[tc.name])
+			ids := enrolIDs(t, f)
+			want := map[string]string{
+				"drop": "plan-order upstream link differs for " + ids[1] + ": ",
+				"add":  "plan-order upstream link differs for " + ids[2] + ": " + ids[0] + "," + ids[1],
+				"text": "chunk text differs for " + ids[0],
+			}[tc.name]
+			enrolAssertExactRefusal(t, f, want)
 		})
 	}
 }
@@ -420,7 +430,12 @@ func TestS134Enrol_FourthChunkLinkEditsRefused(t *testing.T) {
 			} else {
 				enrolSetDeps(t, f, 4, nil)
 			}
-			enrolAssertRefusal(t, f, "link")
+			ids := enrolIDs(t, f)
+			upstream := ""
+			if deps == "[2]" {
+				upstream = ids[1]
+			}
+			enrolAssertExactRefusal(t, f, "plan-order upstream link differs for "+ids[3]+": "+upstream)
 		})
 	}
 }
@@ -537,5 +552,132 @@ func TestS134Enrol_PinnedPolicySurvivesInterruptedRetry(t *testing.T) {
 	f.Must(err)
 	if policy != kernel.DefaultPolicy {
 		t.Fatalf("retry repinned policy: %+v", policy)
+	}
+}
+
+func enrolAssertExactRefusal(t *testing.T, f *kerneltest.Fixture, detail string) {
+	t.Helper()
+	before := enrolSnap(t, f)
+	_, err := enrolApprove(f)
+	want := "plan changed: " + detail + "; restore the recorded plan before retrying approval\nrecovery: mindspec plan approve " + f.SpecID
+	if err == nil || err.Error() != want {
+		t.Fatalf("want refusal %q, got %v", want, err)
+	}
+	if enrolSnap(t, f) != before {
+		t.Fatal("refusal changed snapshot")
+	}
+}
+
+func TestS134Enrol_PanelWitnessBeforeRunPinsPolicy(t *testing.T) {
+	f := enrolFixture(t)
+	enrolWrite(t, filepath.Join(f.Root, ".mindspec", "config.yaml"), "enforcement:\n  panel_gate: false\npanel:\n  max_rounds: 3\n  lease_ttl: 30m\n")
+	config.ResetCache()
+	enrolWrite(t, filepath.Join(f.SpecDir, "reviews", "plan-panel", "panel.json"), `{"orchestrated":true}`)
+	_, err := enrolApprove(f)
+	f.Must(err)
+	policy, present, err := kernel.Decode[kernel.Policy](f.Fake.Records[f.Epic].Metadata, kernel.KeyRun)
+	f.Must(err)
+	if !present || policy != (kernel.Policy{RoundLimit: 3, LeaseTTL: "30m", Rules: "kernel-1"}) {
+		t.Fatalf("missing pinned policy: present=%v policy=%+v", present, policy)
+	}
+}
+
+func TestS134Enrol_PanelWitnessBeforeRunRefusesCycle(t *testing.T) {
+	for _, check := range []bool{false, true} {
+		t.Run(fmt.Sprint("check=", check), func(t *testing.T) {
+			f := enrolFixture(t)
+			enrolWrite(t, filepath.Join(f.SpecDir, "reviews", "plan-panel", "panel.json"), `{"orchestrated":true}`)
+			if check {
+				enrolKill(t, f, "creates")
+				ids := enrolIDs(t, f)
+				_, err := f.Fake.Run("dep", "add", ids[0], ids[1], "--type", "blocks")
+				f.Must(err)
+			} else {
+				f.Fake.Hook = func(args []string) error {
+					if len(args) > 1 && args[0] == "dep" && args[1] == "add" {
+						return fmt.Errorf("cycle refused")
+					}
+					return nil
+				}
+			}
+			_, err := enrolApprove(f)
+			if err == nil || !strings.Contains(err.Error(), "link "+f.Epic+".2 -> "+f.Epic+".1") {
+				t.Fatalf("want cycle refusal, got %v", err)
+			}
+			epic := f.Fake.Records[f.Epic]
+			if _, ok := epic.Metadata[kernel.KeyRun]; ok {
+				t.Fatal("cycle wrote run marker")
+			}
+			if _, ok := epic.Metadata[kernel.KeyPlanApproval]; ok {
+				t.Fatal("cycle wrote approval")
+			}
+			if len(f.Fake.Records) != 4 {
+				t.Fatalf("cycle wrote gates: %d records", len(f.Fake.Records))
+			}
+		})
+	}
+}
+
+func TestS134Enrol_RawFinalCollisionBeforeWrite(t *testing.T) {
+	f := enrolFixture(t)
+	_, err := f.Fake.Run("create", "--title", "foreign", "--type", "task", "--parent", f.Epic, "--id", f.Epic+".final", "--json")
+	f.Must(err)
+	for range 2 {
+		enrolAssertRefusal(t, f, "id-collision: "+f.Epic+".final")
+	}
+}
+
+func TestS134Enrol_UnrelatedRecordsDoNotAddCalls(t *testing.T) {
+	var baseline []int
+	for _, n := range []int{0, 50} {
+		f := enrolFixture(t)
+		for i := 0; i < n; i++ {
+			_, err := f.Fake.Run("create", "--title", fmt.Sprint("unrelated ", i), "--type", "task", "--json")
+			f.Must(err)
+		}
+		f.Fake.Calls = nil
+		_, err := enrolApprove(f)
+		f.Must(err)
+		deps := 0
+		for _, call := range f.Fake.Calls {
+			if len(call) > 1 && call[0] == "dep" && call[1] == "list" {
+				deps++
+			}
+		}
+		counts := []int{len(f.Fake.Calls), deps}
+		t.Logf("N=%d total=%d dep-list=%d", n, counts[0], counts[1])
+		if baseline == nil {
+			baseline = counts
+		} else if !reflect.DeepEqual(counts, baseline) {
+			t.Fatalf("unrelated records added calls: %v -> %v", baseline, counts)
+		}
+	}
+}
+
+func TestS134Enrol_RunMarkerKeepsPolicyAfterCycleRefusal(t *testing.T) {
+	f := enrolFixture(t)
+	enrolKill(t, f, "run")
+	ids := enrolIDs(t, f)
+	item := f.Fake.Records[ids[1]]
+	item.Dependencies = nil
+	f.Fake.Records[item.ID] = item
+	f.Fake.Hook = func(args []string) error {
+		if len(args) > 1 && args[0] == "dep" && args[1] == "add" && args[2] == item.ID {
+			return fmt.Errorf("cycle refused")
+		}
+		return nil
+	}
+	_, err := enrolApprove(f)
+	f.Must(err)
+	policy, present, err := kernel.Decode[kernel.Policy](f.Fake.Records[f.Epic].Metadata, kernel.KeyRun)
+	f.Must(err)
+	if !present || policy != kernel.DefaultPolicy {
+		t.Fatalf("retry changed pinned policy: present=%v policy=%+v", present, policy)
+	}
+	if len(f.Fake.Records[item.ID].Dependencies) != 0 {
+		t.Fatal("retry wrote refused link")
+	}
+	if f.Fake.Records[f.Epic].Metadata[kernel.KeyPlanApproval] != true || len(f.Fake.Records) != 8 {
+		t.Fatal("post-marker refusal stopped approval or gate creation")
 	}
 }

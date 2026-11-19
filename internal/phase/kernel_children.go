@@ -39,35 +39,52 @@ func lifecycleChildrenWithCache(c *Cache, epicID string, children []ChildInfo) (
 			recorded[link.ID] = true
 		}
 	}
-	// A panel can be the sole remaining enrolment witness.
-	if cwd, err := os.Getwd(); err == nil {
-		if root, err := workspace.FindRoot(cwd); err == nil {
-			if specID, err := ResolveSpec(*epic); err == nil {
-				if dir, err := workspace.SpecDir(root, specID); err == nil {
-					w.Orchestrated, err = kernelid.PanelOrchestrated(dir)
-					if err != nil {
-						return nil, err
+	// Optional files that cannot prove enrolment are not witnesses.
+	if specID, err := ResolveSpec(*epic); err == nil {
+		if dir, err := workspace.SpecDir(c.repositoryRoot(), specID); err == nil {
+			w.Orchestrated, _ = kernelid.PanelOrchestrated(dir)
+			if len(recorded) == 0 {
+				data, err := os.ReadFile(filepath.Join(dir, "plan.md"))
+				if err == nil {
+					var plan struct {
+						IDs []string `yaml:"bead_ids"`
 					}
-					if len(recorded) == 0 {
-						data, err := os.ReadFile(filepath.Join(dir, "plan.md"))
-						if err == nil {
-							var plan struct {
-								IDs []string `yaml:"bead_ids"`
-							}
-							parts, _, _ := frontmatter.Parse(data)
-							if err = yaml.Unmarshal(parts, &plan); err != nil {
-								return nil, err
-							}
-							for _, id := range plan.IDs {
-								recorded[id] = true
-							}
-						} else if !os.IsNotExist(err) {
-							return nil, err
+					parts, _, _ := frontmatter.Parse(data)
+					if err = yaml.Unmarshal(parts, &plan); err == nil {
+						for _, id := range plan.IDs {
+							recorded[id] = true
 						}
 					}
 				}
 			}
 		}
+	}
+	addWitnesses := func(items []ChildInfo) {
+		for _, child := range items {
+			w.IDs = append(w.IDs, child.ID)
+			if key, ok := child.Metadata["mindspec_key"].(string); ok {
+				w.Keys = append(w.Keys, key)
+			}
+		}
+	}
+	addWitnesses(children)
+	enrolled, _ := kernelid.Enrolled(w)
+	if !enrolled {
+		// Find closed or retyped nested identities in one read, without a
+		// child query for each work item of an older approval.
+		data, err := listJSONFn("--all", "-n", "0")
+		if err != nil {
+			return nil, err
+		}
+		var records []ChildInfo
+		if err = json.Unmarshal(data, &records); err != nil {
+			return nil, err
+		}
+		addWitnesses(records)
+		enrolled, _ = kernelid.Enrolled(w)
+	}
+	if !enrolled {
+		return children, nil
 	}
 	candidates := append([]ChildInfo{}, children...)
 	// Include nested kernel steps so a leased actor advances the phase.
@@ -88,16 +105,6 @@ func lifecycleChildrenWithCache(c *Cache, epicID string, children []ChildInfo) (
 				candidates = append(candidates, item)
 			}
 		}
-	}
-	for _, child := range candidates {
-		w.IDs = append(w.IDs, child.ID)
-		if key, ok := child.Metadata["mindspec_key"].(string); ok {
-			w.Keys = append(w.Keys, key)
-		}
-	}
-	enrolled, _ := kernelid.Enrolled(w)
-	if !enrolled {
-		return children, nil
 	}
 	selected := []ChildInfo{}
 	for _, child := range candidates {
