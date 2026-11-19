@@ -65,6 +65,27 @@ Two sub-decisions:
    `CommitCount` preflight can fail non-zero after the epic close.
    Neither may be cited as precedent for new code.
 
+## Amendment: HC-4 next-action status exits
+
+`next-action` reports the reducer status through its exit code.
+This rule applies with and without `--apply`.
+It is an exception to the general exit-code contract above.
+A successful reduction can return a non-zero status code.
+
+| Status | Exit code | Meaning |
+|:-------|:----------|:--------|
+| `work` | 0 | An action or binary command is available. |
+| `wait` | 3 | No action is available while work is blocked or leased. |
+| `halted` | 4 | A halt answer stops every work item. |
+| `done` | 5 | All work is complete. |
+| `indeterminate` | 1 | The reducer cannot determine an action. |
+
+Without `--apply`, the command writes nothing.
+With `--apply`, the command makes one reduction under the phase lock.
+On a halted spec, `--apply` can finish pending halted closes and returns 4.
+A read reports `halted` before `wait`.
+Refusals retain the final `recovery:` line.
+
 ## Decision Details
 
 - The machine-greppable prefix is the exported constant
