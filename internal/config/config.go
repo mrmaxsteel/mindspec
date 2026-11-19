@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
@@ -56,19 +57,13 @@ type Config struct {
 	// (the doctor --fix scaffolder's concern, not Load's).
 	SourceGlobs []string `yaml:"source_globs"`
 
-	// Orchestration substrate (spec 109, ADR-0040). Panel supplies the
-	// creation-time defaults for a fresh panel.json (the spec-110 writer
-	// consumes PanelExpectedReviewers/PanelApproveThresholdExpr below); it
-	// never overrides an already-recorded panel's decision inputs —
-	// internal/panel stays a config-free leaf, and PanelGateDecision takes
-	// no *Config. Models, Loop, and Runner are declared, defaulted,
-	// validated, and surfaced by `mindspec config show`, but every key in
-	// them is INERT in this spec: nothing reads them to change behavior
-	// until a later spec wires enforcement.
+	// Panel supplies panel defaults and the policy pinned at enrolment.
+	// Models and Runner supply model selection and skill guidance.
 	Panel  Panel             `yaml:"panel"`
 	Models map[string]string `yaml:"models"`
-	Loop   Loop              `yaml:"loop"`
 	Runner string            `yaml:"runner"`
+
+	removedLoop map[string]any
 
 	// Commands declares the CONSUMER's build/test guidance (spec 123
 	// R7b, ADR-0040's consumer-identity clause): a free-form task ->
@@ -77,7 +72,7 @@ type Config struct {
 	// advisory posture as Models' phase keys. "ci" (spec 126 R8a) names
 	// the project's declared CI invocation, reproduced by
 	// ms-spec-final-review's CI-parity check; when "ci" is undeclared,
-	// commands.test is the documented fallback. UNLIKE Models/Loop/Runner, this key
+	// commands.test is the documented fallback. Unlike model and runner guidance, this key
 	// is NOT inert: `mindspec init` and every `mindspec setup <agent>`
 	// verb render its populated entries as the managed AGENTS.md "Build
 	// & Test" section (see CommandLines/RenderBuildTestSection below) —
@@ -93,6 +88,8 @@ type Config struct {
 // Gates can override the reviewer mix, threshold, lenses and acceptance question.
 // A recorded panel remains authoritative for its own gate decision.
 type Panel struct {
+	MaxRounds int        `yaml:"max_rounds"`
+	LeaseTTL  string     `yaml:"lease_ttl"`
 	Reviewers []Reviewer `yaml:"reviewers"`
 	// ApproveThreshold is the RAW expression ("n-1" or an integer string),
 	// never resolved here. Expression resolution is single-homed in
@@ -126,14 +123,7 @@ type GatePanel struct {
 	Acceptance       *Acceptance `yaml:"acceptance"`
 }
 
-// PanelGateKeys is the closed, ordered enum of panel.gates keys (spec 112
-// R1, ADR-0034). These name REVIEW EVENTS and deliberately do not copy
-// loop.gate_authority's vocabulary, which names APPROVAL ACTS
-// (bead_merge/impl_approve). Exported because Bead 3's consumers
-// (cmd/mindspec, internal/complete) cannot reference a package-private
-// slice; declaration order is the single source for validation, recovery
-// lines, and config-show's enum-order rendering. This is the one place the
-// enum is declared — never duplicate it.
+// PanelGateKeys fixes validation and display order for review events.
 var PanelGateKeys = []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc"}
 
 // Reviewer declares a family, a model, or both. A missing family uses the harness.
@@ -294,52 +284,6 @@ func (c *Config) RenderBuildTestSection(level int) string {
 	return b.String()
 }
 
-// Loop is the orchestration-loop governance skeleton (spec 109 R4, the
-// 2026-07-02 loop-engineering research §3.2 L3 / §3.3). Every key here is
-// INERT in this spec: parsed, defaulted, validated, and surfaced by
-// `mindspec config show`, but nothing reads it to change behavior —
-// in-binary enforcement (gate authority at the approve gates, halt-condition
-// checking, budget ceilings, controller handoff) is a later spec's work.
-type Loop struct {
-	Enabled bool `yaml:"enabled"`
-	// GateAuthority names, for each of the four single-bead-lifecycle gates
-	// ADR-0034 collapsed (spec_approve/plan_approve/bead_merge/
-	// impl_approve), who may pass it unattended: "panel" or "human",
-	// default "human". "panel_skip" is deliberately NOT a valid key here —
-	// panel-skip stays permanently human (MINDSPEC_SKIP_PANEL is env-only,
-	// ADR-0037 §7) and Load refuses it.
-	GateAuthority map[string]string `yaml:"gate_authority"`
-	Halt          Halt              `yaml:"halt"`
-	Budget        Budget            `yaml:"budget"`
-	Context       LoopContext       `yaml:"context"`
-	// HandoffLog is the research-§3.2-L3 morning-handoff path, default
-	// "AUTOPILOT-LOG.md".
-	HandoffLog string `yaml:"handoff_log"`
-}
-
-// Halt names the loop's halt conditions, matching ms-spec-autopilot
-// practice and research §3.2. OnReject must be "halt" — Load refuses any
-// other value (a REJECT halts the track; auto-fixing a rejection is
-// verification debt).
-type Halt struct {
-	MaxRoundsPerBead           int    `yaml:"max_rounds_per_bead"`
-	PanelDeadlockRounds        int    `yaml:"panel_deadlock_rounds"`
-	MaxConsecutiveImplFailures int    `yaml:"max_consecutive_impl_failures"`
-	OnReject                   string `yaml:"on_reject"`
-}
-
-// Budget names the loop's per-wake ceilings. Both fields default to 0,
-// meaning unset/unlimited.
-type Budget struct {
-	MaxBeadsPerWake int `yaml:"max_beads_per_wake"`
-	TokenBudget     int `yaml:"token_budget"`
-}
-
-// LoopContext names the controller's context-handoff policy.
-type LoopContext struct {
-	ControllerHandoff string `yaml:"controller_handoff"`
-}
-
 // Decomposition holds advisory thresholds for plan decomposition-quality
 // warnings emitted by `mindspec validate plan`. All thresholds are
 // non-gating: they only produce warnings. Defaults match the original
@@ -397,6 +341,8 @@ func DefaultConfig() *Config {
 			MinParallelism:  0.25,
 		},
 		Panel: Panel{
+			MaxRounds:        5,
+			LeaseTTL:         "2h",
 			ApproveThreshold: "n-1",
 			Runners:          []Runner{{Family: "harness", Kind: "harness"}},
 			Lenses:           defaultLensData().Lenses,
@@ -406,28 +352,7 @@ func DefaultConfig() *Config {
 		},
 		Models:   map[string]string{},
 		Commands: map[string]string{},
-		Loop: Loop{
-			Enabled: false,
-			GateAuthority: map[string]string{
-				"spec_approve": "human",
-				"plan_approve": "human",
-				"bead_merge":   "human",
-				"impl_approve": "human",
-			},
-			Halt: Halt{
-				MaxRoundsPerBead:           3,
-				PanelDeadlockRounds:        2,
-				MaxConsecutiveImplFailures: 2,
-				OnReject:                   "halt",
-			},
-			Budget: Budget{
-				MaxBeadsPerWake: 0,
-				TokenBudget:     0,
-			},
-			Context:    LoopContext{ControllerHandoff: "per-spec"},
-			HandoffLog: "AUTOPILOT-LOG.md",
-		},
-		Runner: runnerSkillsAdapter,
+		Runner:   runnerSkillsAdapter,
 	}
 }
 
@@ -443,7 +368,7 @@ var (
 )
 
 // Load reads .mindspec/config.yaml under root and returns the parsed Config.
-// Results are cached per absolute root path for the lifetime of the process so
+// Results are cached per resolved root path for the lifetime of the process so
 // repeated calls within a single CLI invocation do not re-read or re-parse the
 // file. Callers must not mutate the returned *Config — it is shared across all
 // callers under the same root. Use ResetCache to invalidate (tests, future
@@ -457,18 +382,18 @@ func Load(root string) (*Config, error) {
 		return loadUncached(root)
 	}
 
+	if resolved, err := filepath.EvalSymlinks(key); err == nil {
+		key = resolved
+	}
 	configCacheMu.Lock()
+	defer configCacheMu.Unlock()
 	if entry, ok := configCache[key]; ok {
-		configCacheMu.Unlock()
 		return entry.cfg, entry.err
 	}
-	configCacheMu.Unlock()
 
 	cfg, loadErr := loadUncached(root)
 
-	configCacheMu.Lock()
 	configCache[key] = cachedConfig{cfg: cfg, err: loadErr}
-	configCacheMu.Unlock()
 
 	return cfg, loadErr
 }
@@ -555,29 +480,8 @@ func loadUncached(root string) (*Config, error) {
 		cfg.Panel.ApproveThreshold = "n-1"
 	}
 
-	// Loop: per-field zero-value backfill (explicit 0/""/nil is "unset",
-	// same convention as Decomposition above). Budget's own default IS 0,
-	// so no backfill is needed there.
-	if len(cfg.Loop.GateAuthority) == 0 {
-		cfg.Loop.GateAuthority = DefaultConfig().Loop.GateAuthority
-	}
-	if cfg.Loop.Halt.MaxRoundsPerBead == 0 {
-		cfg.Loop.Halt.MaxRoundsPerBead = 3
-	}
-	if cfg.Loop.Halt.PanelDeadlockRounds == 0 {
-		cfg.Loop.Halt.PanelDeadlockRounds = 2
-	}
-	if cfg.Loop.Halt.MaxConsecutiveImplFailures == 0 {
-		cfg.Loop.Halt.MaxConsecutiveImplFailures = 2
-	}
-	if cfg.Loop.Halt.OnReject == "" {
-		cfg.Loop.Halt.OnReject = "halt"
-	}
-	if cfg.Loop.Context.ControllerHandoff == "" {
-		cfg.Loop.Context.ControllerHandoff = "per-spec"
-	}
-	if cfg.Loop.HandoffLog == "" {
-		cfg.Loop.HandoffLog = "AUTOPILOT-LOG.md"
+	if err := cfg.readRemovedLoop(raw); err != nil {
+		return nil, err
 	}
 	if cfg.Runner == "" {
 		cfg.Runner = runnerSkillsAdapter
@@ -607,23 +511,12 @@ func loadUncached(root string) (*Config, error) {
 // refusals (spec 112 R4). Every path returns a guard-style error carrying a
 // `recovery: <command>` line (ADR-0035), never a panic.
 func validateOrchestration(cfg *Config) error {
-	if _, ok := cfg.Loop.GateAuthority["panel_skip"]; ok {
-		return termsafe.NewFailure("loop.gate_authority may not declare \"panel_skip\": panel-skip is permanently human (MINDSPEC_SKIP_PANEL is env-only)", "remove the panel_skip key from loop.gate_authority in .mindspec/config.yaml")
+	if cfg.Panel.MaxRounds < 1 {
+		return termsafe.NewFailure("panel.max_rounds must be positive", "set panel.max_rounds to at least 1")
 	}
-	if cfg.Loop.Halt.OnReject != "halt" {
-		return termsafe.NewFailure(fmt.Sprintf("loop.halt.on_reject must be \"halt\" (got %q): a REJECT halts the track, auto-fixing a rejection is verification debt", cfg.Loop.Halt.OnReject), "set loop.halt.on_reject: halt in .mindspec/config.yaml")
-	}
-	for k, v := range cfg.Loop.GateAuthority {
-		if v != "panel" && v != "human" {
-			// R8/AC-20 (spec 120): k is an agent-writable YAML map key —
-			// quote at BOTH interpolation points (the :592-area
-			// panel.gates precedent), so control bytes can never reach
-			// the message or recovery clause raw.
-			return termsafe.NewFailure(fmt.Sprintf("loop.gate_authority.%s must be \"panel\" or \"human\" (got %q)", strconv.Quote(k), v), fmt.Sprintf("set loop.gate_authority.%s to panel or human in .mindspec/config.yaml", strconv.Quote(k)))
-		}
-	}
-	if ch := cfg.Loop.Context.ControllerHandoff; ch != "per-spec" && ch != "at-usage-threshold" {
-		return termsafe.NewFailure(fmt.Sprintf("loop.context.controller_handoff must be \"per-spec\" or \"at-usage-threshold\" (got %q)", ch), "set loop.context.controller_handoff to per-spec or at-usage-threshold in .mindspec/config.yaml")
+	ttl, err := time.ParseDuration(cfg.Panel.LeaseTTL)
+	if err != nil || ttl <= 0 {
+		return termsafe.NewFailure("panel.lease_ttl must be a positive duration", "set panel.lease_ttl to a duration such as 2h")
 	}
 	switch cfg.Runner {
 	case runnerSkillsAdapter, runnerWorkflowAdapter, runnerExternalAdapter:
@@ -696,7 +589,7 @@ func validateGates(cfg *Config) error {
 		// exactly the terminal-injection hole a control-byte-carrying key
 		// (ESC/BEL/embedded newline) would otherwise punch through the
 		// guard-recovery line (round-1 panel G1.1).
-		return termsafe.NewFailure(fmt.Sprintf("panel.gates key %q is not one of the five valid gate keys (%s) — distinct from loop.gate_authority's bead_merge/impl_approve vocabulary, which names approval acts rather than review events", unknown[0], strings.Join(PanelGateKeys, ", ")), fmt.Sprintf("rename the panel.gates key %s to one of %s in .mindspec/config.yaml", strconv.Quote(unknown[0]), strings.Join(PanelGateKeys, ", ")))
+		return termsafe.NewFailure(fmt.Sprintf("panel.gates key %q is not one of the five valid gate keys (%s)", unknown[0], strings.Join(PanelGateKeys, ", ")), fmt.Sprintf("rename the panel.gates key %s to one of %s in .mindspec/config.yaml", strconv.Quote(unknown[0]), strings.Join(PanelGateKeys, ", ")))
 	}
 
 	for _, gate := range PanelGateKeys {

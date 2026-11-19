@@ -983,10 +983,9 @@ failure return, with ZERO commits, a report whose first line is exactly
 span-quoting.
 
 **NOT READY is its own outcome** (`/ms-bead-cycle`), distinct from an
-implementation failure: no panel round is consumed, it is EXCLUDED from
-`loop.halt.max_consecutive_impl_failures` (that brake stops repeated
-post-damage failures; this is the pre-damage refusal that prevents
-them), it never routes to `/ms-bead-fix`, and the worktree stays intact.
+implementation failure. It consumes no panel round. It adds no
+implementation failure. It never routes to `/ms-bead-fix`.
+The worktree stays intact.
 `/ms-spec-autopilot` treats an ACCEPTed NOT READY as a bead-level halt.
 Exactly two dispositions: **ACCEPT** (default — halt, surface the
 ordinal report, revise plan/spec, re-dispatch) or **clarify** (R8).

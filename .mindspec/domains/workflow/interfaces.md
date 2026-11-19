@@ -862,7 +862,7 @@ Core 3 runs in `complete` before materialization for every required matched regi
 | `mindspec complete` | Close bead, remove worktree, advance state |
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
-| `mindspec config show` | Print the effective config (panel/models/loop/runner + retained keys), with no `merge_strategy` row; read-only |
+| `mindspec config show` | Print the effective config and supplied removed settings, with no `merge_strategy` row; read-only |
 | `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--brief-file <absolute-path>` copies a filled regular file below the managed BRIEF.md header, replacing only the authored body on a round bump. Prompt, launch and dispatch refuse unfilled `<!-- TODO(skill)` stubs in that body. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + rule line + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
@@ -1040,14 +1040,11 @@ Core 3 runs in `complete` before materialization for every required matched regi
   `cmd/mindspec/config.go` adds a read-only `config` command with a `show`
   subcommand: it loads the effective config via `config.Load`, renders it
   through the pure `renderConfig(*config.Config) (string, error)` (no fs, no
-  panel scan — testable without a process), and prints it to stdout. The
-  `models:`, `loop:`, and `runner:` blocks are annotated "declared, not yet
-  enforced" in the rendered output; `panel:` is not, since it already drives
-  a fresh panel.json's creation-time defaults today. `renderConfig` sorts
-  `Loop.GateAuthority`'s map keys before rendering (a map iterated directly
-  would make the command's output nondeterministic) and renders
-  `PanelApproveThresholdExpr()` verbatim (no trim/normalize — the resolver's
-  contract is "exactly as configured").
+  panel scan — testable without a process), and prints it to stdout.
+  The display labels removed loop settings as ignored. It labels the round
+  alias as deprecated and labels `runner:` as read by a skill. Panel settings
+  supply defaults for new panels. Model family keys select reviewer models.
+  Other model keys supply guidance. Display order stays deterministic.
   Two caller-side surfaces render the leaf-safe `panel.ReviewerCountNote`
   advisory (Bead 3) when a registered panel's recorded `expected_reviewers`
   differs from `cfg.PanelExpectedReviewers()` — never altering any gate
@@ -1351,3 +1348,27 @@ prior bytes so plain setup can refresh an older install.
 
 Use `bd ready --exclude-label mindspec` to hide MindSpec work in a shared store.
 Setup preserves existing custom types when it adds required types.
+
+## Config show and friction
+
+`config show` renders effective panel policy and supplied removed settings.
+It labels each removed setting as ignored. It labels the deprecated round
+alias with its precedence rule. It labels `runner:` as read by a skill.
+It escapes config strings before terminal output. It sorts map keys.
+The display writes no file.
+
+`allow-not-ready` belongs to both escape-hatch registries. A successful
+command with this flag can produce a journal event. The event contains the
+token. It contains no reason text. Detection uses the existing flag order,
+then `allow-not-ready`.
+
+## Round counter
+
+`panel.RoundsForGate(regs, spec, gate, beadID)` returns a count and an error.
+It reads round records from every supplied registration directory.
+The caller supplies all directories, including a ledger-only registration.
+A bead gate matches its work item. A lifecycle gate matches its spec and gate.
+Abandoned registrations retain their rounds. Snapshot edits do not change
+history. Launch and recovery records add no round. Duplicate directory
+paths count once. A malformed ledger returns an error.
+The panel package imports only the standard library and leaf utilities.
