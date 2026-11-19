@@ -2,6 +2,7 @@ package approve
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -87,6 +88,17 @@ func implKernelEnrolled(store *kernel.Store, dir string) (bool, error) {
 func implKernelPreflight(s kernel.State) error {
 	// Compute refusals first so malformed audit records cannot hide a blocking id.
 	flags, blockerErr := kernel.ApprovalBlockers(s)
+	var gateErr error
+	for _, gate := range s.Gates {
+		r := s.Records[gate]
+		receipt, ok, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
+		if err != nil {
+			gateErr = errors.Join(gateErr, err)
+		}
+		if ok && receipt.Kind == "passed" {
+			gateErr = errors.Join(gateErr, kernel.CheckPassedGate(s, gate))
+		}
+	}
 	events, err := journal.ReadEvents()
 	if err != nil {
 		fmt.Fprintf(warnWriter, "warning: cannot read local audit journal: %s\n", termsafe.Escape(err.Error()))
@@ -112,6 +124,12 @@ func implKernelPreflight(s kernel.State) error {
 			reasons = append(reasons, line)
 		}
 		refusal = "implementation approval is blocked:\n" + strings.Join(reasons, "\n")
+	}
+	if gateErr != nil {
+		if refusal != "" {
+			refusal += "\n"
+		}
+		refusal += "gate checks failed: " + termsafe.Escape(gateErr.Error())
 	}
 	if refusal != "" {
 		return guard.NewFailure(refusal, fmt.Sprintf("resolve the listed records, then run mindspec impl approve %s", idrender.Spec(s.SpecID)))

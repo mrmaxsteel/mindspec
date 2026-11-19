@@ -303,7 +303,7 @@ func TestS133Resolutions_RefusalBeforeWrites(t *testing.T) {
 			if _, err := f.approve("plan_approve"); err != nil {
 				t.Fatal(err)
 			}
-			if f.closes != 1 || f.creates != 1 || migrations == 0 || f.meta["panel_abandoned"] != true || f.meta["mindspec_migrated_at"] == nil {
+			if f.closes != 0 || f.creates != 1 || migrations != 0 || f.meta["panel_abandoned"] != true || f.meta["mindspec_run"] == nil {
 				t.Fatalf("control did not reach pending writes: closes=%d creates=%d migrations=%d metadata=%v", f.closes, f.creates, migrations, f.meta)
 			}
 		})

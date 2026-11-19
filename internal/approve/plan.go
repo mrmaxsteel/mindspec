@@ -12,7 +12,6 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/adr"
 	"github.com/mrmaxsteel/mindspec/internal/bead"
-	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/contextpack"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
@@ -21,12 +20,10 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
-	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
-	"github.com/mrmaxsteel/mindspec/internal/workspace/containment"
 )
 
 // planBranchExistsInFn and planFindLandedMergeFn back R3c's closed-child
@@ -49,9 +46,6 @@ var planRunBDCombinedFn = bead.RunBDCombined
 
 // planRunBDFn is for JSON-returning bd commands (stdout only, no stderr mixing).
 var planRunBDFn = bead.RunBD
-
-// enrolOnApprove keeps enrolment internal until the kernel verbs are connected.
-var enrolOnApprove bool
 
 // planListJSONFn wraps bead.ListJSON for testability.
 var planListJSONFn = bead.ListJSON
@@ -305,17 +299,8 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 	}
 	result := &PlanResult{SpecID: specID}
 	appendDocumentGateWarnings(&result.Warnings, gateWarnings.String())
-	if enrolOnApprove {
-		return approveEnrolment(root, specID, approvedBy, specDir, filepath.Join(specDir, "plan.md"), result, outcome, exec)
-	}
-
-	// Step 1: Validate (SpecDir is worktree-aware per ADR-0022)
 	vr := validate.ValidatePlan(root, specID)
 	if vr.HasFailures() {
-		// If plan.md doesn't exist, check whether the spec itself still needs
-		// approval so we can guide agents that pick the wrong subcommand.
-		// The authoritative phase signal is the epic's mindspec_phase metadata
-		// (ADR-0023); falling back to YAML frontmatter only when no epic exists.
 		specDir, sdErr := workspace.SpecDir(root, specID)
 		if sdErr != nil {
 			return nil, sdErr
@@ -323,205 +308,37 @@ func ApprovePlan(root, specID, approvedBy string, exec executor.Executor) (*Plan
 		planPath := filepath.Join(specDir, "plan.md")
 		if _, statErr := os.Stat(planPath); os.IsNotExist(statErr) {
 			if !specIsApproved(specDir, specID) {
-				// Spec 092 Req 12 (integration finding INT-2): canonical
-				// noun-verb form with a machine-greppable recovery line —
-				// never the deprecated `mindspec approve spec` order.
 				return nil, guard.NewFailure(
-					fmt.Sprintf("spec %s has not been approved yet — no plan.md exists", specID),
-					fmt.Sprintf("mindspec spec approve %s", specID),
+					fmt.Sprintf("spec %s has not been approved yet — no plan.md exists", idrender.Spec(specID)),
+					fmt.Sprintf("mindspec spec approve %s", idrender.Spec(specID)),
 				)
 			}
 		}
 		return nil, planValidationFailure(specID, vr)
 	}
 
-	planPath := filepath.Join(specDir, "plan.md")
-
-	// Preflight (spec 119 R1 / P9 / P10): resolve plan-content facts (bead
-	// sections, structured work_chunks, alignment) AND epic/child-set facts
-	// — refusing FAIL-CLOSED on every derivable violation — before any
-	// mutation. Replaces the historical swallowed epic lookup
-	// (`phase.FindEpicBySpecID`'s error silently skipped bead auto-creation
-	// AFTER the Approved write) and the fail-open child query inside
-	// handleExistingBeads (a `bd list --parent` error used to mean "proceed
-	// with creation").
-	facts, err := resolvePlanApprovePreflight(root, planPath, specID)
+	content := readFileOrEmpty(filepath.Join(specDir, "plan.md"))
+	sections := validate.ParseBeadSections(content)
+	fm, err := validate.ParsePlanFrontmatter(content)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkPlanResolutions(worktree, specID, facts.planContent, facts.parentMetadata, exec); err != nil {
+	if err := validate.ValidateWorkChunkAlignment(fm.WorkChunks, len(sections)); err != nil {
+		return nil, fmt.Errorf("misaligned plan: %w", err)
+	}
+	var metadata map[string]interface{}
+	if _, err := resolveTargetEpic(specID, &metadata); err != nil {
 		return nil, err
 	}
-	// Run the idempotent legacy migration only after the document and
-	// resolution gates. An older approval needs no new spec panel.
-	if _, err := phase.EnsureMigrated(root, specID); err != nil {
+	if err := checkPlanResolutions(worktree, specID, content, metadata, exec); err != nil {
 		return nil, err
 	}
-	// The phase generation reconciliation follows migration. Its lookup is
-	// best effort; preflight has already resolved the epic fail-closed.
-	if epicID, epicErr := phase.FindEpicBySpecID(specID); epicErr == nil && epicID != "" {
-		if _, err := phase.EnsurePhaseSemanticsV2(root, epicID); err != nil {
-			return nil, err
-		}
-	}
-	if err := recordLifecycleGateAudit(facts.parentID, outcome, nil); err != nil {
-		return nil, documentGateAuditFailure(err)
+	result.Warnings = append(result.Warnings, planLintDoubleAssignedFiles(sections)...)
+	if len(fm.WorkChunks) == 0 {
+		result.Warnings = append(result.Warnings, "plan has no work_chunks block; dependency links require structured work chunks")
 	}
 
-	// Spec 119 R11 (mindspec-jli8): the double-assignment plan-lint runs
-	// over the already-parsed facts.sections — advisory only, never a
-	// refusal, so it is safe to surface here alongside the work_chunks
-	// warning below rather than inside resolvePlanApprovePreflight's
-	// fail-closed refusal decisions.
-	result.Warnings = append(result.Warnings, planLintDoubleAssignedFiles(facts.sections)...)
-
-	if len(facts.workChunks) == 0 {
-		// AC-19: a legacy prose-only plan still approves (wiring nothing —
-		// no prose dependency parser exists, spec 097 R3), but silently
-		// wiring zero edges is invisible. Name the absence loudly instead.
-		//
-		// F1 finding 5: "no work_chunks block" is only accurate when the
-		// plan never declared one. When facts.workChunksParseErr is set AND
-		// the raw plan text actually contains a `work_chunks` key, the block
-		// IS present but failed to parse — a materially different, more
-		// actionable diagnosis (a YAML mistake to fix, not a missing
-		// section to add), so it gets its own message naming the parse
-		// error instead of misdirecting the author to add something that
-		// was never missing.
-		warning := "plan has no `work_chunks` frontmatter block — no bd dependency edges were wired; add `work_chunks` with `id`/`depends_on` entries to wire edges (see the plan scaffold)"
-		if facts.workChunksParseErr != nil && strings.Contains(facts.planContent, "work_chunks") {
-			warning = fmt.Sprintf("plan's `work_chunks` frontmatter block is present but could not be parsed (%v) — no bd dependency edges were wired; fix the YAML and re-run `mindspec plan approve %s`", facts.workChunksParseErr, specID)
-		}
-		result.Warnings = append(result.Warnings, warning)
-	}
-
-	// First sanctioned mutation (spec 119 R1): supersede-close an all-open
-	// existing child set. checkExistingBeadsSafety already ran inside the
-	// preflight above, so this step cannot itself discover a fresh refusal —
-	// it only enacts the decision preflight already made.
-	if err := supersedeCloseExistingBeads(facts.children, facts.planContent); err != nil {
-		return nil, err
-	}
-
-	// Step 3: Update plan frontmatter
-	if err = updatePlanApproval(planPath, approvedBy); err != nil {
-		return nil, fmt.Errorf("updating plan approval: %w", err)
-	}
-
-	// Step 3b: Auto-create implementation beads from the preflight-resolved
-	// plan facts. No re-read, no re-validation, no re-query of the child
-	// set — those refusals already fired above, before this mutation.
-	beadIDs, createWarnings, err := createBeadsFromParsed(specDir, specID, facts.parentID, facts.planContent, facts.sections, facts.workChunks)
-	if err != nil {
-		// Spec 092 Req 12: context is PREPENDED so the cause's final
-		// `recovery:` line stays the last line of the message
-		// (`mindspec bead create-from-plan` can recreate beads
-		// without re-approving when the plan itself is fine).
-		return nil, fmt.Errorf("failed to create implementation beads — the plan frontmatter is already marked Approved but the bead set was NOT (fully) created:\n%w", err)
-	}
-	result.Warnings = append(result.Warnings, createWarnings...)
-	if len(beadIDs) > 0 {
-		result.BeadIDs = beadIDs
-		if err := writeBeadIDsToFrontmatter(planPath, beadIDs); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("could not write bead IDs to plan frontmatter: %v", err))
-		}
-	} else {
-		result.Warnings = append(result.Warnings, "plan has no '## Bead N:' sections; no implementation beads were created. Add bead sections to the plan or create beads manually.")
-	}
-
-	// Step 4: Auto-commit plan approval + bead_ids so implementation
-	// worktrees that branch from spec/<id> contain the approved artifacts.
-	// This is a hard error: leaving the spec worktree dirty here causes the
-	// downstream `mindspec complete` merge to fail (`git merge` refuses to
-	// run with uncommitted changes in the target worktree).
-	//
-	// Ordering invariant: this must happen BEFORE Step 4b flips the epic's
-	// mindspec_phase to "implement". Once phase=implement is stored, the
-	// pre-commit hook (internal/hook/dispatch.go) blocks further commits on
-	// the spec/<id> branch — including this very commit, which would then
-	// only land via the MINDSPEC_ALLOW_MAIN=1 escape hatch.
-	cfg, cfgErr := config.Load(root)
-	if cfgErr != nil {
-		cfg = config.DefaultConfig()
-	}
-	// specID already validated at the top of ApprovePlan (validate.SpecID
-	// == idvalidate.SpecID), so this waist call cannot fail.
-	specWtPath, _ := workspace.SpecWorktreePath(root, cfg, specID)
-	commitMsg := fmt.Sprintf("chore: approve plan for %s", specID)
-	if err := exec.CommitAll(specWtPath, commitMsg); err != nil {
-		// R4: specWtPath is a DISPLAY position here (not the `cd` operand,
-		// which containment.EmitCd below already renders spine-safe) —
-		// termsafe.Escape it.
-		return nil, fmt.Errorf("auto-commit plan approval failed: %w\n\nFix the issue in %s and re-run 'mindspec plan approve %s'", err, termsafe.Escape(specWtPath), specID)
-	}
-
-	// Pre-commit hooks (beads, etc.) can modify tracked files as a side
-	// effect of the commit above. A second CommitAll picks up those
-	// residual changes so the spec worktree lands clean.
-	if err := exec.CommitAll(specWtPath, fmt.Sprintf("chore: sync beads state after plan approval for %s", specID)); err != nil {
-		return nil, fmt.Errorf("auto-commit residual state failed: %w\n\nInspect %s and re-run 'mindspec plan approve %s'", err, termsafe.Escape(specWtPath), specID)
-	}
-
-	// Final guard: the spec worktree must be clean before beads can be
-	// merged back into it during `mindspec complete`.
-	if err := exec.IsTreeClean(specWtPath); err != nil {
-		return nil, fmt.Errorf("spec worktree has uncommitted changes after plan approval: %w\n\n%s && git status", err, containment.EmitCd(specWtPath))
-	}
-
-	// Step 4b (Spec 080): Write mindspec_phase to epic metadata.
-	// Must run AFTER Step 4 — see ordering invariant above. facts.parentID is
-	// guaranteed non-empty here — resolvePlanApprovePreflight refuses
-	// pre-mutation on both epic failure modes (P10), so no epic-less path
-	// reaches this point.
-	//
-	// Spec 128 R3.3: wrapped in the phase write lock so a concurrent
-	// mindspec_phase writer can never land a stale value over this one
-	// (or vice versa). Spec 128 Bead 2 (OQ-3 option 1): writes `plan`
-	// (was `implement`) — the first LIFECYCLE claim in `mindspec next`
-	// now owns the advance to `implement` (cmd/mindspec/next.go), so
-	// stored and child-derived phase AGREE at every point of the
-	// plan-approve -> first-claim window (all-open children derive
-	// `plan` too — DerivePhaseFromChildren's all-open arm,
-	// internal/phase/derive.go). Round-1/round-2 panel G3: a failure is
-	// best-effort (a warning, never fatal here) but a lock TIMEOUT is
-	// rendered with a copy-pastable re-run COMMAND via
-	// phase.DescribeLockFailure, not prose.
-	//
-	// Round-1 panel G1/R3-G1: `stored` is WithPhaseWriteLock's own FRESH
-	// read — a `mindspec next` claim can interleave between the
-	// preflight all-open safety check (a pre-lock read) and this write,
-	// advancing stored to `implement` first. Writing `plan` unconditionally
-	// would then land BACKWARD over that fresher claim. Refuse (no-op)
-	// whenever the fresh stored value is already AHEAD of `plan` in the
-	// lifecycle order — the interleaved claim's own value stands, and the
-	// direction-conditional AC-5(iv) warning (derive.go) will name the
-	// correct (forward) recovery if anything ever looks inconsistent.
-	if err := phase.WithPhaseWriteLock(root, facts.parentID, planMergeMetadataFn, func(stored string, present bool) (map[string]interface{}, error) {
-		if present && phase.IsBackwardMove(stored, state.ModePlan) {
-			return nil, nil
-		}
-		return map[string]interface{}{"mindspec_phase": state.ModePlan}, nil
-	}); err != nil {
-		result.Warnings = append(result.Warnings, phase.DescribeLockFailure(err, fmt.Sprintf("mindspec plan approve %s", idrender.Spec(specID))))
-	}
-
-	// Step 5: HandoffEpic — notify executor that beads are ready for dispatch.
-	// For MindspecExecutor this is a no-op. Other executors may use this to schedule work.
-	if len(result.BeadIDs) > 0 {
-		if err := exec.HandoffEpic(facts.parentID, specID, result.BeadIDs); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("handoff epic failed: %v", err))
-		}
-	}
-
-	// Step 6: Emit recording phase marker (best-effort)
-	if err := recording.EmitPhaseMarker(root, specID, "plan", "plan-approved"); err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not emit recording marker: %v", err))
-	}
-	if err := recording.UpdatePhase(root, specID, "plan", "plan-approved"); err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("could not update recording phase: %v", err))
-	}
-
-	return result, nil
+	return approveEnrolment(root, specID, approvedBy, specDir, filepath.Join(specDir, "plan.md"), result, outcome, exec)
 }
 
 // updatePlanApproval reads a plan file and updates YAML frontmatter with

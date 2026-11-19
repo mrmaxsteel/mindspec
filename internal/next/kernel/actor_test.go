@@ -224,6 +224,9 @@ func TestS134Lease_RefusalTable(t *testing.T) {
 }
 func TestS134Lease_AtomicCASAndForeignIsolation(t *testing.T) {
 	f, id, deps := actorFixture(t)
+	// Isolate actor CAS from the first implementation phase transition.
+	// The command tests cover that transition and its cache-failure recovery.
+	f.Must(f.Store.WriteMetadata(f.Epic, map[string]any{"mindspec_phase": "implement"}))
 	_, err := f.Store.Run("update", f.ID(id), "--claim")
 	f.Must(err) // raw claim, no kernel lease
 	if actorRecord(t, f, id).Status != "in_progress" {

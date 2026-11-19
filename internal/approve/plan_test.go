@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -1215,153 +1214,25 @@ func TestExtractPlanVersion(t *testing.T) {
 // claim now owns the advance to `implement`. The ORDERING invariant this
 // test pins is unchanged: every exec.CommitAll invocation must complete
 // before the first planMergeMetadataFn call that writes mindspec_phase.
-func TestApprovePlan_CommitsBeforeWritingImplementPhase(t *testing.T) {
-	noopStubPhaseMergeMetadataForTest(t)
-	tmp := t.TempDir()
-	specID := "042-test"
-	specDir := filepath.Join(tmp, ".mindspec", "docs", "specs", specID)
-	if err := os.MkdirAll(specDir, 0755); err != nil {
-		t.Fatalf("mkdir spec dir: %v", err)
-	}
-
-	planContent := `---
-status: Approved
-spec_id: "042-test"
-version: "1.0"
----
-
-# Plan
-
-## ADR Fitness
-
-No ADRs touched.
-
-## Testing Strategy
-
-Go unit tests.
-
-## Bead 1: First thing
-
-**Steps**
-1. Step one
-2. Step two
-3. Step three
-
-**Verification**
-- [ ] ` + "`go test ./...`" + ` passes
-
-**Acceptance Criteria**
-- First bead works
-
-**Depends on**
-None
-`
-	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planContent), 0644); err != nil {
-		t.Fatalf("write plan: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# Spec\n"), 0644); err != nil {
-		t.Fatalf("write spec: %v", err)
-	}
-
-	// Stub phase.FindEpicBySpecID via listJSONFn → returns epic with matching
-	// spec_num/spec_title so SpecIDFromMetadata(42, "test") == "042-test".
-	epicJSON := []byte(`[{"id":"epic-42","title":"[SPEC 042-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":42,"spec_title":"test","mindspec_phase":"plan"}}]`)
-	// PERF-1: cache.AllEpics issues a single `--type=epic --status=open,in_progress,closed`
-	// call; stub returns the epic whenever a --type=epic query is seen.
-	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
-		for _, a := range args {
-			if a == "--type=epic" {
-				return epicJSON, nil
-			}
+func TestApprovePlan_CommitsEnrolledArtifactsBeforeHandoff(t *testing.T) {
+	f := enrolFixture(t)
+	mock := &recordingExecutor{MockExecutor: &executor.MockExecutor{}, onCommit: func(string, string) {
+		if !f.State().Enrolled || len(f.State().Gates) != 4 {
+			t.Fatal("artifact commit preceded enrolment and gate creation")
 		}
-		return []byte(`[]`), nil
-	})
-	defer restoreList()
-
-	// Validation's checkPlanApprovalGateConsistency calls phase.DerivePhase →
-	// runBDFn("show", epicID, "--json"). Stub it too so the test doesn't
-	// depend on a real bd binary being present in $PATH.
-	restoreRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "show" {
-			return epicJSON, nil
+		if f.Fake.Records[f.Epic].Metadata["mindspec_phase"] != "plan" {
+			t.Fatal("approval advanced to implementation before a lease")
 		}
-		return []byte(`[]`), nil
-	})
-	defer restoreRunBD()
-
-	// Record ordering across exec.CommitAll and planMergeMetadataFn.
-	var callLog []string
-	var mu sync.Mutex
-	record := func(label string) {
-		mu.Lock()
-		callLog = append(callLog, label)
-		mu.Unlock()
+	}}
+	result, err := ApprovePlan(f.Root, f.SpecID, "operator", mock)
+	f.Must(err)
+	if len(result.BeadIDs) != 3 || len(mock.Calls) < 3 {
+		t.Fatalf("missing commit and handoff: %+v %v", result, mock.Calls)
+	}
+	if mock.Calls[len(mock.Calls)-1].Method != "HandoffEpic" {
+		t.Fatalf("handoff did not follow artifact checks: %v", mock.Calls)
 	}
 
-	restoreMerge := SetPlanMergeMetadataForTest(func(issueID string, updates map[string]interface{}) error {
-		newPhase, _ := updates["mindspec_phase"].(string)
-		record(fmt.Sprintf("merge-metadata:%s:%s", issueID, newPhase))
-		return nil
-	})
-	defer restoreMerge()
-
-	restoreBD := SetPlanRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "create" {
-			return []byte(`{"id":"bead-1"}`), nil
-		}
-		if len(args) > 0 && args[0] == "dep" {
-			return nil, nil
-		}
-		return []byte(`[]`), nil
-	})
-	defer restoreBD()
-
-	// planListJSONFn — used by handleExistingBeads to query children; none exist.
-	origList := planListJSONFn
-	defer func() { planListJSONFn = origList }()
-	planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
-
-	restoreCombined := SetPlanRunBDCombinedForTest(func(args ...string) ([]byte, error) {
-		return nil, nil
-	})
-	defer restoreCombined()
-
-	mockExec := &recordingExecutor{
-		MockExecutor: &executor.MockExecutor{},
-		onCommit:     func(path, msg string) { record("commit-all") },
-	}
-
-	result, err := ApprovePlan(tmp, specID, "tester", mockExec)
-	if err != nil {
-		t.Fatalf("ApprovePlan: %v", err)
-	}
-	if result == nil {
-		t.Fatal("nil result")
-	}
-
-	// At least two commits and exactly one phase write.
-	var firstPhaseWrite = -1
-	var lastCommit = -1
-	for i, entry := range callLog {
-		if entry == "commit-all" {
-			lastCommit = i
-		}
-		if strings.HasPrefix(entry, "merge-metadata:") && strings.HasSuffix(entry, ":plan") {
-			if firstPhaseWrite < 0 {
-				firstPhaseWrite = i
-			}
-		}
-	}
-	if lastCommit < 0 {
-		t.Fatalf("expected at least one exec.CommitAll call; got calls: %v", callLog)
-	}
-	if firstPhaseWrite < 0 {
-		t.Fatalf("expected a merge-metadata:*:plan call; got calls: %v", callLog)
-	}
-	if firstPhaseWrite <= lastCommit {
-		t.Fatalf("ordering regression: phase=plan metadata write (idx=%d) must come AFTER final commit (idx=%d). Calls: %v",
-			firstPhaseWrite, lastCommit, callLog)
-	}
 }
 
 // TestApprovePlan_Step4bRefusesBackwardOverFresherClaim is round-1 panel
@@ -1662,118 +1533,19 @@ func TestPlanApprove_BeadsCarrySpecID(t *testing.T) {
 func TestApprovePlan_LocalLedger(t *testing.T) {
 	for _, state := range []string{"tracked", "fresh-init", "upgraded-init"} {
 		t.Run(state, func(t *testing.T) {
-			specE2EFakeBdOnPath(t)
-			noopStubPhaseMergeMetadataForTest(t)
-			tmp := t.TempDir()
-			specID := "042-test"
-			specDir := filepath.Join(tmp, ".mindspec", "specs", specID)
-			if err := os.MkdirAll(specDir, 0755); err != nil {
-				t.Fatalf("mkdir spec dir: %v", err)
+			f := enrolFixture(t)
+			for _, args := range [][]string{{"config", "user.name", "Test"}, {"config", "user.email", "test@example.invalid"}, {"add", "."}, {"commit", "-qm", "plan fixture"}} {
+				_, err := f.Command("git", args...)
+				f.Must(err)
 			}
-
-			planContent := `---
-status: Approved
-spec_id: "042-test"
-version: "1.0"
----
-
-# Plan
-
-## ADR Fitness
-
-No ADRs touched.
-
-## Testing Strategy
-
-Go unit tests.
-
-## Bead 1: First thing
-
-**Steps**
-1. Step one
-2. Step two
-3. Step three
-
-**Verification**
-- [ ] ` + "`go test ./...`" + ` passes
-
-**Acceptance Criteria**
-- First bead works
-
-**Depends on**
-None
-`
-			if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte(planContent), 0644); err != nil {
-				t.Fatalf("write plan: %v", err)
+			file := prepareApprovalLedger(t, f.Root, f.SpecID, state)
+			result, err := ApprovePlan(f.Root, f.SpecID, "operator", &executor.MindspecExecutor{Root: f.Root})
+			f.Must(err)
+			if len(result.BeadIDs) != 3 || !f.State().Enrolled {
+				t.Fatal("plan was not enrolled")
 			}
-			if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# Spec\n"), 0644); err != nil {
-				t.Fatalf("write spec: %v", err)
-			}
-
-			// Stub phase.FindEpicBySpecID via listJSONFn → returns epic with matching
-			// spec_num/spec_title so SpecIDFromMetadata(42, "test") == "042-test".
-			epicJSON := []byte(`[{"id":"epic-42","title":"[SPEC 042-test] Test","status":"open","issue_type":"epic","metadata":{"spec_num":42,"spec_title":"test","mindspec_phase":"plan"}}]`)
-			// PERF-1: cache.AllEpics issues a single `--type=epic --status=open,in_progress,closed`
-			// call; stub returns the epic whenever a --type=epic query is seen.
-			restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
-				for _, a := range args {
-					if a == "--type=epic" {
-						return epicJSON, nil
-					}
-				}
-				return []byte(`[]`), nil
-			})
-			defer restoreList()
-
-			// Validation's checkPlanApprovalGateConsistency calls phase.DerivePhase →
-			// runBDFn("show", epicID, "--json"). Stub it too so the test doesn't
-			// depend on a real bd binary being present in $PATH.
-			restoreRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-				if len(args) > 0 && args[0] == "show" {
-					return epicJSON, nil
-				}
-				return []byte(`[]`), nil
-			})
-			defer restoreRunBD()
-
-			restoreMerge := SetPlanMergeMetadataForTest(func(string, map[string]interface{}) error { return nil })
-			defer restoreMerge()
-
-			restoreBD := SetPlanRunBDForTest(func(args ...string) ([]byte, error) {
-				if len(args) > 0 && args[0] == "create" {
-					return []byte(`{"id":"bead-1"}`), nil
-				}
-				if len(args) > 0 && args[0] == "dep" {
-					return nil, nil
-				}
-				return []byte(`[]`), nil
-			})
-			defer restoreBD()
-
-			// planListJSONFn — used by handleExistingBeads to query children; none exist.
-			origList := planListJSONFn
-			defer func() { planListJSONFn = origList }()
-			planListJSONFn = func(args ...string) ([]byte, error) { return []byte(`[]`), nil }
-
-			restoreCombined := SetPlanRunBDCombinedForTest(func(args ...string) ([]byte, error) {
-				return nil, nil
-			})
-			defer restoreCombined()
-
-			adoptGitRun(t, tmp, "init", "-q", "-b", "main")
-			adoptGitRun(t, tmp, "config", "user.email", "test@example.invalid")
-			adoptGitRun(t, tmp, "config", "user.name", "test")
-			adoptGitRun(t, tmp, "config", "commit.gpgsign", "false")
-			adoptGitRun(t, tmp, "add", "-A")
-			adoptGitRun(t, tmp, "commit", "-qm", "plan fixture")
-			adoptGitRun(t, tmp, "branch", "spec/"+specID)
-			wt := filepath.Join(tmp, ".worktrees", "worktree-spec-"+specID)
-			adoptGitRun(t, tmp, "worktree", "add", wt, "spec/"+specID)
-			file := prepareApprovalLedger(t, wt, specID, state)
-			if _, err := ApprovePlan(tmp, specID, "tester", &executor.MindspecExecutor{Root: tmp}); err != nil {
-				t.Fatal(err)
-			}
-			assertApprovalLedger(t, wt, file, state)
+			assertApprovalLedger(t, f.Root, file, state)
 		})
 	}
+
 }

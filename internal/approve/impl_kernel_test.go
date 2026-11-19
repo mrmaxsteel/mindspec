@@ -26,14 +26,15 @@ func s134ApproveFixture(t *testing.T) (*kerneltest.Fixture, *executor.MockExecut
 	saveAndRestore(t)
 	f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
 	t.Setenv(journal.StateDirEnv, t.TempDir())
-	for _, gate := range f.State().Gates {
-		kerneltest.PassGate(f, gate, "subject")
-	}
+
 	for _, item := range f.Items {
 		f.Must(f.Store.SetStatusIf(item, "open", "closed"))
 	}
 	head, err := f.Command("git", "rev-parse", "HEAD")
 	f.Must(err)
+	for _, gate := range f.State().Gates {
+		kerneltest.PassGate(f, gate, strings.TrimSpace(string(head)))
+	}
 	for _, branch := range append([]string{"spec/" + f.SpecID}, "bead/"+f.Items[0], "bead/"+f.Items[1], "bead/"+f.Items[2]) {
 		_, err = f.Command("git", "branch", branch, strings.TrimSpace(string(head)))
 		f.Must(err)

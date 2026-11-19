@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -133,7 +134,7 @@ func TestS133DocGate_BeadSectionCorpus(t *testing.T) {
 				t.Cleanup(func() { planRunBDFn = original })
 				description := ""
 				planRunBDFn = func(args ...string) ([]byte, error) {
-					if len(args) > 0 && args[0] == "create" {
+					if len(args) > 0 && args[0] == "create" && slices.Contains(args, "task") {
 						for i, arg := range args {
 							if arg == "--description" && i+1 < len(args) {
 								description = args[i+1]

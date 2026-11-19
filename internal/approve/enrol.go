@@ -45,7 +45,7 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 		}
 		sections := validate.ParseBeadSections(content)
 		if err = validate.ValidateWorkChunkAlignment(fm.WorkChunks, len(sections)); err != nil {
-			return err
+			return fmt.Errorf("misaligned plan: %w", err)
 		}
 		if err = checkBeadSectionContents(content, sections); err != nil {
 			return err
@@ -229,7 +229,7 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 			return documentGateAuditFailure(err)
 		}
 		if err = exec.CommitAll(worktree, "chore: approve plan for "+specID); err != nil {
-			return err
+			return fmt.Errorf("auto-commit plan approval failed: %w", err)
 		}
 		if err = exec.CommitAll(worktree, "chore: sync tracker state after plan approval"); err != nil {
 			return err
@@ -238,7 +238,10 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 			return err
 		}
 		result.BeadIDs = ids
-		return exec.HandoffEpic(epic, specID, ids)
+		if err := exec.HandoffEpic(epic, specID, ids); err != nil {
+			result.Warnings = append(result.Warnings, "handoff epic failed: "+termsafe.Escape(err.Error()))
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

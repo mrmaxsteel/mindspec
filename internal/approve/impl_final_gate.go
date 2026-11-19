@@ -18,6 +18,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/safefile"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -27,6 +28,10 @@ import (
 // implFinalReviewGate runs on every pre-close pass while the spec branch exists.
 // A published spec without its worktree can only replay the same subject.
 func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec executor.Executor, placeholder implPlaceholderWrite) (Outcome, bool, error) {
+	s, kernelErr := implKernelStateFn(root, specID)
+	if kernelErr != nil {
+		return Outcome{}, false, kernelErr
+	}
 	cfg, err := config.Load(root)
 	if err != nil {
 		return Outcome{}, false, err
@@ -52,6 +57,9 @@ func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec
 	if os.IsNotExist(statErr) {
 		return Outcome{Gate: "final_review"}, false, guard.NewFailure("gate final_review: spec worktree is absent",
 			fmt.Sprintf("re-create the spec worktree at spec/%s, then run a final-review panel", idrender.Spec(specID)))
+	}
+	if s != nil {
+		return Outcome{Gate: "final_review"}, false, kernel.CheckPassedGate(*s, s.Epic+".final")
 	}
 	o, err := runLifecycleGate(root, specID, "final_review", wt, warnWriter)
 	if err != nil || !cfg.Enforcement.PanelGate || os.Getenv(panel.SkipPanelEnv) == "1" {

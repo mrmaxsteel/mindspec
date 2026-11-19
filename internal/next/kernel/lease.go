@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -30,6 +31,7 @@ type LeaseResult struct {
 	Token    string
 	Lease    LeaseRecord
 	Worktree string
+	Warnings []string
 }
 
 func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, error) {
@@ -37,8 +39,19 @@ func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, erro
 	if !state.Enrolled {
 		return result, ErrPreKernel
 	}
-	err := withActorLock(state, func(s State) error {
-		return WithCASRetry(func() error {
+	if state.Store == nil {
+		return result, actorFailure("operation needs a store")
+	}
+	advancePhase := false
+	err := phase.WithPhaseWriteLock(state.Root, state.Epic, func(epic string, updates map[string]any) error {
+		// The actor claim is durable. A cache failure must not discard its token.
+		if err := state.Store.WriteMetadata(epic, updates); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("warning: could not update phase: %s\nrecovery: mindspec repair phase %s", termsafe.Escape(err.Error()), idrender.Spec(state.SpecID)))
+		}
+		return nil
+	}, func(stored string, present bool) (map[string]any, error) {
+		s := state
+		err := WithCASRetry(func() error {
 			s, err := refreshActorState(s)
 			if err != nil {
 				return err
@@ -128,8 +141,27 @@ func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, erro
 				return err
 			}
 			result.Lease = lease
+			advancePhase = t.Kind == "implement" && options.Release == ""
 			return nil
 		})
+		if err != nil {
+			return nil, err
+		}
+		if advancePhase && (stored == "plan" || (stored == "" && !present)) {
+			return map[string]any{"mindspec_phase": "implement", phase.PhaseSemanticsV2MarkerKey: phase.PhaseSemanticsV2Value}, nil
+		}
+		return nil, nil
+	}, func() (string, bool, error) {
+		epic, err := state.Store.Lookup(state.Epic)
+		if err != nil {
+			return "", false, err
+		}
+		if epic == nil {
+			return "", false, actorFailure("epic is missing")
+		}
+		raw, present := epic.Metadata["mindspec_phase"]
+		stored, _ := raw.(string)
+		return stored, present, nil
 	})
 	if err != nil {
 		return LeaseResult{}, err
