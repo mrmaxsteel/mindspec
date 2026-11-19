@@ -111,7 +111,8 @@ blocks Y" = Y waits for X.
   a chain link and its bd removal; the log has no link write. (c) Killed after the `<epic>.final` create, foreign links
   `<epic>.final` blocks a bug blocks item 3: `--apply` exits 0 without the item-3-to-final link; `next-action` flags
   `foreign-blocker` naming the `<epic>.final`-blocks-bug link. After `bd dep remove` of that link, that flag is gone
-  and `--apply` writes the item-3-to-final link.
+  and `--apply` writes the item-3-to-final link. (d) Killed after the plan-order links, the plan edited to drop the
+  item-2-on-1 link, or separately to add an item-3-on-2 link: the rerun exits non-zero naming it, same snapshot.
 - [ ] AC3 (R3, R4): `next 1` (no `--spec`) resolves spec `x` and prints a token (generation 1); a second `next 1` or
   `lease <1>.impl.a1` exits non-zero naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug
   blocking item 1: `lease <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits
@@ -145,8 +146,8 @@ blocks Y" = Y waits for X.
   exits non-zero printing `bd reopen <1>`; after `bd reopen <1>` and a gate pass, `complete 1` exits 0 and `impl
   approve` does not name the flag.
 - [ ] AC11 (R9): one each of `--allow-not-ready`, `--allow-doc-skew`, `--override-adr`, `--allow-net-deletion`, `lease
-  --take`, `panel defer`, a decision answer, a repaired unreceipted close, a `carry-over`, a 2-slot `re-panel`: `impl
-  approve` and a rerun exit 0, print 1 each (the re-panel row also 2 slots); both registries hold `allow-not-ready`.
+  --take`, `panel defer`, a decision answer, a repaired unreceipted close, a `carry-over`, a 3-slot `re-panel`: `impl
+  approve` and a rerun exit 0, print 1 each (the re-panel row also 3 slots); both registries hold `allow-not-ready`.
   `MINDSPEC_SKIP_PANEL=1 complete`, no passing gate: non-zero, names it.
 - [ ] AC12 (R10): `loop.gate_authority`, `loop.halt.{on_reject: fix, panel_deadlock_rounds,
   max_consecutive_impl_failures}` load with exit 0, one warning each; `config show` labels them ignored and `runner:`
@@ -179,13 +180,15 @@ blocks Y" = Y waits for X.
   refuses): `--apply` creates exactly `<1>.review.judge.a1` and no round; `complete 1` and `impl approve` exit
   non-zero naming it. A second commit before its submit: the next pass closes a1 `superseded` and creates
   `<1>.review.judge.a2` on the newest commit; `submit` to a1 exits non-zero. (a) `submit` to a2 of `carry-over` with a
-  reason: the gate stays `passed`, its receipt names the old and new subject and the judge receipt; `complete 1` exits
-  0 and creates `<2>.impl.a1`; `impl approve` names neither the gate nor a judge. (b) Fresh fixture, `re-panel` with
-  2 slots: `<1>.review.a2` (`mindspec_from` set) gets one 2-slot round on the new subject; after its pass, `complete
-  1` exits 0. (c) Each exits non-zero, step open, no round: 1 or 4 slots, a value other than `carry-over` or
+  reason: the gate stays `passed`, its receipt names the old and new subject and the judge receipt. A commit of the
+  judgement file: the next pass creates no judge. `complete 1` exits 0 and creates `<2>.impl.a1`; `impl approve` names
+  neither the gate nor a judge; a pass after each of `complete 1` and `impl approve` creates no judge. (b) Fresh
+  fixture, `re-panel` with 2 slots and paths: `<1>.review.a2` (`mindspec_from` set) gets one 2-slot round on the new
+  subject, and the `run` entry for `panel create 1` names the paths; after its pass, `complete 1` exits 0. (c) Fresh
+  fixture, judge open; each exits non-zero, step open, no round: 1 or 4 slots, a value other than `carry-over` or
   `re-panel`, `carry-over` with no reason, `re-panel` with no paths; then 3 slots exits 0 and authorises a 3-slot
-  round. (d) Fresh fixture, an ordinary commit, judge open: a successful `panel rebind` and its pass close the judge
-  `superseded`, its receipt names the rebind; `complete 1` exits 0.
+  round. (d) Fresh fixture, an ordinary commit, judge open: a successful `panel rebind` closes the judge `superseded`
+  in its pass, its receipt names the rebind; `complete 1` exits 0.
 
 ## Validation Proofs
 The scratch-repo tests for AC1-AC18 each pass and fail on a named mutation; `make test` exits 0.
@@ -209,8 +212,8 @@ The scratch-repo tests for AC1-AC18 each pass and fail on a named mutation; `mak
 - [x] OQ15-OQ18: enrol every new spec (§8); verbs stay as `run` commands (§7); a spec past `plan approve` at release
   keeps today's rules; an enrolled spec enforces the gate. Decided (operator, 2026-11-18): yes.
 - [x] OQ19: an enrolled plan cannot change (§8). Decided (operator, 2026-11-18): accepted gap (Out of Scope).
-- [x] OQ20: a rerun on an edited plan (B6, §8). Decided (operator, 2026-11-18): a rerun keeps recorded ids and adds
-  only new chunks and links (§8); the operator edits the plan only after removing the epic's children.
+- [x] OQ20: a rerun on an edited plan (B6, §8). Decided (operator, 2026-11-18): before the approval record a rerun
+  refuses any plan change but missing items; the operator edits the plan only after removing the epic's children.
 
 ## Approval
 
