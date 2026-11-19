@@ -282,7 +282,11 @@ func implement(s State) (Changes, error) {
 		if v, ok, _ := Decode[Subject](r.Metadata, KeySubject); ok {
 			sub = v.Commit
 		}
-		brief := []string{"mindspec", "next", t.WorkItem, "--emit-only"}
+		target := t.WorkItem
+		if target == "" {
+			target = id
+		}
+		brief := []string{"mindspec", "next", target, "--emit-only"}
 		if t.Kind == "review-slot" {
 			gate := activeGate(s, t.Gate)
 			reg, _, err := Decode[RegistrationRecord](s.Records[gate].Metadata, KeyRegistration)

@@ -158,6 +158,7 @@ func TestS134Halt_LocalRejectAndForeignDescendant(t *testing.T) {
 	// Reopen locally to represent an in-flight slot with a foreign child.
 	f.Must(f.Store.SetStatusIf(slot, "closed", "open"))
 	slotChild := foreignChild(t, f, slot)
+	before := f.State()
 	out, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: d, Answer: "halt"})
 	f.Must(err)
 	if kernel.OutputExitCode(out) != 4 || !hasFlag(out, "foreign-child-open") {
@@ -167,8 +168,15 @@ func TestS134Halt_LocalRejectAndForeignDescendant(t *testing.T) {
 		if id == slot {
 			continue
 		}
-		if record(t, f, id).Status != "closed" {
+		r := record(t, f, id)
+		if r.Status != "closed" {
 			t.Fatalf("closable step left open: %s", id)
+		}
+		if before.Records[id].Status != "closed" {
+			receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
+			if err != nil || !has || receipt.Kind != "halted" || kernel.ValidReceipt(f.Root, receipt) != nil {
+				t.Fatalf("halt close lacks a halted receipt: %s %+v", id, receipt)
+			}
 		}
 	}
 	if record(t, f, gate).Status != "open" || record(t, f, slot).Status != "open" || !reflect.DeepEqual(record(t, f, foreign.ID), foreign) || !reflect.DeepEqual(record(t, f, slotChild.ID), slotChild) {

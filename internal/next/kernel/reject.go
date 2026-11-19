@@ -91,7 +91,25 @@ func supersede(s State) (Changes, error) {
 		if !has || !registered || reg.Round != round.Round || reg.Subject != round.Subject || head == "" || head == round.Subject {
 			continue
 		}
-		held := false
+		// A fix or decision keeps control of the refused round, even after
+		// a raw close or an answer. Only a passed fix can open its round.
+		_, hasFix := s.Records[fmt.Sprintf("%s.r%d.fix", t.Gate, round.Round+1)]
+		held := hasFix
+		if r := s.ExcludedStep; r != nil {
+			st, _, _ := r.Tuple()
+			held = held || (st.Gate == t.Gate && ((st.Kind == "decision" && st.Round == round.Round) || (st.Kind == "fix" && st.Round == round.Round+1)))
+		}
+		for _, id := range s.Steps {
+			st, _, _ := s.Records[id].Tuple()
+			if st.Kind == "decision" && st.Gate == t.Gate && st.Round == round.Round {
+				held = true
+				break
+			}
+		}
+		if held {
+			continue
+		}
+		superseded := false
 		for _, id := range s.Steps {
 			r := s.Records[id]
 			st, _, _ := r.Tuple()
@@ -104,8 +122,9 @@ func supersede(s State) (Changes, error) {
 			}
 			receipt := Receipt{Kind: "superseded", Subject: head}
 			c.Writes = append(c.Writes, Write{Kind: "close", ID: id, Receipt: &receipt})
+			superseded = true
 		}
-		if held {
+		if held || !superseded {
 			continue
 		}
 		count, err := RoundsForGate(s, gate)

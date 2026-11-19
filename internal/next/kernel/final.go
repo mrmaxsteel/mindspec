@@ -58,11 +58,12 @@ func finalRound(s State) (Changes, error) {
 	if err != nil {
 		return c, err
 	}
+	const initialRound = 1
 	if count >= Allowance(s, gate) {
-		c.Writes = append(c.Writes, decisionWrite(s, gate, "limit", count)...)
+		c.Writes = append(c.Writes, decisionWrite(s, gate, "limit", initialRound)...)
 		return c, nil
 	}
-	round, err := authorisedRound(s, gate, 1, head)
+	round, err := authorisedRound(s, gate, initialRound, head)
 	if err != nil {
 		return c, err
 	}

@@ -152,8 +152,14 @@ func TestS134Reject_LimitAcrossPanels(t *testing.T) {
 	for _, final := range []bool{false, true} {
 		t.Run(fmt.Sprintf("final=%t", final), func(t *testing.T) {
 			f, gate, target := limitFixture(t, final)
+			ref := "bead/" + target
+			if final {
+				ref = "spec/" + f.SpecID
+			}
+			beadCommit(t, f, ref)
 			before := kerneltest.Snapshot(t, f)
 			read := reduce(t, f, false)
+			assertNoPanel(t, read, target)
 			if before != kerneltest.Snapshot(t, f) {
 				t.Fatal("read wrote")
 			}
@@ -173,16 +179,12 @@ func TestS134Reject_LimitAcrossPanels(t *testing.T) {
 			assertNoPanel(t, out, target)
 			after, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
 			f.Must(err)
-			if !reflect.DeepEqual(old, after) || !action(out, gate+".r6.fix") || kernel.Allowance(f.State(), gate) != 6 {
+			if old.Round != 5 || !reflect.DeepEqual(old, after) || !action(out, gate+".r6.fix") || kernel.Allowance(f.State(), gate) != 6 {
 				t.Fatalf("answer authorised a round or lost fix: %+v", out)
 			}
 			assertNoPanel(t, reduce(t, f, true), target)
 			fix := gate + ".r6.fix"
 			// A committed artifact is durable evidence for the passed fix.
-			ref := "bead/" + target
-			if final {
-				ref = "spec/" + f.SpecID
-			}
 			commit := actorCommit(t, f, "fix-proof.txt", "fixed", ref)
 			blob := reducerGit(t, f, "rev-parse", commit+":fix-proof.txt")
 			f.Must(f.Store.WriteReceipt(fix, kernel.Receipt{Kind: "passed", Path: "fix-proof.txt", Commit: commit, Blob: blob}))
@@ -434,4 +436,133 @@ func TestS134Supersede_SubmitFixPreservesRound(t *testing.T) {
 	if round.Round != 2 || round.Subject != commit || receipt.Kind != "passed" || record(t, f, fix).Status != "closed" || !hasRun(out, "mindspec", "panel", "create", f.Items[0]) {
 		t.Fatalf("fix submission superseded its subject or did not open the next round: %+v %+v", round, out)
 	}
+}
+
+func TestS134Reject_CommitAfterRefusedTally(t *testing.T) {
+	for _, verdict := range []string{"REJECT", "REQUEST_CHANGES"} {
+		t.Run(verdict, func(t *testing.T) {
+			f := reducerFixture(t)
+			gate := f.Items[0] + ".review"
+			refusedPanel(t, f, gate, "review", 1, verdict)
+			old, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+			f.Must(err)
+			beadCommit(t, f, "bead/"+f.Items[0])
+			out := reduce(t, f, true)
+			after, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+			f.Must(err)
+			if !reflect.DeepEqual(old, after) {
+				t.Fatalf("commit after a refused tally authorised round %d", after.Round)
+			}
+			assertNoPanel(t, out, f.Items[0])
+			record(t, f, gate+".r2.fix")
+			if verdict == "REJECT" {
+				d := gate + ".decide.reject.r1"
+				if len(out.Decisions) != 1 || out.Decisions[0].Step != d || action(out, gate+".r2.fix") {
+					t.Fatalf("commit bypassed reject decision: %+v", out)
+				}
+			} else if len(out.Decisions) != 0 || !action(out, gate+".r2.fix") {
+				t.Fatalf("commit bypassed refused-round fix: %+v", out)
+			}
+			assertNoPanel(t, reduce(t, f, false), f.Items[0])
+			assertNoPanel(t, reduce(t, f, true), f.Items[0])
+		})
+	}
+}
+
+func TestS134Reject_RawFixCloseAfterCommit(t *testing.T) {
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	refusedPanel(t, f, gate, "review", 1, "REQUEST_CHANGES")
+	reduce(t, f, true)
+	fix := gate + ".r2.fix"
+	beadCommit(t, f, "bead/"+f.Items[0])
+	f.Must(f.Store.SetStatusIf(fix, "open", "closed"))
+	out := reduce(t, f, true)
+	round, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+	f.Must(err)
+	if round.Round != 1 {
+		t.Fatalf("raw fix close authorised round %d without a passed receipt", round.Round)
+	}
+	assertNoPanel(t, out, f.Items[0])
+	assertNoPanel(t, reduce(t, f, false), f.Items[0])
+	assertNoPanel(t, reduce(t, f, true), f.Items[0])
+}
+
+func TestS134Supersede_ExistingOutcomeHoldsOpenSlots(t *testing.T) {
+	for _, outcome := range []string{"closed-fix", "answered-open-decision", "answered-closed-decision", "closed-decision"} {
+		t.Run(outcome, func(t *testing.T) {
+			f := reducerFixture(t)
+			gate := f.Items[0] + ".review"
+			registerGate(t, f, gate, "review", 1)
+			reduce(t, f, true)
+			if outcome == "closed-fix" {
+				fix := gate + ".r2.fix"
+				f.Create(fix, gate)
+				f.Must(f.Store.SetStatusIf(fix, "open", "closed"))
+			} else {
+				d := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
+				if outcome == "closed-decision" {
+					f.Must(f.Store.SetStatusIf(d, "open", "closed"))
+				} else {
+					kerneltest.Answer(f, d, "fix")
+					if outcome == "answered-open-decision" {
+						f.Must(f.Store.SetStatusIf(d, "closed", "open"))
+					}
+				}
+			}
+			beadCommit(t, f, "bead/"+f.Items[0])
+			out := reduce(t, f, true)
+			round, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+			f.Must(err)
+			if round.Round != 1 {
+				t.Fatalf("%s allowed supersede to authorise round %d", outcome, round.Round)
+			}
+			for _, id := range round.Slots {
+				if record(t, f, id).Status != "open" {
+					t.Fatalf("%s superseded an open slot: %s", outcome, id)
+				}
+			}
+			assertNoPanel(t, out, f.Items[0])
+		})
+	}
+}
+
+func TestS134Final_FixBrief(t *testing.T) {
+	f, gate, _ := limitFixture(t, true)
+	reduce(t, f, true)
+	out, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: gate + ".decide.limit.r5", Answer: "continue:1"})
+	f.Must(err)
+	fix := gate + ".r6.fix"
+	for _, a := range out.Actions {
+		if a.Step == fix {
+			want := []string{"mindspec", "next", fix, "--emit-only"}
+			if !reflect.DeepEqual(a.Brief, want) {
+				t.Fatalf("final fix brief = %q, want %q", a.Brief, want)
+			}
+			return
+		}
+	}
+	t.Fatal("final fix action missing")
+}
+
+func TestS134Final_LimitUsesInitialRound(t *testing.T) {
+	f := reducerFixture(t)
+	for _, item := range f.Items {
+		doneItem(t, f, item)
+	}
+	gate := f.Epic + ".final"
+	// Prior registrations count against the allowance, but do not name the
+	// initial round that this gate would authorise.
+	for n := 1; n <= 5; n++ {
+		kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "old", Round: n, Subject: gateHead(t, f, gate), Slots: []string{"R1", "R2", "R3"}})
+	}
+	out := reduce(t, f, true)
+	want := gate + ".decide.limit.r1"
+	if len(out.Decisions) != 1 || out.Decisions[0].Step != want {
+		t.Fatalf("final limit used registration count instead of initial round: %+v", out.Decisions)
+	}
+	if _, has, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound); err != nil || has {
+		t.Fatalf("final limit authorised a round: has=%t err=%v", has, err)
+	}
+	assertNoPanel(t, out, f.SpecID)
 }
