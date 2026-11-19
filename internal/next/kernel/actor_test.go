@@ -566,52 +566,73 @@ func TestS134Submit_PassOnceAfterCloseAndError(t *testing.T) {
 		})
 	}
 }
-func TestS134Submit_HaltedPassBeforeRefusal(t *testing.T) {
-	for _, kind := range []string{"implement", "verdict"} {
-		t.Run(kind, func(t *testing.T) {
-			f, id, deps := actorFixture(t)
-			lease := leaseActor(t, f, id, deps)
-			commit := actorCommit(t, f, "proof.json", "{}", "bead/"+f.Items[0])
-			o := kernel.SubmitOptions{Step: id, Lease: lease.Token, Commit: commit}
-			if kind == "verdict" {
-				var subject string
-				f, id, lease, subject = slotFixture(t)
-				actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
-				o = kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: "verdict.json"}
-			}
-			d := kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
-			kerneltest.Answer(f, d, "halt")
-			other := f.Items[1] + ".impl.a1"
-			f.Create(other, f.Items[1])
-			before := actorRecord(t, f, id)
-			count := 0
-			reg := kernel.NewRegistry("ordinary", "halt", "spy")
-			f.Must(reg.Register("ordinary", kernel.Ordinary, func(kernel.State) (kernel.Changes, error) {
-				t.Fatal("halted pass ran an ordinary rule")
-				return kernel.Changes{}, nil
-			}))
-			f.Must(reg.Register("halt", kernel.Halt, func(s kernel.State) (kernel.Changes, error) {
-				if !s.Halted() {
-					t.Fatal("halt rule lost halt state")
+func TestS134Submit_HaltedNoWrites(t *testing.T) {
+	for _, kind := range []string{"implement", "verdict", "answer-change", "answer-new", "answer-new-halt", "answer-prior", "answer-foreign"} {
+		for _, native := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/native=%t", kind, native), func(t *testing.T) {
+				f, id, deps := actorFixture(t)
+				lease := leaseActor(t, f, id, deps)
+				commit := actorCommit(t, f, "proof.json", "{}", "bead/"+f.Items[0])
+				o := kernel.SubmitOptions{Step: id, Lease: lease.Token, Commit: commit}
+				if kind == "verdict" {
+					var subject string
+					f, id, lease, subject = slotFixture(t)
+					actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
+					o = kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: "verdict.json"}
 				}
-				if _, exists := s.Records[id]; exists {
-					t.Fatal("halt pass saw named step")
+				d := kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
+				kerneltest.Answer(f, d, "halt")
+				switch kind {
+				case "answer-change":
+					o = kernel.SubmitOptions{Step: d, Answer: "fix"}
+				case "answer-new", "answer-new-halt", "answer-prior":
+					otherDecision := kerneltest.OpenDecision(f, f.Items[1]+".review", "reject", 1, "fix", "halt")
+					o = kernel.SubmitOptions{Step: otherDecision, Answer: "fix"}
+					if kind == "answer-new-halt" {
+						o.Answer = "halt"
+					}
+					if kind == "answer-prior" {
+						kerneltest.Answer(f, otherDecision, "fix")
+					}
+				case "answer-foreign":
+					o = kernel.SubmitOptions{Step: "foreign", Answer: "halt"}
 				}
-				return kernel.Changes{Writes: []kernel.Write{{Kind: "close", ID: other, Receipt: &kernel.Receipt{Kind: "halted", HaltAnswer: d}}}}, nil
-			}))
-			f.Must(reg.Register("spy", kernel.FlagOnly, func(kernel.State) (kernel.Changes, error) { count++; return kernel.Changes{}, nil }))
-			kerneltest.WithRules(t, reg)
-			_, err := kernel.Submit(f.State(), o)
-			if err == nil || !strings.Contains(err.Error(), "spec is halted by "+d) {
-				t.Fatalf("halt refusal: %v", err)
-			}
-			if count != 1 || actorRecord(t, f, other).Status != "closed" || actorReceipt(t, f, other).Kind != "halted" {
-				t.Fatal("halt refusal lost its first pass")
-			}
-			if !reflect.DeepEqual(before, actorRecord(t, f, id)) {
-				t.Fatal("halt refusal touched named step")
-			}
-		})
+				f.Store.NativeIDs = native
+				if kind != "answer-foreign" {
+					o.Step = f.ID(o.Step)
+				}
+				other := f.Items[1] + ".impl.a1"
+				f.Create(other, f.Items[1])
+				before := kerneltest.Snapshot(t, f)
+				count := 0
+				reg := kernel.NewRegistry("ordinary", "halt", "spy")
+				f.Must(reg.Register("ordinary", kernel.Ordinary, func(kernel.State) (kernel.Changes, error) {
+					count++
+					return kernel.Changes{}, nil
+				}))
+				f.Must(reg.Register("halt", kernel.Halt, func(kernel.State) (kernel.Changes, error) {
+					count++
+					return kernel.Changes{Writes: []kernel.Write{{Kind: "close", ID: other, Receipt: &kernel.Receipt{Kind: "halted", HaltAnswer: d}}}}, nil
+				}))
+				f.Must(reg.Register("spy", kernel.FlagOnly, func(kernel.State) (kernel.Changes, error) { count++; return kernel.Changes{}, nil }))
+				kerneltest.WithRules(t, reg)
+				var err error
+				if o.Answer != "" {
+					_, err = kernel.Answer(f.State(), o.Step, o.Answer)
+				} else {
+					_, err = kernel.Submit(f.State(), o)
+				}
+				if err == nil || !strings.Contains(err.Error(), "spec is halted by "+d) {
+					t.Errorf("halt refusal: %v", err)
+				}
+				if count != 0 {
+					t.Errorf("halt refusal ran rules: calls=%d", count)
+				}
+				if kerneltest.Snapshot(t, f) != before {
+					t.Error("halt refusal changed snapshot")
+				}
+			})
+		}
 	}
 }
 func TestS134Submit_FinalFixBranch(t *testing.T) {

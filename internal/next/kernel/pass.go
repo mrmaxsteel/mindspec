@@ -58,7 +58,6 @@ func reduce(reg *Registry, state State, apply bool, step string) (PassResult, er
 			continue
 		}
 		input := result.State.Clone()
-		input.passHalted = halted
 		excluded := map[string]bool{step: step != ""}
 		for key, record := range input.Records {
 			if step != "" && (key == step || record.ID == step) {
