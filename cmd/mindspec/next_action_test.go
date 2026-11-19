@@ -165,11 +165,15 @@ func TestS134NextAction_StatusExits(t *testing.T) {
 	bin := buildMindspecBinary(t)
 	t.Run("done", func(t *testing.T) {
 		f := nextActionFixture(t)
+		head, err := f.Command("git", "rev-parse", "HEAD")
+		f.Must(err)
+		accepted := strings.TrimSpace(string(head))
 		for _, item := range f.Items {
-			kerneltest.PassGate(f, item+".review", "subject")
+			f.Must(f.Store.WriteMetadata(item, map[string]any{kernel.KeyCompletion: accepted}))
+			kerneltest.PassGate(f, item+".review", accepted)
 			f.Must(f.Store.SetStatusIf(item, "open", "closed"))
 		}
-		kerneltest.PassGate(f, f.Epic+".final", "subject")
+		kerneltest.PassGate(f, f.Epic+".final", accepted)
 		f.Must(f.Store.SetStatusIf(f.Epic, "open", "closed"))
 		nextActionSave(t, f)
 		out, code := nextActionRun(t, f, bin)

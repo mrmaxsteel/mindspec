@@ -19,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -280,6 +281,7 @@ var (
 // discipline. If CompleteBead fails, the metadata is not written —
 // the failure itself is the audit trail.
 type CompleteOpts struct {
+	kernelState *kernel.State
 	// Check runs content gates without changing lifecycle or workspace state.
 	Check              bool
 	workDestructionErr error
@@ -596,6 +598,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		)
 	}
 
+	opts.docAudit = &docCompletionAudit{}
+	if err := validateDocFlags(beadID, opts); err != nil {
+		return nil, err
+	}
 	kernelState, kernelErr := completeKernelStateFn(root, specID, lineageEpicID)
 	if kernelErr != nil {
 		return nil, kernelErr
@@ -606,18 +612,15 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			return nil, err
 		}
 		kernelState = &checked
+		opts.kernelState = kernelState
 		if !opts.Check && checked.Merged[beadID] && checked.Records[beadID].Status == "closed" {
-			return &Result{BeadID: beadID, BeadClosed: true, NextSpec: specID, AlreadyMerged: true}, nil
+			return &Result{BeadID: beadID, BeadClosed: true, NextSpec: specID, AlreadyMerged: true}, finishKernelComplete(*kernelState, beadID)
 		}
 		defer func() {
 			if retErr == nil && !opts.Check {
-				retErr = finishKernelComplete(*kernelState)
+				retErr = finishKernelComplete(*kernelState, beadID)
 			}
 		}()
-	}
-	opts.docAudit = &docCompletionAudit{}
-	if err := validateDocFlags(beadID, opts); err != nil {
-		return nil, err
 	}
 	if opts.Check {
 		return runCheck(root, beadID, specID, exec, opts)
@@ -1239,6 +1242,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 		// An unchanged ancestor branch creates no naming merge. Keep the
 		// existing completion path for that case.
+	}
+
+	if kernelState != nil {
+		if err := recheckKernelComplete(*kernelState, beadID); err != nil {
+			return nil, err
+		}
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)

@@ -87,7 +87,8 @@ func TestS134Next_LeaseAndNoForeignWrites(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "lease --take") {
 		t.Fatalf("second next: %v", err)
 	}
-	_, err = kernel.Lease(f.State(), kernel.LeaseOptions{Step: step}, kernel.LeaseDeps{})
+	actorCmdStore(t, f)
+	_, err = kernelPanelRun(t, leaseCmd, step)
 	if err == nil || !strings.Contains(err.Error(), "lease --take") {
 		t.Fatalf("lease after next: %v", err)
 	}
@@ -100,7 +101,8 @@ func TestS134Next_HaltAndActiveSelection(t *testing.T) {
 	decision := kerneltest.OpenDecision(halted, halted.Items[0]+".review", "reject", 1, "fix", "halt")
 	kerneltest.Answer(halted, decision, "halt")
 	before := kerneltest.Snapshot(t, halted)
-	_, leaseErr := kernel.Lease(halted.State(), kernel.LeaseOptions{Step: kernel.ImplementationStep(halted.State(), halted.Items[0])}, kernel.LeaseDeps{})
+	actorCmdStore(t, halted)
+	_, leaseErr := kernelPanelRun(t, leaseCmd, kernel.ImplementationStep(halted.State(), halted.Items[0]))
 	if leaseErr == nil || !strings.Contains(leaseErr.Error(), "halt") {
 		t.Fatalf("halted lease: %v", leaseErr)
 	}
@@ -181,7 +183,7 @@ func TestS134EnrolFault_FinalLinkCycleAfterCreate(t *testing.T) {
 		t.Fatal("missing repaired final link")
 	}
 }
-func TestS134Complete_HaltRefusesBeforeMutation(t *testing.T) {
+func TestS134Next_CheckHaltWritesNothing(t *testing.T) {
 	f, _ := nextKernelFixture(t)
 	decision := kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
 	kerneltest.Answer(f, decision, "halt")
@@ -280,5 +282,61 @@ func TestS134Next_LeasePhaseRecovery(t *testing.T) {
 		if f.Fake.Records[f.Epic].Metadata["mindspec_phase"] != phaseValue {
 			t.Fatalf("renew moved phase backwards from %s", phaseValue)
 		}
+	}
+}
+
+func TestS134Next_PreKernelWithEnrolledSibling(t *testing.T) {
+	f, _ := nextKernelFixture(t)
+	legacy := kerneltest.PreKernelSpec(t, kerneltest.WithFake(kernel.NativeIDs))
+	legacy.Items = []string{"legacy-1.1"}
+	handled, err := runKernelNext(&cobra.Command{}, f.Root, "", legacy.Items[0], 0, nil, false, "")
+	if handled || err != nil {
+		t.Fatalf("pre-kernel item captured: %t %v", handled, err)
+	}
+}
+func TestS134Next_AllHalted(t *testing.T) {
+	f, _ := nextKernelFixture(t)
+	decision := kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
+	kerneltest.Answer(f, decision, "halt")
+	before := kerneltest.Snapshot(t, f)
+	handled, err := runKernelNext(&cobra.Command{}, f.Root, "", "", 0, nil, false, "")
+	if !handled || err == nil || !strings.Contains(err.Error(), "halt") || !strings.Contains(err.Error(), decision) || !strings.Contains(err.Error(), "recovery: mindspec next-action "+f.SpecID) {
+		t.Fatalf("missing halt and recovery: %t %v", handled, err)
+	}
+	if kerneltest.Snapshot(t, f) != before {
+		t.Fatal("halted selection wrote")
+	}
+}
+func TestS134Next_SkipsLiveLease(t *testing.T) {
+	f, step := nextKernelFixture(t)
+	second := f.Fake.Records[f.Items[1]]
+	second.Dependencies = nil
+	f.Fake.Records[second.ID] = second
+	step2 := f.Items[1] + ".impl.a1"
+	f.Create(step2, f.Items[1])
+	actorCmdGit(t, f, "branch", "bead/"+f.Items[1])
+	var output bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&output)
+	_, err := runKernelNext(cmd, f.Root, "", "1", 0, nil, false, "")
+	f.Must(err)
+	first, _, err := kernel.Decode[kernel.LeaseRecord](f.State().Records[step].Metadata, kernel.KeyLease)
+	f.Must(err)
+	output.Reset()
+	_, err = runKernelNext(cmd, f.Root, "", "", 0, nil, false, "")
+	f.Must(err)
+	leased, ok, err := kernel.Decode[kernel.LeaseRecord](f.State().Records[step2].Metadata, kernel.KeyLease)
+	f.Must(err)
+	if !ok || leased.Generation != 1 || !strings.Contains(output.String(), "generation 1") {
+		t.Fatalf("second item not leased: %s %+v", output.String(), leased)
+	}
+	unchanged, _, err := kernel.Decode[kernel.LeaseRecord](f.State().Records[step].Metadata, kernel.KeyLease)
+	f.Must(err)
+	if !reflect.DeepEqual(first, unchanged) {
+		t.Fatal("selection changed first lease")
+	}
+	_, err = runKernelNext(cmd, f.Root, "", "", 0, nil, false, "")
+	if err == nil || !strings.Contains(err.Error(), "lease --take") {
+		t.Fatalf("all leased: %v", err)
 	}
 }

@@ -289,6 +289,11 @@ func TestS134Reducer_DoneNeedsMerge(t *testing.T) {
 	}
 	reducerGit(t, f, "update-ref", "refs/heads/spec/"+f.SpecID, head)
 	out = reduce(t, f, true)
+	if len(out.Actions) != 0 {
+		t.Fatal("raw merge released work without completion")
+	}
+	f.Must(f.Store.WriteMetadata(item, map[string]any{kernel.KeyCompletion: head}))
+	out = reduce(t, f, true)
 	if len(out.Actions) != 2 {
 		t.Fatalf("merged pass did not release both dependents: %+v", out)
 	}
@@ -499,7 +504,7 @@ func TestS134Reducer_BranchRemovalKeepsMerge(t *testing.T) {
 	tree := reducerGit(t, f, "rev-parse", head+"^{tree}")
 	merge := reducerGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit-tree", tree, "-p", base, "-p", head, "-m", "Merge bead/"+item)
 	reducerGit(t, f, "update-ref", "refs/heads/spec/"+f.SpecID, merge)
-	f.Must(f.Store.WriteMetadata(item, map[string]any{"mindspec_landed_merge_sha": merge, "mindspec_landed_second_parent": head}))
+	f.Must(f.Store.WriteMetadata(item, map[string]any{"mindspec_landed_merge_sha": merge, "mindspec_landed_second_parent": head, kernel.KeyCompletion: head}))
 	reducerGit(t, f, "update-ref", "-d", "refs/heads/bead/"+item)
 	if out := reduce(t, f, true); len(out.Actions) != 2 {
 		t.Fatalf("removed merged branch held downstream: %+v", out)

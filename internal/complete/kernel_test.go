@@ -1,6 +1,8 @@
 package complete
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -173,7 +175,7 @@ func TestS134Complete_EnablesDependentsOnlyAfterMerge(t *testing.T) {
 	f.Must(err)
 	_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "merge", "--no-ff", "-m", "Merge bead/"+f.Items[0], "bead/"+f.Items[0])
 	f.Must(err)
-	f.Must(finishKernelComplete(f.State()))
+	f.Must(finishKernelComplete(f.State(), f.Items[0]))
 	created := []string{}
 	for _, id := range f.State().Steps {
 		if tuple, ok, err := f.State().Records[id].Tuple(); err == nil && ok && tuple.Kind == "implement" && !prior[id] {
@@ -274,6 +276,13 @@ func TestS134Complete_RunAcceptsCarryOverAndPanelOnly(t *testing.T) {
 				kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "passed", Round: 1, Subject: old, Slots: []string{"R1", "R2"}})
 				completeKernelMove(t, f, filepath.ToSlash(filepath.Join(".mindspec/specs", f.SpecID, "reviews/passed/note.txt")))
 			} else if mode != "raw-close" {
+				if mode == "carry-over" {
+					kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "passed", Round: 1, Subject: old, Slots: []string{"R1", "R2"}})
+					_, err := f.Command("git", "add", ".")
+					f.Must(err)
+					_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "panel registration")
+					f.Must(err)
+				}
 				head := completeKernelMove(t, f, ".mindspec/config.yaml")
 				if mode == "carry-over" {
 					r, err := f.Store.Lookup(gate)
@@ -284,32 +293,12 @@ func TestS134Complete_RunAcceptsCarryOverAndPanelOnly(t *testing.T) {
 					f.Must(f.Store.WriteReceipt(gate, receipt))
 				}
 			}
-			stubPhaseEpic(t, f.SpecID, f.Epic)
-			findEpicForBeadFn = func(string) (string, string, error) { return f.Epic, f.SpecID, nil }
-			runBDFn = f.Fake.Run
-			worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
-				return []bead.WorktreeListEntry{{Name: "worktree-" + f.Items[0], Path: f.Root, Branch: "bead/" + f.Items[0]}}, nil
-			}
-			completeGetMetadataFn = func(id string) (map[string]interface{}, error) {
-				r, err := f.Store.Lookup(id)
-				if r == nil {
-					return nil, err
-				}
-				return r.Metadata, err
-			}
-			completeMergeMetadataFn = f.Store.WriteMetadata
-			closeBeadFn = func(ids ...string) error {
-				r, err := f.Store.Lookup(ids[0])
-				if err != nil {
-					return err
-				}
-				return f.Store.SetStatusIf(ids[0], r.Status, "closed")
-			}
-			fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
-				r, err := f.Store.Lookup(id)
-				return next.BeadInfo{ID: id, Status: r.Status}, err
-			}
+			installCompleteKernelRun(t, f)
 			exec := &s134CompletionExecutor{MockExecutor: &executor.MockExecutor{}, fixture: f}
+			priorRecords := map[string]kernel.Record{}
+			data, err := json.Marshal(f.Fake.Records)
+			f.Must(err)
+			f.Must(json.Unmarshal(data, &priorRecords))
 			result, err := Run(f.Root, f.Items[0], f.SpecID, "", exec, CompleteOpts{})
 			if mode == "unaccepted" || mode == "missing-gate" {
 				if err == nil || !strings.Contains(err.Error(), gate) {
@@ -330,6 +319,25 @@ func TestS134Complete_RunAcceptsCarryOverAndPanelOnly(t *testing.T) {
 					t.Fatal("completion pass omitted dependent")
 				}
 			}
+			allowed := map[string]bool{f.Epic: true}
+			state := f.State()
+			for _, ids := range [][]string{state.Items, state.Gates, state.Steps} {
+				for _, id := range ids {
+					if row, ok := state.Records[id]; ok {
+						allowed[row.ID] = true
+					}
+				}
+			}
+			for id, row := range f.Fake.Records {
+				if !reflect.DeepEqual(priorRecords[id], row) && !allowed[id] {
+					t.Fatalf("completion changed unrelated record %s", id)
+				}
+			}
+			for id := range priorRecords {
+				if _, ok := f.Fake.Records[id]; !ok {
+					t.Fatalf("completion deleted record %s", id)
+				}
+			}
 			if !reflect.DeepEqual(f.Fake.Records[note.ID], note) || !reflect.DeepEqual(f.Fake.Records[bug.ID], bug) {
 				t.Fatal("completion changed foreign records")
 			}
@@ -339,6 +347,12 @@ func TestS134Complete_RunAcceptsCarryOverAndPanelOnly(t *testing.T) {
 				t.Fatal("completion ignored the foreign blocker")
 			}
 			before := kerneltest.Snapshot(t, f)
+			f.Fake.Hook = func(args []string) error {
+				if len(args) > 1 && args[0] == "update" && args[1] == f.Items[0] {
+					return errors.New("replay wrote completed work item")
+				}
+				return nil
+			}
 			replay, err := Run(f.Root, f.Items[0], f.SpecID, "", exec, CompleteOpts{})
 			f.Must(err)
 			if !replay.AlreadyMerged || !strings.Contains(FormatResult(replay), "already complete") || strings.Contains(FormatResult(replay), "Mode: idle") {
@@ -363,4 +377,34 @@ func TestS134Complete_AncestorWithoutCompletionStillNeedsGate(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), gate) {
 		t.Fatalf("ancestry bypassed the gate: %v", err)
 	}
+}
+
+func installCompleteKernelRun(t *testing.T, f *kerneltest.Fixture) {
+	t.Helper()
+	stubPhaseEpic(t, f.SpecID, f.Epic)
+	findEpicForBeadFn = func(string) (string, string, error) { return f.Epic, f.SpecID, nil }
+	runBDFn = f.Fake.Run
+	worktreeListFn = func() ([]bead.WorktreeListEntry, error) {
+		return []bead.WorktreeListEntry{{Name: "worktree-" + f.Items[0], Path: f.Root, Branch: "bead/" + f.Items[0]}}, nil
+	}
+	completeGetMetadataFn = func(id string) (map[string]interface{}, error) {
+		r, err := f.Store.Lookup(id)
+		if r == nil {
+			return nil, err
+		}
+		return r.Metadata, err
+	}
+	completeMergeMetadataFn = f.Store.WriteMetadata
+	closeBeadFn = func(ids ...string) error {
+		r, err := f.Store.Lookup(ids[0])
+		if err != nil {
+			return err
+		}
+		return f.Store.SetStatusIf(ids[0], r.Status, "closed")
+	}
+	fetchBeadByIDFn = func(id string) (next.BeadInfo, error) {
+		r, err := f.Store.Lookup(id)
+		return next.BeadInfo{ID: id, Status: r.Status}, err
+	}
+
 }

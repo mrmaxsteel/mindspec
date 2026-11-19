@@ -17,6 +17,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -236,6 +237,13 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 		}
 		if err = exec.IsTreeClean(worktree); err != nil {
 			return err
+		}
+
+		if err := recording.EmitPhaseMarker(root, specID, "plan", "plan-approved"); err != nil {
+			result.Warnings = append(result.Warnings, "could not emit recording marker: "+termsafe.Escape(err.Error()))
+		}
+		if err := recording.UpdatePhase(root, specID, "plan", "plan-approved"); err != nil {
+			result.Warnings = append(result.Warnings, "could not update recording phase: "+termsafe.Escape(err.Error()))
 		}
 		result.BeadIDs = ids
 		if err := exec.HandoffEpic(epic, specID, ids); err != nil {

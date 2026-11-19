@@ -174,6 +174,11 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath st
 		var err error
 		switch step {
 		case 1:
+			if opts.kernelState != nil {
+				if err := recheckKernelComplete(*opts.kernelState, beadID); err != nil {
+					return nil, err
+				}
+			}
 			if !closed {
 				err = closeBeadFn(beadID)
 				if err == nil {

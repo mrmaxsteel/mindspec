@@ -188,7 +188,7 @@ func refuseHalt(s State) error {
 	}
 	sort.Strings(ids)
 	if len(ids) > 0 {
-		return actorFailure("spec is halted by " + ids[0])
+		return fmt.Errorf("spec is halted by %s (%s)\nrecovery: mindspec next-action %s", termsafe.Escape(ids[0]), idrender.Spec(s.SpecID), idrender.Spec(s.SpecID))
 	}
 	return nil
 }

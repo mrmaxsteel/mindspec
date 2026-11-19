@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -57,6 +58,7 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 		return true, err
 	}
 	var candidates []kernel.State
+	var halted []error
 	for _, s := range states {
 		matches := name == ""
 		n, _ := strconv.Atoi(name)
@@ -67,13 +69,14 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 			continue
 		}
 		if s.Halted() && spec == "" && name == "" {
+			halted = append(halted, kernel.CheckHalt(s))
 			continue
 		}
 		candidates = append(candidates, s)
 	}
 	if len(candidates) == 0 {
-		if len(states) > 0 {
-			return true, fmt.Errorf("no approved work item matches; recovery: mindspec next-action %s", idrender.Spec(spec))
+		if len(halted) > 0 {
+			return true, errors.Join(halted...)
 		}
 		return false, nil
 	}
@@ -94,6 +97,7 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 		}
 	}
 	selected := ""
+	waiting := ""
 	if name != "" {
 		n, _ := strconv.Atoi(name)
 		for i, item := range s.Items {
@@ -106,6 +110,19 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 		for _, item := range items {
 			step := kernel.ImplementationStep(s, item)
 			if step != "" && s.Records[step].Status != "closed" {
+				lease, _, err := kernel.Decode[kernel.LeaseRecord](s.Records[step].Metadata, kernel.KeyLease)
+				if err != nil {
+					return true, err
+				}
+				if lease.TokenHash != "" && lease.Expires.After(s.At) {
+					if waiting == "" {
+						waiting = item
+					}
+					continue
+				}
+				if kernel.CheckWorkItem(s, step) != nil {
+					continue
+				}
 				selected = item
 				break
 			}
@@ -116,8 +133,21 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 			return true, fmt.Errorf("pick %d out of range", pick)
 		}
 	}
+	if selected == "" && waiting != "" {
+		selected = waiting
+	}
 	if selected == "" {
 		return true, fmt.Errorf("no implementation is ready\nrecovery: mindspec next-action %s --apply", idrender.Spec(s.SpecID))
+	}
+	dirt, ignored, err := next.CheckDirtyTreeProportional(root, root, s.SpecID)
+	if err != nil {
+		return true, err
+	}
+	if len(dirt) > 0 {
+		return true, next.DirtyTreeFailure(root, dirt, "")
+	}
+	if len(ignored) > 0 {
+		fmt.Fprintln(cmd.ErrOrStderr(), next.IgnoredDirtNotice(ignored))
 	}
 	step := kernel.ImplementationStep(s, selected)
 	if step == "" {
@@ -132,16 +162,6 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 	}
 	if step == "" {
 		return true, fmt.Errorf("implementation is blocked\nrecovery: mindspec next-action %s", idrender.Spec(s.SpecID))
-	}
-	dirt, ignored, err := next.CheckDirtyTreeProportional(root, root, s.SpecID)
-	if err != nil {
-		return true, err
-	}
-	if len(dirt) > 0 {
-		return true, next.DirtyTreeFailure(root, dirt, "")
-	}
-	if len(ignored) > 0 {
-		fmt.Fprintln(cmd.ErrOrStderr(), next.IgnoredDirtNotice(ignored))
 	}
 	gate, err := nextGateReadinessFn(root, selected, next.GateOptions{ScopeSpec: s.SpecID, NamedSignals: signals, FlagGiven: flagGiven, EvidencePath: evidence})
 	if err != nil {

@@ -57,7 +57,9 @@ func activeGate(s State, base string) string {
 	return best
 }
 func itemDone(s State, id string) bool {
-	return s.Records[id].Status == "closed" && !ForcedClose(s, id) && passed(s, s.Records[activeGate(s, id+".review")]) && s.Merged[id]
+	completed, _ := s.Records[id].Metadata[KeyCompletion].(string)
+	accepted, err := AcceptedSubject(s, id+".review")
+	return completed != "" && completed == accepted && err == nil && s.Records[id].Status == "closed" && !ForcedClose(s, id) && s.Merged[id] && CheckPassedGate(s, id+".review") == nil
 }
 func upstreamsDone(s State, item string) bool {
 	for _, link := range s.Links {
@@ -78,7 +80,14 @@ func subject(s State, gate string) string {
 		if err != nil {
 			return ""
 		}
-		return s.Refs["refs/heads/"+branch]
+		if head := s.Refs["refs/heads/"+branch]; head != "" {
+			return head
+		}
+		if s.Merged[t.WorkItem] {
+			head, _ := s.Records[t.WorkItem].Metadata["mindspec_landed_second_parent"].(string)
+			return head
+		}
+		return ""
 	}
 	branch, err := workspace.SpecBranch(s.SpecID)
 	if err != nil {

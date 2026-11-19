@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
@@ -32,10 +33,6 @@ func CheckPassedGate(s State, base string) error {
 	for _, key := range children {
 		failures = append(failures, fmt.Errorf("open child: %s", termsafe.Escape(key)))
 	}
-	tuple, _, _ := g.Tuple()
-	if (tuple.WorkItem != "" && s.Merged[tuple.WorkItem]) || (tuple.WorkItem == "" && s.Records[s.Epic].Status == "closed") {
-		return errors.Join(failures...)
-	}
 	accepted, err := AcceptedSubject(s, gate)
 	if err != nil {
 		failures = append(failures, err)
@@ -50,7 +47,7 @@ func CheckPassedGate(s State, base string) error {
 	if len(failures) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%w\nrecovery: finish the gate and its open children", errors.Join(failures...))
+	return fmt.Errorf("%w\nrecovery: mindspec next-action %s --apply", errors.Join(failures...), idrender.Spec(s.SpecID))
 }
 
 // ImplementationStep selects the newest implementation attempt of a work item.

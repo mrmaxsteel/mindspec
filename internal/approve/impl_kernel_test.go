@@ -195,7 +195,9 @@ func TestS134ImplApprove_AuditAndRerun(t *testing.T) {
 	slot := s134Slot(f)
 	s134Close(t, f, slot, nil)
 	kerneltest.Repaired(f, slot, kernel.Receipt{Kind: "passed", Retally: "repair"})
-	receipt := kernel.Receipt{Kind: "passed", Retally: "passing-tally", CarryOvers: []kernel.CarryOver{{OldSubject: "old", NewSubject: "new", Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", Retally: "judgement"}}}}
+	accepted, err := kernel.AcceptedSubject(f.State(), gate)
+	f.Must(err)
+	receipt := kernel.Receipt{Kind: "passed", Subject: accepted, Retally: "passing-tally", CarryOvers: []kernel.CarryOver{{OldSubject: accepted, NewSubject: accepted, Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", Retally: "judgement"}}}}
 	f.Must(f.Store.WriteReceipt(gate, receipt))
 	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRePanel, kernel.RePanel{SlotCount: 3, Paths: []string{"source.go"}})))
 	f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyRawClaims, []kernel.RawClaim{{At: now}})))

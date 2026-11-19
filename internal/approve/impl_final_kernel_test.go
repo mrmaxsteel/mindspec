@@ -89,3 +89,44 @@ func TestS134ImplFinalGate_JudgeNamesSubjectInApproval(t *testing.T) {
 		t.Fatalf("approval did not name all checks: %v", err)
 	}
 }
+
+func TestS134ImplFinalGate_MergedMovedSubject(t *testing.T) {
+	f, ex, _ := s134ApproveFixture(t)
+	item := f.Items[0]
+	gate := item + ".review"
+	accepted, err := kernel.AcceptedSubject(f.State(), gate)
+	f.Must(err)
+	_, err = f.Command("git", "switch", "bead/"+item)
+	f.Must(err)
+	f.Must(os.WriteFile(filepath.Join(f.Root, "unreviewed.go"), []byte("package changed\n"), 0600))
+	_, err = f.Command("git", "add", "unreviewed.go")
+	f.Must(err)
+	_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "change")
+	f.Must(err)
+	raw, err := f.Command("git", "rev-parse", "HEAD")
+	f.Must(err)
+	head := strings.TrimSpace(string(raw))
+	_, err = f.Command("git", "switch", "spec/"+f.SpecID)
+	f.Must(err)
+	_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "merge", "--no-ff", "-m", "raw", "bead/"+item)
+	f.Must(err)
+	if !f.State().Merged[item] {
+		t.Fatal("fixture not merged")
+	}
+	_, err = ApproveImpl(f.Root, f.SpecID, ex)
+	if err == nil || !strings.Contains(err.Error(), head) || !strings.Contains(err.Error(), accepted) {
+		t.Fatalf("approval accepted moved merged head: %v", err)
+	}
+}
+func TestS134ImplFinalGate_ClosedEpicMovedSubject(t *testing.T) {
+	f, _, _ := s134ApproveFixture(t)
+	gate := f.Epic + ".final"
+	accepted, err := kernel.AcceptedSubject(f.State(), gate)
+	f.Must(err)
+	head := finalKernelCommit(t, f, "unreviewed.go")
+	f.Must(f.Store.SetStatusIf(f.Epic, "open", "closed"))
+	err = kernel.CheckPassedGate(f.State(), gate)
+	if err == nil || !strings.Contains(err.Error(), head) || !strings.Contains(err.Error(), accepted) {
+		t.Fatalf("closed epic bypassed subject: %v", err)
+	}
+}
