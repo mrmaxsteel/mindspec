@@ -2,6 +2,24 @@
 
 ## Provided Interfaces
 
+### Surface scan
+
+The branch surface scan runs only with the `surfacescan` build tag.
+It checks added and changed lines in non-test Go files under `cmd/` and `internal/`.
+It excludes Go test files and `testdata/` directories.
+It also checks all files under `.claude/skills/` and `plugins/mindspec/skills/`.
+The matcher rejects internal record references and tracker export filenames.
+It permits whole quoted slot tokens, dotted slot tokens, and listed product words.
+An unknown product word with the project prefix fails the scan.
+
+`MINDSPEC_SURFACE_BASE` can select a later base commit.
+The base must include the pinned history floor and precede the head.
+The base must be an ancestor of the head and reachable from `origin/main`.
+The scan checks only lines after that base.
+Missing history fails with fetch guidance.
+Temporary repository tests check the matcher, path selection, and history rules.
+The permanent product surface guard also checks shipped skills and embedded text.
+
 ### Doctor status and merge state
 
 `doctor.Info` renders as `[INFO]`. `Report.HasFailures` counts only Error
