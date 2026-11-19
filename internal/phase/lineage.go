@@ -30,6 +30,7 @@ type LineageProvenance struct {
 }
 
 func titleSpecID(title string) string {
+	title = strings.TrimSpace(strings.TrimPrefix(title, "[mindspec]"))
 	start := strings.Index(title, "[SPEC ")
 	if start < 0 {
 		return ""

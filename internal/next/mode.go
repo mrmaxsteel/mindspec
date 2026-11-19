@@ -83,6 +83,7 @@ func ResolveMode(root string, bead BeadInfo) ResolvedWork {
 // today and a hostile one can never be stored in ResolvedWork.SpecID,
 // rendered raw, or fed to a recording write.
 func parseSpecID(title string) string {
+	title = strings.TrimSpace(strings.TrimPrefix(title, "[mindspec]"))
 	// Try bracket-prefix: [TAG specID] or [TAG specID.chunk] or [specID]
 	if strings.HasPrefix(title, "[") {
 		closeBracket := strings.Index(title, "]")

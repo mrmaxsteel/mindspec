@@ -834,7 +834,7 @@ func handleEmptyScoped(root string, rs next.ReadySet, exec executor.Executor, re
 	if _, err := rs.Cache.FindEpic(rs.EpicID); err != nil {
 		return fmt.Errorf("stored phase: indeterminate: %w\nrecovery: mindspec state show", next.RenderBDError(err))
 	}
-	detail, err := phase.DerivePhaseDetailWithCache(rs.Cache, rs.EpicID)
+	detail, err := phase.DerivePhaseDetailWithCache(rs.Cache.WithRoot(root), rs.EpicID)
 	if err != nil {
 		return err
 	}

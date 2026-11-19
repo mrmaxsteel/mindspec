@@ -1652,3 +1652,31 @@ Each step resumes from its own done signal.
 A closed resume keeps all gates and tip checks. It skips the presence check.
 An absent worktree passes the user-changes check. In a non-flat layout with
 panel enforcement, no worktree and no surviving registration refuses.
+
+## Enrolment
+
+Plan approval records each work-item ID immediately after creation.
+A retry uses these IDs. It does not select items by parent.
+A foreign child stays unchanged.
+
+Approval writes the complete plan-order link record before it checks cycles.
+It checks child links and blocking links before each blocking-link write.
+A cycle before enrolment stops approval. The error names the link and a tracker
+command to remove the blocking link. No gate or approval record exists yet.
+After enrolment, a refused link stays absent. The next apply pass retries it.
+
+Enrolment pins the round allowance and lease duration on the epic.
+The approval record follows this policy record.
+Each work item gets an open review gate as its child.
+The epic gets a final gate. Each work item blocks that final gate.
+These gates use computed identities and tuple metadata.
+An open review gate prevents a normal close of its work item.
+
+Before approval, a retry checks every recorded item against its plan chunk.
+It also checks each recorded upstream list. A change stops the retry before
+any write. A new chunk with no recorded ID can be created.
+An approval with an enrolment witness refuses a second approval.
+An older approval with no witness keeps its existing lifecycle.
+
+The epic and work items carry the `mindspec` label and title tag.
+Title parsers skip this tag.
