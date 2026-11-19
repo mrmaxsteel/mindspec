@@ -91,7 +91,7 @@ func surfaceGit(repo string, args ...string) (string, error) {
 		}
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
+		"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false", "GIT_NO_REPLACE_OBJECTS=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, out)
@@ -187,7 +187,7 @@ func TestS134SurfaceMatcher_PlantedReferences(t *testing.T) {
 		"ADR-0035", "ADR 0035", "ADR0035", "spec 134", "spec_134", "spec-134", "Spec134", "S134",
 		"AC14", "OQ8", "(R3", `"B7: ..."`, `"R11 forbids"`, "§8", "#7", "#146", `"#146 broke"`,
 		"mindspec-xaoq", "mindspec-4qd", "mindspec-2fy.1", ".beads/issues.jsonl", "mindspec-kernel",
-		"mindspec-abc.12.3", "mindspec-owned.1", "B12", "R99",
+		"mindspec-abc.12.3", "mindspec-owned.1", "B12", "R99", `"#000000"`,
 	} {
 		t.Run(line, func(t *testing.T) {
 			if got := surfaceInternalRefs(line); len(got) == 0 {
@@ -356,20 +356,40 @@ func TestS134SurfaceDiffFn_SpecBranchBaseRefused(t *testing.T) {
 
 func TestS134SurfaceDiffFn_MergedMainBase(t *testing.T) {
 	s, base := surfaceTestRepo(t)
+	surfaceTestWrite(t, s.repo, "cmd/base.go", "package main\n// ADR-0035\n// spec line\n")
 	specCommit := surfaceTestCommit(t, s.repo)
-	surfaceTestWrite(t, s.repo, "internal/main.go", "// ADR-0035\n")
+	surfaceTestWrite(t, s.repo, "cmd/base.go", "package main\n// ADR-0035\n// main ADR-0036 line\n")
 	candidate := surfaceTestCommit(t, s.repo)
 	tree := surfaceTestGit(t, s.repo, "rev-parse", candidate+"^{tree}")
 	mainCommit := surfaceTestGit(t, s.repo, "-c", "user.name=Surface Test", "-c", "user.email=surface@example.invalid",
 		"commit-tree", tree, "-p", base, "-m", "main advance")
 	surfaceTestGit(t, s.repo, "update-ref", "refs/remotes/origin/main", mainCommit)
+	surfaceTestWrite(t, s.repo, "cmd/base.go", "package main\n// ADR-0035\n// main ADR-0036 line\n// spec line\n")
+	candidate = surfaceTestCommit(t, s.repo)
+	tree = surfaceTestGit(t, s.repo, "rev-parse", candidate+"^{tree}")
 	// Build a merge graph locally without invoking merge or checking out a branch.
 	merge := surfaceTestGit(t, s.repo, "-c", "user.name=Surface Test", "-c", "user.email=surface@example.invalid",
 		"commit-tree", tree, "-p", specCommit, "-p", mainCommit, "-m", "merged main")
 	if err := s.scan(mainCommit, merge, "origin/main"); err != nil {
 		t.Fatalf("merged main's lines must pass: %v", err)
 	}
-	if err := s.scan(base, merge, "origin/main"); err == nil || !strings.Contains(err.Error(), "internal/main.go:1:") {
+	if err := s.scan(base, merge, "origin/main"); err == nil || !strings.Contains(err.Error(), `cmd/base.go:3: internal references ["ADR-0036"]`) {
 		t.Fatalf("old base must still expose main's planted line: %v", err)
+	}
+}
+
+func TestS134SurfaceDiffFn_ReplaceBlobCannotHideLine(t *testing.T) {
+	s, base := surfaceTestRepo(t)
+	surfaceTestWrite(t, s.repo, "cmd/new.go", "// ADR-0035\n")
+	head := surfaceTestCommit(t, s.repo)
+	dirtyBlob := surfaceTestGit(t, s.repo, "rev-parse", head+":cmd/new.go")
+	surfaceTestWrite(t, s.repo, "cmd/new.go", "// plain text\n")
+	cleanBlob := surfaceTestGit(t, s.repo, "hash-object", "-w", filepath.Join(s.repo, "cmd/new.go"))
+	surfaceTestGit(t, s.repo, "replace", dirtyBlob, cleanBlob)
+	if got := surfaceTestGit(t, s.repo, "cat-file", "blob", "refs/replace/"+dirtyBlob); got != "// plain text" {
+		t.Fatalf("replacement must contain clean text: %q", got)
+	}
+	if err := s.scan(base, head, "origin/main"); err == nil || !strings.Contains(err.Error(), `cmd/new.go:1: internal references ["ADR-0035"]`) {
+		t.Fatalf("blob replacement must not hide the planted line: %v", err)
 	}
 }

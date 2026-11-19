@@ -80,6 +80,8 @@ A successful reduction can return a non-zero status code.
 | `done` | 5 | All work is complete. |
 | `indeterminate` | 1 | The reducer cannot determine an action. |
 
+`indeterminate` means the reducer returns no actions.
+
 Without `--apply`, the command writes nothing.
 With `--apply`, the command makes one reduction under the phase lock.
 On a halted spec, `--apply` can finish pending halted closes and returns 4.

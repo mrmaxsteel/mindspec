@@ -28,6 +28,7 @@ func adr0035NextActionStatusExits(text string) error {
 		"exception to the general exit-code contract", "with and without `--apply`",
 		"writes nothing", "one reduction under the phase lock", "pending halted closes and returns 4",
 		"`halted` before `wait`", "final `recovery:` line",
+		"`indeterminate` means the reducer returns no actions.",
 	} {
 		if !strings.Contains(section, rule) {
 			return fmt.Errorf("next-action amendment is missing rule %q", rule)
