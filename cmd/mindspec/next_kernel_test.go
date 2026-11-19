@@ -288,7 +288,39 @@ func TestS134Next_LeasePhaseRecovery(t *testing.T) {
 func TestS134Next_PreKernelWithEnrolledSibling(t *testing.T) {
 	f, _ := nextKernelFixture(t)
 	legacy := kerneltest.PreKernelSpec(t, kerneltest.WithFake(kernel.NativeIDs))
-	legacy.Items = []string{"legacy-1.1"}
+	// Both epics and their recorded items are in the same store.
+	ids := map[string]string{}
+	for id := range legacy.Fake.Records {
+		ids[id] = strings.Replace(id, legacy.Epic, "legacy-1", 1)
+	}
+	for id, row := range legacy.Fake.Records {
+		row.ID = ids[id]
+		if row.Parent != "" {
+			row.Parent = ids[row.Parent]
+		}
+		for i := range row.Dependencies {
+			row.Dependencies[i].ID = ids[row.Dependencies[i].ID]
+		}
+		f.Fake.Records[row.ID] = row
+	}
+	legacy.Epic = ids[legacy.Epic]
+	for i, id := range legacy.Items {
+		legacy.Items[i] = ids[id]
+	}
+	planPath := filepath.Join(legacy.SpecDir, "plan.md")
+	plan, err := os.ReadFile(planPath)
+	f.Must(err)
+	for old, newID := range ids {
+		plan = []byte(strings.ReplaceAll(string(plan), old, newID))
+	}
+	f.Must(os.WriteFile(planPath, plan, 0600))
+	legacy.Store = kernel.NewStore(f.Root, legacy.Epic, f.Fake.Run)
+	legacy.Store.NativeIDs = kernel.NativeIDs
+	legacyState, err := kernel.ReadState(legacy.Store, legacy.SpecID, legacy.SpecDir)
+	f.Must(err)
+	if legacyState.Enrolled || legacyState.Records[legacy.Items[0]].ID != legacy.Items[0] {
+		t.Fatal("pre-kernel fixture missing from shared store")
+	}
 	handled, err := runKernelNext(&cobra.Command{}, f.Root, "", legacy.Items[0], 0, nil, false, "")
 	if handled || err != nil {
 		t.Fatalf("pre-kernel item captured: %t %v", handled, err)
@@ -338,5 +370,47 @@ func TestS134Next_SkipsLiveLease(t *testing.T) {
 	_, err = runKernelNext(cmd, f.Root, "", "", 0, nil, false, "")
 	if err == nil || !strings.Contains(err.Error(), "lease --take") {
 		t.Fatalf("all leased: %v", err)
+	}
+}
+
+func TestS134Next_SkipsBlockedItem(t *testing.T) {
+	f, step := nextKernelFixture(t)
+	second := f.Fake.Records[f.Items[1]]
+	second.Dependencies = nil
+	f.Fake.Records[second.ID] = second
+	step2 := f.Items[1] + ".impl.a1"
+	f.Create(step2, f.Items[1])
+	actorCmdGit(t, f, "branch", "bead/"+f.Items[1])
+	bug := kernel.Record{ID: "foreign-bug", Type: "bug", Status: "open"}
+	f.Fake.Records[bug.ID] = bug
+	first := f.Fake.Records[f.Items[0]]
+	first.Dependencies = append(first.Dependencies, kernel.Dependency{ID: bug.ID, Type: "blocks"})
+	f.Fake.Records[first.ID] = first
+	before := f.State().Records[step]
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	_, err := runKernelNext(cmd, f.Root, "", "", 0, nil, false, "")
+	f.Must(err)
+	lease, ok, err := kernel.Decode[kernel.LeaseRecord](f.State().Records[step2].Metadata, kernel.KeyLease)
+	f.Must(err)
+	if !ok || lease.Generation != 1 || !strings.Contains(out.String(), "generation 1") {
+		t.Fatal("unblocked item not leased")
+	}
+	if !reflect.DeepEqual(before, f.State().Records[step]) || !reflect.DeepEqual(bug, f.Fake.Records[bug.ID]) {
+		t.Fatal("blocked step or foreign blocker changed")
+	}
+}
+
+func TestS134Next_NoReadyNamesLegacySelection(t *testing.T) {
+	f, step := nextKernelFixture(t)
+	f.Must(f.Store.SetStatusIf(step, "open", "closed"))
+	before := kerneltest.Snapshot(t, f)
+	handled, err := runKernelNext(&cobra.Command{}, f.Root, "", "", 0, nil, false, "")
+	if !handled || err == nil || !strings.Contains(err.Error(), "mindspec next <id>") || !strings.Contains(err.Error(), "mindspec next --spec <spec>") {
+		t.Fatalf("missing explicit selection recovery: %v", err)
+	}
+	if before != kerneltest.Snapshot(t, f) {
+		t.Fatal("empty selection wrote")
 	}
 }

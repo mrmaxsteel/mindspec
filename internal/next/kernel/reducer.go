@@ -59,7 +59,7 @@ func activeGate(s State, base string) string {
 func itemDone(s State, id string) bool {
 	completed, _ := s.Records[id].Metadata[KeyCompletion].(string)
 	accepted, err := AcceptedSubject(s, id+".review")
-	return completed != "" && completed == accepted && err == nil && s.Records[id].Status == "closed" && !ForcedClose(s, id) && s.Merged[id] && CheckPassedGate(s, id+".review") == nil
+	return completed != "" && completed == accepted && err == nil && s.Records[id].Status == "closed" && !ForcedClose(s, id) && s.Merged[id] && CheckWorkItem(s, id) == nil && CheckPassedGate(s, id+".review") == nil
 }
 func upstreamsDone(s State, item string) bool {
 	for _, link := range s.Links {

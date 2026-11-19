@@ -137,7 +137,7 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 		selected = waiting
 	}
 	if selected == "" {
-		return true, fmt.Errorf("no implementation is ready\nrecovery: mindspec next-action %s --apply", idrender.Spec(s.SpecID))
+		return true, fmt.Errorf("no implementation is ready\nrecovery: mindspec next-action %s --apply; to select another spec, run mindspec next <id> or mindspec next --spec <spec>", idrender.Spec(s.SpecID))
 	}
 	dirt, ignored, err := next.CheckDirtyTreeProportional(root, root, s.SpecID)
 	if err != nil {

@@ -64,6 +64,9 @@ func TestS134Complete_MergedSubject(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), gate) {
 				t.Fatalf("merged item bypassed gate: %+v %v", result, err)
 			}
+			if mode != "missing-gate" && (!strings.Contains(err.Error(), "restore branch bead/"+item+" to accepted subject "+accepted+" with git") || strings.Contains(err.Error(), "next-action")) {
+				t.Fatalf("merged subject has no usable recovery: %v", err)
+			}
 			if mode != "missing-gate" && (!strings.Contains(err.Error(), head) || !strings.Contains(err.Error(), accepted)) {
 				t.Fatalf("missing head and accepted subject: %v", err)
 			}

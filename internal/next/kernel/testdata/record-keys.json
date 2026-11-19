@@ -16,5 +16,6 @@
   "mindspec_close",
   "mindspec_subject",
   "mindspec_registration",
-  "mindspec_raw_claims"
+  "mindspec_raw_claims",
+  "mindspec_completed_subject"
 ]

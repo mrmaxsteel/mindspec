@@ -65,7 +65,7 @@ func prepareKernelComplete(s kernel.State, item string, apply bool) (kernel.Stat
 			return fmt.Errorf("closed work item %s has not finished its gate\nrecovery: bd reopen %s", idrender.Bead(item), idrender.Bead(item))
 		}
 		if closed && s.Merged[item] {
-			return kernel.CheckPassedGate(s, kernel.GateBase(item))
+			return errors.Join(kernel.CheckWorkItem(s, item), kernel.CheckPassedGate(s, kernel.GateBase(item)))
 		}
 		if closed && !kernel.RawClose(s, item) {
 			return fmt.Errorf("closed work item %s has not finished its gate\nrecovery: bd reopen %s", idrender.Bead(item), idrender.Bead(item))
@@ -89,7 +89,7 @@ func finishKernelComplete(s kernel.State, item string) error {
 		if fresh.Records[item].Status != "closed" || !fresh.Merged[item] {
 			return fmt.Errorf("work item %s has not landed", idrender.Bead(item))
 		}
-		if err := errors.Join(kernel.CheckHalt(fresh), kernel.CheckPassedGate(fresh, kernel.GateBase(item))); err != nil {
+		if err := errors.Join(kernel.CheckHalt(fresh), kernel.CheckWorkItem(fresh, item), kernel.CheckPassedGate(fresh, kernel.GateBase(item))); err != nil {
 			return err
 		}
 		accepted, err := kernel.AcceptedSubject(fresh, kernel.GateBase(item))

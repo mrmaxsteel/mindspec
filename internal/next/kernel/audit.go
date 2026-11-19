@@ -129,6 +129,11 @@ func ApprovalBlockers(s State) ([]Flag, error) {
 			flags = append(flags, Flag{Code: "foreign-child-open", Step: id})
 		}
 	}
+	for _, item := range s.Items {
+		if err := CheckWorkItem(s, item); err != nil {
+			flags = append(flags, Flag{Code: "foreign-blocker", Step: item, Repair: []string{err.Error()}})
+		}
+	}
 	registry := Rules()
 	for _, name := range []string{"unreceipted-close", "raw-close", "forced-close", "id-collision"} {
 		rule, ok := registry.entries[name]
