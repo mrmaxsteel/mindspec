@@ -13,6 +13,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/journal"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
@@ -138,8 +139,13 @@ func TestS134ImplApprove_RefusalTable(t *testing.T) {
 			if !found {
 				t.Fatalf("missing exact refusal line %q: %v", want, err)
 			}
-			if !strings.Contains(err.Error(), "resolve the listed records, then run mindspec impl approve "+f.SpecID) {
+			recovery := strings.Split(err.Error(), "\n")
+			last := recovery[len(recovery)-1]
+			if last != guard.RecoveryPrefix+"resolve the listed records, then run mindspec impl approve "+f.SpecID {
 				t.Fatalf("missing final recovery: %v", err)
+			}
+			if matches := guard.FindFloorMatches(strings.TrimPrefix(last, guard.RecoveryPrefix)); len(matches) > 0 {
+				t.Fatalf("recovery matches the destructive floor: %+v", matches)
 			}
 			if kerneltest.Snapshot(t, f) != before {
 				t.Fatal("refusal changed snapshot")

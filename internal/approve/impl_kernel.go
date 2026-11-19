@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/journal"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
@@ -124,7 +125,7 @@ func implKernelPreflight(s kernel.State) error {
 		refusal = "implementation approval is blocked:\n" + strings.Join(reasons, "\n")
 	}
 	if refusal != "" {
-		return guard.NewFailure(refusal, fmt.Sprintf("resolve the listed records, then run mindspec impl approve %s", termsafe.Escape(s.SpecID)))
+		return guard.NewFailure(refusal, fmt.Sprintf("resolve the listed records, then run mindspec impl approve %s", idrender.Spec(s.SpecID)))
 	}
 	if auditErr != nil {
 		fmt.Fprintf(warnWriter, "warning: cannot read kernel audit: %s\n", termsafe.Escape(auditErr.Error()))

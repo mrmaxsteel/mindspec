@@ -155,6 +155,9 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/approve/impl_kernel.go", Func: "implKernelPreflight", Detail: "arg1:unprovable",
+		Rationale:  "The recovery asks to resolve the listed records and retry implementation approval. Its ID operand uses idrender.Spec. The scan cannot fold this runtime operand to a literal.",
+		Obligation: "internal/approve TestS134ImplApprove_RefusalTable checks the actual recovery text against the destructive floor and checks that refusal preserves state."},
 	{File: "internal/approve/doc_declarations.go", Func: "implDocGate", Detail: "arg1:unprovable", Rationale: "Recovery uses the owning lifecycle verb. ID operands use idrender and flag values use shell quoting.", Obligation: "TestS133DocOwner_ImplOpenResolvedTransferredAndOverride checks the real recovery against the destructive floor and preserves the required flags."},
 	{File: "internal/approve/doc_declarations.go", Func: "implDocGate", Detail: "arg2:unprovable", Rationale: "Recovery uses the owning lifecycle verb. ID operands use idrender and flag values use shell quoting.", Obligation: "TestS133DocOwner_ImplOpenResolvedTransferredAndOverride checks the real recovery against the destructive floor and preserves the required flags."},
 	{File: "internal/complete/check.go", Func: "reportContentGates", Detail: "arg2:unprovable", Rationale: "Recovery uses the owning lifecycle verb. ID operands use idrender and flag values use shell quoting.", Obligation: "TestS133DocOwner_RecoveryKeepsOwnerAndDeclarations checks the real recovery against the destructive floor and preserves the required flags."},

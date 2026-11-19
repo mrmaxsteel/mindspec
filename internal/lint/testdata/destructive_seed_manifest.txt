@@ -147,6 +147,7 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+internal/approve/impl_kernel.go	implKernelPreflight	arg1:unprovable
 internal/approve/doc_declarations.go	implDocGate	arg1:unprovable
 internal/approve/doc_declarations.go	implDocGate	arg2:unprovable
 internal/complete/check.go	reportContentGates	arg2:unprovable

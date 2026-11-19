@@ -9,6 +9,7 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/approve/impl_kernel.go readImplKernelState workspace.SpecDir":                                             {Count: 1, Gate: "SpecDir validates the spec ID before path composition. An error returns before the kernel state read. ApproveImpl also validates the ID at entry."},
 	"internal/next/kernel/reducer.go subject workspace.BeadBranch":                                                      {Count: 1, Gate: "BeadBranch validates the parsed work item before ref lookup. Invalid IDs cannot occur in refs loaded by ReadState and retain the missing-subject result."},
 	"internal/next/kernel/reducer.go subject workspace.SpecBranch":                                                      {Count: 1, Gate: "SpecBranch validates the state spec ID before ref lookup; ReadState already validates it before returning a usable state."},
 	"internal/next/kernel/reducer.go implement workspace.BeadBranch":                                                    {Count: 1, Gate: "BeadBranch validates the tuple work item before ref lookup. Invalid IDs cannot occur in refs loaded by ReadState and retain the missing-subject result."},
