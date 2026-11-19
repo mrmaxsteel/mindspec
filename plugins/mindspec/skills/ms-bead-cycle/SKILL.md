@@ -25,6 +25,8 @@ Apply the repository's Bead-loop guardrails. Only the cycle runs `mindspec compl
    Capture the token. Execute the action's `brief` argv to obtain its dispatch context.
    Pass the step, subject, context, worktree and token to the actor.
    If the lease is held or blocked, follow the refusal's recovery line.
+   Do not take a lease that your own still-running actor holds.
+   Wait for that actor or stop it first.
    Renew a live lease with `mindspec lease <step> --renew <token>` when needed.
 3. Dispatch by the returned kind:
    - `implement`: use `/ms-bead-impl` to stage and dispatch the implementation.
@@ -32,7 +34,16 @@ Apply the repository's Bead-loop guardrails. Only the cycle runs `mindspec compl
    - `fix`: use `/ms-bead-fix` for one fixer in the target worktree.
    - `change-judge`: dispatch an agent with the old and new subjects and frozen gate receipt.
      Return a `carry-over` judgement with a reason or a `re-panel` judgement with paths and slot count.
+
    Actor agents return evidence. They never claim, complete, merge or push lifecycle work.
+   After each implementation or fix commit, run `mindspec complete <bead> --check`.
+   Run this check inside the leased step before submission.
+   This check writes nothing and does not run the panel gate.
+   If it fails, send all
+   failing gates and recovery lines to the implementer or fixer under the same lease.
+   Keep the same actor. Do not submit a failed check.
+   Wait for the fixed commit and run the check again.
+   Submit only after the check passes so the panel reviews the fixed diff.
 4. Submit the evidence with the action's `submit` argv and current token.
    Use `mindspec submit <step> --lease <token> --commit <oid>` for an implementation or fix.
    Use `mindspec submit <step> --lease <token> --artifact <path>` for a verdict or judgement.
@@ -64,23 +75,19 @@ lease implement → /ms-bead-impl
   ↓ implementation commit SHA + flagged deviations
 mindspec complete <bead> --check
   ↓ content gates PASS
+mindspec submit <step> --lease <token> --commit <oid>
+  ↓ next-action --apply → execute panel create from run
 /ms-panel-run          (execute panel create from run, then lease review slots)
   ↓ submit review evidence → next-action --apply → open decision, if any
 lease fix → /ms-bead-fix
   ↓ new implementation commit SHA + flagged deviations
 mindspec complete <bead> --check
   ↓ content gates PASS
+mindspec submit <step> --lease <token> --commit <oid>
+  ↓ next-action --apply → execute panel create from run
 /ms-panel-run          (execute the next panel create entry)
   ↓ submit review evidence → next-action --apply → execute each run entry
 ```
-
-## Content check before the bead panel
-
-After each implementation or fix commit, run `mindspec complete <bead> --check`.
-This check writes nothing and does not run the panel gate. If it fails, send all
-failing gates and recovery lines to the implementer or fixer. Wait for the fixed
-commit and run the check again. Convene the bead panel only after the check passes,
-so the panel reviews the fixed diff.
 
 ## NOT READY — dispatch triage
 
@@ -92,7 +99,12 @@ so the panel reviews the fixed diff.
 
 On a NOT READY, choose exactly one of two dispositions:
 
-- **ACCEPT (the default)** — pause this dispatch and surface the reasons (the full ordinal-numbered report) to the user/orchestrator, with the routing instruction: revise the plan/spec section the reasons quote, then re-dispatch (back to `/ms-bead-impl`, which re-runs the ingress ready-check and re-stages Phase 0 fresh). Other gates remain governed by the binary output.
+- **ACCEPT (the default)** — pause this dispatch and surface the reasons to the user.
+  Return the full ordinal-numbered report. Revise the plan or spec text that the reasons quote.
+  Return through `mindspec next-action --apply` and `mindspec lease` before a new dispatch.
+  Reuse the current lease only while it is valid.
+  Use `/ms-bead-impl` to run the ingress check and stage Phase 0 again.
+  Other gates remain governed by the binary output.
 - **DISAGREE / clarify** — once per bead: author a grounded, reason-keyed record (one entry for EVERY cited ordinal, each: `{ordinal, verbatim reason, concrete answer, authoritative source span}` — the verb REFUSES a partial record (an unanswered cited reason means the bead is still not ready — that is ACCEPT territory) and a paraphrased reason (the pairing must repeat the cited reason verbatim); a clarification may DISAMBIGUATE existing spec/plan/landed-code authority, but may never CREATE new normative behavior; when no span supports the answer, ACCEPT is the correct disposition, not clarify) and write it via:
   ```bash
   mindspec bead clarify <bead-id> --file <record.json>
@@ -105,7 +117,9 @@ On a NOT READY, choose exactly one of two dispositions:
 
 ## Completion
 
-Execute `mindspec complete` only when its command appears in `run`.
+Execute `mindspec complete` only when its command appears in `run`, except for the content check.
+The only exception is `mindspec complete <bead> --check` inside a leased implement or fix step.
+This is the only `complete` call allowed outside `run`. It must carry `--check`.
 Check `git status --porcelain` in the target worktree before completion.
 Preserve pending changes and follow the CLI recovery line if completion refuses.
 Never merge a bead branch with raw `git merge bead/<id>`.

@@ -226,14 +226,19 @@ func TestMsBeadCycleSkill_BoundedLoopContractShipped(t *testing.T) {
 // --- ms-spec-autopilot: binary-owned local decisions ---
 
 func TestS134Skills_AutopilotLocalDecisions(t *testing.T) {
-	content := readinessSkillFile(t, "ms-spec-autopilot")
-	for _, want := range []string{"Return each open decision to the user", "Only a submitted `halt` answer stops every work item"} {
-		if !strings.Contains(content, want) {
-			t.Errorf("missing local decision rule %q", want)
-		}
-	}
-	if strings.Contains(content, "NOT READY") {
-		t.Error("a readiness refusal must not halt the whole spec")
+	for name, content := range s134SkillCopies(t, "ms-spec-autopilot") {
+		t.Run(name, func(t *testing.T) {
+			for _, want := range []string{"Return each open decision to the user", "Only a submitted `halt` answer stops every work item"} {
+				if !strings.Contains(content, want) {
+					t.Errorf("missing local decision rule %q", want)
+				}
+			}
+			for _, forbidden := range []string{"NOT READY", "Two consecutive impl-subagent failures"} {
+				if strings.Contains(strings.ToLower(content), strings.ToLower(forbidden)) {
+					t.Errorf("removed spec-wide halt guidance: %q", forbidden)
+				}
+			}
+		})
 	}
 }
 

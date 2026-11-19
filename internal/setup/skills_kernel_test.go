@@ -156,6 +156,14 @@ func TestS134Skills_SnapshotProvenance(t *testing.T) {
 			}
 		})
 	}
+	// Pin the body shipped before the leased-check correction as refreshable too.
+	prior, err := historicalSkillsFS.ReadFile("historical_skills/ms-bead-cycle.pre134-fix.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(prior)); got != "4a11dd849813a08dea1b65a7158f0868a6b66508ca1e6a61dc0c42ba7e1ae757" {
+		t.Fatalf("pre134-fix snapshot digest %s", got)
+	}
 }
 
 func TestS134Skills_PlainSetupRefreshesHistory(t *testing.T) {

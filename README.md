@@ -27,7 +27,7 @@ An unattended loop cannot be argued with, so its guardrails must not be arguable
                                          • merge gate enforced in the binary
 ```
 
-**[Quickstart](#quickstart) · [The autonomy ladder](#the-autonomy-ladder) · [Documentation](#documentation)**
+**[Quickstart](#quickstart) · [Governed autonomy](#governed-autonomy) · [Documentation](#documentation)**
 
 ## What you get
 
@@ -37,7 +37,7 @@ An unattended loop cannot be argued with, so its guardrails must not be arguable
 - **Maker ≠ verifier** — the implementing agent makes exactly one commit and cannot merge its own work. A panel with configured reviewers and distinct lenses verifies the work. The binary computes the decision.
 - **Architecture that can't be steamrolled** — plans must cite ADRs covering every impacted domain. If the diff touches a domain whose decisions weren't cited, the merge gate blocks until a human approves a superseding ADR.
 - **Docs that can't rot** — a bead cannot close while source and documentation have drifted apart. Doc-sync is a gate, not a convention.
-- **Governed autonomy** — use the same binary workflow interactively or through an orchestrator. The binary selects steps, checks evidence and returns decisions to you ([Autonomy](#the-autonomy-ladder)).
+- **Governed autonomy** — use the same binary workflow interactively or through an orchestrator. The binary selects steps, checks evidence and returns decisions to you ([Autonomy](#governed-autonomy)).
 - **Every escape hatch audited** — overrides like `--override-adr` and `--allow-doc-skew` exist, but each use is journaled to a redacted, local friction log. Where overrides concentrate is where the system improves next.
 
 ## The loop
@@ -93,7 +93,7 @@ Task decomposition quality is one of the strongest predictors of agent execution
 
 The full decision framework lives in [project-docs/research/scaling-agent-systems.md](project-docs/research/scaling-agent-systems.md). Your agent doesn't need to remember any of this — the validator applies it to every plan.
 
-## The autonomy ladder
+## Governed autonomy
 
 MindSpec has one workflow for each newly approved plan. Run its commands yourself,
 or use `/ms-spec-autopilot` to dispatch agents. The binary selects the same steps in both cases.
