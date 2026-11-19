@@ -22,6 +22,8 @@ type SubmitOptions struct {
 	Artifact string
 	Commit   string
 	Answer   string
+	// BeforeClose publishes validated evidence before the receipt and final reduction.
+	BeforeClose func() error
 }
 type ArtifactCheck func(State, Record, Receipt) error
 
@@ -126,6 +128,11 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 				}
 				if err = actorChildren(s, r); err != nil {
 					return err
+				}
+				if options.BeforeClose != nil {
+					if err = options.BeforeClose(); err != nil {
+						return err
+					}
 				}
 				receipt.Repaired = r.Status == "closed"
 				if err = s.Store.WriteReceipt(r.Key(), receipt); err != nil {
@@ -389,7 +396,7 @@ func checkVerdict(s State, r Record, receipt Receipt) error {
 	if !listed {
 		return actorFailure("slot is not in the active gate round")
 	}
-	reg, exists, err := Decode[RegistrationRecord](s.Records[t.Gate].Metadata, KeyRegistration)
+	reg, exists, err := Decode[RegistrationRecord](s.Records[activeGate(s, t.Gate)].Metadata, KeyRegistration)
 	if err != nil {
 		return err
 	}

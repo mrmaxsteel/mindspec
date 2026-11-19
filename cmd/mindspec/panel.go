@@ -172,6 +172,9 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 				fmt.Sprintf("--spec %q cannot be combined with --gate adhoc: an ad-hoc panel has no owning spec", idrender.Spec(specID)),
 				fmt.Sprintf("use `panel create %s --spec %s --target %s` for a gated panel, or `panel create %s --gate adhoc --target %s` for an ad-hoc panel", slug, knownOr(idrender.Spec(specForRecovery), "<id>"), knownOr(target, "<ref>"), slug, knownOr(target, "<ref>")))
 		}
+		if handled, err := tryKernelPanelCreate(cmd, slug, specID, gate); handled || err != nil {
+			return err
+		}
 		if gate != "adhoc" && strings.TrimSpace(specID) == "" {
 			return fmt.Errorf("--spec is required")
 		}
@@ -285,6 +288,15 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 			return checkoutError(err, "check the panel scratch paths, then repeat panel create")
 		}
 		defer releaseCheckouts()
+		if gate == "spec_approve" || gate == "plan_approve" {
+			count, err := panel.RoundsForGate(panel.Scan(root, specDir), specID, gate, "")
+			if err != nil {
+				return err
+			}
+			if count+1 > cfg.Panel.MaxRounds {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: review round count %d exceeds the configured limit\n", count+1)
+			}
+		}
 		if err := panel.Create(dir, in); err != nil {
 			return panelCreateFailure(err, slug, in)
 		}

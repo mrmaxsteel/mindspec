@@ -51,12 +51,15 @@ const FileName = "panel.json"
 // Round/verdict-filename disagreement as a writer error to report
 // (see Result.RoundMismatch), never as something to silently repair.
 type Panel struct {
-	VerdictSchema     int     `json:"verdict_schema,omitempty"`
-	BeadID            *string `json:"bead_id"`
-	Spec              string  `json:"spec"`
-	Target            string  `json:"target"`
-	Round             int     `json:"round"`
-	ExpectedReviewers int     `json:"expected_reviewers"`
+	Orchestrated      bool     `json:"orchestrated,omitempty"`
+	KernelGate        string   `json:"kernel_gate,omitempty"`
+	Scope             []string `json:"scope,omitempty"`
+	VerdictSchema     int      `json:"verdict_schema,omitempty"`
+	BeadID            *string  `json:"bead_id"`
+	Spec              string   `json:"spec"`
+	Target            string   `json:"target"`
+	Round             int      `json:"round"`
+	ExpectedReviewers int      `json:"expected_reviewers"`
 	// ReviewerCountSource is default or explicit; absent legacy values mean default.
 	ReviewerCountSource string `json:"reviewer_count_source,omitempty"`
 	ReviewedHeadSHA     string `json:"reviewed_head_sha"`

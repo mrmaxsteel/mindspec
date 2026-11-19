@@ -44,6 +44,10 @@ func init() {
 }
 
 func panelRebindRunE(cmd *cobra.Command, args []string) error {
+	return withKernelPanelVerb(cmd, args[0], true, func() error { return panelRebindRunEBody(cmd, args) })
+}
+
+func panelRebindRunEBody(cmd *cobra.Command, args []string) error {
 	slug := args[0]
 	if err := validatePanelSlug(slug); err != nil {
 		return err
