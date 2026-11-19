@@ -6,8 +6,9 @@ adr_citations: [ADR-0045, ADR-0023, ADR-0040, ADR-0038, ADR-0037, ADR-0035, ADR-
 work_chunks:
   - {id: 1, depends_on: [], key_file_paths: [internal/next/kernel/ids.go, internal/next/kernel/idmode.go,
       internal/next/kernel/store.go, internal/next/kernel/records.go, internal/next/kernel/clock.go,
-      internal/next/kernel/witness.go, internal/next/kernel/kerneltest/fixture.go, internal/phase/phaselock.go,
-      internal/bead/config.go, internal/harness/sandbox.go, internal/doctor/beads.go, .beads/config.yaml]}
+      internal/next/kernel/witness.go, internal/next/kernel/kerneltest/fixture.go,
+      internal/next/kernel/kerneltest/repo.go, internal/phase/phaselock.go, internal/bead/config.go,
+      internal/harness/sandbox.go, internal/doctor/beads.go, .beads/config.yaml, .github/workflows/ci.yml]}
   - {id: 2, depends_on: [], key_file_paths: [internal/config/config.go, cmd/mindspec/config.go,
       internal/redact/redact.go, cmd/mindspec/selfemit.go, cmd/mindspec/ceremony_guard_test.go]}
   - {id: 3, depends_on: [1, 2], key_file_paths: [internal/approve/plan.go, internal/approve/enrol.go,
@@ -15,7 +16,7 @@ work_chunks:
   - {id: 4, depends_on: [1], key_file_paths: [internal/next/kernel/reducer.go, internal/next/kernel/state.go,
       internal/next/kernel/output.go, internal/next/kernel/flags.go, cmd/mindspec/next_action.go,
       internal/panel/tally.go]}
-  - {id: 5, depends_on: [4], key_file_paths: [internal/next/kernel/lease.go, internal/next/kernel/submit.go,
+  - {id: 5, depends_on: [3, 4], key_file_paths: [internal/next/kernel/lease.go, internal/next/kernel/submit.go,
       cmd/mindspec/lease.go, cmd/mindspec/submit.go, internal/next/worktree.go, internal/rules/rules.yaml]}
   - {id: 6, depends_on: [4, 5], key_file_paths: [internal/next/kernel/reject.go, internal/next/kernel/halt.go,
       internal/next/kernel/final.go, internal/panel/rounds.go, internal/next/kernel/submit.go]}
@@ -32,7 +33,7 @@ work_chunks:
       plugins/mindspec/skills/ms-bead-cycle/SKILL.md, .claude/skills/ms-spec-autopilot/SKILL.md,
       plugins/mindspec/skills/ms-spec-autopilot/SKILL.md, internal/setup/skills.go,
       .mindspec/adr/ADR-0035-agent-error-contract.md, project-docs/user/guides/autonomy.md,
-      cmd/mindspec/surface_scan_test.go, .github/workflows/ci.yml]}
+      cmd/mindspec/surface_scan_test.go, cmd/mindspec/surface_scan_branch_test.go]}
   - {id: 12, depends_on: [9], key_file_paths: [cmd/mindspec/kernel_e2e_test.go]}
 ---
 # Plan: 134-governed-autonomy-kernel
@@ -62,8 +63,16 @@ chain is 1 -> 4 -> 5 -> 6 -> 8 -> 10 -> 9 -> 12. Each link carries state the nex
 store; `submit` runs a reducer pass; the halt retry and the final fix check edit `submit`; the panel verbs call
 `submit` and the round counter; the re-panel round goes through the rewritten `panel create`; `next` and `complete`
 need every gate rule; the end-to-end test needs every verb. Waves: {1, 2}, {3, 4}, {5}, {6, 7}, {8}, {10}, {9},
-{11, 12}; Bead 3 can run in any wave after {1, 2}. Kernel code goes in `internal/next/kernel`, which the workflow
-manifest already owns.
+{11, 12}. The edge 5 -> 3 is a merge-order rule, not a code need: Bead 3 can change the shared fixture, so it merges
+before the first bead after Bead 4 that builds on it. Kernel code goes in `internal/next/kernel`, which the workflow
+manifest already owns. Beads 4, 6 and 9 are the largest; a split would add chain links, so each stays one session.
+
+**Package boundary.** `internal/next/kernel` imports `bead`, `phase`, `config`, `panel` and leaf packages only; it
+never imports `internal/next`, `internal/approve`, `internal/complete` or `cmd/`. `internal/panel` stays a leaf
+(`TestPanelLeafImports_StdlibPlusTermsafeOnly`) and never imports the kernel. So the kernel takes the worktree helper
+as an injected callback (`kernel.LeaseDeps.EnsureWorktree`), and `cmd/mindspec` wires `next.EnsureWorktree` into it and
+runs the kernel pass for the panel verbs. `internal/approve` and `internal/complete` may import the kernel.
+`TestS134Boundary_` (Bead 1) parses the kernel's non-test imports and fails on a forbidden one.
 
 **Pre-kernel path until Bead 9.** Bead 3 builds enrolment behind the unexported package variable
 `approve.enrolOnApprove` (default false). Its tests set it in-process; no verb, flag, env var or key reads it. Until
@@ -89,13 +98,26 @@ implementer bead does them.
   `internal/lint/destructive_guidance_test.go`; `internal/setup/{readiness_skill_pin,review_discipline,skills}_test.go`;
   `internal/bead/config_test.go`; `internal/bootstrap/bootstrap_test.go`; `internal/doctor/beads_test.go`;
   `TestApprovePlan*`; `internal/harness/lifecycle_scenario_test.go`.
-- **Real bd.** Scenario tests run real bd 1.3.4 in a scratch repo through `harness.NewSandbox`
-  (`internal/harness/sandbox.go`). They fail, not skip, when bd is absent, as `cmd/mindspec/next_ready_gate_test.go`.
-  From Bead 1, `NewSandbox` writes `types.custom: "gate,step"` through `bead.EnsureBeadsConfig`.
+- **Real bd.** `TestS134` tests that need bd call `kerneltest.NewRepo(t)`: a scratch git repo, `bd init` and
+  `EnsureBeadsConfig`. It calls `kerneltest.RequireBD(t)`, which fails (never skips) when `bd` is absent or `bd
+  --version` is not 1.3.4, and it fails when `bd init` fails. These tests do not use `harness.NewSandbox`, which skips
+  under `-short` with no `bin/mindspec` and only logs a missing bd. Binary tests build the binary with
+  `buildMindspecBinary`. From Bead 1, `NewSandbox` writes `types.custom: "gate,step"` through `EnsureBeadsConfig`.
+- **bd in CI.** The CI `test` job runs `go test -short -race ./...` and today has no bd, so the existing real-bd tests
+  skip under `-short`. Bead 1 adds a step to that job before the tests: download the release asset
+  `https://github.com/gastownhall/beads/releases/download/v1.3.4/beads_1.3.4_linux_amd64.tar.gz`, check its SHA-256
+  `175c26904bde3ff9168d2282ff6b56f17b17f60c22fa5acb3dacc9fb3465303a` (the release `checksums.txt` line), install `bd`
+  to `/usr/local/bin` and run `bd --version | grep -F 1.3.4`. The asset holds one glibc ELF binary; `ubuntu-latest`
+  has glibc. With bd present, the tests that skip on a missing bd run in CI as they run on a developer machine.
 - **Fake bd.** Fault tests put a script named `bd` first on `PATH`, as `nextHonestyFakeBD`
   (`cmd/mindspec/next_selection_test.go`) and `installFakeBD` (`cmd/mindspec/verb_output_test.go`). A forwarding
-  wrapper logs argv, calls real bd and injects a cycle refusal, exit 13 or `kill -9 $PPID` on a named write. No test
-  starts a model CLI.
+  wrapper logs argv, calls real bd and injects a cycle refusal or exit 13 on a named write. When a mindspec binary
+  subprocess calls bd, the wrapper kills it with `kill -9 $PPID`. No test starts a model CLI.
+- **Kill in-process (Bead 3).** Before Bead 9 enrolment runs only in-process. `enrol.go` has an unexported stage hook
+  (`enrolStageHook func(stage string)`, default no-op) called after each write group of contracts §8. A kill test
+  re-runs the test binary (`os.Args[0] -test.run '^TestS134EnrolHelper$'`, env `S134_KILL_AT=<stage>`); the helper
+  sets `enrolOnApprove`, sets the hook to `os.Exit(137)` at that stage and runs `plan approve`. The process dies with
+  no deferred cleanup, as a real kill does. The parent reads the store and runs the rerun in-process.
 - **bd seams.** The kernel store runs bd through a runner it is given (default `bead.RunBD`). `enrol.go` gives it the
   approve package's `planRunBDFn`, so `approve.SetPlanRunBDForTest` covers enrolment writes; `phase.SetRunBDForTest`
   covers derivation reads.
@@ -123,7 +145,11 @@ implementer bead does them.
   5, 8, 9, 10). Bead 12 asserts it for every verb on the end-to-end path.
 - **Surface rule (AC16).** "Internal record number" = an ADR, spec, requirement (R, B, AC, OQ id), section sign, bead
   or issue number. No added non-test Go line (comments too), CLI text or skill line holds one or names
-  `.beads/issues.jsonl`. Bead 11 adds the scan test.
+  `.beads/issues.jsonl`. A changed line counts as added: a bead removes the reference from each line it changes.
+  Bead 11 adds the scan. It constrains only this spec's lines, so it is not in plain `go test ./...`: the branch run
+  is behind build tag `surfacescan`. The permanent guard for skill and embedded text stays
+  `TestProductSurface_NoInternalRefs` (`internal/setup/product_surface_test.go`); each bead that edits that text keeps
+  it green.
 - **Doc sync.** Each bead that changes `internal/**` or `cmd/**` updates a domain doc section of each owning domain
   (core: `internal/{config,phase,redact}`; execution: `internal/{bead,harness,executor}`; workflow: the rest), because
   the released `complete` refuses code with no domain-doc change. Each bead edits only its own named section. Section
@@ -134,7 +160,9 @@ implementer bead does them.
   workflow `runbook.md`: "Kernel loop" (9, then 12). When two beads of one wave edit one file, the lower-numbered bead
   merges first and the other rebases on it.
 - **Dogfood boundary.** The lane runs lifecycle and panel verbs on the released binary, never the spec-branch binary.
-- **Gate.** The final review runs `make test`.
+- **Gate.** The final review runs, from the spec worktree, `make test`, `go test -tags surfacescan ./cmd/mindspec/
+  -run '^TestS134SurfaceBranch_' -v` and the two AC15 `git grep` commands, and checks that the spec PR's CI `test` job
+  is green with its bd step printing 1.3.4.
 
 ## Bead 1: Kernel foundation: bd probe, ids, records, store and the step type
 
@@ -158,14 +186,17 @@ implementer bead does them.
    uses it), `WriteReceipt`, `AddLink` (computed ids only) and `Collision` (`id-collision`).
 6. Add `witness.go` (`mindspec_run`, a computed kernel id under the epic, or `panel.json` with `"orchestrated": true`)
    and `DefaultPolicy` (round limit 5, lease TTL 2h). Export `phase.WithPhaseLock(root, fn)` over
-   `acquirePhaseLock`. Add `kerneltest` (`Enrolled`, `PreKernelSpec`, `Snapshot`, `ID`, `SetClock`, fake bd).
+   `acquirePhaseLock`. Add `kerneltest` (`Enrolled`, `PreKernelSpec`, `Snapshot`, `ID`, `SetClock`, fake bd,
+   `NewRepo`, `RequireBD`) and `TestS134Boundary_` (Package boundary). Add the bd 1.3.4 step to the CI `test` job
+   (Testing Strategy "bd in CI").
 7. Update the doc sections core "Phase lock", execution "bd types and sandbox", workflow "Kernel store and ids", and
    the existing tests that pin `types.custom: "gate"`.
 
 **Verification**
-- [ ] `go test ./internal/next/kernel/... -run '^TestS134(Probe|IDs|Records|Store|Witness)_' -v` passes and lists the new tests.
+- [ ] `go test -short ./internal/next/kernel/... -run '^TestS134(Probe|IDs|Records|Store|Witness|Boundary)_' -v` passes and lists the new tests (none skips under `-short`).
 - [ ] `go test ./internal/bead/... ./internal/doctor/... -run '^TestS134(Setup|Doctor)_' -v` passes and lists the new tests.
-- [ ] `go test -short ./internal/next/... ./internal/phase/... ./internal/bead/... ./internal/doctor/... ./internal/bootstrap/... ./internal/setup/... ./internal/harness/...` passes.
+- [ ] `PATH=<a dir with git and no bd> go test -short ./internal/next/kernel/... -run '^TestS134Probe_'` exits non-zero naming bd.
+- [ ] With bd 1.3.4 first on `PATH` and no `bin/mindspec` (the CI `test` job's state), `go test -short -race ./...` passes.
 - [ ] `go build ./...` exits 0.
 
 **Acceptance Criteria**
@@ -181,6 +212,8 @@ implementer bead does them.
       `gate,spike2,step`. A writer that replaces the value under `--force` fails a test. `doctor` reports `step` missing.
 - [ ] AC6 primitive: witness detection finds each of the three witnesses alone; with none it reports pre-kernel.
 - [ ] Each record type round-trips to its golden JSON; a renamed key fails the test.
+- [ ] CI provisions bd: the `test` job installs the checksummed 1.3.4 asset before `go test`; a planted kernel import of
+      `internal/next` makes `TestS134Boundary_` fail.
 
 **Depends on**
 None
@@ -234,13 +267,15 @@ None
    items and kernel ids count; a foreign `task` under the epic does not. A pre-kernel spec keeps today's rule, and a
    `plan approve` rerun on it does not enrol and selects by recorded `bead_ids`.
 5. Add `TestS134Enrol_FixtureMatches`: `kerneltest.Enrolled` equals a real enrolment snapshot after id normalisation.
-6. Update workflow "Enrolment", core "Phase derivation" and the ADR-0023 amendment note. Refusals cite no internal
+   A fixture change made here keeps every consumer test green.
+6. Add the stage hook and the helper-process kill of the Testing Strategy; the AC2 (b), (d), (e) kills use it.
+7. Update workflow "Enrolment", core "Phase derivation" and the ADR-0023 amendment note. Refusals cite no internal
    record number.
 
 **Verification**
-- [ ] `go test ./internal/approve/... -run '^TestS134Enrol_' -v` passes and lists the new tests.
+- [ ] `go test ./internal/approve/... -run '^TestS134Enrol' -v` passes and lists the new tests.
 - [ ] `go test ./internal/phase/... -run '^TestS134Derive_' -v` passes and lists the new tests.
-- [ ] `go test -short ./internal/approve/... ./internal/phase/...` passes (includes `TestApprovePlan*` on the pre-kernel path).
+- [ ] `go test -short ./internal/approve/... ./internal/phase/... ./internal/next/... ./internal/panel/... ./cmd/mindspec/...` passes (includes `TestApprovePlan*` on the pre-kernel path and every fixture-consumer test merged so far).
 
 **Acceptance Criteria**
 - [ ] AC2 (enrolment): `plan approve` creates exactly `<w>.review` per item, `<epic>.final`, `mindspec_links` and
@@ -248,7 +283,7 @@ None
 - [ ] AC2 (a): a fake bd refuses a plan-order `dep add` as a cycle: exit non-zero naming the link; no gate,
       `mindspec_run` or approval. A foreign `bd create --parent <epic>`, then a normal rerun: exit 0, no second work
       item, that child unchanged.
-- [ ] AC2 (b): killed after the creates, foreign links item 3 blocks a bug blocks item 1: the rerun exits non-zero
+- [ ] AC2 (b): killed (helper process, exit 137) after the creates, foreign links item 3 blocks a bug blocks item 1: the rerun exits non-zero
       naming a chain link and its bd removal; the call log has no link write.
 - [ ] AC2 (d), (e): each listed plan edit after a kill gives the exit and snapshot the AC names; a chunk 4 added after a
       kill gives exactly one item 4 and one item-4-on-1 link.
@@ -290,7 +325,8 @@ Bead 1, Bead 2
 
 **Acceptance Criteria**
 - [ ] AC1: `next-action x --json` twice: same bytes and snapshot, one action, item 1 `implement`, `"exists":false`. A
-      changed input changes `revision`; a display time does not.
+      change in each input class changes `revision`: a bd subtree field, a git ref the subtree names, a ledger line,
+      a verdict file and the clock past an expiry. A display time does not.
 - [ ] AC2 (apply): the first `--apply` creates exactly `<1>.impl.a1`; a second, or a rerun after a kill at its first
       write, gives the same snapshot and `revision`.
 - [ ] A live lease gives a `waiting` entry and `retry_at` at its expiry; moving the clock past it changes the output.
@@ -313,9 +349,9 @@ Bead 1
 1. Add `lease.go`: under the phase lock write `in_progress`, a monotonic generation, the expiry (`kernel.Now` plus the
    pinned TTL) and a token hash with `SetStatusIf` on the status read. Print the token once. Support `--renew`,
    `--release` and `--take --reason` (records the take reason).
-2. For an implement step, `lease` calls `next.EnsureWorktree` (the helper `next` uses today) to create `bead/<w>` and
-   its worktree, then records the claim base (the `bead/<w>` head at the claim) in the lease record. Bead 9 makes
-   `next <w>` call this same lease function.
+2. For an implement step, `lease` calls the injected `LeaseDeps.EnsureWorktree` to create `bead/<w>` and its worktree,
+   then records the claim base (the `bead/<w>` head at the claim) in the lease record. `cmd/mindspec/lease.go` passes
+   `next.EnsureWorktree` (the helper `next` uses today). Bead 9 makes `next <w>` call this same lease function.
 3. Refuse a foreign bead, a gate, a decision, a held or blocked ancestor or upstream (an open epic, work item or gate
    does not hold), a live lease (name `lease --take`), a halted spec, an unanswered decision (§13.8) and a pre-kernel
    spec (name today's verbs).
@@ -339,6 +375,9 @@ Bead 1
       the clock past the TTL `lease` prints generation 2. A foreign bug blocking item 1: `lease <1>.review.r1.R1` exits
       non-zero naming it.
 - [ ] A table test: `lease` on a foreign bead, a gate, a decision and a `PreKernelSpec` item each exits non-zero, no write.
+- [ ] `--renew` with the current token moves the expiry to `kernel.Now` plus the TTL; `--renew` or `--release` with an
+      old token exits non-zero, lease unchanged; `--release` with the current token frees the step, and a new `lease`
+      then exits 0.
 - [ ] AC4: each listed bad `submit` exits non-zero with the step open. A commit on `bead/1` made before the lease,
       ahead of the spec branch, is refused as not past the claim base. A valid `submit` writes `mindspec_close` =
       path, commit, blob id; a rerun exits 0, another artifact exits non-zero, each with `bd show --json` unchanged.
@@ -350,7 +389,7 @@ Bead 1
       close; always 13: non-zero, step open with at most its receipt.
 
 **Depends on**
-Bead 4
+Bead 3 (merge order only), Bead 4
 
 ## Bead 6: Rounds, refused rounds, decisions, halt and the final gate
 
@@ -388,7 +427,8 @@ Bead 4
       Killed after the `halt` receipt: `--apply` closes the decision and open steps `halted`, exits 4. A retry of `submit
       --answer halt` exits 4 and closes the remaining closable steps; a retry that exits 0 fails the test.
 - [ ] After the last item is done, the pass authorises final round 1 on the spec branch head; a final fix commit on a
-      bead branch is refused and one on the spec branch is accepted.
+      bead branch is refused and one on the spec branch is accepted. With the last item's gate `passed` but its branch
+      not merged, the pass authorises no final round.
 - [ ] A halt pass never closes a foreign bead (selection by computed id). New strings: no internal record number.
 
 **Depends on**
@@ -420,6 +460,9 @@ Bead 4, Bead 5
 - [ ] AC10 (part): after item 1's gate passes, `bd close <1>` flags `raw-close`, `impl approve` exits non-zero naming
       it, and `--apply` creates no `<2>.impl.a1`. In a fresh fixture `bd close --force <1>` flags `forced-close` and
       `--apply` creates no `<2>.impl.a1`.
+- [ ] A table test: `impl approve` on an enrolled spec with each of an open step, an open decision, an unrepaired
+      unreceipted close, `raw-close`, `forced-close` and an open foreign child exits non-zero naming it, same snapshot;
+      a refusal set that misses one row fails the test.
 - [ ] AC11 (audit): records of each listed event, written through the Bead 1 types, give `impl approve` and a rerun
       exit 0, each printing count 1; the re-panel row shows 3 slots.
 - [ ] AC13 (part): `next-action` flags `raw-claim`. A foreign note under the epic at the end: `impl approve` exits
@@ -434,7 +477,7 @@ Bead 2, Bead 4, Bead 5
 1. Make `panel create` the one round writer for an enrolled spec: take the subject from the gate, refuse another
    `--target`, a round past the allowance (`panel.RoundsForGate`), an open slot on the current subject, an unanswered
    decision on the gate, a passed gate, an id collision (`id-collision`) and a halted spec. Write `"orchestrated":
-   true` in `panel.json`. Run one pass (§13.9).
+   true` in `panel.json`. Run one pass (§13.9). The kernel calls live in `cmd/mindspec`; `internal/panel` stays a leaf.
 2. For `--gate spec_approve` or `plan_approve`, count rounds with `panel.RoundsForGate` and, past `panel.max_rounds`,
    print one warning naming the count and proceed (count and warn, no refusal).
 3. Make `panel submit` require `--lease` of the current generation and close the slot as `submit` does. Update
@@ -445,12 +488,12 @@ Bead 2, Bead 4, Bead 5
 
 **Verification**
 - [ ] `go test ./cmd/mindspec/... -run '^TestS134Panel(Create|Submit|Refute|Defer)_' -v` passes and lists the new tests.
-- [ ] `go test -short ./cmd/mindspec/... ./internal/panel/...` passes (includes `PanelCreate|PanelSubmit|PanelDefer|PanelRefute` and `_HelpFlags`).
+- [ ] `go test -short ./cmd/mindspec/... ./internal/panel/...` passes (includes `PanelCreate|PanelSubmit|PanelDefer|PanelRefute`, `_HelpFlags` and `TestPanelLeafImports_StdlibPlusTermsafeOnly`).
 
 **Acceptance Criteria**
 - [ ] AC3 (part): `panel submit` without `--lease` exits non-zero; the slot stays open. With a valid `--lease` and
       verdict it closes the slot with a receipt.
-- [ ] AC5 (part): after a pass, `panel create <w>` exits non-zero. With `r2.fix` or a limit decision open, a passing
+- [ ] AC5 (part): after a pass, `panel create <w>` exits non-zero; so does `panel create 1 --target <another ref>`. With `r2.fix` or a limit decision open, a passing
       `panel refute` of the only blocking finding closes the gate `passed` and the fix or decision `superseded`; a
       passing `panel defer` does the same.
 - [ ] AC7 (verb): 3 rounds on slug A, `panel abandon` A, 2 on slug B: round 3 of B exits non-zero; after `continue:1`
@@ -469,7 +512,8 @@ Bead 5, Bead 6
 ## Bead 9: `next`, `complete` and enrolment on
 
 **Steps**
-1. Make `next <w>` call the Bead 5 lease function for `<w>.impl.a<k>` and print the token; with a live lease refuse
+1. Make `next <w>` (in `cmd/mindspec/next.go`, which wires `next.EnsureWorktree` as in Bead 5) call the Bead 5 lease
+   function for `<w>.impl.a<k>` and print the token; with a live lease refuse
    and name `lease --take`. Select only approved work items by computed id; resolve the spec without `--spec` and skip
    a halted spec. A pre-kernel spec selects by recorded `bead_ids`. Update `_NextFlags` if flags change.
 2. Make `complete` refuse unless the gate closed `passed` and no child is open. On `raw-close` merge and clear it; on
@@ -500,6 +544,9 @@ Bead 5, Bead 6
       non-zero. On `PreKernelSpec` `y`, `complete` with no panel warns and exits 0; `next` does not select the foreign
       child.
 - [ ] AC9 (verbs): on the halted spec `lease`, `complete`, `next 2`, `panel create 2` exit non-zero, same snapshot.
+      `panel tally`, `panel verify`, `config show` and `doctor` are not refused for the halt. With a second enrolled
+      spec `z` active, `next` with no argument and no `--spec` skips the halted `x` and selects an item of `z`.
+- [ ] `complete 1` again after its merge exits 0 with the same snapshot.
 - [ ] AC10 (part): `complete 1` exits 0 and clears `raw-close`; on `forced-close` it exits non-zero printing `bd reopen
       <1>`; after `bd reopen <1>` and a gate pass it exits 0 and `impl approve` does not name the flag.
 - [ ] AC11 (part): `MINDSPEC_SKIP_PANEL=1 complete` with no passing gate exits non-zero and names it.
@@ -541,6 +588,8 @@ Bead 3, Bead 7, Bead 8, Bead 10
       as scope, and `panel create 1 --reviewers 6` exits non-zero.
 - [ ] AC18 (c): 1 or 4 slots, another value, `carry-over` with no reason, `re-panel` with no paths each exit non-zero,
       step open, no round; 3 slots exits 0 and authorises a 3-slot round.
+- [ ] Final gate: after `<epic>.final` passes, a commit on the spec branch makes the pass create
+      `<epic>.final.judge.a1`; a `carry-over` to it keeps the final gate `passed`.
 - [ ] AC18 (d): a successful `panel rebind` closes the judge `superseded` in its pass; the receipt names the rebind.
 - [ ] AC13 (part): a snapshot diff around a judge `submit` and `panel rebind` changes only computed ids and links.
 
@@ -559,29 +608,40 @@ Bead 5, Bead 8
    ready --exclude-label mindspec`.
 4. Add the HC-4 amendment section to ADR-0035 (exit 3, 4, 5 for `next-action`) and its pin test in
    `cmd/mindspec/adr0035_amendment_test.go`.
-5. Add `TestS134Surface_` in `cmd/mindspec/surface_scan_test.go`. It diffs from the pinned base commit `371dc360`
-   (the spec's base) to `HEAD` and scans each added line of non-test Go files under `cmd/` and `internal/` (not
-   `testdata/`) and of `.claude/skills/**` and `plugins/mindspec/skills/**`. Patterns, one per class: ADR
-   `ADR-[0-9]{4}`; spec `[Ss]pec[ -]?[0-9]{3}\b`; requirement `\b(AC|OQ)[0-9]+\b` and `\b[RB][0-9]{1,2}\b` not
-   preceded by `.` or `"` (slot ids `.R3`, `"R1"` stay legal); section `§`; issue `#[0-9]{2,}\b`; bead id
-   `(^|[^A-Za-z0-9.-])mindspec-[a-z0-9]{4}(\.[0-9]+)*($|[^A-Za-z0-9-])`; `issues\.jsonl`. When the base commit is
-   absent the test fails and names a full-history fetch; it never skips. Set `fetch-depth: 0` on the test job in
-   `.github/workflows/ci.yml`.
+5. Add the surface scan in two files. Untagged `cmd/mindspec/surface_scan_test.go` holds the matcher and the diff
+   function and their tests (`TestS134SurfaceMatcher_`, `TestS134SurfaceDiffFn_`, temp repos only). Tagged
+   `cmd/mindspec/surface_scan_branch_test.go` (`//go:build surfacescan`) holds `TestS134SurfaceBranch_`: it diffs
+   from the base to `HEAD` and scans each added or changed line of non-test Go files under `cmd/` and `internal/` (not
+   `testdata/`) and of `.claude/skills/**` and `plugins/mindspec/skills/**`. The base is `371dc360` (the spec's base);
+   `MINDSPEC_SURFACE_BASE` overrides it with a main commit merged into the spec branch later, so main's lines are not
+   scanned. A missing base fails and names a full-history fetch; it never skips. Plain `go test ./...` does not build
+   the tagged file, so the scan never runs on main or a later spec. Use RE2 (Go `regexp`); check context characters in
+   code. Classes: ADR `\bADR[- ]?[0-9]{4}\b`; spec `\b[Ss]pec[ -]?[0-9]{3}\b`; requirement `\b(AC|OQ)[0-9]+\b` and
+   `\b[RB][0-9]{1,2}\b`, legal only as a whole slot token (`"R3"` with a quote on each side, or `.R3`); section `§`;
+   issue `#[0-9]+\b` after line start, a space or one of `([{,;:`; bead id `mindspec-[a-z0-9]{3,8}(\.[0-9]+)*`
+   with no letter, digit, `.` or `-` before it and no letter, digit or `-` after it, except the words `owned`,
+   `required`, `managed`, `level`, `fixture`, `driven`, `approved`, `written`, `started`, `rendered`, `internal`,
+   `emitted`, `complete`, `build`; `issues\.jsonl`. The permanent guard `TestProductSurface_NoInternalRefs` stays.
 6. Update workflow "Setup and skills". Skill, guide and setup text cites no internal record number.
 
 **Verification**
-- [ ] `go test ./cmd/mindspec/... -run '^TestS134Surface_|TestADR0035Amendment' -v` passes and lists the new tests.
+- [ ] `go test ./cmd/mindspec/... -run '^TestS134Surface|TestADR0035Amendment' -v` passes and lists the new tests.
+- [ ] `go test -tags surfacescan ./cmd/mindspec/ -run '^TestS134SurfaceBranch_' -v` passes on the spec branch.
 - [ ] `go test -short ./internal/setup/... ./internal/lint/... ./plugins/mindspec/... ./cmd/mindspec/...` passes (includes `TestReadyCheck_CycleSkillCopiesMatch`, the destructive-guidance and skill pin tests).
 - [ ] The AC15 `git grep` over `.claude/skills plugins/mindspec/skills plugins/mindspec/README.md README.md project-docs/user/guides` exits 1.
 - [ ] `for s in plugins/mindspec/skills/*/; do n=$(basename $s); cmp $s/SKILL.md .claude/skills/$n/SKILL.md || echo $n; done` prints nothing.
+- [ ] The Bead 2 `.mindspec/domains` `git grep` exits 1.
 
 **Acceptance Criteria**
 - [ ] AC15: the skills-and-docs `git grep` exits 1. Both `ms-bead-cycle` copies name `next-action --apply`, `lease`
       and `submit`; `cmp` of each skill pair exits 0. After plain `mindspec setup` on an old install, each installed
       skill copy matches its source.
-- [ ] AC16: the scan passes on the branch. One planted line per class (`ADR-0035`, `spec 134`, `AC14`, `(R3`, `§8`,
-      `#146`, `mindspec-xaoq`, `.beads/issues.jsonl`) makes it fail; `mindspec-owned` and `.mindspec-scratch` do not.
-      A missing base commit makes it fail.
+- [ ] AC16: the branch scan passes. Matcher: one planted line per class makes it fail (`ADR-0035`, `ADR 0035`,
+      `ADR0035`, `spec 134`, `AC14`, `(R3`, `"B7: ..."`, `"R11 forbids"`, `§8`, `#7`, `#146`, `mindspec-xaoq`,
+      `mindspec-4qd`, `mindspec-2fy.1`, `.beads/issues.jsonl`); `"R1"`, `.R3`, `mindspec-owned`, `.mindspec-scratch`,
+      `"#ffffff"` and `"%#v"` do not. Diff function, in a temp repo: a line added after the base fails; an unchanged
+      base line passes; a missing base fails; with the base set to a merged main commit, that commit's lines pass.
+- [ ] After plain `mindspec setup` on a repo whose `types.custom` is `gate,spike2`, it is `gate,spike2,step`.
 - [ ] The ADR-0035 pin test finds exit codes 3, 4 and 5 and goes red without the section.
 
 **Depends on**
@@ -599,10 +659,12 @@ Bead 9
 3. Produce each AC11 event through its real verb and read the audit table of `impl approve` and its rerun.
 4. Run the AC12 pin and AC18 verb cases on enrolled fixtures made by this binary.
 5. Update workflow "Kernel loop" with the loop the test drives.
+6. When a test here finds a defect in another bead's code, fix it in this bead in that bead's files and list each fix
+   in the commit message.
 
 **Verification**
 - [ ] `go test ./cmd/mindspec/... -run '^TestS134E2E_' -v` passes and lists the new tests.
-- [ ] `go test -short ./cmd/mindspec/...` passes.
+- [ ] `go test -short ./...` passes, and the Bead 2 `.mindspec/domains` `git grep` exits 1.
 
 **Acceptance Criteria**
 - [ ] AC17: only `next-action --apply`, `lease`, `submit` and `run` entries reach `impl approve` exit 0 and
@@ -644,8 +706,8 @@ Each `-run` pattern runs in the package its bead's Verification names.
 | AC12 | 2, 3, 12 | `-run '^TestS134Config'`; `-run '^TestS134Enrol_'`; `-run '^TestS134E2E_'` |
 | AC13 | 1, 3, 4, 5, 7, 8, 9, 10, 12 | `-run '^TestS134Store_'`; `-run '^TestS134Enrol_'`; `-run '^TestS134(Flags|NextAction)_'`; `-run '^TestS134Lease'`; `-run '^TestS134(Closes|ImplApprove)_'`; `-run '^TestS134Panel'`; `-run '^TestS134(Next|Complete)_'`; `-run '^TestS134JudgeCmd_'`; `-run '^TestS134E2E_'` |
 | AC14 | 1, 4, 5, 8 | `-run '^TestS134Store_'`; `-run '^TestS134(Flags|NextAction)_'`; `-run '^TestS134Submit_'`; `-run '^TestS134PanelCreate_'` |
-| AC15 | 1, 2, 3, 11 | `-run '^TestS134Setup_'`; Bead 2 domains `git grep`; `-run '^TestS134Enrol_'`; the Bead 11 `git grep` and `cmp` lines |
-| AC16 | all; 11 | each bead's message tests; `-run '^TestS134Surface_'` with one red mutation per class |
+| AC15 | 1, 2, 3, 11, 12 | `-run '^TestS134Setup_'`; domains `git grep` (Beads 2, 11, 12); `-run '^TestS134Enrol_'`; the Bead 11 `git grep`, `cmp` and setup lines |
+| AC16 | all; 11 | each bead's message tests; `-run '^TestS134Surface(Matcher|DiffFn)_'` (red mutations); `-tags surfacescan -run '^TestS134SurfaceBranch_'` |
 | AC17 | 12 | `-run '^TestS134E2E_'` |
 | AC18 | 10, 12 | `-run '^TestS134(Judge|JudgeCmd|Repanel)_'`; `-run '^TestS134E2E_'` |
-| Validation proofs | final review | `make test` on the spec branch |
+| Validation proofs | final review | the Testing Strategy "Gate" commands on the spec branch |
