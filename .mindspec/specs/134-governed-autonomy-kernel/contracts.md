@@ -1,7 +1,7 @@
 # Spec 134 contracts: governed-autonomy kernel
 
 Normative for spec 134. §1-§12 hold the operator rulings of 2026-11-15 and 2026-11-17. §13 holds readings where a
-ruling is silent; the operator confirmed them on 2026-11-18. A citation of `§<n>` includes all of that section.
+ruling is silent; the operator confirmed them on 2026-11-18, but for those §13.2 names. `§<n>` cites all of it.
 
 ## 1. Rulings
 
@@ -209,22 +209,28 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    nothing written) the verb reads again and runs its pass once more. A retry that succeeds returns success. A second
    mismatch refuses; the step stays open with at most its receipt (B5). Creates use computed ids: no second bead.
 
-## 13. Applied readings (confirmed by the operator, 2026-11-18)
+## 13. Applied readings (confirmed by the operator, 2026-11-18, but for those §13.2 names)
 
 1. **Final gate (OQ4).** B9 and the decision grammar apply to `<epic>.final`. A final fix commit lands on the spec
-   branch, and the §6 fix check reads it. Final rounds count over every `final_review` registration, abandoned too.
+   branch, which the §6 fix check reads. Final rounds count over all `final_review` registrations, abandoned too.
 2. **Subject change after a pass (OQ5).** A move of a passed gate's subject commit never by itself forces a new
-   panel, and a frozen receipt never by itself authorises the new subject. When `panel rebind` refreshes the passing
-   panel to the new subject, nothing more happens; rebind does not write the gate. Otherwise (for example a
-   `.mindspec/config.yaml` commit), the next pass creates the actor step `<gate>.judge.a<k>` (kind `change-judge`,
-   child of the gate's parent, subject = the new commit), leased and submitted as §5 and §6 say. Its artifact is a
-   judgement with one of two values: `carry-over` with a reason, or `re-panel` with a slot count n (from 2 to the
-   slot count of the gate's passing round) and the changed paths in scope. `submit` checks the shape, the old and new
-   subject and the frozen gate's receipt; it never judges the content. A judgement that does not fit is refused and
-   the step stays open. On `carry-over` the gate stays `passed`; its receipt adds the old subject, the new subject and
-   the judge's receipt, and verbs accept the new subject. On `re-panel` the pass creates the successor `<gate>.a<k+1>`
-   (same parent, `mindspec_from` = the frozen gate) and authorises a round of n slots on the new subject, scoped to
-   the diff (§13.7). Verbs select the highest attempt, rounds keep counting, and §2 ids apply to it.
+   panel, and a frozen receipt never by itself authorises the new subject. The accepted subject is the passing panel's
+   subject as `panel rebind` refreshes it (rebind does not write the gate), or the new subject of the last `carry-over`.
+   A commit that changes only the gate's panel directory does not move the subject. When a pass finds the newest subject
+   commit of a passed gate (highest attempt) is not its accepted subject and no judge is open on that commit, it creates
+   the actor step `<gate>.judge.a<k>` (kind `change-judge`, child of the gate's parent, subject = that commit), leased
+   and submitted as §5 and §6 say. One subject change has one live judge: a pass closes an open judge `superseded` when
+   its subject is not the newest commit or is the accepted subject (a successful rebind; the receipt names the rebind),
+   then applies the rule above, so any `.a<k+1>` judges the newest commit. The artifact, in the gate's panel directory
+   like a verdict, is a judgement with one of two values: `carry-over` with a reason, or `re-panel` with a slot count n
+   (from 2 to the slot count of the gate's passing round) and the changed paths. `submit` checks the shape, the old
+   subject (the accepted subject), the new subject and the frozen gate's receipt; it never judges the content. A
+   judgement that does not fit is refused, step open. On `carry-over` the gate stays `passed`; its receipt adds the old
+   subject, the new subject and the judge's receipt, and verbs accept the new subject. On `re-panel` the pass creates
+   the successor `<gate>.a<k+1>` (same parent, `mindspec_from` = the frozen gate) and authorises a round of n slots on
+   the new subject; its `panel create` entry in `run` (§13.7) carries the changed paths as the round's scope. Verbs
+   select the highest attempt, rounds keep counting, and §2 ids apply to it. Judge and gate attempts count apart.
+   Applied readings, not in the ruling: the accepted subject, judge parent, supersede, slot ceiling, scope carrier.
 3. **Implement authorisation (OQ9).** An open work item with all plan upstreams done (B4), no open implement step and
    no gate round authorises `<w>.impl.a1`. Each pass creates it for every such item, in plan order, on the one
    controller host (§8); this is not the deferred parallel waves. `<w>.impl.a<k+1>` comes only from §9.
