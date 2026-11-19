@@ -224,7 +224,8 @@ tests in the same bead.
   judgement, and re-panel (slot count, paths). Producers write and the audit reads only through these types. A golden
   JSON test pins each shape. **Receipt validity**, per return kind, has one check, `kernel.ValidReceipt`: a close
   with an artifact (`submit` or `panel submit` of an implement step, slot, fix or judge) is valid when it names path,
-  holding commit and blob id and they resolve. A close the pass itself writes with no artifact (a slot closed
+  holding commit and blob id and they resolve. A valid `submit` of an implement step or fix writes return kind
+  `passed`. A close the pass itself writes with no artifact (a slot closed
   `superseded` by a new subject, a step or decision closed `halted`, a fix or limit decision closed `superseded` by a
   passing refute or defer retally, a judge closed `superseded`, a gate closed by the tally) carries a receipt of its
   kind with its reason fields (the new subject, the halt answer, the retally, the rebind) and no artifact fields; that
@@ -327,8 +328,10 @@ tests in the same bead.
 - [ ] Each record type round-trips to its golden JSON; a renamed key fails the test.
 - [ ] Pass receipts: a golden test pins one pass-written receipt of each kind (slot, fix and judge closed `superseded`,
       a step closed `halted`, a gate closed by the tally), each with its reason fields and no artifact fields;
-      `ValidReceipt` accepts each. It refuses a `submit` slot receipt with no blob id, and one whose holding commit
-      does not exist. A check that requires path, commit and blob on every kind fails the test.
+      `ValidReceipt` accepts each. It refuses a `submit` slot receipt with no blob id, one whose holding commit
+      does not exist, and one whose blob id does not match the path at its holding commit. A check that requires
+      path, commit and blob on every kind fails the test. A golden test pins the receipt a `submit` of an implement
+      step writes: kind `passed`, path, commit, blob.
 - [ ] Every dispatcher test runs `Pass` on its own `NewRegistry` with test names, never on `DefaultRegistry`. `Pass` on
       an empty registry writes nothing (same snapshot) and reports `halted` on a seeded `halt` answer; a test rule's
       create and close are written receipt first; a rule error and a bd error each come back from `Pass`.
@@ -579,6 +582,10 @@ Bead 1, Bead 2
 - [ ] Core rules, frozen gate: after `kerneltest.PassGate` with `<1>.review.r2.fix` closed `superseded` with its pass
       receipt (the state a passing refute or defer retally leaves), `--apply` writes no gate round record and `run`
       lists no `panel create 1`. A round opening keyed on `ValidReceipt` alone fails the test.
+- [ ] Core rules, gate still open: with `<1>.review.r2.fix` closed `passed` with its receipt and round 2 authorised
+      (`kerneltest.Authorise`) but not registered, then `kerneltest.PassGate` (the state a passing `panel refute` of
+      round 1 leaves), `run` lists no `panel create 1` and lists `complete 1`. A round opening that checks the close
+      kind and receipt but not the gate state fails the test.
 - [ ] Exits: on a seeded all-done fixture (every gate `passed`, every branch merged, the epic closed) `next-action x`
       prints `"status":"done"` and exits 5. In `output.go`, a result with no action, waiting entry, decision or `run`
       entry on a spec that is not done gives `indeterminate` and exit 1. A mapping that exits 0 for either fails.
@@ -655,6 +662,8 @@ Bead 1, Bead 2
       ahead of the spec branch, is refused as not past the claim base. A valid `submit` writes `mindspec_close` =
       path, commit, blob id; a rerun exits 0, another artifact exits non-zero, each with `bd show --json` unchanged.
       On a seeded receipt with no close (the state a kill leaves): step open with its receipt; a rerun closes it.
+- [ ] Return kind: a valid `submit` of `<1>.impl.a1` writes a receipt of kind `passed`. A `Submit` that writes an
+      empty or other kind fails the test.
 - [ ] `submit` calls `Pass` exactly once after the close (a spy on the seam). Through the real dispatcher: binary
       `submit` of a valid implement commit exits 0; `submit --answer halt` on a seeded halt decision exits 4;
       in-process, a failing test rule (through `kerneltest.WithRules`) makes `submit` exit non-zero with the receipt and
