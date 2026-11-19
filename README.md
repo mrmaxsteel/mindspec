@@ -37,18 +37,18 @@ An unattended loop cannot be argued with, so its guardrails must not be arguable
 - **Maker ≠ verifier** — the implementing agent makes exactly one commit and cannot merge its own work. A panel with configured reviewers and distinct lenses verifies the work. The binary computes the decision.
 - **Architecture that can't be steamrolled** — plans must cite ADRs covering every impacted domain. If the diff touches a domain whose decisions weren't cited, the merge gate blocks until a human approves a superseding ADR.
 - **Docs that can't rot** — a bead cannot close while source and documentation have drifted apart. Doc-sync is a gate, not a convention.
-- **An autonomy ladder, not an autonomy switch** — run interactively, run a supervised autopilot, or grant a governed unattended loop with named halt conditions, budget ceilings, and a handoff log. You choose the rung per project ([The autonomy ladder](#the-autonomy-ladder)).
+- **Governed autonomy** — use the same binary workflow interactively or through an orchestrator. The binary selects steps, checks evidence and returns decisions to you ([Autonomy](#the-autonomy-ladder)).
 - **Every escape hatch audited** — overrides like `--override-adr` and `--allow-doc-skew` exist, but each use is journaled to a redacted, local friction log. Where overrides concentrate is where the system improves next.
 
 ## The loop
 
-Every phase transition is a gate. Who holds each gate — you or a review panel — is configuration; what the gate checks is not.
+Every phase transition is a gate. The binary checks the evidence at each gate.
 
 **Spec** — define what "done" looks like: problem statement, ≥3 falsifiable acceptance criteria each paired with a runnable proof, impacted domains, ADR touchpoints. The `ms-spec-grill` skill then interrogates the draft one question at a time, hunting synonym-dodges ("support", "handle", "improve"), non-falsifiable claims, cross-requirement contradictions, and repo claims the tree doesn't back up. No code allowed.
 
 **Plan** — decompose the spec into beads: independently completable work items with per-bead acceptance criteria. The plan validator checks decomposition against published research thresholds and requires ADR citations covering every impacted domain. If the plan needs to deviate from a cited ADR, it stops and escalates — you approve a superseding ADR or reject the divergence.
 
-**Implement** — the bead loop. `mindspec next` claims the next ready bead and creates an isolated git worktree; a fresh agent implements it with a deterministic, token-budgeted context pack; it makes exactly one commit; a review panel judges the diff; `mindspec complete` runs the doc-sync, ADR-divergence, and panel gates before merging bead → spec branch. Discovered work becomes new beads — never scope creep in the current one.
+**Implement** — run `mindspec next-action --apply <spec> --json`. Lease each returned actor step with `mindspec lease`, dispatch the agent, and submit its committed evidence with `mindspec submit`. Execute each returned `run` command. A review panel checks each work item before `mindspec complete` merges it. Discovered work becomes a new work item.
 
 **Review** — after the last bead merges, a final panel reviews the cumulative spec branch against main: scope drift, inter-bead coherence, release readiness. Approval merges spec → main via PR, and the lifecycle returns to idle.
 
@@ -75,7 +75,7 @@ Every bead merge — and, on the higher autonomy rungs, every gate — is judged
 - **No unresolved findings** — every REQUEST_CHANGES finding must be fixed, refuted with evidence, or deferred to a follow-up bead before the panel passes.
 - **Artifact hard gates** — a finding that names a missing measurement artifact (a benchmark, a cost projection, a regression baseline) blocks regardless of the vote count. Agents can't vote evidence into existence.
 - **The decision matrix is a pure function in the binary** — identical facts produce an identical decision, whether the panel was launched by a human, a skill, or an unattended loop. `mindspec panel create | checkout | prompt | launch | submit | recover | verify | tally | refute | defer | rebind | abandon` are the agent-neutral verbs; any orchestrator that can run a CLI can run a panel. `mindspec panel disposition validate | append | check | query` is the durable review-telemetry store behind them.
-- **A REJECT halts the track.** Auto-fixing a rejection is the definition of verification debt, so the loop never does it.
+- **A REJECT opens a local decision.** Choose `fix` or `halt` for that gate. Other eligible work can continue. A `halt` answer stops every work item in the spec.
 
 Verdicts persist as JSON alongside the spec, so every merge carries its review history in the repo.
 
@@ -95,55 +95,32 @@ The full decision framework lives in [project-docs/research/scaling-agent-system
 
 ## The autonomy ladder
 
-> "I don't prompt Claude anymore. I have loops running… My job is to write loops." — Boris Cherny, creator of Claude Code
-
-Autonomy in MindSpec is a ladder you climb deliberately, not a switch you flip and hope. Each rung is earned: a loop qualifies to run more agents by first proving it can stop a single bad one.
-
-| Level | Trigger | Gate authority |
-|:------|:--------|:---------------|
-| **0 — Interactive** | you | you approve every gate |
-| **1 — Assisted loop** | you start `/ms-spec-autopilot` | you approve spec and plan; panels verify every bead |
-| **2 — Governed loop** | you grant a scoped run | panels hold every gate, under named halt conditions and a handoff log |
-| **3 — Scheduled loop** | cron / heartbeat | as level 2, plus budget ceilings per wake |
-| **4 — Fleet** | a queue of specs | as level 3, parallel across specs (beads stay serial within a spec, by design) |
-
-The governance profile lives in `.mindspec/config.yaml`, and it selects **who holds each gate — never what the evidence is**:
+MindSpec has one workflow for each newly approved plan. Run its commands yourself,
+or use `/ms-spec-autopilot` to dispatch agents. The binary selects the same steps in both cases.
+Plan approval enrols the spec and pins its round allowance and lease duration.
 
 ```yaml
 panel:
   reviewers: [{family: harness, count: 4}]
-loop:
-  enabled: true
-  gate_authority:              # who may pass each gate unattended: panel | human
-    spec_approve:  panel
-    plan_approve:  panel
-    bead_merge:    panel
-    impl_approve:  panel
-    # there is no panel_skip key — skipping the verifier is never delegable,
-    # and the loader refuses any config that tries to add one
-  halt:
-    max_rounds_per_bead: 3
-    max_consecutive_impl_failures: 2
-    panel_deadlock_rounds: 2
-    on_reject: halt            # the only accepted value — a REJECT always halts
-  budget: {max_beads_per_wake: 4}
-  handoff_log: .mindspec/loop/AUTOPILOT-LOG.md
+  max_rounds: 5
+  lease_ttl: 2h
 ```
 
-Some things deliberately stay human at every level: skipping a panel, waving through a rejection, and accepting missing evidence. Halting is the default for anything not explicitly delegated.
+Use `mindspec next-action <spec> --json` to inspect the next steps without writing.
+Add `--apply` to create the authorised steps. Lease actors, dispatch them, submit
+committed evidence, and execute each `run` entry. Repeat until the status is `done`.
+The binary returns waiting steps, flags and decisions with the actions.
 
-An unattended loop accrues four costs, and all four are silent while it runs — verification debt, comprehension rot, cognitive surrender, and token blowout. Each gets a structural guard here, not advice:
+Round limits count all panel registrations for the gate, including abandoned panels.
+At the limit, the user chooses `continue:<n>` or `halt`. A REJECT returns a local
+`fix` or `halt` decision. A halt stops every work item and cannot be resumed.
+Implementation approval prints an audit of overrides, decisions and review changes.
 
-| Cost | The guard |
-|:-----|:----------|
-| **Verification debt** | every merge is panel-verified; rejections stop the line instead of getting quietly patched over |
-| **Comprehension rot** | the handoff log records every delegated decision with its vote — your review moves per-batch, it doesn't disappear |
-| **Cognitive surrender** | the non-delegable gates keep one door permanently human; the loop can execute, but it cannot decide |
-| **Token blowout** | budget ceilings are a precondition for unattended running, not a reaction to the first surprising bill |
+People who work without MindSpec can use bd and git in the same store.
+Run `bd ready --exclude-label mindspec` to show only work outside MindSpec.
+MindSpec preserves those items and respects their blocking links.
 
-`mindspec loop status` is the supervisor's poll surface: open panels, rounds consumed, budget spent, escape hatches used, halt state.
-
-The level-by-level walkthrough — prerequisites, halt conditions, recovery, and the handoff review workflow — is in the [autonomy guide](project-docs/user/guides/autonomy.md).
+See the [autonomy guide](project-docs/user/guides/autonomy.md) for the commands and recovery flow.
 
 ## Architecture guardrails
 
@@ -188,7 +165,7 @@ Then tell your agent what to build. The SessionStart hook runs `mindspec instruc
 4. **Implement** — the bead loop runs: fresh agent per bead, panel per merge
 5. **Review** — final panel over the whole branch, you approve, spec merges to main
 
-When you're ready to loosen your grip, `/ms-spec-autopilot` runs the whole bead loop for a spec (level 1), and the `loop:` profile takes you up the ladder from there.
+Use `/ms-spec-autopilot` to execute the returned workflow for the whole spec. Each open decision returns to you.
 
 ### Existing codebase
 
@@ -237,7 +214,7 @@ It is also continuously tested against real agents: a behavioral harness runs li
 | Full workflow with Claude Code | [Claude Code guide](project-docs/user/guides/claude-code.md) |
 | Full workflow with Codex | [Codex guide](project-docs/user/guides/codex.md) |
 | Full workflow with Copilot | [Copilot guide](project-docs/user/guides/copilot.md) |
-| Climbing the autonomy ladder (autopilot → governed → scheduled) | [Autonomy guide](project-docs/user/guides/autonomy.md) |
+| Running the governed workflow | [Autonomy guide](project-docs/user/guides/autonomy.md) |
 | Onboarding an existing codebase | [Brownfield guide](project-docs/user/guides/brownfield.md) |
 | Configuring and running review panels | [Review panels guide](project-docs/user/guides/review-panels.md) |
 | Contributing to MindSpec | [CONTRIBUTING.md](CONTRIBUTING.md) |
@@ -252,7 +229,7 @@ It is also continuously tested against real agents: a behavioral harness runs li
 ```
 your-project/
 ├── .mindspec/
-│   ├── config.yaml          # panels, models, runner, loop governance
+│   ├── config.yaml          # panels, models, runner, policy defaults
 │   ├── specs/               # versioned specs + plans + panel verdicts
 │   ├── adr/                 # Architecture Decision Records
 │   ├── domains/             # bounded contexts + OWNERSHIP.yaml manifests

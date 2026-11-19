@@ -184,14 +184,14 @@ func TestMsBeadCycleSkill_NotReadyRoutingShipped(t *testing.T) {
 	if !strings.Contains(content, "No panel round is consumed") {
 		t.Error("expected the no-panel-round rule")
 	}
-	if !strings.Contains(content, "max_consecutive_impl_failures") {
-		t.Error("expected the max_consecutive_impl_failures exclusion named")
+	if strings.Contains(content, "max_consecutive_impl_failures") {
+		t.Error("removed implementation-failure counter must not control readiness routing")
 	}
 	if !strings.Contains(content, "Never routed to `/ms-bead-fix`") {
 		t.Error("expected the never-routed-to-fix rule")
 	}
-	if !strings.Contains(content, "ACCEPT") || !strings.Contains(content, "halt") {
-		t.Error("expected the ACCEPT halt-and-surface disposition")
+	if !strings.Contains(content, "ACCEPT") || !strings.Contains(content, "pause this dispatch and surface the reasons") {
+		t.Error("expected ACCEPT to pause its own dispatch and surface the reasons")
 	}
 }
 
@@ -223,15 +223,17 @@ func TestMsBeadCycleSkill_BoundedLoopContractShipped(t *testing.T) {
 	}
 }
 
-// --- ms-spec-autopilot: ACCEPTed-NOT-READY halt row ---
+// --- ms-spec-autopilot: binary-owned local decisions ---
 
-func TestMsSpecAutopilotSkill_AcceptedNotReadyHaltRow(t *testing.T) {
+func TestS134Skills_AutopilotLocalDecisions(t *testing.T) {
 	content := readinessSkillFile(t, "ms-spec-autopilot")
-	if !strings.Contains(content, "NOT READY") {
-		t.Fatal("expected the ACCEPTed NOT READY halt row in the shipped ms-spec-autopilot SKILL.md")
+	for _, want := range []string{"Return each open decision to the user", "Only a submitted `halt` answer stops every work item"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("missing local decision rule %q", want)
+		}
 	}
-	if !strings.Contains(content, "do NOT proceed to the next bead") && !strings.Contains(content, "do not proceed to the next bead") {
-		t.Error("expected the halt row to say not to proceed to the next bead")
+	if strings.Contains(content, "NOT READY") {
+		t.Error("a readiness refusal must not halt the whole spec")
 	}
 }
 
