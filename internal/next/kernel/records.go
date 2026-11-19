@@ -21,6 +21,7 @@ const (
 	KeyLease     = "mindspec_lease"
 	KeyRound     = "mindspec_round"
 	KeyTake      = "mindspec_take"
+	KeyRawClaims = "mindspec_raw_claims"
 	KeyAnswer    = "mindspec_answer"
 	KeyDefer     = "mindspec_defer"
 	KeyJudgement = "mindspec_judgement"
@@ -71,6 +72,12 @@ type GateRound struct {
 	SlotCount int      `json:"slot_count"`
 	Paths     []string `json:"paths,omitempty"`
 }
+
+// RawClaim records a claim observed when a lease replaces it.
+type RawClaim struct {
+	At time.Time `json:"at"`
+}
+
 type TakeReason struct {
 	Reason     string    `json:"reason"`
 	At         time.Time `json:"at"`
