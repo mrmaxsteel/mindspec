@@ -7,5 +7,6 @@
     "path": "judge.json",
     "commit": "commit",
     "blob": "blob"
-  }
+  },
+  "rebind": "accepted-rebind"
 }
