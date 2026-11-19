@@ -419,29 +419,62 @@ func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
 					kernelPanelRequire(t, out, e)
 				}
 			}
-			out, e := kernelPanelCreate(t, f, "B", append(extra, "--bead", func() string {
-				if final {
-					return ""
+			create := func() (string, error) {
+				args := append([]string{}, extra...)
+				if !final {
+					args = append(args, "--bead", f.Items[0])
 				}
-				return f.Items[0]
-			}())...)
-			kernelPanelRefusal(t, out, e, "round 6")
-			kernelPanelAuthorise(f, gate, head, 6, 2)
-			out, e = kernelPanelCreate(t, f, "B", append(extra, "--bead", func() string {
-				if final {
-					return ""
-				}
-				return f.Items[0]
-			}())...)
-			kernelPanelRefusal(t, out, e, "allowance")
-			d := kerneltest.OpenDecision(f, gate, "limit", 5, "continue:<n>", "halt")
-			fix := gate + ".r6.fix"
-			f.Create(fix, gate)
-			kernelPanelClose(t, f, fix, head)
-			kernelPanelAuthorise(f, gate, head, 6, 2)
-			out, e = kernelPanelCreate(t, f, "1", extra...)
+				return kernelPanelCreate(t, f, "B", args...)
+			}
+			if !final {
+				// Before the tally pass opens a decision, the allowance still holds.
+				out, e := create()
+				kernelPanelRefusal(t, out, e, "round 6 exceeds the allowance")
+				kernelPanelAuthorise(f, gate, head, 6, 2)
+				out, e = create()
+				kernelPanelRefusal(t, out, e, "round 6 exceeds the allowance")
+				kernelPanelAuthorise(f, gate, head, 5, 2)
+			}
+			// A completed refused tally at the limit opens its decision.
+			_, e := kernel.Pass(kernel.Rules(), f.State(), true)
+			f.Must(e)
+			if got := kernel.Allowance(f.State(), gate); got != 5 {
+				t.Fatalf("want allowance 5, got %d", got)
+			}
+			d := gate + ".decide.limit.r5"
+			decisions := f.State().OpenDecisions()
+			if len(decisions) != 1 || decisions[0].Key() != d {
+				t.Fatalf("want the round-5 limit decision: %+v", decisions)
+			}
+			decision, ok, e := kernel.Decode[kernel.DecisionRecord](decisions[0].Metadata, kernel.KeyDecision)
+			f.Must(e)
+			if !ok || !reflect.DeepEqual(decision.Options, []string{"continue:<n>", "halt"}) {
+				t.Fatal("wrong limit options", decision)
+			}
+			before := kerneltest.Snapshot(t, f)
+			out, e := create()
+			kernelPanelRefusal(t, out, e, "answer decision "+d+" first")
 			kernelPanelRefusal(t, out, e, "recovery: mindspec submit "+d+" --answer continue:1")
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("decision refusal wrote")
+			}
 			_, e = kernel.Answer(f.State(), d, "continue:1")
+			f.Must(e)
+			if got := kernel.Allowance(f.State(), gate); got != 6 {
+				t.Fatalf("want allowance 6, got %d", got)
+			}
+			fix := gate + ".r6.fix"
+			if r := kernelPanelRecord(t, f, fix); r.Status != "open" {
+				t.Fatal("continuation did not create an open fix", r)
+			}
+			before = kerneltest.Snapshot(t, f)
+			out, e = create()
+			kernelPanelRefusal(t, out, e, "round 6 is not authorized")
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("unauthorized round wrote")
+			}
+			kernelPanelClose(t, f, fix, head)
+			_, e = kernel.Pass(kernel.Rules(), f.State(), true)
 			f.Must(e)
 			if r := kernelPanelRecord(t, f, fix); r.Status != "closed" {
 				t.Fatal("continuation replaced completed fix", r)
@@ -452,22 +485,18 @@ func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
 					t.Fatal("continuation created a second fix", r)
 				}
 			}
-			out, e = kernelPanelCreate(t, f, "B", append(extra, "--bead", func() string {
-				if final {
-					return ""
-				}
-				return f.Items[0]
-			}())...)
+			out, e = create()
 			kernelPanelRequire(t, out, e)
 			kernelPanelVerdict(t, f, gate, head, "B", "R1", "REQUEST_CHANGES", 6)
 			kernelPanelVerdict(t, f, gate, head, "B", "R2", "REQUEST_CHANGES", 6)
-			out, e = kernelPanelCreate(t, f, "B", append(extra, "--bead", func() string {
-				if final {
-					return ""
-				}
-				return f.Items[0]
-			}())...)
-			kernelPanelRefusal(t, out, e, "allowance")
+			if !final {
+				out, e = create()
+				kernelPanelRefusal(t, out, e, "round 7 exceeds the allowance")
+			}
+			_, e = kernel.Pass(kernel.Rules(), f.State(), true)
+			f.Must(e)
+			out, e = create()
+			kernelPanelRefusal(t, out, e, "answer decision "+gate+".decide.limit.r6 first")
 		})
 	}
 }
