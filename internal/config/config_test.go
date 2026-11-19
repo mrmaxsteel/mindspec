@@ -370,11 +370,8 @@ func TestLoadCaches_KeyedByAbsolutePath(t *testing.T) {
 	}
 }
 
-// TestLoad_ZeroConfigPanelModelsLoopDefaults covers spec 109 AC1: an absent
-// config.yaml yields the panel/models/loop/runner defaults documented in R2
-// (panel), R3 (models), R4 (loop), R10 (runner) — and every pre-existing
-// field is unchanged.
-func TestLoad_ZeroConfigPanelModelsLoopDefaults(t *testing.T) {
+// An absent config file supplies panel policy, model and skill defaults.
+func TestLoad_ZeroConfigPanelModelDefaults(t *testing.T) {
 	ResetCache()
 	defer ResetCache()
 
@@ -397,42 +394,8 @@ func TestLoad_ZeroConfigPanelModelsLoopDefaults(t *testing.T) {
 		t.Errorf("models: want empty map, got %v", cfg.Models)
 	}
 
-	// loop:
-	if cfg.Loop.Enabled {
-		t.Error("loop.enabled: want false by default")
-	}
-	wantGateAuthority := map[string]string{
-		"spec_approve": "human",
-		"plan_approve": "human",
-		"bead_merge":   "human",
-		"impl_approve": "human",
-	}
-	if !reflect.DeepEqual(cfg.Loop.GateAuthority, wantGateAuthority) {
-		t.Errorf("loop.gate_authority: got %v, want %v", cfg.Loop.GateAuthority, wantGateAuthority)
-	}
-	if cfg.Loop.Halt.MaxRoundsPerBead != 3 {
-		t.Errorf("loop.halt.max_rounds_per_bead: got %d, want 3", cfg.Loop.Halt.MaxRoundsPerBead)
-	}
-	if cfg.Loop.Halt.PanelDeadlockRounds != 2 {
-		t.Errorf("loop.halt.panel_deadlock_rounds: got %d, want 2", cfg.Loop.Halt.PanelDeadlockRounds)
-	}
-	if cfg.Loop.Halt.MaxConsecutiveImplFailures != 2 {
-		t.Errorf("loop.halt.max_consecutive_impl_failures: got %d, want 2", cfg.Loop.Halt.MaxConsecutiveImplFailures)
-	}
-	if cfg.Loop.Halt.OnReject != "halt" {
-		t.Errorf("loop.halt.on_reject: got %q, want \"halt\"", cfg.Loop.Halt.OnReject)
-	}
-	if cfg.Loop.Budget.MaxBeadsPerWake != 0 {
-		t.Errorf("loop.budget.max_beads_per_wake: got %d, want 0 (unlimited)", cfg.Loop.Budget.MaxBeadsPerWake)
-	}
-	if cfg.Loop.Budget.TokenBudget != 0 {
-		t.Errorf("loop.budget.token_budget: got %d, want 0 (unlimited)", cfg.Loop.Budget.TokenBudget)
-	}
-	if cfg.Loop.Context.ControllerHandoff != "per-spec" {
-		t.Errorf("loop.context.controller_handoff: got %q, want \"per-spec\"", cfg.Loop.Context.ControllerHandoff)
-	}
-	if cfg.Loop.HandoffLog != "AUTOPILOT-LOG.md" {
-		t.Errorf("loop.handoff_log: got %q, want \"AUTOPILOT-LOG.md\"", cfg.Loop.HandoffLog)
+	if cfg.RoundLimit() != 5 || cfg.Panel.LeaseTTL != "2h" {
+		t.Fatalf("policy defaults: %+v", cfg.Panel)
 	}
 
 	// runner:
@@ -509,22 +472,6 @@ func TestLoad_RefusesUnweakenableKnobs(t *testing.T) {
 		content string
 	}{
 		{
-			name:    "panel_skip under gate_authority",
-			content: "loop:\n  gate_authority:\n    panel_skip: human\n",
-		},
-		{
-			name:    "on_reject other than halt",
-			content: "loop:\n  halt:\n    on_reject: auto-fix\n",
-		},
-		{
-			name:    "gate_authority value out of enum",
-			content: "loop:\n  gate_authority:\n    bead_merge: robot\n",
-		},
-		{
-			name:    "controller_handoff out of enum",
-			content: "loop:\n  context:\n    controller_handoff: never\n",
-		},
-		{
 			name:    "unknown runner",
 			content: "runner: mystery-adapter\n",
 		},
@@ -571,8 +518,7 @@ func TestLoad_RefusesUnweakenableKnobs(t *testing.T) {
 	}
 }
 
-// TestLoad_PopulatedConfigRoundTrips covers spec 109 AC7: a fully populated
-// panel/models/loop/runner config round-trips through Load unchanged.
+// Current settings round-trip. Removed settings remain available for display.
 func TestLoad_PopulatedConfigRoundTrips(t *testing.T) {
 	ResetCache()
 	defer ResetCache()
@@ -645,41 +591,11 @@ runner: claude-code-workflow
 		t.Errorf("models: got %v, want %v", cfg.Models, wantModels)
 	}
 
-	if !cfg.Loop.Enabled {
-		t.Error("loop.enabled: want true (explicit override)")
+	if cfg.RoundLimit() != 5 {
+		t.Fatalf("round alias: got %d", cfg.RoundLimit())
 	}
-	wantGateAuthority := map[string]string{
-		"spec_approve": "panel",
-		"plan_approve": "panel",
-		"bead_merge":   "human",
-		"impl_approve": "panel",
-	}
-	if !reflect.DeepEqual(cfg.Loop.GateAuthority, wantGateAuthority) {
-		t.Errorf("loop.gate_authority: got %v, want %v", cfg.Loop.GateAuthority, wantGateAuthority)
-	}
-	if cfg.Loop.Halt.MaxRoundsPerBead != 5 {
-		t.Errorf("loop.halt.max_rounds_per_bead: got %d, want 5", cfg.Loop.Halt.MaxRoundsPerBead)
-	}
-	if cfg.Loop.Halt.PanelDeadlockRounds != 3 {
-		t.Errorf("loop.halt.panel_deadlock_rounds: got %d, want 3", cfg.Loop.Halt.PanelDeadlockRounds)
-	}
-	if cfg.Loop.Halt.MaxConsecutiveImplFailures != 4 {
-		t.Errorf("loop.halt.max_consecutive_impl_failures: got %d, want 4", cfg.Loop.Halt.MaxConsecutiveImplFailures)
-	}
-	if cfg.Loop.Halt.OnReject != "halt" {
-		t.Errorf("loop.halt.on_reject: got %q, want \"halt\"", cfg.Loop.Halt.OnReject)
-	}
-	if cfg.Loop.Budget.MaxBeadsPerWake != 10 {
-		t.Errorf("loop.budget.max_beads_per_wake: got %d, want 10", cfg.Loop.Budget.MaxBeadsPerWake)
-	}
-	if cfg.Loop.Budget.TokenBudget != 500000 {
-		t.Errorf("loop.budget.token_budget: got %d, want 500000", cfg.Loop.Budget.TokenBudget)
-	}
-	if cfg.Loop.Context.ControllerHandoff != "at-usage-threshold" {
-		t.Errorf("loop.context.controller_handoff: got %q, want \"at-usage-threshold\"", cfg.Loop.Context.ControllerHandoff)
-	}
-	if cfg.Loop.HandoffLog != "CUSTOM-LOG.md" {
-		t.Errorf("loop.handoff_log: got %q, want \"CUSTOM-LOG.md\"", cfg.Loop.HandoffLog)
+	if len(cfg.RemovedLoopKeys()) != 10 {
+		t.Fatalf("removed keys: %v", cfg.RemovedLoopKeys())
 	}
 
 	if cfg.Runner != "claude-code-workflow" {

@@ -65,12 +65,8 @@ func resetConfigShowGateFlags(t *testing.T) {
 	t.Cleanup(reset)
 }
 
-// TestConfigShow_EmitsPanelModelsLoop asserts that renderConfig(DefaultConfig())
-// (a pure function — no fs, no process) surfaces the panel reviewers, the raw
-// approve_threshold expression, the empty models block, loop.enabled=false,
-// runner: claude-code-skills, and the "declared, not yet enforced" annotation
-// on each of the three inert blocks (spec 109 AC6).
-func TestConfigShow_EmitsPanelModelsLoop(t *testing.T) {
+// Effective settings carry truthful policy and skill labels.
+func TestConfigShow_EmitsPanelModelsPolicy(t *testing.T) {
 	out, err := renderConfig(config.DefaultConfig())
 	if err != nil {
 		t.Fatalf("renderConfig: %v", err)
@@ -89,20 +85,16 @@ func TestConfigShow_EmitsPanelModelsLoop(t *testing.T) {
 		t.Errorf("expected an empty models block, got:\n%s", out)
 	}
 
-	// loop: enabled=false by default, INERT.
-	if !strings.Contains(out, "loop:") || !strings.Contains(out, "enabled: false") {
-		t.Errorf("expected loop with enabled: false, got:\n%s", out)
+	if strings.Contains(out, "loop:") {
+		t.Fatalf("removed defaults rendered: %s", out)
+	}
+	if !strings.Contains(out, "runner: claude-code-skills  # read by a skill") {
+		t.Fatalf("runner label: %s", out)
+	}
+	if strings.Contains(out, "declared, not yet enforced") {
+		t.Fatalf("stale labels: %s", out)
 	}
 
-	// runner: default, INERT.
-	if !strings.Contains(out, "runner: claude-code-skills") {
-		t.Errorf("expected runner: claude-code-skills, got:\n%s", out)
-	}
-
-	// Only the loop and adapter selection remain advisory blocks.
-	if got := strings.Count(out, "declared, not yet enforced"); got != 2 {
-		t.Errorf("expected the \"declared, not yet enforced\" annotation on both inert blocks (loop/runner), got %d occurrences:\n%s", got, out)
-	}
 }
 
 // TestConfigShow_ReviewerCountNoteWhenPanelDiffers exercises the full `config

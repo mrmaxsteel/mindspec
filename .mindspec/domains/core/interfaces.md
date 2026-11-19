@@ -150,10 +150,9 @@ type Config struct {
     // consumes the resolvers below); it never overrides an already-recorded
     // panel's decision inputs — internal/panel stays a config-free leaf.
     // Models selects reviewer models through reviewer.<family> keys.
-    // Other model keys, Loop, and Runner supply orchestration guidance.
+    // Other model keys and Runner supply skill guidance.
     Panel  Panel             `yaml:"panel"`
     Models map[string]string `yaml:"models"` // phase -> model id; free-form (runner-specific); default {}
-    Loop   Loop              `yaml:"loop"`
     Runner string            `yaml:"runner"` // claude-code-skills | claude-code-workflow | external; default claude-code-skills
 
     // Commands is the CONSUMER's declared build/test guidance (spec 123
@@ -176,6 +175,8 @@ func (c *Config) CommandLines() []string              // "<command>   # <task>" 
 func (c *Config) RenderBuildTestSection(level int) string // "" when Commands unset — section omitted, never a placeholder
 
 type Panel struct {
+    MaxRounds int `yaml:"max_rounds"` // default 5
+    LeaseTTL string `yaml:"lease_ttl"` // default "2h"
     Reviewers        []Reviewer   `yaml:"reviewers"`         // explicit ALL-GATES list; default empty (per-gate sizes)
     ApproveThreshold string       `yaml:"approve_threshold"` // RAW "n-1" or integer string; default "n-1"; never resolved here
     Runners          []Runner          `yaml:"runners"`
@@ -203,12 +204,7 @@ type GatePanel struct {
     Acceptance       *Acceptance `yaml:"acceptance"`
 }
 
-// PanelGateKeys is the closed, ordered enum of panel.gates keys (spec 112
-// R1, ADR-0034): {"spec_approve", "plan_approve", "bead", "final_review",
-// "adhoc"}. These name REVIEW EVENTS — deliberately distinct from
-// loop.gate_authority's vocabulary, which names APPROVAL ACTS
-// (bead_merge/impl_approve). Exported: the single source for validation,
-// recovery lines, and config-show's enum-order rendering.
+// PanelGateKeys fixes the order of review events.
 var PanelGateKeys = []string{"spec_approve", "plan_approve", "bead", "final_review", "adhoc"}
 
 // Reviewer is one entry of a reviewer mix (global or per-gate).
@@ -231,31 +227,6 @@ type Reviewer struct {
 // (validation, resolvers, slot expansion, that renderer) goes through this
 // one accessor.
 func (r Reviewer) CountValue() int
-
-// Loop is the orchestration-loop governance skeleton (research §3.2 L3 /
-// §3.3). Every key is parsed, defaulted, validated, and surfaced — none is
-// enforced in this spec.
-type Loop struct {
-    Enabled       bool              `yaml:"enabled"`        // default false (loops are opt-in)
-    GateAuthority map[string]string `yaml:"gate_authority"` // exactly spec_approve/plan_approve/bead_merge/impl_approve -> panel|human, default human
-    Halt          Halt              `yaml:"halt"`
-    Budget        Budget            `yaml:"budget"`
-    Context       LoopContext       `yaml:"context"`
-    HandoffLog    string            `yaml:"handoff_log"` // default "AUTOPILOT-LOG.md"
-}
-type Halt struct {
-    MaxRoundsPerBead           int    `yaml:"max_rounds_per_bead"`            // default 3
-    PanelDeadlockRounds        int    `yaml:"panel_deadlock_rounds"`          // default 2
-    MaxConsecutiveImplFailures int    `yaml:"max_consecutive_impl_failures"`  // default 2
-    OnReject                   string `yaml:"on_reject"`                      // must be "halt"; Load refuses any other value
-}
-type Budget struct {
-    MaxBeadsPerWake int `yaml:"max_beads_per_wake"` // default 0 (unlimited)
-    TokenBudget     int `yaml:"token_budget"`       // default 0 (unlimited)
-}
-type LoopContext struct {
-    ControllerHandoff string `yaml:"controller_handoff"` // per-spec | at-usage-threshold; default per-spec
-}
 
 // PanelExpectedReviewers uses adhoc resolution for create without --gate (default 6).
 // PanelApproveThresholdExpr is the RAW panel.approve_threshold expression —
@@ -316,11 +287,29 @@ With no count argument, the configured expansion is unchanged.
 
 **Deterministic slot expansion:** `PanelGateReviewerSlots` expands each entry's `CountValue()` in declaration order. Slots have IDs `R1` through `Rn`. An explicit reviewer `lens` applies to all slots from that entry. Other slots cycle through `GateLenses(gate)`. One cursor starts at zero and advances only for slots without an explicit lens.
 
-`Load` refuses (guard-style error with a `recovery: <command>` line, ADR-0035), and never panics, on: a `panel_skip` key anywhere under `loop.gate_authority` (panel-skip is permanently human, `MINDSPEC_SKIP_PANEL` is env-only, ADR-0037 §7); a `loop.halt.on_reject` other than `halt`; a `gate_authority` value outside `{panel, human}`; a `controller_handoff` outside `{per-spec, at-usage-threshold}`; an unknown `runner`; an explicit global `panel.reviewers` list with `panel.approve_threshold` neither `"n-1"` nor an integer in `[1, sum(reviewers.count)]`; a `reviewers[].count < 1`; or an explicit reviewer list with `sum(reviewers.count) < 2` (a one-reviewer panel cannot pass). Without a global list, the global threshold is not range-checked. An absent/empty `panel:`/`models:`/`loop:`/`runner:` block round-trips to its documented default.
+`Load` refuses an unknown runner. It also refuses invalid reviewer counts
+and invalid global thresholds. An explicit global list needs at least two
+slots. Its threshold must be `n-1` or an integer from one to the slot count.
+Without a global list, the global threshold has no range check.
+
 
 **Per-gate refusals:** `Load` refuses a gate key outside `PanelGateKeys`. A gate must set `reviewers`, `approve_threshold`, `lenses` or `acceptance`. Each reviewer must set `model` or `family`. An explicit count must be positive. An explicit reviewer list must produce at least two slots. Legacy per-gate thresholds are not range-checked against reviewer counts. Model IDs have no name list, but must pass `ValidateModel`. Reviewer lens names remain open vocabulary. Gate lens lists must name entries in `panel.lenses`.
 
 Used by workflow: `internal/panel` stays a config-free leaf and never imports this package. Panel create resolves `PanelGateReviewerSlots()` here and passes the roster as plain values. It does not use `PanelApproveThresholdExpr()` or write `approve_threshold`. `cmd/mindspec config show` and `internal/complete`'s panel-advisory path render the legacy config values alongside `panel.ReviewerCountNote`.
+
+### Config keys
+
+`panel.max_rounds` sets the round allowance. It defaults to 5.
+`Config.RoundLimit()` returns this value. The deprecated loop alias applies
+only when `panel.max_rounds` is absent. Its warning names the supplied value.
+`panel.lease_ttl` sets the lease duration. It defaults to `2h`.
+The round limit must be positive. The lease duration must be positive.
+Enrolment pins both values for that spec.
+
+The loader ignores removed loop settings. It emits one warning per setting
+on the first load of a root. It caches later loads for that root.
+`RemovedLoopKeys` and `RemovedLoopValue` expose supplied values for display.
+They do not supply policy. `Runner` supplies skill guidance.
 
 ### Panel runners, local config and lenses
 
