@@ -45,7 +45,7 @@
     "labels": [
       "mindspec"
     ],
-    "description": "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./internal/approve`\n\n**Acceptance Criteria**\n- The item works.",
+    "description": "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./...`\n\n**Acceptance Criteria**\n- The item works.",
     "metadata": {
       "spec_id": "001-x",
       "file_paths": null
@@ -86,7 +86,7 @@
         "type": "blocks"
       }
     ],
-    "description": "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./internal/approve`\n\n**Acceptance Criteria**\n- The item works.",
+    "description": "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./...`\n\n**Acceptance Criteria**\n- The item works.",
     "metadata": {
       "spec_id": "001-x",
       "file_paths": null
@@ -127,7 +127,7 @@
         "type": "blocks"
       }
     ],
-    "description": "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./internal/approve`\n\n**Acceptance Criteria**\n- The item works.",
+    "description": "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./...`\n\n**Acceptance Criteria**\n- The item works.",
     "metadata": {
       "spec_id": "001-x",
       "file_paths": null

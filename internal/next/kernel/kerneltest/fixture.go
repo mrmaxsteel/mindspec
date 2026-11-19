@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 )
@@ -66,14 +67,14 @@ func fixture(t testing.TB, enrolled bool, options ...Option) *Fixture {
 	if enrolled {
 		phase = "plan"
 	}
-	epic := raw("create", "--title", fmt.Sprintf("[mindspec] [SPEC %s] kernel fixture", f.SpecID), "--type", "epic", "--labels", "mindspec", "--metadata", fmt.Sprintf(`{"spec_id":%q,"mindspec_phase":%q}`, f.SpecID, phase), "--json")
+	epic := raw("create", "--title", fmt.Sprintf("[mindspec] [SPEC %s] kernel fixture", idrender.Spec(f.SpecID)), "--type", "epic", "--labels", "mindspec", "--metadata", fmt.Sprintf(`{"spec_id":%q,"mindspec_phase":%q}`, f.SpecID, phase), "--json")
 	f.Epic = epic.ID
 	f.Store = kernel.NewStore(f.Root, f.Epic, run)
 	if o.fake {
 		f.Store.NativeIDs = o.native
 	}
 	for i := 1; i <= 3; i++ {
-		r := raw("create", "--title", fmt.Sprintf("[mindspec] [%s] Bead %d: Item %d", f.SpecID, i, i), "--type", "task", "--labels", "mindspec", "--parent", f.Epic, "--description", EnrolmentBody(), "--metadata", fmt.Sprintf(`{"spec_id":%q,"file_paths":null}`, f.SpecID), "--json")
+		r := raw("create", "--title", fmt.Sprintf("[mindspec] [%s] Bead %d: Item %d", idrender.Spec(f.SpecID), i, i), "--type", "task", "--labels", "mindspec", "--parent", f.Epic, "--description", EnrolmentBody(), "--metadata", fmt.Sprintf(`{"spec_id":%q,"file_paths":null}`, f.SpecID), "--json")
 		f.Items = append(f.Items, r.ID)
 	}
 	links := kernel.Links{{ID: f.Items[0], Upstream: []string{}}, {ID: f.Items[1], Upstream: []string{f.Items[0]}}, {ID: f.Items[2], Upstream: []string{f.Items[0]}}}
@@ -184,7 +185,7 @@ func (f *Fixture) Command(name string, args ...string) ([]byte, error) {
 
 // EnrolmentBody is the work text shared by enrolment producers and fixtures.
 func EnrolmentBody() string {
-	return "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./internal/approve`\n\n**Acceptance Criteria**\n- The item works."
+	return "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./...`\n\n**Acceptance Criteria**\n- The item works."
 }
 
 // EnrolmentPlan builds a valid plan with each later item depending on the first.

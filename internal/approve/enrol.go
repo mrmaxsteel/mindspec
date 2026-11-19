@@ -70,7 +70,7 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 			return err
 		}
 		if enrolled && (bool(approved) || strings.EqualFold(fm.Status, "Approved")) {
-			return guard.NewFailure("plan approval already belongs to an enrolment", "mindspec next-action "+specID+" --apply")
+			return guard.NewFailure("plan approval already belongs to an enrolment", fmt.Sprintf("mindspec next-action %s --apply", idrender.Spec(specID)))
 		}
 		vr := validate.ValidatePlan(root, specID)
 		// Item existence is checked against this operation's fresh store snapshot.
@@ -353,7 +353,7 @@ func enrolCompare(fm *validate.PlanFrontmatter, content string, sections []valid
 }
 
 func enrolEdit(specID, detail string) error {
-	return guard.NewFailure("plan changed: "+termsafe.Escape(detail)+"; restore the recorded plan before retrying approval", "mindspec plan approve "+idrender.Spec(specID))
+	return guard.NewFailure("plan changed: "+termsafe.Escape(detail)+"; restore the recorded plan before retrying approval", fmt.Sprintf("mindspec plan approve %s", idrender.Spec(specID)))
 }
 
 func enrolMarkEpic(store *kernel.Store) error {

@@ -155,6 +155,18 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/approve/enrol.go", Func: "approveEnrolment", Detail: "arg1:unprovable",
+		Rationale:  "The retry uses mindspec next-action with --apply and an idrender.Spec operand.",
+		Obligation: "TestOpaqueOperandRegistry_EnrolmentRecoveries checks each real command template, its ID renderers and its rendered values against the destructive floor."},
+	{File: "internal/approve/enrol.go", Func: "enrolEdit", Detail: "arg1:unprovable",
+		Rationale:  "The retry uses mindspec plan approve with an idrender.Spec operand.",
+		Obligation: "TestOpaqueOperandRegistry_EnrolmentRecoveries checks each real command template, its ID renderers and its rendered values against the destructive floor."},
+	{File: "internal/approve/enrol.go", Func: "enrolWaits.check", Detail: "arg1:unprovable",
+		Rationale:  "The recovery removes one dependency link with bd dep remove. Both link operands use idrender.Bead; this command does not match a destructive floor family.",
+		Obligation: "TestOpaqueOperandRegistry_EnrolmentRecoveries checks each real command template, its ID renderers and its rendered values against the destructive floor."},
+	{File: "internal/approve/enrol.go", Func: "enrolAddLink", Detail: "arg1:unprovable",
+		Rationale:  "The recovery reads dependencies with bd dep list and --json. The item operand uses idrender.Bead.",
+		Obligation: "TestOpaqueOperandRegistry_EnrolmentRecoveries checks each real command template, its ID renderers and its rendered values against the destructive floor."},
 	{File: "internal/approve/doc_declarations.go", Func: "implDocGate", Detail: "arg1:unprovable", Rationale: "Recovery uses the owning lifecycle verb. ID operands use idrender and flag values use shell quoting.", Obligation: "TestS133DocOwner_ImplOpenResolvedTransferredAndOverride checks the real recovery against the destructive floor and preserves the required flags."},
 	{File: "internal/approve/doc_declarations.go", Func: "implDocGate", Detail: "arg2:unprovable", Rationale: "Recovery uses the owning lifecycle verb. ID operands use idrender and flag values use shell quoting.", Obligation: "TestS133DocOwner_ImplOpenResolvedTransferredAndOverride checks the real recovery against the destructive floor and preserves the required flags."},
 	{File: "internal/complete/check.go", Func: "reportContentGates", Detail: "arg2:unprovable", Rationale: "Recovery uses the owning lifecycle verb. ID operands use idrender and flag values use shell quoting.", Obligation: "TestS133DocOwner_RecoveryKeepsOwnerAndDeclarations checks the real recovery against the destructive floor and preserves the required flags."},
