@@ -1,7 +1,7 @@
 # Spec 134 contracts: governed-autonomy kernel
 
 Normative for spec 134. §1-§12 hold the operator rulings of 2026-11-15 and 2026-11-17. §13 holds readings where a
-ruling is silent; the operator confirmed them on 2026-11-18, but for those §13.2 names. `§<n>` cites all of it.
+ruling is silent; the operator confirmed them on 2026-11-18, but for those §8 and §13.2 name. `§<n>` cites all of it.
 
 ## 1. Rulings
 
@@ -130,20 +130,21 @@ runs the B7 check on current state for each missing mindspec link and flags `for
 link on each cycle from that link's downstream bead, and its bd removal; nothing is stored. A rerun before the approval
 record keeps any `mindspec_run`, reuses exactly the recorded ids, creates only chunks with no recorded id and continues
 the order. It compares first: each id in a written `mindspec_links` against the plan. An id not in it (created by a
-killed run) takes its links from the plan. With no child under the epic, it ignores a written `mindspec_links`. It never
-selects by `--parent` and closes or supersedes no other bead. It refuses every other plan change, names it and writes
-nothing: a recorded id with no chunk, a recorded chunk whose text differs from its item, or an id in a written
-`mindspec_links` whose plan-order upstreams differ from it (it adds no link between existing items and keeps no dropped
-plan-order link). On an enrolled spec with an approval record, `plan approve` refuses, names the enrolment and writes
-nothing. An item created but not recorded is foreign; its `foreign-child-open` recovery line says to close it with bd. A
-spec is enrolled if ANY witness exists: `mindspec_run` on the epic; a computed kernel id under the epic (open or closed,
-any type); a spec `panel.json` with `"orchestrated": true` (`panel create` writes it). A witness without the marker
-gives the default policy and flags `run-marker-missing`. A spec with no witness (approved before this release) is
-pre-kernel and finishes on today's rules: warnings, and `panel_presence` applies. `next-action` and `lease` refuse it,
-naming today's verbs; no pass writes on it. No verb, flag, env var or key enrols a pre-kernel spec or clears enrolment.
-Policy is pinned at enrolment; config edits and retypes change nothing. An enrolled spec always enforces the panel gate.
-Threat model: the kernel governs progression, not OS access; a same-user process can forge an answer. One controller
-host.
+killed run, so it has no link yet) is a missing item and takes its links from the plan, edited or not (applied
+reading). With no recorded id in the store (a foreign child does not count), it ignores the recorded ids and a
+written `mindspec_links`. It never selects by `--parent` and closes or supersedes no other bead. It refuses every other
+plan change, names it and writes nothing: a recorded id with no chunk, a recorded chunk whose text differs from its
+item, or an id in a written `mindspec_links` whose plan-order upstreams differ from it (it adds no link between existing
+items and keeps no dropped plan-order link). On an enrolled spec with an approval record, `plan approve` refuses, names
+the enrolment and writes nothing. An item created but not recorded is foreign; its `foreign-child-open` recovery line
+says to close it with bd. A spec is enrolled if ANY witness exists: `mindspec_run` on the epic; a computed kernel id
+under the epic (open or closed, any type); a spec `panel.json` with `"orchestrated": true` (`panel create` writes it). A
+witness without the marker gives the default policy and flags `run-marker-missing`. A spec with no witness (approved
+before this release) is pre-kernel and finishes on today's rules: warnings, and `panel_presence` applies. `next-action`
+and `lease` refuse it, naming today's verbs; no pass writes on it. No verb, flag, env var or key enrols a pre-kernel
+spec or clears enrolment. Policy is pinned at enrolment; config edits and retypes change nothing. An enrolled spec
+always enforces the panel gate. Threat model: the kernel governs progression, not OS access; a same-user process can
+forge an answer. One controller host.
 
 ## 9. Refused vs flagged
 

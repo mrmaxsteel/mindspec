@@ -7,7 +7,7 @@ approved_by: ""
 
 *Code citations: `origin/main` at `371dc360` (v0.19.0), 2026-11-15; the named symbol is authoritative. Normative:
 [contracts.md](contracts.md) (§1-§12 operator rulings; §13 readings the operator confirmed on 2026-11-18, but for
-the applied readings §13.2 names).*
+the applied readings §8 and §13.2 name).*
 
 ## Goal
 
@@ -114,7 +114,8 @@ blocks Y" = Y waits for X.
   that flag is gone and `--apply` writes the item-3-to-final link. (d) Killed after the plan-order links, the plan
   edited to drop the item-2-on-1 link, or separately to add an item-3-on-2 link: the rerun exits non-zero naming it,
   same snapshot. (e) Killed after the plan-order links, a chunk 4 on item 1 added, the rerun killed again after its
-  links: a further rerun exits 0 with item 4 and its item-4-on-1 link.
+  links: a further rerun exits 0 with exactly one item 4 and one item-4-on-1 link. Then chunk 4 edited to depend on
+  item 2, or separately its link dropped: the next rerun exits non-zero naming it, same snapshot.
 - [ ] AC3 (R3, R4): `next 1` (no `--spec`) resolves spec `x` and prints a token (generation 1); a second `next 1` or
   `lease <1>.impl.a1` exits non-zero naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug
   blocking item 1: `lease <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits
