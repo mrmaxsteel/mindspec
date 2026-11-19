@@ -4,16 +4,42 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
+
+func panelStoreFailure(err error) error {
+	return guard.NewFailure("panel tracker store is unavailable: "+termsafe.Escape(err.Error()), "restore the tracker store and bd on PATH, then run bd list --all --json")
+}
+
+func panelHasEnrollment(root, spec string) bool {
+	roots := []string{root, filepath.Join(root, ".mindspec")}
+	entries, _ := os.ReadDir(workspace.SpecsDir(root))
+	for _, entry := range entries {
+		if entry.IsDir() && idvalidate.SpecID(entry.Name()) == nil {
+			roots = append(roots, filepath.Join(workspace.SpecsDir(root), entry.Name()))
+		}
+	}
+	for _, reg := range panel.Scan(roots...) {
+		if reg.Err == nil && reg.Panel.Orchestrated && (spec == "" || reg.Panel.Spec == spec) {
+			return true
+		}
+	}
+	return false
+}
 
 // panelKernelStateFn resolves enrollment without changing the store.
 var panelKernelStateFn = func(root, spec string) (*kernel.State, error) {
@@ -22,21 +48,19 @@ var panelKernelStateFn = func(root, spec string) (*kernel.State, error) {
 		if _, err := os.Stat(filepath.Join(root, ".beads", name)); err == nil {
 			available = true
 		} else if !os.IsNotExist(err) {
-			return nil, panelVerbFailure(err)
+			return nil, panelStoreFailure(err)
 		}
 	}
 	if !available {
-		for _, reg := range panel.Scan(root, filepath.Join(root, ".mindspec"), workspace.SpecsDir(root)) {
-			if reg.Err == nil && reg.Panel.Orchestrated && (spec == "" || reg.Panel.Spec == spec) {
-				return nil, panelVerbFailure(fmt.Errorf("the enrolled panel requires its tracker store"))
-			}
+		if panelHasEnrollment(root, spec) {
+			return nil, panelStoreFailure(fmt.Errorf("the enrolled panel requires its tracker store"))
 		}
 		return nil, nil
 	}
 	store := kernel.NewStore(root, "", nil)
 	rows, err := store.All()
 	if err != nil {
-		return nil, panelVerbFailure(err)
+		return nil, panelStoreFailure(err)
 	}
 	var states []kernel.State
 	for _, r := range rows {
@@ -101,19 +125,68 @@ func panelKernelGuard(s kernel.State, gate string, limit bool) error {
 			}
 		}
 	}
-	for _, id := range s.Collisions {
-		return panelVerbFailure(fmt.Errorf("id-collision: %s; remove that bead with bd", id))
+	if len(s.Collisions) > 0 {
+		return panelVerbFailure(fmt.Errorf("id-collision: %s; remove that bead with bd", s.Collisions[0]))
 	}
 	for _, r := range s.OpenDecisions() {
 		t, _, _ := r.Tuple()
 		if t.Gate == gateBase(s, gate) && (t.Cause == "reject" || limit) {
-			return panelVerbFailure(fmt.Errorf("answer decision %s first", r.Key()))
+			answer := "fix"
+			if t.Cause == "limit" {
+				answer = "continue:1"
+			}
+			return guard.NewFailure(fmt.Sprintf("answer decision %s first", r.Key()), fmt.Sprintf("mindspec submit %s --answer %s", r.Key(), answer))
 		}
 	}
 	return nil
 }
 func refreshPanelState(s kernel.State) (kernel.State, error) {
 	return kernel.ReadState(s.Store, s.SpecID, s.SpecDir)
+}
+
+// panelCreateKernelGate selects only lifecycle shorthand without reading the tracker.
+func panelCreateKernelGate(root, slug, spec, target, item string) string {
+	if item != "" || strings.HasPrefix(target, "bead/") {
+		return "bead"
+	}
+	if n, err := strconv.Atoi(slug); err == nil && n > 0 {
+		return "bead"
+	}
+	if spec != "" && slug == spec {
+		return "final_review"
+	}
+	dirs := []string{}
+	if spec != "" {
+		if idvalidate.SpecID(spec) != nil {
+			return ""
+		}
+		if dir, err := workspace.SpecDir(root, spec); err == nil {
+			dirs = append(dirs, dir)
+		}
+	} else {
+		entries, _ := os.ReadDir(workspace.SpecsDir(root))
+		for _, entry := range entries {
+			if entry.IsDir() && idvalidate.SpecID(entry.Name()) == nil {
+				dirs = append(dirs, filepath.Join(workspace.SpecsDir(root), entry.Name()))
+			}
+		}
+	}
+	for _, dir := range dirs {
+		data, err := os.ReadFile(filepath.Join(dir, "plan.md"))
+		if err != nil {
+			continue
+		}
+		fm, err := validate.ParsePlanFrontmatter(string(data))
+		if err != nil {
+			continue
+		}
+		for _, id := range fm.BeadIDs {
+			if slug == id {
+				return "bead"
+			}
+		}
+	}
+	return ""
 }
 
 func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, error) {
@@ -123,6 +196,14 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 	root, err := findPanelRoot(config.IsolationRootFor)
 	if err != nil {
 		return false, nil
+	}
+	if kind == "" {
+		target, _ := cmd.Flags().GetString("target")
+		item, _ := cmd.Flags().GetString("bead")
+		kind = panelCreateKernelGate(root, slug, spec, target, item)
+		if kind == "" {
+			return false, nil
+		}
 	}
 	s, err := panelKernelStateFn(root, spec)
 	if err != nil {
@@ -232,7 +313,7 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 			r := s.Records[id]
 			t, _, _ := r.Tuple()
 			if t.Gate == gateBase(*s, gate) && t.Kind == "review-slot" && r.Status != "closed" {
-				return panelVerbFailure(fmt.Errorf("slot %s is open; use panel recover or panel launch", id))
+				return guard.NewFailure(fmt.Sprintf("slot %s is open", id), fmt.Sprintf("mindspec panel launch %s R%d --spec %s", shellQuoteTarget(slug), t.Slot, shellQuoteTarget(idrender.Spec(s.SpecID))))
 			}
 		}
 		repanel, rep, e := kernel.Decode[kernel.RePanel](g.Metadata, kernel.KeyRePanel)
@@ -314,11 +395,14 @@ func withKernelPanelVerb(cmd *cobra.Command, slug string, rebind bool, mutate fu
 	if err != nil {
 		return mutate()
 	}
+	if reg.Panel.Gate != "bead" && reg.Panel.Gate != "final_review" {
+		return mutate()
+	}
 	s, err := panelKernelStateFn(root, reg.Panel.Spec)
 	if err != nil {
 		return err
 	}
-	if s == nil || (reg.Panel.Gate != "bead" && reg.Panel.Gate != "final_review") {
+	if s == nil {
 		return mutate()
 	}
 	return phase.WithPhaseLock(s.Root, func() error {
@@ -383,14 +467,19 @@ func closeRetalliedChildren(s kernel.State, gate, dir string) error {
 		return nil
 	}
 	// Refuse a foreign child before any close writes.
+	var children []string
 	for _, r := range s.Records {
 		if r.Status == "closed" {
 			continue
 		}
 		t, owned, e := r.Tuple()
 		if r.Parent == s.Records[gate].ID && (!owned || e != nil || t.Epic != s.Epic) {
-			return panelVerbFailure(fmt.Errorf("foreign-child-open: %s; close or re-parent that child with bd", r.ID))
+			children = append(children, r.ID)
 		}
+	}
+	if len(children) > 0 {
+		sort.Strings(children)
+		return panelVerbFailure(fmt.Errorf("foreign-child-open: %s; close or re-parent those children with bd", strings.Join(children, ", ")))
 	}
 	for _, id := range s.Steps {
 		r := s.Records[id]
@@ -400,9 +489,13 @@ func closeRetalliedChildren(s kernel.State, gate, dir string) error {
 		}
 		for _, child := range s.Records {
 			if child.Parent == r.ID && child.Status != "closed" {
-				return panelVerbFailure(fmt.Errorf("open child %s prevents close", child.ID))
+				children = append(children, child.ID)
 			}
 		}
+	}
+	if len(children) > 0 {
+		sort.Strings(children)
+		return panelVerbFailure(fmt.Errorf("open children %s prevent close", strings.Join(children, ", ")))
 	}
 	for _, id := range s.Steps {
 		r := s.Records[id]

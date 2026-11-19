@@ -6,6 +6,7 @@
 
 An enrolled spec uses its active gate to authorise each review round.
 `panel create` takes the subject and reviewer count from that authorisation.
+It refuses a `--target` other than the gate branch.
 It selects the highest gate attempt.
 A re-panel keeps its required slot count and changed paths as the round scope.
 The registration and round ledger retain that scope.
@@ -13,7 +14,7 @@ A closed gate, an open slot, an unanswered decision, a collision, or a halted sp
 A round must equal the total registered rounds plus one.
 All registrations count, including abandoned panels.
 A continuation answer increases the pinned allowance.
-Spec and plan approval panels warn after the configured count and continue.
+When a local panel records enrollment, spec and plan approval panels warn after the configured count and continue.
 
 `panel submit` requires the current slot lease for an enrolled spec.
 Use a committed verdict file in the panel directory.

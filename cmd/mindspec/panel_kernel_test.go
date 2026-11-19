@@ -114,8 +114,8 @@ func kernelPanelRecord(t *testing.T, f *kerneltest.Fixture, id string) kernel.Re
 }
 
 type kernelPanelProtected struct {
-	Rows map[string]kernel.Record
-	Refs string
+	Snapshot string
+	Gate     string
 }
 
 func kernelPanelForeign(t *testing.T, f *kerneltest.Fixture) kernelPanelProtected {
@@ -129,24 +129,70 @@ func kernelPanelForeign(t *testing.T, f *kerneltest.Fixture) kernelPanelProtecte
 	r = f.Fake.Records[f.Items[2]+".impl.a1"]
 	r.Status = "in_progress"
 	f.Fake.Records[r.ID] = r
-	return kernelPanelProtected{Rows: map[string]kernel.Record{"foreign-note": f.Fake.Records["foreign-note"], "foreign-bug": f.Fake.Records["foreign-bug"], f.Items[1]: f.Fake.Records[f.Items[1]]}, Refs: actorCmdGit(t, f, "for-each-ref")}
+	return kernelPanelProtect(t, f)
+}
+
+// Preserve every snapshot field except the selected gate's computed records,
+// links between those records, and the panel artifact paths written by the verb.
+func kernelPanelProtectedSnapshot(t *testing.T, f *kerneltest.Fixture, gate string) string {
+	t.Helper()
+	raw := kerneltest.Snapshot(t, f)
+	lines := strings.Split(raw, "\n")
+	var rows []kernel.Record
+	f.Must(json.Unmarshal([]byte(lines[0]), &rows))
+	allowed := map[string]bool{gate: true}
+	for _, r := range rows {
+		tuple, ok, err := r.Tuple()
+		if err == nil && ok && tuple.Gate == gate && (tuple.Kind == "review-slot" || tuple.Kind == "fix" || tuple.Kind == "decision" || tuple.Kind == "change-judge") {
+			allowed[r.ID] = true
+		}
+	}
+	var kept []kernel.Record
+	var deps []json.RawMessage
+	for i, row := range rows {
+		if allowed[row.ID] {
+			var links []kernel.Dependency
+			f.Must(json.Unmarshal([]byte(lines[i+1]), &links))
+			for _, link := range links {
+				if !allowed[link.ID] || (link.DependsOnID != "" && !allowed[link.DependsOnID]) {
+					deps = append(deps, json.RawMessage(lines[i+1]))
+					break
+				}
+			}
+			continue
+		}
+		kept = append(kept, row)
+		deps = append(deps, json.RawMessage(lines[i+1]))
+	}
+	tail := []string{}
+	for _, line := range lines[len(rows)+1:] {
+		if strings.HasPrefix(line, "?? .mindspec/specs/"+f.SpecID+"/reviews/") {
+			continue
+		}
+		// Only review artifacts may change in the working tree.
+		if len(line) > 3 && strings.Contains(line[3:], ".mindspec/specs/"+f.SpecID+"/reviews/") {
+			continue
+		}
+		tail = append(tail, line)
+	}
+	data, err := json.Marshal(struct {
+		Rows []kernel.Record
+		Deps []json.RawMessage
+		Tail []string
+	}{kept, deps, tail})
+	f.Must(err)
+	return string(data)
+}
+func kernelPanelProtect(t *testing.T, f *kerneltest.Fixture) kernelPanelProtected {
+	t.Helper()
+	gate := f.Items[0] + ".review"
+	return kernelPanelProtected{Snapshot: kernelPanelProtectedSnapshot(t, f, gate), Gate: gate}
 }
 func kernelPanelCheckForeign(t *testing.T, f *kerneltest.Fixture, before kernelPanelProtected) {
 	t.Helper()
-	if actorCmdGit(t, f, "for-each-ref") != before.Refs {
-		t.Fatal("panel verb changed repository refs")
-	}
-	for id, want := range before.Rows {
-		if !reflect.DeepEqual(f.Fake.Records[id], want) {
-			t.Fatal("foreign row changed", id)
-		}
-	}
-	for _, call := range f.Fake.Calls {
-		if len(call) > 1 && (call[0] == "update" || call[0] == "close") {
-			if _, ok := before.Rows[call[1]]; ok {
-				t.Fatal("foreign write", call)
-			}
-		}
+	after := kernelPanelProtectedSnapshot(t, f, before.Gate)
+	if before.Snapshot != after {
+		t.Fatalf("panel verb changed protected snapshot\nbefore: %s\nafter: %s", before.Snapshot, after)
 	}
 }
 
@@ -200,8 +246,17 @@ func TestS134PanelCreate_AuthorisationAndFrozenGate(t *testing.T) {
 	}
 	t.Run("passed and target", func(t *testing.T) {
 		f, gate, head := kernelPanelFixture(t)
+		kernelPanelAuthorise(f, gate, head, 1, 2)
+		f.Create(gate+".r1.R1", gate)
+		before := kerneltest.Snapshot(t, f)
+		out, e := kernelPanelCreate(t, f, "1", "--target", "another")
+		kernelPanelRefusal(t, out, e, "target must be")
+		if before != kerneltest.Snapshot(t, f) {
+			t.Fatal("target refusal wrote")
+		}
+		kernelPanelAssertUnpublished(t, f, gate+".r1.R1", filepath.Join(f.SpecDir, "reviews", "1"))
 		kerneltest.PassGate(f, gate, head)
-		out, e := kernelPanelCreate(t, f, "1")
+		out, e = kernelPanelCreate(t, f, "1")
 		kernelPanelRefusal(t, out, e, "closed")
 		out, e = kernelPanelCreate(t, f, "1", "--target", "another")
 		kernelPanelRefusal(t, out, e, "target must be")
@@ -230,6 +285,9 @@ func TestS134PanelCreate_CollisionHaltAndOpenSlot(t *testing.T) {
 			out, e := kernelPanelCreate(t, f, target)
 			word := map[string]string{"collision": "id-collision", "halt": "halted", "slot": "is open"}[mode]
 			kernelPanelRefusal(t, out, e, word)
+			if mode == "slot" {
+				kernelPanelRefusal(t, out, e, "mindspec panel launch "+shellQuoteTarget("1")+" R1 --spec "+shellQuoteTarget(f.SpecID))
+			}
 			if before != kerneltest.Snapshot(t, f) {
 				t.Fatal("refusal changed snapshot")
 			}
@@ -248,7 +306,7 @@ func TestS134PanelCreate_LocalDecisionAndLease(t *testing.T) {
 	_, e := kernel.Lease(f.State(), kernel.LeaseOptions{Step: fix}, kernel.LeaseDeps{})
 	kernelPanelRefusal(t, "", e, d)
 	out, e := kernelPanelCreate(t, f, "2")
-	kernelPanelRefusal(t, out, e, d)
+	kernelPanelRefusal(t, out, e, "mindspec submit "+d+" --answer fix")
 	_, e = kernel.Answer(f.State(), d, "fix")
 	f.Must(e)
 	_, e = kernel.Lease(f.State(), kernel.LeaseOptions{Step: fix}, kernel.LeaseDeps{})
@@ -383,6 +441,15 @@ func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
 			kernelPanelAuthorise(f, gate, head, 6, 2)
 			_, e = kernel.Answer(f.State(), d, "continue:1")
 			f.Must(e)
+			if r := kernelPanelRecord(t, f, fix); r.Status != "closed" {
+				t.Fatal("continuation replaced completed fix", r)
+			}
+			for _, r := range f.State().Records {
+				tuple, ok, _ := r.Tuple()
+				if ok && tuple.Kind == "fix" && tuple.Gate == gate && r.Key() != fix && tuple.Round > 5 {
+					t.Fatal("continuation created a second fix", r)
+				}
+			}
 			out, e = kernelPanelCreate(t, f, "B", append(extra, "--bead", func() string {
 				if final {
 					return ""
@@ -421,13 +488,11 @@ func TestS134PanelSubmit_LeaseReceiptAndForeignSnapshot(t *testing.T) {
 	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
 	actorCmdGit(t, f, "add", ".")
 	actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "verdict")
-	foreign.Refs = actorCmdGit(t, f, "for-each-ref")
+	foreign = kernelPanelProtect(t, f)
 	args := []string{"1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file}
 	out, e = kernelPanelRun(t, panelSubmitCmd, args...)
-	kernelPanelRefusal(t, out, e, "--lease")
-	if kernelPanelRecord(t, f, id).Status == "closed" {
-		t.Fatal("closed without token")
-	}
+	kernelPanelRefusal(t, out, e, "mindspec lease "+id)
+	kernelPanelAssertUnpublished(t, f, id, filepath.Dir(file))
 	out, e = kernelPanelRun(t, panelSubmitCmd, append(args, "--lease", lease.Token)...)
 	kernelPanelRequire(t, out, e)
 	r := kernelPanelRecord(t, f, id)
@@ -552,11 +617,17 @@ func TestS134PanelRebind_OnePassAndForeignSnapshot(t *testing.T) {
 	}
 }
 func TestS134PanelCreate_PlanRoundsWarn(t *testing.T) {
-	f, _, head := kernelPanelFixture(t)
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, e := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, e)
 	// Document gates remain count-and-warn even when the work lifecycle is enrolled.
 	for n := 1; n <= 6; n++ {
 		out, e := kernelPanelRun(t, panelCreateCmd, "plan", "--spec", f.SpecID, "--gate", "plan_approve", "--target", "spec/"+f.SpecID, "--round", fmt.Sprint(n))
 		kernelPanelRequire(t, out, e)
+		if n <= 5 && strings.Contains(out, "warning:") {
+			t.Fatal("early round warning", out)
+		}
 		if n == 6 && (strings.Count(out, "warning:") != 1 || !strings.Contains(out, "count 6")) {
 			t.Fatal("sixth round warning", out)
 		}

@@ -288,7 +288,7 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 			return checkoutError(err, "check the panel scratch paths, then repeat panel create")
 		}
 		defer releaseCheckouts()
-		if gate == "spec_approve" || gate == "plan_approve" {
+		if (gate == "spec_approve" || gate == "plan_approve") && panelHasEnrollment(root, specID) {
 			count, err := panel.RoundsForGate(panel.Scan(root, specDir), specID, gate, "")
 			if err != nil {
 				return err

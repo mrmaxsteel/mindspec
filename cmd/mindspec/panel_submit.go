@@ -163,17 +163,20 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 		})
 		return err
 	}
-	state, err := panelKernelStateFn(root, spec)
-	if err != nil {
-		return err
+	var state *kernel.State
+	if reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review" {
+		state, err = panelKernelStateFn(root, spec)
+		if err != nil {
+			return err
+		}
 	}
 	if state != nil && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review") {
 		token, _ := cmd.Flags().GetString("lease")
-		if token == "" {
-			return panelVerbFailure(fmt.Errorf("--lease is required for this slot"))
-		}
 		gate := kernelPanelGate(*state, reg.Panel)
 		step := fmt.Sprintf("%s.r%d.%s", gateBase(*state, gate), round, slot)
+		if token == "" {
+			return guard.NewFailure("--lease is required for this slot", "mindspec lease "+step)
+		}
 		if file == "-" {
 			return panelVerbFailure(fmt.Errorf("use a committed verdict file for this slot"))
 		}
@@ -181,7 +184,17 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 		if e != nil {
 			return e
 		}
-		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: submit})
+		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: func(receipt kernel.Receipt) error {
+			committed, exists, e := newExecutor(root).FileAtRefOrAbsent(receipt.Commit, receipt.Path)
+			if e != nil {
+				return e
+			}
+			if !exists {
+				return panelVerbFailure(fmt.Errorf("committed verdict is missing"))
+			}
+			data = committed
+			return submit()
+		}})
 	} else {
 		err = submit()
 	}
