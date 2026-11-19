@@ -223,6 +223,15 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
 	}
+	kernelState, err := implKernelStateFn(root, specID)
+	if err != nil {
+		return nil, err
+	}
+	if kernelState != nil {
+		if err := implKernelPreflight(*kernelState); err != nil {
+			return nil, err
+		}
+	}
 	// Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on first
 	// lifecycle command. No-op if the epic already has mindspec_phase, or
 	// when no epic exists yet. Migration errors fail the command
@@ -324,6 +333,9 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		status, statusErr := readBeadStatus(epicID)
 		if statusErr == nil && status == "closed" && phaseDetail.Stored == state.ModeDone {
 			children, childErr := phase.LifecycleChildIDsForEpic(epicID)
+			if kernelState != nil {
+				children = append([]string{}, kernelState.Items...)
+			}
 			if childErr == nil {
 				fr, resumeErr := exec.ResumeFinalizedEpic(epicID, specID, children, hasRemote)
 				if resumeErr == nil {
@@ -458,6 +470,9 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	var lifecycleAllowSet []string
 	if planErr == nil {
 		lifecycleAllowSet = intersectIDs(beadIDs, lifecycleChildren)
+		if kernelState != nil {
+			lifecycleAllowSet = append([]string{}, kernelState.Items...)
+		}
 	}
 
 	// Spec 115 Bead 2: the pre-terminal orphan/obligation refusal gate.

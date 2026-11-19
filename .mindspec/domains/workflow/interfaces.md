@@ -1464,3 +1464,40 @@ Statuses `work`, `wait`, `halted`, `done` and `indeterminate` exit 0, 3, 4, 5 an
 An empty result on unfinished work is indeterminate.
 The command refuses an unapproved plan.
 Apply also requires the custom step type and a readable store.
+
+
+## Close flags and audit
+
+A kernel close needs a valid receipt.
+Artifact receipts identify a path, holding commit and blob.
+Reducer receipts identify their close reason.
+A verdict file alone does not permit a gate tally.
+Every registered slot needs a valid close or a completed retry.
+An invalid close produces `unreceipted-close`.
+The next apply creates one retry with predecessor lineage.
+A valid repaired receipt or a valid completed retry clears the flag.
+A retry retains its subject and decision options.
+It receives no old lease or receipt.
+
+A closed, unmerged work item with a passing gate produces `raw-close`.
+A work item closed over an open child produces `forced-close`.
+Neither state releases dependent work.
+A claimed actor step without a lease produces `raw-claim`.
+These flags are computed from the current state.
+
+Implementation approval checks the enrolled tree before any write.
+It refuses open steps, open decisions, invalid closes and open foreign children.
+It also refuses raw work-item closes and forced closes.
+Finalization uses only recorded work-item ids.
+After branch removal, merge checks use the recorded publication tip.
+Specs without enrolment retain the existing approval path.
+
+The audit table shows the pinned policy and event counts on every approval run.
+Escape-hatch counts come from the local journal.
+The journal has no project identity, so these counts cover this machine.
+Typed metadata supplies deferrals, takeovers, timed answers, repaired closes,
+carry-overs and each re-panel's slot count.
+A lease that replaces a raw claim retains a timed claim record.
+Raw-claim counts include retained records and current unrepaired claims.
+Audit counts do not block approval.
+An audit read error gives a warning.

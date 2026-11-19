@@ -127,6 +127,9 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	}
 	s.Enrolled, s.MarkerMissing = kernelid.Enrolled(w)
 	s.classify()
+	if !s.Enrolled {
+		return s, nil
+	}
 	s.Panels, err = panelDirectories(s.Root, specDir)
 	if err != nil {
 		return s, err
@@ -199,6 +202,13 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 			}
 		}
 		target := s.Refs["refs/heads/"+specBranch]
+		if target == "" {
+			// Finalization retains the publication tip after removing the branch.
+			publication, _ := epic.Metadata["mindspec_finalize_tip"].(string)
+			if objectID(publication) {
+				target = publication
+			}
+		}
 		if tip == "" || target == "" {
 			continue
 		}
