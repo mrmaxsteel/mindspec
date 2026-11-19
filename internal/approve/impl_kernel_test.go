@@ -3,6 +3,7 @@ package approve
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -95,6 +96,7 @@ func TestS134ImplApprove_RefusalTable(t *testing.T) {
 		t.Run(code, func(t *testing.T) {
 			f, mock, _ := s134ApproveFixture(t)
 			id := ""
+			repair := ""
 			switch code {
 			case "open-step":
 				id = s134Slot(f)
@@ -103,13 +105,16 @@ func TestS134ImplApprove_RefusalTable(t *testing.T) {
 			case "unreceipted-close":
 				id = s134Slot(f)
 				s134Close(t, f, id, nil)
+				repair = "mindspec next-action " + f.SpecID + " --apply"
 			case "raw-close":
 				id = f.Items[0]
+				repair = "mindspec complete " + id
 				// Remove the bead branch and its landed binding so the item is unmerged.
 				_, err := f.Command("git", "branch", "-D", "bead/"+id)
 				f.Must(err)
 			case "forced-close":
 				id = f.Items[0]
+				repair = "bd reopen " + id
 				s134Slot(f)
 				// A direct child of the item holds the close even though its gate passed.
 				f.Create(id+".impl.a1", id)
@@ -119,8 +124,22 @@ func TestS134ImplApprove_RefusalTable(t *testing.T) {
 			}
 			before := kerneltest.Snapshot(t, f)
 			_, err := ApproveImpl(f.Root, f.SpecID, mock)
-			if err == nil || !strings.Contains(err.Error(), code+": "+id) {
-				t.Fatalf("missing %s %s: %v", code, id, err)
+			if err == nil {
+				t.Fatal("approval did not refuse")
+			}
+			want := code + ": " + id
+			if repair != "" {
+				want += "; repair: " + repair
+			}
+			found := false
+			for _, line := range strings.Split(err.Error(), "\n") {
+				found = found || line == want
+			}
+			if !found {
+				t.Fatalf("missing exact refusal line %q: %v", want, err)
+			}
+			if !strings.Contains(err.Error(), "resolve the listed records, then run mindspec impl approve "+f.SpecID) {
+				t.Fatalf("missing final recovery: %v", err)
 			}
 			if kerneltest.Snapshot(t, f) != before {
 				t.Fatal("refusal changed snapshot")
@@ -172,8 +191,15 @@ func TestS134ImplApprove_AuditAndRerun(t *testing.T) {
 			t.Fatalf("run %d: %v", run, err)
 		}
 		for _, name := range []string{"--allow-doc-skew", "--override-adr", "--allow-not-ready", "--allow-net-deletion", "deferrals", "takeovers", "decision-answers", "raw-claims", "unreceipted-closes", "carry-overs", "re-panels"} {
-			if !strings.Contains(out.String(), name+" | 1") {
-				t.Errorf("run %d missing count 1 for %s:\n%s", run, name, out.String())
+			matches := 0
+			for _, line := range strings.Split(out.String(), "\n") {
+				fields := strings.Split(line, " | ")
+				if len(fields) >= 2 && fields[0] == name && fields[1] == "1" {
+					matches++
+				}
+			}
+			if matches != 1 {
+				t.Errorf("run %d needs exactly one count 1 for %s:\n%s", run, name, out.String())
 			}
 		}
 		if !strings.Contains(out.String(), "3 slots") || !strings.Contains(out.String(), decision+" fix ") {
@@ -229,5 +255,80 @@ func TestS134ImplApprove_AuditReadErrorIsAdvisory(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "warning: cannot read kernel audit") {
 		t.Fatalf("audit read error was hidden: %s", out.String())
+	}
+}
+
+func TestS134ImplApprove_RuleErrorRefuses(t *testing.T) {
+	f, mock, _ := s134ApproveFixture(t)
+	reg := kernel.NewRegistry("unreceipted-close", "raw-close", "forced-close", "id-collision")
+	for _, name := range []string{"unreceipted-close", "raw-close", "forced-close", "id-collision"} {
+		fn := func(kernel.State) (kernel.Changes, error) { return kernel.Changes{}, nil }
+		if name == "raw-close" {
+			fn = func(kernel.State) (kernel.Changes, error) {
+				return kernel.Changes{}, errors.New("cannot read close evidence")
+			}
+		}
+		f.Must(reg.Register(name, kernel.FlagOnly, fn))
+	}
+	kerneltest.WithRules(t, reg)
+	before := kerneltest.Snapshot(t, f)
+	_, err := ApproveImpl(f.Root, f.SpecID, mock)
+	if err == nil || !strings.Contains(err.Error(), "approval rule raw-close: cannot read close evidence") {
+		t.Fatalf("rule error did not refuse approval: %v", err)
+	}
+	if before != kerneltest.Snapshot(t, f) || len(mock.CallsTo("FinalizeEpic")) != 0 {
+		t.Fatal("rule error changed state or finalized")
+	}
+}
+
+func TestS134ImplApprove_NoEpicUsesLegacyError(t *testing.T) {
+	old := implKernelStateFn
+	implKernelStateFn = readImplKernelState
+	t.Cleanup(func() { implKernelStateFn = old })
+	t.Cleanup(phase.SetListJSONForTest(func(...string) ([]byte, error) { return []byte("[]"), nil }))
+	_, err := ApproveImpl(t.TempDir(), "010-test", &executor.MockExecutor{})
+	if err == nil || err.Error() != "no epic found for spec 010-test: no epic found for spec 010-test" {
+		t.Fatalf("legacy no-epic error lost: %v", err)
+	}
+}
+
+func TestS134ImplApprove_LegacyAvoidsKernelStoreRead(t *testing.T) {
+	f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
+	r := f.Fake.Records[f.Epic]
+	delete(r.Metadata, kernel.KeyRun)
+	f.Fake.Records[f.Epic] = r
+	for _, gate := range f.State().Gates {
+		delete(f.Fake.Records, f.ID(gate))
+	}
+	fullRead := false
+	store := kernel.NewStore(f.Root, f.Epic, func(args ...string) ([]byte, error) {
+		if args[0] == "list" && !contains(args, "--parent") {
+			fullRead = true
+			return nil, errors.New("kernel store read failed")
+		}
+		return f.Fake.Run(args...)
+	})
+	s, err := implKernelState(store, f.SpecID, f.SpecDir)
+	if err != nil || s != nil || fullRead {
+		t.Fatalf("legacy read kernel store: state=%+v err=%v read=%v", s, err, fullRead)
+	}
+}
+
+func TestS134ImplApprove_RepairArgumentsAreEscaped(t *testing.T) {
+	f, _, _ := s134ApproveFixture(t)
+	reg := kernel.NewRegistry("unreceipted-close", "raw-close", "forced-close", "id-collision")
+	for _, name := range []string{"unreceipted-close", "raw-close", "forced-close", "id-collision"} {
+		fn := func(kernel.State) (kernel.Changes, error) { return kernel.Changes{}, nil }
+		if name == "raw-close" {
+			fn = func(kernel.State) (kernel.Changes, error) {
+				return kernel.Changes{Flags: []kernel.Flag{{Code: "raw-close", Step: "item", Repair: []string{"tool\n", "arg\x1b"}}}}, nil
+			}
+		}
+		f.Must(reg.Register(name, kernel.FlagOnly, fn))
+	}
+	kerneltest.WithRules(t, reg)
+	err := implKernelPreflight(f.State())
+	if err == nil || !strings.Contains(err.Error(), `raw-close: item; repair: "tool\n" "arg\x1b"`) {
+		t.Fatalf("repair arguments not escaped: %v", err)
 	}
 }

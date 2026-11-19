@@ -223,6 +223,12 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
 	}
+	// Find the epic for this spec directly (ADR-0023).
+	epicID, err := phase.FindEpicBySpecID(specID)
+	if err != nil {
+		return nil, fmt.Errorf("no epic found for spec %s: %w", specID, err)
+	}
+
 	kernelState, err := implKernelStateFn(root, specID)
 	if err != nil {
 		return nil, err
@@ -232,6 +238,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 			return nil, err
 		}
 	}
+
 	// Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on first
 	// lifecycle command. No-op if the epic already has mindspec_phase, or
 	// when no epic exists yet. Migration errors fail the command
@@ -244,12 +251,6 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		o = opts[0]
 	}
 	result := &ImplResult{SpecID: specID}
-
-	// Find the epic for this spec directly (ADR-0023).
-	epicID, err := phase.FindEpicBySpecID(specID)
-	if err != nil {
-		return nil, fmt.Errorf("no epic found for spec %s: %w", specID, err)
-	}
 
 	// Spec 128 Bead 2 (OQ-3 option 1): the v2 phase-semantics one-shot
 	// reconciliation runs beside EnsureMigrated above, under the SAME

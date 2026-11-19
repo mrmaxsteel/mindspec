@@ -2,6 +2,7 @@ package kernel_test
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -73,5 +74,17 @@ func TestS134Audit_CurrentRawClaim(t *testing.T) {
 		if row.Event == "raw-claims" && row.Count != 1 {
 			t.Fatalf("raw claim count=%d", row.Count)
 		}
+	}
+}
+
+func TestS134Audit_ApprovalBlockersOrder(t *testing.T) {
+	s := kernel.State{Foreign: []string{"z", "a"}, Steps: []string{"step-z", "step-a"}, Records: map[string]kernel.Record{}}
+	for _, id := range append(append([]string{}, s.Foreign...), s.Steps...) {
+		s.Records[id] = kernel.Record{ID: id, Status: "open"}
+	}
+	want := []kernel.Flag{{Code: "foreign-child-open", Step: "a"}, {Code: "foreign-child-open", Step: "z"}, {Code: "open-step", Step: "step-a"}, {Code: "open-step", Step: "step-z"}}
+	got, err := kernel.ApprovalBlockers(s)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("blocker order: %+v, %v; want %+v", got, err, want)
 	}
 }

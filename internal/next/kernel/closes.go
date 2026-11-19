@@ -129,6 +129,7 @@ func retryAttempts(s State) (Changes, error) {
 	}
 	return c, nil
 }
+
 func unreceiptedFlags(s State) (Changes, error) {
 	c := Changes{}
 	for _, id := range UnreceiptedCloses(s) {
@@ -156,6 +157,7 @@ func ForcedClose(s State, id string) bool {
 	}
 	return false
 }
+
 func rawCloseFlags(s State) (Changes, error) {
 	c := Changes{}
 	for _, id := range s.Items {
@@ -165,6 +167,7 @@ func rawCloseFlags(s State) (Changes, error) {
 	}
 	return c, nil
 }
+
 func forcedCloseFlags(s State) (Changes, error) {
 	c := Changes{}
 	for _, id := range s.Items {
@@ -175,7 +178,7 @@ func forcedCloseFlags(s State) (Changes, error) {
 	return c, nil
 }
 
-// Tally reads verdicts only after each registered slot has a receipted close.
+// receiptedSlots reports whether each registered slot has a valid close or repair.
 func receiptedSlots(s State, round GateRound) bool {
 	if len(round.Slots) == 0 || len(round.Slots) != round.SlotCount {
 		return false

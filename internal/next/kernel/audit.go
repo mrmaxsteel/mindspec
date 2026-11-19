@@ -110,7 +110,7 @@ func PrintAudit(out io.Writer, s State, rows []AuditRow) {
 }
 
 // ApprovalBlockers reads the current snapshot. It does not run a reducer pass.
-func ApprovalBlockers(s State) []Flag {
+func ApprovalBlockers(s State) ([]Flag, error) {
 	var flags []Flag
 	for _, id := range append(append([]string{}, s.Gates...), s.Steps...) {
 		r := s.Records[id]
@@ -129,8 +129,16 @@ func ApprovalBlockers(s State) []Flag {
 			flags = append(flags, Flag{Code: "foreign-child-open", Step: id})
 		}
 	}
-	for _, fn := range []Rule{unreceiptedFlags, rawCloseFlags, forcedCloseFlags, collisionFlags} {
-		c, _ := fn(s)
+	registry := Rules()
+	for _, name := range []string{"unreceipted-close", "raw-close", "forced-close", "id-collision"} {
+		rule, ok := registry.entries[name]
+		if !ok {
+			return nil, fmt.Errorf("approval rule %s is missing", name)
+		}
+		c, err := rule.fn(s)
+		if err != nil {
+			return nil, fmt.Errorf("approval rule %s: %w", name, err)
+		}
 		flags = append(flags, c.Flags...)
 	}
 	sort.Slice(flags, func(i, j int) bool {
@@ -139,5 +147,5 @@ func ApprovalBlockers(s State) []Flag {
 		}
 		return flags[i].Step < flags[j].Step
 	})
-	return flags
+	return flags, nil
 }

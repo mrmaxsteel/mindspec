@@ -1,9 +1,10 @@
 package approve
 
 import (
-	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"os"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 )
 
 // TestMain defaults planListJSONFn to a bd-independent stub (an empty

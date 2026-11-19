@@ -162,18 +162,47 @@ func TestS134Closes_WorkItemBlocksDependent(t *testing.T) {
 	assertRetry(t, f, "", f.Items[1]+".impl.a1", false)
 }
 func TestS134Closes_RawClaimStep(t *testing.T) {
-	f := reducerFixture(t)
-	id := f.Items[0] + ".impl.a1"
-	reduce(t, f, true)
-	f.Must(f.Store.SetStatusIf(id, "open", "in_progress"))
-	before := kerneltest.Snapshot(t, f)
-	assertCloseFlag(t, reduce(t, f, false), "raw-claim", id, true)
-	if before != kerneltest.Snapshot(t, f) {
-		t.Fatal("flag wrote")
+	for _, row := range []struct {
+		name  string
+		lease *kernel.LeaseRecord
+		want  bool
+	}{
+		{"no-lease", nil, true},
+		{"empty-token-hash", &kernel.LeaseRecord{Generation: 1, Expires: fixedTime.Add(time.Hour)}, true},
+		{"valid-lease", &kernel.LeaseRecord{Generation: 1, TokenHash: "leased", Expires: fixedTime.Add(time.Hour)}, false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			f := reducerFixture(t)
+			id := f.Items[0] + ".impl.a1"
+			reduce(t, f, true)
+			f.Must(f.Store.SetStatusIf(id, "open", "in_progress"))
+			if row.lease != nil {
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyLease, *row.lease)))
+			}
+			before := kerneltest.Snapshot(t, f)
+			assertCloseFlag(t, reduce(t, f, false), "raw-claim", id, row.want)
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("flag wrote")
+			}
+		})
 	}
-	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyLease, kernel.LeaseRecord{Generation: 1, TokenHash: "leased", Expires: fixedTime.Add(time.Hour)})))
-	assertCloseFlag(t, reduce(t, f, false), "raw-claim", id, false)
 }
+
+func TestS134Closes_MergedPassedClosedItem(t *testing.T) {
+	f := reducerFixture(t)
+	item := f.Items[0]
+	kerneltest.PassGate(f, item+".review", "subject")
+	f.Must(f.Store.SetStatusIf(item, "open", "closed"))
+	s := f.State()
+	if !s.Merged[item] {
+		t.Fatal("fixture item is not merged")
+	}
+	if kernel.RawClose(s, item) {
+		t.Fatal("merged item counted as raw close")
+	}
+	assertCloseFlag(t, reduce(t, f, false), "raw-close", item, false)
+}
+
 func TestS134Closes_RawClosedJudgeBlocksSamePass(t *testing.T) {
 	f := reducerFixture(t)
 	item := f.Items[0]
