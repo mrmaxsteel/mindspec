@@ -88,25 +88,30 @@ own file and returning `ErrNotBuilt` until its bead fills it. **Rule registry.**
 `kernel.NewRegistry(names...)` fixes its own order, and its `Register(name, mode, fn)` refuses an unlisted or repeated
 name. `DefaultRegistry` is `NewRegistry` over the names `contract.go` lists; `RegisterRule` registers into it, and rule
 beads fill it through `init` in their own files. `Pass(reg, state, apply)` in `pass.go` is the real dispatcher: it runs
-the rules of `reg` in that registry's order, never in registration order, and with `apply` writes their result
-(receipts before closes, `WithCASRetry` on each status write). On an empty registry it writes nothing; it returns every
-rule and store error. Entry points and verbs call `Pass(kernel.Rules(), ...)`; `Rules()` is `DefaultRegistry` unless
+the rules of `reg` in that registry's order, never in registration order, and with `apply` writes their result (receipts
+before closes, `WithCASRetry` on each status write). On an empty registry it writes nothing; it returns every rule and
+store error. Entry points and verbs call `Pass(kernel.Rules(), ...)`; `Rules()` is `DefaultRegistry` unless
 `kerneltest.WithRules(t, reg)` replaces it for one test (restored by `t.Cleanup`; no `t.Parallel`). Bead 1's dispatcher
 tests use their own `NewRegistry`, so later rules do not change them; Bead 7's failing rule and Bead 10's counting rule
 use `WithRules`. A test over the default registry asserts only writes and output that no later rule bead changes.
 **Modes.** A rule's mode is `ordinary`, `halt` or `flag`. A `flag` rule returns flags only; a write from it makes `Pass`
 return an error. When `State.Halted()`, `Pass` runs only `halt` and `flag` rules, in order, reports `halted`, and with
 `apply` writes only the `halted` closes and receipts of `halt` rules; it creates no bead. Flags are read-only, so a
-halted read shows every flag. Otherwise `Pass` runs every rule. Bead 6 adds the core rules (`ordinary`) and its flag
-rules; Bead 8 its halt rule (`halt`); Bead 9 its flags (`flag`) and its `<id>.a<k+1>` create (`ordinary`). No bead
-after Bead 1 edits the dispatcher. **Seeders.** Bead 1 adds the `kerneltest` seeders `PassGate`, `Authorise` (an
-authorised round: round, subject, slot count, paths), `OpenDecision`, `Answer`, `Register` and `Repaired` (a repaired
-receipt). The bead that builds a producer pins the seeder with `TestS134SeedMatch_<seeder>[<case>]`: real producer vs
-seeder on twin fixtures, normalising only bead ids, wall-clock times and token hashes and comparing every other
-metadata key and value; on a mismatch the bead corrects the seeder. Pins: `Enrolled` Bead 5; `PassGate` Bead 6;
-`Authorise` each producer: Bead 6 (closed implement step, closed fix), Bead 8 (supersede, final round 1), Bead 11
-(`re-panel`); `Answer`, `Repaired` Bead 7; `OpenDecision` (reject and limit kinds) Bead 8; `Register` Bead 10. Bead 6's
-round opening is the one writer of the authorisation on a fix close; Bead 8 creates the fix only.
+halted read shows every flag. Otherwise `Pass` runs every rule. No bead after Bead 1 edits the dispatcher. **Rule
+list.** Bead 1 owns the list in `contract.go`: each name with its mode, in this order (owner in brackets). `ordinary`:
+`missing-link` (6), `recreate` (6), `tally` (6), `supersede` (8), `refused-round` (8), `final-round` (8), `judge-apply`
+(11), `judge-supersede` (11), `judge-create` (11), `round-open` (6), `slots` (6), `implement` (6), `retry-attempt` (9),
+`complete-entry` (6). `halt`: `halt` (8). `flag`: `run-marker-missing`, `foreign-child-open`, `foreign-blocker`,
+`id-collision` (6), `unreceipted-close`, `raw-close`, `forced-close`, `raw-claim` (9). Later beads only register a
+listed name with its listed mode; they do not edit the list. **Seeders.** Bead 1 adds the `kerneltest` seeders
+`PassGate`, `Authorise` (an authorised round: round, subject, slot count, paths), `OpenDecision`, `Answer`, `Register`
+and `Repaired` (a repaired receipt). The bead that builds a producer pins the seeder with
+`TestS134SeedMatch_<seeder>[<case>]`: real producer vs seeder on twin fixtures, normalising only bead ids, wall-clock
+times and token hashes and comparing every other metadata key and value; on a mismatch the bead corrects the seeder.
+Pins: `Enrolled` Bead 5; `PassGate` Bead 6; `Authorise` each producer: Bead 6 (closed implement step, closed fix), Bead
+8 (supersede, final round 1), Bead 11 (`re-panel`); `Answer`, `Repaired` Bead 7; `OpenDecision` (reject and limit kinds)
+Bead 8; `Register` Bead 10. Bead 6's round opening is the one writer of the authorisation on a fix close; Bead 8 creates
+the fix only.
 
 **Shared files.** `cmd/mindspec` registers each verb in its own file; Bead 1 adds `next_action.go`, `lease.go` and
 `submit.go` with their final flags and the `_HelpFlags` and `HelpGolden` lines, so no later bead edits those pins.
@@ -301,8 +306,9 @@ tests in the same bead.
       an empty registry writes nothing (same snapshot) and reports `halted` on a seeded `halt` answer; a test rule's
       create and close are written receipt first; a rule error and a bd error each come back from `Pass`.
 - [ ] Registry: `Register` of a name outside the registry's list, or of a name twice, returns an error; `RegisterRule`
-      of a name `contract.go` does not list returns an error. `WithRules` swaps `Rules()` for one test and restores
-      `DefaultRegistry` after it.
+      of a name `contract.go` does not list, or with a mode other than its listed mode, returns an error. A golden test
+      pins the `contract.go` names, order and modes of Contracts first. `WithRules` swaps `Rules()` for one test and
+      restores `DefaultRegistry` after it.
 - [ ] Order: two test rules registered in the reverse of their fixed order run in the fixed order; a dispatcher that
       runs rules in registration order fails the test.
 - [ ] Halt mode: on a seeded `halt` answer, an `ordinary` test rule that creates a step is not called and the snapshot
@@ -486,12 +492,13 @@ Bead 1, Bead 2
 **Steps**
 1. Add `reducer.go`: the core rules, registered with the Bead 1 `Pass` dispatcher, which turn `State` into a write list
    and the contracts §4 output. Core rules: implement authorisation (§13.3), round opening on a closed implement step or
-   a closed fix and the `panel create` entry in `run` (§13.7; the one writer of these two authorisations), slots after
-   `panel create`, the inline tally, a passing gate close (frozen), the `complete` entry and re-creation of a deleted
-   kernel bead (its rounds stay in the ledger). A work item is done only when its gate closed `passed` and its branch is
-   merged; any other state releases no dependent (B4). The slot rule creates slots only for a registered round that
-   matches the gate's authorised round. A subject move before `panel create` updates the authorised subject only
-   (§13.7).
+   a closed fix and the `panel create` entry in `run` (§13.7; the one writer of these two authorisations; a close with
+   no valid receipt authorises nothing), slots after `panel create`, the inline tally, a passing gate close (frozen),
+   the `complete` entry, re-creation of a deleted kernel bead (its rounds stay in the ledger) and `missing-link`: with
+   `--apply` it writes each missing mindspec link that passes the B7 check (§8). A work item is done only when its gate
+   closed `passed` and its branch is merged; any other state releases no dependent (B4). The slot rule creates slots
+   only for a registered round that matches the gate's authorised round. A subject move before `panel create` updates
+   the authorised subject only (§13.7).
 2. Add `allowance.go`: `Allowance(state, gate)` is the pinned limit plus each `continue:<n>` answer; rounds count
    through `panel.RoundsForGate`. A round past the allowance gets no `run` entry.
 3. Add `flags.go` (rules in mode `flag`) for `run-marker-missing`, `foreign-child-open`, `foreign-blocker` (B7 check on
@@ -523,6 +530,14 @@ Bead 1, Bead 2
       `kerneltest.Register` of round 1 with 3 slots, `--apply` creates exactly `<1>.review.r1.R1`..`R3`; with 4 rounds
       counted and a closed `<1>.review.r5.fix` seeded, `run` lists `panel create 1`; after `kerneltest.PassGate`,
       `run` lists `complete 1`.
+- [ ] Core rules, no receipt: a raw `bd close <1>.impl.a1` (no receipt) gives no `panel create 1` in `run`, and
+      `--apply` writes no gate round record; the same for a raw-closed `<1>.review.r5.fix` with 4 rounds counted. A
+      round opening that accepts any close fails the test.
+- [ ] Exits: on a seeded all-done fixture (every gate `passed`, every branch merged, the epic closed) `next-action x`
+      prints `"status":"done"` and exits 5. In `output.go`, a result with no action, waiting entry, decision or `run`
+      entry on a spec that is not done gives `indeterminate` and exit 1. A mapping that exits 0 for either fails.
+- [ ] Missing link: after `bd dep remove` of the item-3-to-`<epic>.final` link, `--apply` writes it again; with a
+      foreign link that closes a cycle on it, `--apply` writes no link and flags `foreign-blocker` naming that link.
 - [ ] Done = passed and merged: after `kerneltest.PassGate` with item 1 open and `bead/1` not merged, `--apply` creates
       no `<2>.impl.a1` and lists no action for items 2 or 3. A rule that counts a passed gate as done fails this test.
 - [ ] Authorised slots: `kerneltest.Register` of round 2 while the gate's authorised round is 1: `--apply` creates no
@@ -533,7 +548,8 @@ Bead 1, Bead 2
 - [ ] `--apply` with `types.custom: gate` exits non-zero naming `mindspec setup`; `next-action` on a spec with no
       approved plan exits non-zero; each writes nothing.
 - [ ] `TestS134SeedMatch_PassGate` matches a real passing tally; `TestS134SeedMatch_Authorise` matches the round 1
-      record a real implement close writes and the round N record a real fix close writes.
+      record the round opening writes on a seeded close of `<1>.impl.a1` with its receipt, and the round N record it
+      writes on a seeded close of `<1>.review.r<N>.fix` with its receipt (no real `submit`).
 - [ ] AC6 (part): with each kernel step force-closed and retyped `chore` and no `mindspec_run` or `panel.json`,
       `next-action` flags `run-marker-missing`.
 - [ ] AC7 (allowance): with 5 rounds counted and a `continue:1` answer (seeded), the allowance is 6; with no answer the
@@ -615,20 +631,20 @@ Bead 1
 ## Bead 8: Refused rounds, decisions, halt and the final gate
 
 **Steps**
-1. Add `reject.go` (registered rules): a refused tally below the allowance creates `<gate>.r<N+1>.fix`; a REJECT also
-   creates `<gate>.decide.reject.r<N>` (`fix`, `halt`); at the allowance only `<gate>.decide.limit.r<N>`
-   (`continue:<n>`, `halt`). `next-action` lists the decision, not the fix, until `--answer fix`. `continue:<n>` raises
-   the allowance and creates the fix. These rules write no round authorisation: Bead 6's round opening authorises round
-   N+1 when the fix closes.
+1. Add `reject.go` (rules `supersede` and `refused-round`, mode `ordinary`): a refused tally below the allowance creates
+   `<gate>.r<N+1>.fix`; a REJECT also creates `<gate>.decide.reject.r<N>` (`fix`, `halt`); at the allowance only
+   `<gate>.decide.limit.r<N>` (`continue:<n>`, `halt`). `next-action` lists the decision, not the fix, until `--answer
+   fix`. `continue:<n>` raises the allowance and creates the fix. These rules write no round authorisation: Bead 6's
+   round opening authorises round N+1 when the fix closes.
 2. Add B10 supersede to `reject.go`: a new subject during round N closes its open slots `superseded` and authorises
    round N+1; a commit in an open fix does not.
-3. Add `halt.go`, its rule registered in mode `halt` (Contracts first): from the answer's receipt close every open step and decision under the epic `halted`, except a step
-   with an open foreign child and its kernel ancestors. Status `halted` wins over `wait`; exit 4. A retry of the `halt`
-   answer and `--apply` close the receipted decision and every other closable step `halted`, exit 4 and write nothing
-   else (the pass does the closes; `submit` maps `halted` to exit 4). Each `halt` option text says it stops every work
-   item.
-4. Add `final.go`: final gate round 1 on the spec branch head when the last item is done (B4), and B9 and the decision
-   grammar for `<epic>.final` (§13.1).
+3. Add `halt.go`, its rule `halt` registered in mode `halt` (Contracts first): from the answer's receipt close every
+   open step and decision under the epic `halted`, except a step with an open foreign child and its kernel ancestors.
+   Status `halted` wins over `wait`; exit 4. A retry of the `halt` answer and `--apply` close the receipted decision
+   and every other closable step `halted`, exit 4 and write nothing else (the pass does the closes; `submit` maps
+   `halted` to exit 4). Each `halt` option text says it stops every work item.
+4. Add `final.go` (rule `final-round`, mode `ordinary`): final gate round 1 on the spec branch head when the last item
+   is done (B4), and B9 and the decision grammar for `<epic>.final` (§13.1).
 5. Update workflow "Rounds, decisions and halt". Text cites no internal record number.
 
 **Verification**
@@ -636,9 +652,15 @@ Bead 1
 - [ ] `go test -short ./internal/next/... ./internal/panel/... ./cmd/mindspec/...` passes (includes `ForBead`).
 
 **Acceptance Criteria**
-- [ ] AC7 (reducer): 3 rounds on slug A, `panel abandon` A, 2 on slug B (seeded with `kerneltest.Register`):
-      `next-action` lists one decision (`continue:<n>`, `halt`) and `run` has no `panel create`; after `continue:1` one
-      more round is authorised. The same holds for the final gate.
+- [ ] AC7 (reducer): 3 rounds on slug A, `panel abandon` A, 2 on slug B (seeded with `kerneltest.Register`), round 5
+      refused: `next-action` lists one decision (`continue:<n>`, `halt`) and `run` has no `panel create`. After `submit
+      --answer continue:1`, the pass creates `<1>.review.r6.fix`, writes no round authorisation and `run` lists no
+      `panel create`; a rule that authorises on the answer fails here. After a close of that fix with its receipt is
+      seeded, the pass (Bead 6's round opening) authorises round 6 and `run` lists `panel create 1`. The same pair for
+      `<epic>.final` and `<epic>.final.r6.fix`.
+- [ ] Decision with a foreign child: a foreign `bd create --parent` the seeded `<1>.review.decide.reject.r1`, then
+      `submit --answer fix`: the answer receipt is written, the decision stays open flagged `foreign-child-open`, and
+      the next `next-action` lists `<1>.review.r2.fix`. A reducer that waits for the decision's bd close fails.
 - [ ] AC8 (reducer): REJECT on item 2, `--apply`: a decision under item 2 whose `halt` text says it stops the spec, and
       an action for item 3.
 - [ ] AC9 (reducer): a commit on `bead/2` in round 2 with no fix open: one pass marks round-2 slots `superseded` and
@@ -665,8 +687,9 @@ Bead 6, Bead 7
 ## Bead 9: Unreceipted closes, raw closes and the audit table
 
 **Steps**
-1. Add `closes.go`: a `flag` rule flags `unreceipted-close` (a kernel close with no or a bad receipt); an `ordinary`
-   rule creates `<id>.a<k+1>` with `mindspec_from` on the next pass, unless a valid `repaired` receipt exists.
+1. Add `closes.go`: the `flag` rule `unreceipted-close` flags a kernel close with no or a bad receipt; the `ordinary`
+   rule `retry-attempt` creates `<id>.a<k+1>` with `mindspec_from` on the next pass, unless a valid `repaired`
+   receipt exists.
 2. Flag `raw-close` (a work item closed by bd after its gate passed, not merged), `forced-close` (closed over an open
    child) and `raw-claim` (a bd claim with no lease), each in a `flag` rule. Flags come from current state and are never
    stored. Export the `raw-close` and `forced-close` predicates for `complete`. A `raw-close` or `forced-close` item
@@ -681,7 +704,8 @@ Bead 6, Bead 7
 **Verification**
 - [ ] `go test ./internal/next/kernel/... -run '^TestS134(Closes|Audit)_' -v` passes and lists the new tests.
 - [ ] `go test ./internal/approve/... -run '^TestS134ImplApprove_' -v` passes and lists the new tests.
-- [ ] `go test -short ./internal/next/... ./internal/approve/...` passes (includes `ApproveImpl`).
+- [ ] `go test -short ./internal/next/... ./internal/approve/... ./cmd/mindspec/...` passes (includes `ApproveImpl`;
+      the Bead 9 rules join the default registry, so every verb test in `cmd/mindspec` runs them).
 
 **Acceptance Criteria**
 - [ ] AC10 (part): `bd close <slot>` with no verdict, or with a verdict and an old token, flags `unreceipted-close` and
@@ -719,8 +743,8 @@ Bead 2, Bead 6
    `_HelpFlags`. Make a passing `panel refute` or `panel defer` retally close the gate `passed` and its open fix or
    limit decision `superseded`; `panel defer` writes the defer record.
 5. Keep every refusal of today. A pre-kernel spec keeps today's panel rules. Update workflow "Panel verbs".
-6. Each test seeds the full state the producers leave (fix, decision, answer, authorised round), so the pre-pass writes
-   nothing whether Bead 8 is merged or not.
+6. Each test seeds the full state the producers leave (fix, decision, answer, authorised round), and every seeded
+   close carries its receipt, so the passes write nothing whether Beads 8, 9 and 11 are merged or not.
 
 **Verification**
 - [ ] `go test ./cmd/mindspec/... -run '^TestS134(Panel(Create|Submit|Refute|Defer|Rebind|Repanel)|SeedMatch)_' -v` passes and lists the new tests.
@@ -732,16 +756,18 @@ Bead 2, Bead 6
 - [ ] AC5 (part): after a pass, `panel create <w>` exits non-zero; so does `panel create 1 --target <another ref>`.
       With `r2.fix` or a limit decision open (seeded), a passing `panel refute` of the only blocking finding closes the
       gate `passed` and the fix or decision `superseded`; a passing `panel defer` does the same.
-- [ ] AC7 (verb): 3 rounds on slug A, `panel abandon` A, 2 on slug B: round 3 of B exits non-zero; after `submit
-      --answer continue:1` on the seeded limit decision and round 6 seeded with `kerneltest.Authorise` (real path: Bead
-      6's round opening when the fix closes), one more round runs and the next exits non-zero. The same for the final
-      gate (round seeded with `Authorise` on the spec branch head). With no authorised round, `panel create` exits
-      non-zero naming it.
+- [ ] AC7 (verb): 3 rounds on slug A, `panel abandon` A, 2 on slug B: round 3 of B exits non-zero. The test then seeds
+      the state the real path leaves after the answer: `<1>.review.r6.fix` closed with its receipt (Bead 8 creates it)
+      and round 6 with `kerneltest.Authorise` (Bead 6's round opening on that close). After `submit --answer
+      continue:1` on the seeded limit decision (its pass creates no fix: the fix exists), one more round runs and the
+      next exits non-zero. The same for the final gate (`<epic>.final.r6.fix` closed with its receipt, round seeded
+      with `Authorise` on the spec branch head). With no authorised round, `panel create` exits non-zero naming it.
 - [ ] Round authorisation: (i) a seeded REJECT round 1, decision answered `fix`, `<1>.review.r2.fix` open; (ii) a seeded
-      refused round 1 with no REJECT, all its slots closed, `<1>.review.r2.fix` seeded open: in each, `panel create 1`
-      exits non-zero naming the unauthorised round, same snapshot (no registration, `round` line, slot or gate round
-      record). After the fix closes and round 2 is authorised (seeded with `Authorise`, the record Bead 6's round
-      opening writes on that close), it exits 0. A presence-only check fails the test.
+      refused round 1 with no REJECT, all its slots closed with receipts, `<1>.review.r2.fix` seeded open: in each,
+      `panel create 1` exits non-zero naming the unauthorised round, same snapshot (no registration, `round` line, slot
+      or gate round record). After a close of the fix with its receipt is seeded and round 2 is authorised (seeded with
+      `Authorise`, the record Bead 6's round opening writes on that close), it exits 0. A presence-only check fails the
+      test.
 - [ ] A sixth `plan_approve` round exits 0 with one warning naming the count; a refusal fails the test.
 - [ ] AC8 (verbs): with a seeded unanswered REJECT decision and fix, `lease` on the fix and `panel create 2` exit
       non-zero; after `submit --answer fix`, `lease` exits 0.
@@ -762,9 +788,10 @@ Bead 2, Bead 6, Bead 7
 ## Bead 11: Change judge
 
 **Steps**
-1. Add `judge.go` (registered rule): compute the accepted subject (§13.2) from the passing panel's subject as `panel
-   rebind` refreshes it and the last `carry-over`, exported as `kernel.AcceptedSubject(state, gate)` for the highest
-   attempt. A commit that changes only a panel directory of the gate does not move it.
+1. Add `judge.go` (rules `judge-apply`, `judge-supersede` and `judge-create`, mode `ordinary`): compute the accepted
+   subject (§13.2) from the passing panel's subject as `panel rebind` refreshes it and the last `carry-over`, exported
+   as `kernel.AcceptedSubject(state, gate)` for the highest attempt. A commit that changes only a panel directory of the
+   gate does not move it.
 2. When the newest subject commit of a passed gate is not the accepted subject, create `<gate>.judge.a<k>` (kind
    `change-judge`, child of the gate's parent) unless the item is merged or the epic is closed. Close an open judge
    `superseded` when its subject is not the newest commit or is the accepted subject; its receipt names the rebind.
@@ -853,8 +880,8 @@ Bead 6, Bead 7
       exit non-zero naming it. After a carry-over, `complete 1` exits 0 and the next `--apply` creates no judge.
 - [ ] AC3 (part): `next 1` with no `--spec` resolves `x` and prints a token (generation 1); a second `next 1`, and
       separately `lease <1>.impl.a1` after `next 1`, each exit non-zero naming `lease --take`.
-- [ ] AC6 (part): `panel_presence: warn`, kernel steps force-closed and retyped: `complete` with no passing panel exits
-      non-zero. On `PreKernelSpec` `y`, `complete` with no panel warns and exits 0; `next` does not select the foreign
+- [ ] AC6 (part): `panel_presence: warn`, kernel steps force-closed and retyped `chore`, no `mindspec_run` or
+      `panel.json`: `complete` with no passing panel exits non-zero. On `PreKernelSpec` `y`, `complete` with no panel warns and exits 0; `next` does not select the foreign
       child.
 - [ ] AC9 (verbs): on the halted spec (seeded `halt` answer) `lease`, `complete` and `next 2` exit non-zero, same
       snapshot. `panel tally`, `panel verify`, `config show` and `doctor` are not refused for the halt. With a second
