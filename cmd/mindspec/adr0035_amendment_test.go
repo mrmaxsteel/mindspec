@@ -1,11 +1,81 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func adr0035NextActionStatusExits(text string) error {
+	const heading = "## Amendment: HC-4 next-action status exits"
+	_, section, found := strings.Cut(text, heading)
+	if !found {
+		return fmt.Errorf("missing next-action exit-code amendment section")
+	}
+	section, _, _ = strings.Cut(section, "\n## ")
+	section = normalizeWhitespace(section)
+	for _, row := range []string{
+		"| `work` | 0 |", "| `wait` | 3 |", "| `halted` | 4 |",
+		"| `done` | 5 |", "| `indeterminate` | 1 |",
+	} {
+		if !strings.Contains(section, row) {
+			return fmt.Errorf("next-action amendment is missing status mapping %q", row)
+		}
+	}
+	for _, rule := range []string{
+		"exception to the general exit-code contract", "with and without `--apply`",
+		"writes nothing", "one reduction under the phase lock", "pending halted closes and returns 4",
+		"`halted` before `wait`", "final `recovery:` line",
+		"`indeterminate` means the reducer returns no actions.",
+	} {
+		if !strings.Contains(section, rule) {
+			return fmt.Errorf("next-action amendment is missing rule %q", rule)
+		}
+	}
+	return nil
+}
+
+func adr0035RawText(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(repoRootFromTestDir(t), ".mindspec", "adr", "ADR-0035-agent-error-contract.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestADR0035Amendment_NextActionStatusExits(t *testing.T) {
+	if err := adr0035NextActionStatusExits(adr0035RawText(t)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestADR0035Amendment_NextActionRejectsMissingSection(t *testing.T) {
+	text := adr0035RawText(t)
+	const heading = "## Amendment: HC-4 next-action status exits"
+	before, section, found := strings.Cut(text, heading)
+	if !found {
+		t.Fatal("missing amendment in mutation fixture")
+	}
+	_, after, found := strings.Cut(section, "\n## ")
+	if !found {
+		t.Fatal("missing section boundary in mutation fixture")
+	}
+	if err := adr0035NextActionStatusExits(before + "\n## " + after); err == nil {
+		t.Fatal("removing the amendment must fail even though other exit-code prose remains")
+	}
+	for _, row := range []string{"| `wait` | 3 |", "| `halted` | 4 |", "| `done` | 5 |"} {
+		t.Run(row, func(t *testing.T) {
+			wrong := strings.Replace(text, row, "| `wrong` | 0 |", 1)
+			if err := adr0035NextActionStatusExits(wrong); err == nil {
+				t.Fatalf("changing exit-code mapping %q must fail", row)
+			}
+		})
+	}
+}
 
 // adr0035_amendment_test.go — spec 127 (lifecycle-verb-trustworthiness)
 // Bead 2, R5(f)/AC-9(iv): the pre-drafted ADR-0035 "Guidance non-
