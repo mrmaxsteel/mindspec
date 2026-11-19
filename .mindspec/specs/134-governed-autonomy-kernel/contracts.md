@@ -1,7 +1,7 @@
 # Spec 134 contracts: governed-autonomy kernel
 
 Normative for spec 134. §1-§12 hold the operator rulings of 2026-11-15 and 2026-11-17. §13 holds readings where a
-ruling is silent; each cites the open question that confirms it. A citation of `§<n>` includes all of that section.
+ruling is silent; the operator confirmed them on 2026-11-18. A citation of `§<n>` includes all of that section.
 
 ## 1. Rulings
 
@@ -20,7 +20,8 @@ Thesis: beads hold plan and dispatch; git holds evidence; the binary holds rules
   edges (`work_chunks`), which `plan approve` already writes as bd blocks links.
 - The kernel alone creates kernel beads, type `step`: implement `<w>.impl.a<k>`; bead gate `<w>.review` and final
   gate `<epic>.final` (both at enrolment); slots `<gate>.r<N>.R<s>`; fix `<gate>.r<N>.fix` (after round N-1 is
-  refused). Decisions `<gate>.decide.<cause>.r<N>` use bd's built-in `decision` type.
+  refused); change judge `<gate>.judge.a<k>` (§13.2). Decisions `<gate>.decide.<cause>.r<N>` use bd's built-in
+  `decision` type.
 - Actor steps close by `submit` or the §7 verb. Gates close only by the reducer on a passing tally. Decisions close
   by `submit --answer`. A gate holds its active round and slot ids in metadata (no round beads, no "pick the
   latest") and is never leased. A slot may close `passed` with a REJECT verdict.
@@ -41,13 +42,13 @@ Thesis: beads hold plan and dispatch; git holds evidence; the binary holds rules
 7. Check both kinds for cycles before each mindspec link write (§8; bd's refusal is the backstop). No blocks between
    ancestor and descendant.
 8. Just in time: a bead comes only from the outcome that authorises it (enrolment: all gates; refused round: its
-   fix; passed fix: the next slots).
+   fix; passed fix: the next slots; a subject change after a pass: its judge, §13.2).
 9. A refused tally below the limit creates round N+1's fix under the same open gate. Attempts are counted.
 10. A new subject during round N supersedes its open slots in the same pass. A commit in an open fix does not.
 11. `halt` closes every open step under the epic `halted` in the same pass, except a step with an open foreign
     child and its kernel ancestors (§13.4). It never closes a foreign bead.
 12. A gate is a child of what it decides. An open bead gate makes raw `bd close <work item>` fail without `--force`.
-    A gate closed `passed` is frozen.
+    A gate closed `passed` is frozen; only a `carry-over` (§13.2) adds to its receipt.
 13. A receipt names path, holding commit and blob id, never the body (a bare digest only if a commit keeps the
     bytes). Readers resolve from that commit, not from the branch head.
 
@@ -68,8 +69,8 @@ or starts an actor.
 ```
 
 - `status` `work` / `wait` / `halted` / `done` / `indeterminate` exits 0 / 3 / 4 / 5 / 1. `indeterminate` means no
-  actions. `kind` is `implement`, `review-slot` or `fix`. Commands are argv arrays. Order: plan, kind, slot. Text
-  goes through `termsafe`.
+  actions. `kind` is `implement`, `review-slot`, `fix` or `change-judge`. Commands are argv arrays. Order: plan, kind,
+  slot. Text goes through `termsafe`.
 - Inputs: the epic subtree, the git refs it names, the panel ledger and verdicts, the pinned policy, the clock against
   expiries. `revision` digests them (no display times, no free text). Same inputs give the same bytes. An expiry
   changes the output (`retry_at`). A no-change `--apply` writes nothing. A removed field, a new `kind` or a new
@@ -89,10 +90,11 @@ records the reason. `panel.lease_ttl` defaults to `2h` and is renewable.
 
 Checks: the current generation; subject = the gate's active round; the artifact resolves at a commit and the blob
 matches; the artifact fits the kind (a verdict for a slot; a commit on `bead/<id>` past the round subject for a fix; a
-commit past the claim base for an implement step). It writes the receipt, closes, and runs one reducer pass (order:
-§13.9). Refuses: an old or absent token, a stale subject, a foreign slot, a missing artifact, a different result for a
-closed step. The same receipt again on a closed step exits 0 with no change; on an open step it closes it. A decision
-needs no token and takes a listed option; it counts from its receipt, even when a foreign child keeps it open.
+commit past the claim base for an implement step; a judgement for a change judge, §13.2). It writes the receipt, closes,
+and runs one reducer pass (order: §13.9). Refuses: an old or absent token, a stale subject, a foreign slot, a missing
+artifact, a different result for a closed step. The same receipt again on a closed step exits 0 with no change; on an
+open step it closes it. A decision needs no token and takes a listed option; it counts from its receipt, even when a
+foreign child keeps it open.
 
 ## 7. Existing verbs
 
@@ -163,8 +165,9 @@ leaves the epic and work items open (§13.4). Spec and plan gates: count and war
 ## 11. Audit table
 
 `impl approve` prints the table; it never blocks. It shows policy and counts of each escape hatch (`--allow-doc-skew`,
-`--override-adr`, `--allow-not-ready`, `--allow-net-deletion`), deferrals, takeovers, timed decision
-answers, raw claims and unreceipted closes, from durable records. `--allow-not-ready` joins both friction registries.
+`--override-adr`, `--allow-not-ready`, `--allow-net-deletion`), deferrals, takeovers, timed decision answers, raw
+claims, unreceipted closes, carry-overs and the slot count of each re-panel, from durable records. `--allow-not-ready`
+joins both friction registries.
 
 ## 12. Shared bd store
 
@@ -173,14 +176,14 @@ with no mindspec command and no setup. Mindspec-owned = the computed set: the ep
 finalizer's allow-set) and kernel ids. Every other bead is foreign, a `task` under the epic included. Nothing a
 foreign user does with bd makes mindspec advance, lose, double or corrupt a step.
 
-1. **Ids.** Kernel ids have word segments (`.impl.`, `.review`, `.final`, `.decide.`). bd assigns `<prefix>-<hash>` and
-   numeric child ids `<parent>.<n>`, so a bd-assigned id never has a kernel shape. Work items are the approved plan's
-   ids, never "any `task` child": a foreign child `<epic>.<n>` stays foreign, and phase derivation and `next` selection
-   ignore it. A bead that has a kernel-shaped id but no matching tuple (for example from `bd create --id`) is a
-   collision: the verb refuses, prints `id-collision` with the id and the line "remove that bead with bd", and never
-   adopts, edits or closes it. Kernel-shaped = an exact match of the §2 grammar, with an optional attempt suffix `.a<k>`
-   on any kernel id: a bd-numbered child such as `<w>.review.1` is foreign. If OQ1 takes its fallback, the computed key
-   in metadata is the identity.
+1. **Ids.** Kernel ids have word segments (`.impl.`, `.review`, `.final`, `.decide.`, `.judge.`). bd assigns
+   `<prefix>-<hash>` and numeric child ids `<parent>.<n>`, so a bd-assigned id never has a kernel shape. Work items are
+   the approved plan's ids, never "any `task` child": a foreign child `<epic>.<n>` stays foreign, and phase derivation
+   and `next` selection ignore it. A bead that has a kernel-shaped id but no matching tuple (for example from `bd create
+   --id`) is a collision: the verb refuses, prints `id-collision` with the id and the line "remove that bead with bd",
+   and never adopts, edits or closes it. Kernel-shaped = an exact match of the §2 grammar, with an optional attempt
+   suffix `.a<k>` on any kernel id: a bd-numbered child such as `<w>.review.1` is foreign. If OQ1 takes its fallback,
+   the computed key in metadata is the identity.
 2. **Views.** bd 1.3.4 has no store-level default filter for `bd ready` or `bd list` (`bd config --help` lists
    none). Every bead mindspec creates (epic, work items, steps, decisions) gets label `mindspec` and a title that
    starts `[mindspec]`; types stay as §2 says. `bd ready --exclude-label mindspec` hides them all. (OQ14.) The epic
@@ -206,14 +209,22 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    nothing written) the verb reads again and runs its pass once more. A retry that succeeds returns success. A second
    mismatch refuses; the step stays open with at most its receipt (B5). Creates use computed ids: no second bead.
 
-## 13. Applied readings (spec 134; each confirmed by an open question)
+## 13. Applied readings (confirmed by the operator, 2026-11-18)
 
 1. **Final gate (OQ4).** B9 and the decision grammar apply to `<epic>.final`. A final fix commit lands on the spec
    branch, and the §6 fix check reads it. Final rounds count over every `final_review` registration, abandoned too.
-2. **Subject change after a pass (OQ5).** A frozen receipt never authorises a changed subject. `panel rebind`
-   refreshes a passing panel and does not write the gate. When rebind refuses the change (for example
-   `.mindspec/config.yaml`), the next pass creates a successor `<gate>.a<k+1>` (same parent, `mindspec_from` = the
-   frozen gate); verbs select the highest attempt, rounds keep counting, and §2 ids apply to it.
+2. **Subject change after a pass (OQ5).** A move of a passed gate's subject commit never by itself forces a new
+   panel, and a frozen receipt never by itself authorises the new subject. When `panel rebind` refreshes the passing
+   panel to the new subject, nothing more happens; rebind does not write the gate. Otherwise (for example a
+   `.mindspec/config.yaml` commit), the next pass creates the actor step `<gate>.judge.a<k>` (kind `change-judge`,
+   child of the gate's parent, subject = the new commit), leased and submitted as §5 and §6 say. Its artifact is a
+   judgement with one of two values: `carry-over` with a reason, or `re-panel` with a slot count n (from 2 to the
+   slot count of the gate's passing round) and the changed paths in scope. `submit` checks the shape, the old and new
+   subject and the frozen gate's receipt; it never judges the content. A judgement that does not fit is refused and
+   the step stays open. On `carry-over` the gate stays `passed`; its receipt adds the old subject, the new subject and
+   the judge's receipt, and verbs accept the new subject. On `re-panel` the pass creates the successor `<gate>.a<k+1>`
+   (same parent, `mindspec_from` = the frozen gate) and authorises a round of n slots on the new subject, scoped to
+   the diff (§13.7). Verbs select the highest attempt, rounds keep counting, and §2 ids apply to it.
 3. **Implement authorisation (OQ9).** An open work item with all plan upstreams done (B4), no open implement step and
    no gate round authorises `<w>.impl.a1`. Each pass creates it for every such item, in plan order, on the one
    controller host (§8); this is not the deferred parallel waves. `<w>.impl.a<k+1>` comes only from §9.
@@ -234,14 +245,14 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    `ms-spec-autopilot`, "One halted bead halts the spec", "Any bead REJECT verdict", "Two consecutive impl-subagent
    failures", `max-rounds-per-bead`, the NOT READY row, "Don't keep going after a halt". Rows that stay: a failed
    merge, a dependency mismatch, and rows that return an open decision to the user.
-7. **Round opening (OQ10, OQ12).** `panel create` is the one writer of a round record (the registration and its
-   ledger `round` line, which `ForBead` and §10 count). These outcomes authorise round N on a subject commit: a closed
+7. **Round opening (OQ10, OQ12).** `panel create` is the one writer of a round record (the registration and its ledger
+   `round` line, which `ForBead` and §10 count). These outcomes authorise round N on a subject commit: a closed
    implement step (round 1); a closed fix `<gate>.r<N>.fix` (round N); a supersede (B10: the same pass sets the new
-   subject, round N+1); a successor gate (§13.2); for `<epic>.final`, the last work item done (B4; round 1,
-   the spec branch head). The pass records the round and subject in gate metadata and lists `panel create` for that
-   gate in `run`; its pass creates the slots. While a round on the current subject has an open slot, `panel create`
-   refuses and names it (redispatch: `panel recover` or `launch`). A subject move before `panel create` updates the
-   authorised subject only. A round past the allowance gives the limit decision, not a `run` entry.
+   subject, round N+1); a `re-panel` judgement (§13.2: n slots on the successor gate); for `<epic>.final`, the last work
+   item done (B4; round 1, the spec branch head). The pass records the round and subject in gate metadata and lists
+   `panel create` for that gate in `run`; its pass creates the slots. While a round on the current subject has an open
+   slot, `panel create` refuses and names it (redispatch: `panel recover` or `launch`). A subject move before `panel
+   create` updates the authorised subject only. A round past the allowance gives the limit decision, not a `run` entry.
 8. **REJECT (OQ13).** A tally with a REJECT verdict is a refused round. Below the limit, its pass creates the fix
    `<gate>.r<N+1>.fix` and the decision `<gate>.decide.reject.r<N>` (`fix` or `halt`). While it is unanswered, a verb
    that would claim or close another child of that gate, open a round on it, or close or merge what it decides refuses

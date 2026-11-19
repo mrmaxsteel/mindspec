@@ -6,7 +6,7 @@ approved_by: ""
 # Spec 134-governed-autonomy-kernel: Governed Autonomy Kernel
 
 *Code citations: `origin/main` at `371dc360` (v0.19.0), 2026-11-15; the named symbol is authoritative. Normative:
-[contracts.md](contracts.md) (§1-§12 operator rulings; §13 readings where a ruling is silent).*
+[contracts.md](contracts.md) (§1-§12 operator rulings; §13 readings the operator confirmed on 2026-11-18).*
 
 ## Goal
 
@@ -36,7 +36,7 @@ replaces a differing `types.custom` under `--force`. Already delivered: `77daf45
 [ADR-0045](../../adr/ADR-0045-binary-owns-sequence-and-rules.md); [ADR-0023](../../adr/ADR-0023.md) (`step`);
 [ADR-0040](../../adr/ADR-0040-orchestration-layering-ratchet.md); [ADR-0038](../../adr/ADR-0038-friction-reporter.md);
 [ADR-0037](../../adr/ADR-0037-panel-gate-enforced-contract.md); [ADR-0035](../../adr/ADR-0035-agent-error-contract.md);
-[ADR-0043](../../adr/ADR-0043-panel-disposition-telemetry-store.md). HC-4 status clause: OQ8.
+[ADR-0043](../../adr/ADR-0043-panel-disposition-telemetry-store.md). Amends ADR-0035 HC-4: `next-action` exits by §4.
 
 ## Requirements
 
@@ -52,7 +52,8 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
 4. **Existing verbs are kernel steps.** The §7 verbs are the commands `run` lists; each closes the step it names and
    keeps its refusals. Failure: today `next`, `complete` and the skills each follow their own rules.
 5. **Bead gate as child.** Enrolment creates `<w>.review` per work item and `<epic>.final`; a passed gate is frozen
-   (B12, §13.2). Failure: nothing deters a raw work-item close (`mindspec-xaoq`).
+   (B12); an agent step judges a later subject change that `panel rebind` does not accept: carry-over or a re-panel of 2
+   or more slots (§13.2). Failure: nothing deters a raw work-item close (`mindspec-xaoq`).
 6. **Enrol at plan approve.** `plan approve` enrols every new spec and pins its policy (§8). Nothing clears it; an
    enrolled spec always enforces the panel gate. Failure: `panel_presence` defaults to `warn`; `loop:` is editable.
 7. **Round limit across panels.** A gate counts every registration of its work item or spec (§10, §13.1). Failure: a
@@ -89,7 +90,8 @@ on it does not enrol and selects by recorded `bead_ids`, not `--parent`. Without
   hatches, per-wake ceilings, `token_budget`, lane kit ledger.
 - Rejected: a hand mode or opt-in inside mindspec; enrol on read; bd's lease; unfenced leases; ownership by type;
   version stamp; auto-reopen; round beads; per-directory round counts; `--ephemeral` steps.
-- Later: export removal (`mindspec-lzx4`); document steps; parallel waves (`mindspec-m4ks`); a driver; skill merge.
+- Later: export removal (`mindspec-lzx4`); document steps; parallel waves (`mindspec-m4ks`); a driver; skill merge;
+  plan amendment of a spec past `plan approve` (follow-up spec, `mindspec-3v6n`).
 
 ## Acceptance Criteria
 
@@ -117,10 +119,9 @@ blocks Y" = Y waits for X.
   another slot, a changed blob, a verdict to a fix, an implement commit not past the claim base. A valid `submit`
   writes `mindspec_close` = path, commit, blob id; a rerun exits 0 and another artifact exits non-zero, each with
   `bd show --json` unchanged. Killed between receipt and close: step open with its receipt; a rerun closes it.
-- [ ] AC5 (R5, B12): `bd close <w>` exits non-zero (open child). After a pass, `panel create <w>` exits non-zero. A
-  `.mindspec/config.yaml` commit: `complete` exits non-zero and creates `<w>.review.a2` (`mindspec_from` set); after
-  its pass, `complete` exits 0. With `r2.fix` or a limit decision open, `panel refute` of the only blocking finding
-  closes the gate `passed` and the fix or decision `superseded`.
+- [ ] AC5 (R5, B12): `bd close <w>` exits non-zero (open child). After a pass, `panel create <w>` exits non-zero. With
+  `r2.fix` or a limit decision open, `panel refute` of the only blocking finding closes the gate `passed` and the fix
+  or decision `superseded`.
 - [ ] AC6 (R6): `panel_presence: warn`; each kernel step closed by `bd close --force` and retyped `chore`; no
   `mindspec_run` or `panel.json`: `complete` with no passing panel exits non-zero (closed ids witness); `next-action`
   flags `run-marker-missing`. Spec `y` approved by v0.19.0: `next-action y` exits non-zero, same snapshot; `complete`
@@ -172,28 +173,39 @@ blocks Y" = Y waits for X.
 - [ ] AC17 (R1-R4, B8): only `next-action --apply`, `lease`, `submit` and each `run` entry reach `impl approve` exit 0
   and `"status":"done"`. After `submit <1>.impl.a1`, `run` lists `panel create 1`; after it, `--apply` lists slots
   `<1>.review.r1.R<s>`, `ForBead` counts 1 round, a rerun of `panel create 1` exits non-zero; the finalize export runs.
+- [ ] AC18 (R5, B12): after item 1's gate passes on 3 slots, a `.mindspec/config.yaml` commit on `bead/1` (rebind
+  refuses): `--apply` creates exactly `<1>.review.judge.a1` and no round. (a) `submit` of `carry-over` with a reason:
+  the gate stays `passed`, its receipt names the old and new subject and the judge receipt; `complete 1` and `impl
+  approve` accept the new subject. (b) Fresh fixture, `re-panel` with 2 slots: `<1>.review.a2` (`mindspec_from` set)
+  gets one 2-slot round on the new subject; after its pass, `complete 1` exits 0. (c) A judgement with 1 or 4 slots,
+  or a value other than `carry-over` or `re-panel`: `submit` exits non-zero, the step stays open, no round.
 
 ## Validation Proofs
 The scratch-repo tests for AC1-AC17 each pass and fail on a named mutation; `make test` exits 0.
 
 ## Open Questions
 
-- [ ] grill deferred: headless session
-- [ ] OQ1: Does `bd create --id` accept word segments? Recommended: probe first; fallback `mindspec_key` (§12).
-- [ ] OQ2: lease refuses an "open ancestor or upstream", but every step has one. Recommended: held or blocked (§5).
-- [ ] OQ5: B12 freezes a passed gate; `panel rebind` refuses a config change. Recommended: successor gates (§13.2).
-- [ ] OQ4, OQ6: no final-gate fix id; a halted spec is active; halt retry exit 4 (§13.4) vs 0 (§6). Recommended: §13.
-- [ ] OQ8: exits 3/4/5 conflict with ADR-0035 HC-4; `indeterminate` = 1 equals a refusal. Recommended: amend HC-4.
-- [ ] OQ9, OQ11: B8 has no implement outcome; refusals omit today's gates and halt rows. Recommended: §13.3, §13.5-6.
-- [ ] OQ10, OQ12: B8, B10 name no next round; only `panel create` writes one. Recommended: `run` entry (§13.7, §13.9).
-- [ ] OQ13: B9 gives a refused round a fix, R8 a REJECT a decision. Recommended: both; the decision holds (§13.8).
-- [ ] OQ14: bd has no default view filter. Recommended: mark mindspec beads; `bd ready --exclude-label mindspec` (§12).
-- [ ] OQ15-OQ18: `plan approve` enrols every new spec, no opt-in (§8); the verbs stay as `run` commands (§7); a spec
-  past `plan approve` at release keeps today's rules; an enrolled spec enforces the gate. Recommended: yes.
-- [ ] OQ19: `plan approve` refuses an enrolled spec (§8); how does a plan change? Recommended: a new spec, or `halt`.
-- [ ] OQ20: a rerun on an edited plan keeps a dropped plan-order link (B6), and a new cycle refuses or exits 0 (§8;
-  R1-M20, R1-M21, R2-M27, R3-M27). Recommended: a rerun before the approval record refuses any plan change other than
-  missing items; the operator edits the plan only after removing the epic's children with bd.
+- [x] grill waived by the operator (2026-11-18)
+- [x] OQ1: Does `bd create --id` take word segments? Decided (operator, 2026-11-18): the plan settles it; its first
+  bead probes `bd create --id`; fallback `mindspec_key` (§12).
+- [x] OQ2: every step has an open ancestor or upstream. Decided (operator, 2026-11-18): lease refuses held or
+  blocked (§5).
+- [x] OQ4, OQ6: final-gate fix id; halted spec; halt retry exit. Decided (operator, 2026-11-18): §13.1, §13.4.
+- [x] OQ5: a passed gate is frozen; `panel rebind` refuses a config change. Decided (operator, 2026-11-18): a moved
+  subject never by itself forces a new panel; an agent step picks carry-over or a smaller re-panel (§13.2).
+- [x] OQ8: exits 3/4/5 conflict with ADR-0035 HC-4. Decided (operator, 2026-11-18): amend HC-4 (ADR Touchpoints).
+- [x] OQ9, OQ11: no implement outcome; refusal sets; halt rows. Decided (operator, 2026-11-18): §13.3, §13.5-6.
+- [x] OQ10, OQ12: no writer of the next round. Decided (operator, 2026-11-18): a `run` entry (§13.7, §13.9).
+- [x] OQ13: a refused round gets a fix, a REJECT a decision. Decided (operator, 2026-11-18): both; the decision
+  holds (§13.8).
+- [x] OQ14: bd has no default view filter. Decided (operator, 2026-11-18): label and title mindspec beads; `bd ready
+  --exclude-label mindspec` (§12).
+- [x] OQ15-OQ18: enrol every new spec (§8); verbs stay as `run` commands (§7); a spec past `plan approve` at release
+  keeps today's rules; an enrolled spec enforces the gate. Decided (operator, 2026-11-18): yes.
+- [x] OQ19: the plan of an enrolled spec cannot change (§8). Decided (operator, 2026-11-18): accepted gap; plan
+  amendment is a follow-up spec (Out of Scope).
+- [x] OQ20: a rerun on an edited plan (B6, §8). Decided (operator, 2026-11-18): before the approval record a rerun
+  refuses any plan change but missing items; the operator edits the plan only after removing the epic's children.
 
 ## Approval
 
