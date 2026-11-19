@@ -65,10 +65,11 @@ Each touchpoint ADR stays sound; none needs a superseding ADR.
 
 ## Decomposition
 
-Thirteen beads; one bead is one session. Bead 1 fixes every contract the other beads build against, so most beads wait
-only for Bead 1 and run side by side. The critical path is 1 -> 6 -> {8, 9, 10, 11} -> 12 -> 13 (five beads). Kernel
-code goes in `internal/next/kernel`, which the workflow manifest owns. Bead 1 is the largest bead: a split adds a chain
-link. The CI bd install stays in it: its tests fail without bd, so both land in one merge; alone it is trivial work.
+Thirteen beads; one bead is one session. Bead 1 writes first every contract the other beads build against, so most beads
+wait only for Bead 1 and run side by side; a later bead amends a contract under "Amendments" (Contracts first). The
+critical path is 1 -> 6 -> {8, 9, 10, 11} -> 12 -> 13 (five beads). Kernel code goes in `internal/next/kernel`, which
+the workflow manifest owns. Bead 1 is the largest bead: a split adds a chain link. The CI bd install stays in it: its
+tests fail without bd, so both land in one merge; alone it is trivial work.
 
 **Parallel waves.** The lane runs up to 4 beads at once. An edge exists only where a bead needs another bead's code to
 compile or its behaviour to test.
@@ -99,21 +100,30 @@ use `WithRules`. A test over the default registry asserts only writes and output
 **Modes.** A rule's mode is `ordinary`, `halt` or `flag`. A `flag` rule returns flags only; a write from it makes `Pass`
 return an error. When `State.Halted()`, `Pass` runs only `halt` and `flag` rules, in order, reports `halted`, and with
 `apply` writes only the `halted` closes and receipts of `halt` rules; it creates no bead. Flags are read-only, so a
-halted read shows every flag. Otherwise `Pass` runs every rule. No bead after Bead 1 edits the dispatcher. **Rule
-list.** Bead 1 owns the list in `contract.go`: each name with its mode, in this order (owner in brackets). `ordinary`:
-`recreate` (6), `missing-link` (6), `tally` (6), `supersede` (8), `refused-round` (8), `final-round` (8), `judge-apply`
-(11), `judge-supersede` (11), `judge-create` (11), `round-open` (6), `slots` (6), `implement` (6), `retry-attempt` (9),
-`complete-entry` (6). `halt`: `halt` (8). `flag`: `run-marker-missing`, `foreign-child-open`, `foreign-blocker`,
-`id-collision` (6), `unreceipted-close`, `raw-close`, `forced-close`, `raw-claim` (9). Later beads only register a
-listed name with its listed mode; they do not edit the list. **Seeders.** Bead 1 adds the `kerneltest` seeders
-`PassGate`, `Authorise` (an authorised round: round, subject, slot count, paths), `OpenDecision`, `Answer`, `Register`
-and `Repaired` (a repaired receipt). The bead that builds a producer pins the seeder with
+halted read shows every flag. Otherwise `Pass` runs every rule. **Rule list.** Bead 1 owns the list in `contract.go`:
+each name with its mode, in this order (owner in brackets). `ordinary`: `recreate` (6), `missing-link` (6), `tally` (6),
+`supersede` (8), `refused-round` (8), `final-round` (8), `judge-apply` (11), `judge-supersede` (11), `judge-create`
+(11), `round-open` (6), `slots` (6), `implement` (6), `retry-attempt` (9), `complete-entry` (6). `halt`: `halt` (8).
+`flag`: `run-marker-missing`, `foreign-child-open`, `foreign-blocker`, `id-collision` (6), `unreceipted-close`,
+`raw-close`, `forced-close`, `raw-claim` (9). A rule bead registers a listed name with its listed mode. **Seeders.**
+Bead 1 adds the `kerneltest` seeders `PassGate`, `Authorise` (an authorised round: round, subject, slot count, paths),
+`OpenDecision`, `Answer`, `Register`, `Repaired` (a repaired receipt) and `Judge` (an open change judge: parent the work
+item, tuple naming the gate, subject commit). The bead that builds a producer pins the seeder with
 `TestS134SeedMatch_<seeder>[<case>]`: real producer vs seeder on twin fixtures, normalising only bead ids, wall-clock
 times and token hashes and comparing every other metadata key and value; on a mismatch the bead corrects the seeder.
 Pins: `Enrolled` Bead 5; `PassGate` Bead 6; `Authorise` each producer: Bead 6 (closed implement step, closed fix), Bead
 8 (supersede, final round 1), Bead 11 (`re-panel`); `Answer`, `Repaired` Bead 7; `OpenDecision` (reject and limit kinds)
-Bead 8; `Register` Bead 10. Bead 6's round opening is the one writer of the authorisation on a fix close; Bead 8 creates
-the fix only.
+Bead 8; `Register` Bead 10; `Judge` Bead 11. Bead 6's round opening is the one writer of the authorisation on a fix
+close; Bead 8 creates the fix only.
+**Amendments.** Bead 1 writes these contracts first; they are not frozen. A later bead may amend Bead 1's contract
+files (`pass.go`, `contract.go`, `records.go` and the `kerneltest` seeders) when one of its own tests exposes a gap in
+them. The amendment keeps every earlier bead's tests green: before `complete`, the bead runs `go test -short ./...` on
+its branch rebased onto the current spec branch, and its report names each amendment. When two beads of one wave amend
+the same contract file, they merge in sequence: the later one rebases onto the earlier and runs the full suite again.
+This adds no dependency edge. Bead 1 owns the rule list order and modes: an amendment that adds or reorders a rule
+says why in its report and keeps the order the contracts imply (`recreate` first; `tally` before `refused-round` and
+`final-round`; `supersede` before `round-open`; `judge-supersede` before `judge-create`; `judge-create` and
+`retry-attempt` before `complete-entry`) and each listed mode.
 
 **Shared files.** `cmd/mindspec` registers each verb in its own file; Bead 1 adds `next_action.go`, `lease.go` and
 `submit.go` with their final flags and the `_HelpFlags` and `HelpGolden` lines, so no later bead edits those pins.
@@ -195,8 +205,8 @@ tests in the same bead.
   store with the record types, in the final shape of contracts §8: items, `mindspec_links`, plan-order links,
   `mindspec_run`, approval record, gates and the links to `<epic>.final`), `PreKernelSpec` (the v0.19.0 shape: epic,
   items and plan links, no witness), `Snapshot` (the spec's snapshot, compared byte for byte), the forwarding fake bd,
-  the id resolver `ID` and the seeders (pinned as Contracts first says). A bead that corrects a seeder runs every
-  package with a consumer of it; a later bead of its wave rebases onto the correction.
+  the id resolver `ID` and the seeders (pinned as Contracts first says). A bead that corrects a seeder follows
+  "Amendments" (Contracts first).
 - **Ids in tests (OQ1).** Bead 1 commits the probe result as `kernel.NativeIDs`; later beads read only that constant
   and run on that branch. Every `<computed id>` in a bd argv or assertion is `kerneltest.ID(t, <computed id>)`: the
   computed id with native ids, else the bd id whose `mindspec_key` is the computed id. Fallback forms: AC14's foreign
@@ -209,7 +219,14 @@ tests in the same bead.
   `repaired`, `rebind` and `carry_overs`), `mindspec_from`, `mindspec_links`, `mindspec_run`, lease (generation,
   expiry, token hash, claim base), gate round (round, subject, slot ids), take reason, decision answer, defer,
   judgement, and re-panel (slot count, paths). Producers write and the audit reads only through these types. A golden
-  JSON test pins each shape.
+  JSON test pins each shape. **Receipt validity**, per return kind, has one check, `kernel.ValidReceipt`: a close
+  with an artifact (`submit` or `panel submit` of an implement step, slot, fix or judge) is valid when it names path,
+  holding commit and blob id and they resolve. A close the pass itself writes with no artifact (a slot closed
+  `superseded` by a new subject, a step or decision closed `halted`, a fix or limit decision closed `superseded` by a
+  passing refute or defer retally, a judge closed `superseded`, a gate closed by the tally) carries a receipt of its
+  kind with its reason fields (the new subject, the halt answer, the retally, the rebind) and no artifact fields; that
+  receipt is valid. A decision answer's receipt holds the answer record and is valid. `unreceipted-close` and the
+  round opening use only this check.
 - **Snapshot diffs.** With a foreign note, a foreign bug and a raw claim present, a snapshot diff around each new or
   changed verb changes only computed ids and links between them (Beads 6, 7, 10, 11, 12; all verbs in Bead 13).
 - **Surface rule (AC16).** "Internal record number" = an ADR, spec, requirement (R, B, AC, OQ id), section sign, bead
@@ -270,7 +287,7 @@ tests in the same bead.
    today's verbs and calls its entry point. Update `_HelpFlags` and `HelpGolden`.
 6. Export `phase.WithPhaseLock(root, fn)` over `acquirePhaseLock`. Add `kerneltest` (`Enrolled`, `PreKernelSpec`,
    `Snapshot`, `ID`, `SetClock`, fake bd, `NewRepo`, `RequireBD`, `WithRules`, and the seeders `PassGate`, `Authorise`,
-   `OpenDecision`, `Answer`, `Register`, `Repaired`) and `TestS134Boundary_` (Package boundary). Add
+   `OpenDecision`, `Answer`, `Register`, `Repaired`, `Judge`) and `TestS134Boundary_` (Package boundary). Add
    `scripts/ci-install-bd.sh` and its CI step (Testing Strategy "bd in CI").
 7. Update the doc sections core "Phase lock", execution "bd types and sandbox", workflow "Kernel store and ids", and
    the existing tests that pin `types.custom: "gate"`.
@@ -304,6 +321,10 @@ tests in the same bead.
 - [ ] `State` read from `Enrolled` lists items 1-3, the gates and the plan links; a foreign `task` under the epic is
       foreign. Each seeder writes only through the record types; a golden test pins each seeded record.
 - [ ] Each record type round-trips to its golden JSON; a renamed key fails the test.
+- [ ] Pass receipts: a golden test pins one pass-written receipt of each kind (slot, fix and judge closed `superseded`,
+      a step closed `halted`, a gate closed by the tally), each with its reason fields and no artifact fields;
+      `ValidReceipt` accepts each. It refuses a `submit` slot receipt with no blob id. A check that requires path,
+      commit and blob on every kind fails the test.
 - [ ] Every dispatcher test runs `Pass` on its own `NewRegistry` with test names, never on `DefaultRegistry`. `Pass` on
       an empty registry writes nothing (same snapshot) and reports `halted` on a seeded `halt` answer; a test rule's
       create and close are written receipt first; a rule error and a bd error each come back from `Pass`.
@@ -315,7 +336,10 @@ tests in the same bead.
       runs rules in registration order fails the test.
 - [ ] Visibility: test rule A creates a step; a later test rule B finds that step in its `State` and a test rule before
       A does not, with and without `apply`. The write list `Pass` returns without `apply` equals the writes that `Pass`
-      with `apply` makes (snapshot diff). A dispatcher that gives every rule the input `State` fails the test.
+      with `apply` makes (snapshot diff). The same holds when rule A closes a step with its receipt and writes gate
+      metadata (an authorised round): rule B sees the close and the metadata in both modes, and the read-only write
+      list equals the writes with `apply`. A dispatcher that gives every rule the input `State`, or that overlays only
+      creates, fails the test.
 - [ ] Halt mode: on a seeded `halt` answer, an `ordinary` test rule that creates a step is not called and the snapshot
       shows no create; a `halt` test rule is called and its `halted` close is written; a `flag` test rule is called and
       its flag is in the output. On a state that is not halted all three are called. A `flag` rule that returns a write
@@ -499,12 +523,12 @@ Bead 1, Bead 2
    and the contracts §4 output. Core rules: implement authorisation (§13.3), round opening on a closed implement step or
    a closed fix and the `panel create` entry in `run` (§13.7; the one writer of these two authorisations; a close with
    no valid receipt authorises nothing), slots after `panel create`, the inline tally, a passing gate close (frozen),
-   the `complete` entry (not listed while a judge under that gate is open, as `complete` refuses then), re-creation of a
-   deleted kernel bead (its rounds stay in the ledger) and `missing-link`: with `--apply` it writes each missing
-   mindspec link that passes the B7 check (§8). A work item is done only when its gate closed `passed` and its branch is
-   merged; any other state releases no dependent (B4). The slot rule creates slots only for a registered round that
-   matches the gate's authorised round. A subject move before `panel create` updates the authorised subject only
-   (§13.7).
+   the `complete` entry (not listed while a change judge of that gate is open, as `complete` refuses then; the judge is
+   matched by its tuple, a child of the work item, §13.2), re-creation of a deleted kernel bead (its rounds stay in the
+   ledger) and `missing-link`: with `--apply` it writes each missing mindspec link that passes the B7 check (§8). A work
+   item is done only when its gate closed `passed` and its branch is merged; any other state releases no dependent (B4).
+   The slot rule creates slots only for a registered round that matches the gate's authorised round. A subject move
+   before `panel create` updates the authorised subject only (§13.7).
 2. Add `allowance.go`: `Allowance(state, gate)` is the pinned limit plus each `continue:<n>` answer; rounds count
    through `panel.RoundsForGate`. A round past the allowance gets no `run` entry.
 3. Add `flags.go` (rules in mode `flag`) for `run-marker-missing`, `foreign-child-open`, `foreign-blocker` (B7 check on
@@ -536,9 +560,10 @@ Bead 1, Bead 2
 - [ ] A deleted `<1>.impl.a1` is created again by the next `--apply`. After `bd delete` of `<epic>.final`, one
       `--apply` creates it again with each work-item link to it, and a second `--apply` writes nothing; a rule order
       that runs `missing-link` before `recreate` fails the test.
-- [ ] Complete entry: after `kerneltest.PassGate`, a commit on `bead/1` and `<1>.review.judge.a1` created open on
-      that commit through the store, `run` lists no `complete 1` (later judge rules write nothing on this state). A
-      rule that lists `complete` with a judge open fails; "Core rules, positive" holds the case with no judge.
+- [ ] Complete entry: after `kerneltest.PassGate`, a commit on `bead/1` and `<1>.review.judge.a1` seeded open on that
+      commit by `kerneltest.Judge` (parent `<1>`, tuple naming gate `<1>.review`), `run` lists no `complete 1` (later
+      judge rules write nothing on this state). A rule that lists `complete` with a judge open, or that looks for the
+      judge among the children of `<1>.review`, fails; "Core rules, positive" holds the case with no judge.
 - [ ] Core rules, positive: with a seeded receipted close of `<1>.impl.a1`, `run` lists `panel create 1`; after
       `kerneltest.Register` of round 1 with 3 slots, `--apply` creates exactly `<1>.review.r1.R1`..`R3`; with 4 rounds
       counted and a closed `<1>.review.r5.fix` seeded, `run` lists `panel create 1`; after `kerneltest.PassGate`,
@@ -701,9 +726,11 @@ Bead 6, Bead 7
 ## Bead 9: Unreceipted closes, raw closes and the audit table
 
 **Steps**
-1. Add `closes.go`: the `flag` rule `unreceipted-close` flags a kernel close with no or a bad receipt; the `ordinary`
-   rule `retry-attempt` creates `<id>.a<k+1>` with `mindspec_from` on the next pass, unless a valid `repaired`
-   receipt exists.
+1. Add `closes.go`: the `flag` rule `unreceipted-close` flags a kernel close with no receipt or one that
+   `ValidReceipt` refuses (Record shapes); the `ordinary` rule `retry-attempt` creates `<id>.a<k+1>` with
+   `mindspec_from` on the next pass, unless a valid `repaired` receipt exists. An unreceipted close whose retry
+   `<id>.a<k+1>` closed with a valid receipt counts as repaired: no flag, no further retry, and `impl approve` does
+   not refuse for it.
 2. Flag `raw-close` (a work item closed by bd after its gate passed, not merged), `forced-close` (closed over an open
    child) and `raw-claim` (a bd claim with no lease), each in a `flag` rule. Flags come from current state and are never
    stored. Export the `raw-close` and `forced-close` predicates for `complete`. A `raw-close` or `forced-close` item
@@ -725,12 +752,16 @@ Bead 6, Bead 7
 - [ ] AC10 (part): `bd close <slot>` with no verdict, or with a verdict and an old token, flags `unreceipted-close` and
       the next `--apply` creates `<slot>.a2`. With a `repaired` receipt seeded by `kerneltest.Repaired` (pinned to
       `submit` in Bead 7), `--apply` creates no `<slot>.a2`.
+- [ ] Pass receipts: on records seeded through the record types, a slot closed `superseded` (new subject), a fix
+      closed `superseded` (retally) and a judge closed `superseded` naming a rebind raise no `unreceipted-close` flag,
+      and `--apply` creates no `.a2` for any of them. A check that requires path, commit and blob on every kind fails.
 - [ ] AC10 (part): after item 1's gate passes (`kerneltest.PassGate`), `bd close <1>` flags `raw-close`, `impl approve`
       exits non-zero naming it, and `--apply` creates no `<2>.impl.a1`. In a fresh fixture `bd close --force <1>` flags
       `forced-close` and `--apply` creates no `<2>.impl.a1`.
 - [ ] A table test: `impl approve` on an enrolled spec with each of an open step, an open decision, an unrepaired
       unreceipted close, `raw-close`, `forced-close` and an open foreign child exits non-zero naming it, same snapshot;
-      a refusal set that misses one row fails the test.
+      a refusal set that misses one row fails the test. Pass row: a raw slot close whose `<slot>.a2` is closed with a
+      valid receipt (seeded): `impl approve` does not refuse for it; a check that reads only `repaired` fails.
 - [ ] AC11 (audit): records of each listed event, written through the record types, give `impl approve` and a rerun
       exit 0, each printing count 1; the re-panel row shows 3 slots.
 - [ ] AC13 (part): `next-action` flags `raw-claim`. A foreign note under the epic at the end: `impl approve` exits
@@ -841,6 +872,8 @@ Bead 2, Bead 6, Bead 7
       spec branch gives no final judge. A rule that ignores the merge or the epic close fails the test.
 - [ ] `TestS134SeedMatch_AuthoriseRepanel` matches the record a real `re-panel` judgement writes: the next round
       (`RoundsForGate` plus 1) on `<1>.review.a2`, the new subject, the slot count and the paths.
+      `TestS134SeedMatch_Judge` matches `kerneltest.Judge` to the judge a real pass creates (id, parent `<1>`, tuple,
+      subject); on a mismatch Bead 11 corrects the seeder (Amendments).
 - [ ] AC13 (part): a snapshot diff around a judge `submit` changes only computed ids and links.
 
 **Depends on**
