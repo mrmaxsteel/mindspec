@@ -1416,3 +1416,34 @@ A halted pass runs only halt rules and flag rules.
 Flag rules cannot write.
 The command entry points refuse a pre-kernel spec and name its existing lifecycle verbs.
 The action, lease, submit, and answer entry points reserve their public contracts.
+
+### Lease and submit
+
+`lease` claims one actor step under the phase lock.
+It uses the pinned lease duration.
+It stores the generation, expiry, token hash, and claim base in one status compare-and-set.
+The command prints the generation and the new token.
+Renew and release require the current token.
+A take requires a reason and creates a new generation.
+A live lease, a hold, a blocker, or an unanswered gate decision prevents another claim.
+Implementation claims use the worktree adapter and record the branch head as the claim base.
+
+`submit` requires the current token and committed evidence for the actor kind.
+Implementation commits must follow the claim base on the work branch.
+Fix commits must follow the round subject on the gate branch.
+Final fixes use the spec branch.
+Review verdicts must match the active slot, round, and subject.
+An artifact can come from any linked worktree of the same repository.
+Its receipt uses the path relative to that worktree root.
+The command writes a receipt before it closes the step.
+It then runs one reducer pass.
+A status conflict permits one fresh read and retry.
+The same evidence can finish a receipt left open by a crash.
+A closed receipt accepts the same evidence without a write.
+Valid evidence can repair a raw close with the current token.
+
+`submit --answer` records a listed decision option without a token.
+The answer remains effective if an open child prevents the close.
+A halt prevents further claims and submissions.
+A retry of the same halt answer can finish the halt.
+The command exits with code 4 when its pass reports a halted spec.

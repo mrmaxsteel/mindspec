@@ -39,7 +39,7 @@ func OpenDecision(f *Fixture, gate, cause string, round int, options ...string) 
 	return id
 }
 func Answer(f *Fixture, decision, option string) {
-	answer := kernel.DecisionAnswer{Option: option, At: kernel.Now().UTC(), Actor: "test"}
+	answer := kernel.DecisionAnswer{Option: option, At: kernel.Now().UTC(), Actor: "operator"}
 	f.Must(f.Store.WriteMetadata(decision, kernel.Metadata(kernel.KeyAnswer, answer)))
 	f.Must(f.Store.WriteReceipt(decision, kernel.Receipt{Kind: "passed", Answer: &answer}))
 	closeRecord(f, decision)

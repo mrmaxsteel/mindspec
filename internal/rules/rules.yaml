@@ -27,7 +27,7 @@
   scope: [orchestrator]
   prohibition: Do not start more than one fix agent per panel round or run it in a slot tree.
   replacement: Run one fix agent per round in the target's own worktree.
-  enforced_by: advisory
+  enforced_by: lease
 - id: panel.artifact-gate
   scope: [orchestrator]
   prohibition: Do not close a finding about a missing measurement artifact with a text edit.
@@ -93,7 +93,7 @@
   scope: [implementer, fixer]
   prohibition: A subagent must not run mindspec complete, bd close or a raw bead merge.
   replacement: Return the implementation or fix to the orchestrator for completion.
-  enforced_by: advisory
+  enforced_by: submit
 - id: sequence.bead-impl-prompt
   scope: [orchestrator]
   prohibition: Do not dispatch an implementer before the implementation prompt is staged.
