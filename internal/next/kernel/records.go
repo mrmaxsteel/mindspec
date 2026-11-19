@@ -101,6 +101,7 @@ type Judgement struct {
 	Paths      []string `json:"paths,omitempty"`
 }
 type RePanel struct {
+	Judge     string   `json:"judge,omitempty"`
 	SlotCount int      `json:"slot_count"`
 	Paths     []string `json:"paths"`
 }

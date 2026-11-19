@@ -1,4 +1,5 @@
 {
+  "judge": "judge",
   "slot_count": 2,
   "paths": [
     "app.go"

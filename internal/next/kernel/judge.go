@@ -105,15 +105,9 @@ func gateRebind(s State, g Record) (string, string, error) {
 	return accepted, evidence, nil
 }
 
-func judgePanelPath(s State, dir string) (string, error) {
-	rel, err := filepath.Rel(s.Root, dir)
-	if err != nil {
-		return "", err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return actorGit(dir, "rev-parse", "--show-prefix")
-	}
-	return rel, nil
+func judgePanelPath(_ State, dir string) (string, error) {
+	prefix, err := actorGit(dir, "rev-parse", "--show-prefix")
+	return strings.TrimSuffix(prefix, "/"), err
 }
 
 // registeredJudgePanel includes registrations retained only in the ledger.
@@ -323,7 +317,7 @@ func readJudgement(s State, receipt Receipt) (Judgement, error) {
 	var j Judgement
 	data, err := actorGitBytes(s.Root, "show", receipt.Commit+":"+receipt.Path)
 	if err != nil {
-		return j, err
+		return j, actorFailure("cannot read committed judgement artifact")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -370,27 +364,41 @@ func validateJudgement(s State, r Record, receipt Receipt, current bool) error {
 	if err != nil {
 		return err
 	}
-	if j.OldSubject != accepted || (current && j.NewSubject != newest) || j.NewSubject != sub.Commit || j.OldSubject == j.NewSubject {
-		return actorFailure("judgement subject is stale")
-	}
 	reg, registered, err := Decode[RegistrationRecord](g.Metadata, KeyRegistration)
 	if err != nil {
 		return err
 	}
-	inPanel := false
-	ceiling := 0
-	for _, p := range s.Panels {
-		if !registered || p.Slug() != reg.Slug || !gatePanel(t, p.Panel) || p.Panel.Round != reg.Round {
-			continue
-		}
-		rel, err := judgePanelPath(s, p.Dir)
-		if err != nil {
-			return err
-		}
-		inPanel = strings.HasPrefix(receipt.Path, filepath.ToSlash(rel)+"/")
-		ceiling = p.Panel.ExpectedReviewers
+	round, _, err := Decode[GateRound](g.Metadata, KeyRound)
+	if err != nil {
+		return err
 	}
-	if !inPanel {
+	ceiling := round.SlotCount
+	// Use the registered passing roster when no round count is stored.
+	if ceiling == 0 {
+		ceiling = len(reg.Slots)
+	}
+	expectedNew := sub.Commit
+	if current {
+		expectedNew = newest
+	}
+	if j.OldSubject != accepted || (current && sub.Commit != newest) || j.NewSubject != sub.Commit || j.OldSubject == j.NewSubject {
+		return actorFailure(fmt.Sprintf("judgement subject is stale; expected old subject %s and new subject %s; slot ceiling %d", accepted, expectedNew, ceiling))
+	}
+	if !registered {
+		return actorFailure("judgement needs a registered panel directory")
+	}
+	dir := filepath.Join(s.SpecDir, "reviews", reg.Slug)
+	for _, p := range s.Panels {
+		if p.Slug() == reg.Slug && registeredJudgePanel(s, t, p) && (p.Panel.Round == 0 || p.Panel.Round == reg.Round) {
+			dir = p.Dir
+			break
+		}
+	}
+	rel, err := judgePanelPath(s, dir)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(receipt.Path, filepath.ToSlash(rel)+"/") {
 		return actorFailure("judgement must be in its registered panel directory")
 	}
 	switch j.Value {
@@ -400,11 +408,11 @@ func validateJudgement(s State, r Record, receipt Receipt, current bool) error {
 		}
 	case "re-panel":
 		if j.SlotCount < 2 || j.SlotCount > ceiling || len(j.Paths) == 0 {
-			return actorFailure("re-panel needs changed paths and a slot count within the passing round")
+			return actorFailure(fmt.Sprintf("re-panel needs changed paths and 2 to %d slots; expected old subject %s and new subject %s", ceiling, accepted, sub.Commit))
 		}
 		for _, name := range j.Paths {
 			if strings.TrimSpace(name) == "" || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") {
-				return actorFailure("re-panel paths must be repository-relative files")
+				return actorFailure(fmt.Sprintf("re-panel paths must be repository-relative files; expected old subject %s and new subject %s; slot ceiling %d", accepted, expectedNew, ceiling))
 			}
 		}
 	default:
@@ -450,8 +458,7 @@ func judgeApply(s State) (Changes, error) {
 			}
 			from, hasFrom, _ := Decode[From](record.Metadata, KeyFrom)
 			scope, hasScope, _ := Decode[RePanel](record.Metadata, KeyRePanel)
-			round, _, _ := Decode[GateRound](record.Metadata, KeyRound)
-			applied = applied || (hasFrom && hasScope && sameJudgeGate(string(from), t.Gate) && round.Subject == j.NewSubject && scope.SlotCount == j.SlotCount && reflect.DeepEqual(scope.Paths, j.Paths))
+			applied = applied || (hasFrom && hasScope && sameJudgeGate(string(from), t.Gate) && scope.Judge == id)
 		}
 		if applied {
 			continue
@@ -480,7 +487,7 @@ func judgeApply(s State) (Changes, error) {
 				round.Slots = append(round.Slots, fmt.Sprintf("%s.r%d.R%d", gt.Gate, round.Round, i))
 			}
 			w := createStep(next, judgeParent(gt))
-			w.Create.Metadata = map[string]any{KeyFrom: From(gate), KeyRePanel: RePanel{SlotCount: j.SlotCount, Paths: j.Paths}, KeyRound: round}
+			w.Create.Metadata = map[string]any{KeyFrom: From(gate), KeyRePanel: RePanel{Judge: id, SlotCount: j.SlotCount, Paths: j.Paths}, KeyRound: round}
 			c.Writes = append(c.Writes, w)
 		}
 		c.Writes = append(c.Writes, Write{Kind: "metadata", ID: id, Metadata: Metadata(KeyJudgement, j)})

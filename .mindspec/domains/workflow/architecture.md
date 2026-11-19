@@ -1681,7 +1681,6 @@ An older approval with no witness keeps its existing lifecycle.
 The epic and work items carry the `mindspec` label and title tag.
 Title parsers skip this tag.
 
-
 ## Change judge
 
 A passed gate keeps its original receipt.
@@ -1703,7 +1702,9 @@ The gate receipt records both subjects and the judge receipt.
 The carry-over also records the current rebind identity.
 Use `re-panel` with changed paths to request another round.
 Set at least two slots and no more than the passing round used.
-The successor gate records its predecessor and the requested scope.
+The successor gate records its predecessor, the judge ID, and the requested scope.
+The scope applies only to the subject the judge saw.
+A later code commit needs a full round.
 The next panel-create entry carries that scope.
 Submission checks committed evidence and subject identity.
 It does not assess the judgement content.

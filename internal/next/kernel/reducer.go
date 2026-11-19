@@ -168,18 +168,28 @@ func roundOpen(s State) (Changes, error) {
 			continue
 		}
 		head := subject(s, gate)
+		resetScope := false
 		if _, repanel, err := Decode[RePanel](g.Metadata, KeyRePanel); err != nil {
 			return c, err
-		} else if repanel {
-			head, err = newestJudgeSubject(s, gate)
+		} else if repanel && has && wanted == round.Round {
+			newest, err := newestJudgeSubject(s, gate)
 			if err != nil {
 				return c, err
 			}
+			if newest == round.Subject {
+				// The judgement authorizes this scope only on the subject the judge saw.
+				head = round.Subject
+			} else {
+				// A later subject needs a full round. The scoped round is superseded.
+				head = newest
+				resetScope = true
+			}
 		}
+
 		if head == "" {
 			continue
 		}
-		if !has || wanted != round.Round {
+		if !has || wanted != round.Round || resetScope {
 			kind := "bead"
 			if t.WorkItem == "" {
 				kind = "final_review"
