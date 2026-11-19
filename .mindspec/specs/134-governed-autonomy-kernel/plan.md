@@ -39,6 +39,7 @@ work_chunks:
   - {id: 11, depends_on: [6, 7], key_file_paths: [internal/next/kernel/judge.go]}
   - {id: 12, depends_on: [5, 6, 7, 8, 9, 10, 11], key_file_paths: [cmd/mindspec/next.go, internal/next/select.go,
       internal/complete/complete.go, internal/complete/panel_presence.go, internal/approve/plan.go,
+      internal/approve/impl_final_gate.go, internal/approve/lifecycle_gate.go,
       internal/harness/lifecycle_scenario_test.go]}
   - {id: 13, depends_on: [8, 9, 10, 11, 12], key_file_paths: [cmd/mindspec/kernel_e2e_test.go]}
 ---
@@ -77,21 +78,27 @@ compile or its behaviour to test.
 | 1 | 1, 2, 3, 4 | No edges. 3 and 4 touch only tests, the ADR, skills and docs; 4 names verbs whose flags Bead 1 fixes in the contract. |
 | 2 | 5, 6, 7 | 5 -> 1 (store, leaf witness, fixture), 5 -> 2 (`config.RoundLimit`, `panel.lease_ttl`); 6 -> 1 (state, contract), 6 -> 2 (`panel.RoundsForGate` for the allowance); 7 -> 1 (store, state, the `Pass` dispatcher). 7 does not need 6: `submit` runs the Bead 1 dispatcher (Contracts first). None merges before the integration gate. |
 | 3 | 8, 9, 10, 11 | 8 -> 6 (pass runner), 8 -> 7 (halt retry through `submit --answer`); 9 -> 6 (flags in the pass), 9 -> 2 (registry token in the audit); 10 -> 6 (pass, allowance), 10 -> 7 (close as `submit` does), 10 -> 2 (round counter); 11 -> 6 (pass), 11 -> 7 (judgement check in `submit`). 10 does not need 8: its tests seed authorised rounds and decisions with `kerneltest.Authorise` and `OpenDecision`. |
-| 4 | 12 | 12 -> 5 (enrolment on), 12 -> 6 (pass), 12 -> 7 (lease function), 12 -> 9 (`raw-close` and `forced-close` in `complete`); 12 -> 8, 10, 11: enrolment turns on only after every kernel rule and verb has merged. |
+| 4 | 12 | 12 -> 5 (enrolment on), 12 -> 6 (pass), 12 -> 7 (lease function), 12 -> 9 (`raw-close` and `forced-close` in `complete`), 12 -> 11 (`kernel.AcceptedSubject` for the `complete` and final-gate subject); 12 -> 8, 10: enrolment turns on only after every kernel rule and verb has merged. |
 | 5 | 13 | 13 drives every verb end to end: 8 (decisions, final gate), 9 (audit), 10 (panel verbs), 11 (judge), 12 (`next`, `complete`). |
 
 **Contracts first.** Bead 1 adds the types and entry points that later beads fill: the record types, `State` and its
-reader, the output types of contracts §4, the rule registry of the pass (`RegisterRule`, with the fixed rule order in
-`contract.go`), the artifact-check registry of `submit` (`RegisterArtifactCheck`), `LeaseDeps`, and the entry points
-`NextAction`, `Lease`, `Submit` and `Answer`, each in its own file and returning `ErrNotBuilt` until its bead fills it.
-`Pass(state, apply)` in `pass.go` is the real rule dispatcher, not a stub: it runs the registered rules in the fixed
-order and, with `apply`, writes their result (receipts before closes, `WithCASRetry` on each status write). It reports
-`halted` when `State.Halted()`, writes nothing with no rule registered and returns every rule and store error. Bead 6
-adds the core rules; no bead edits the dispatcher. A rule bead (8, 9, 11) registers its rules and checks through `init`
-in its own files. Bead 1 also adds the `kerneltest` seeders (`PassGate`, `Authorise` for an authorised round,
-`OpenDecision`, `Answer`, `Register`). The bead that builds each producer pins its seeder with
-`TestS134SeedMatch_<seeder>` (real producer vs seeder on twin fixtures, ids normalised; on a mismatch it corrects the
-seeder): `Enrolled` Bead 5; `PassGate`, `Authorise` Bead 6; `Answer` Bead 7; `OpenDecision` Bead 8; `Register` Bead 10.
+reader, the output types of contracts §4, the rule registry of the pass (`RegisterRule(name, mode, fn)`; `contract.go`
+lists every rule name in the fixed order and `RegisterRule` refuses an unlisted name), the artifact-check registry of
+`submit` (`RegisterArtifactCheck`), `LeaseDeps`, and the entry points `NextAction`, `Lease`, `Submit` and `Answer`,
+each in its own file and returning `ErrNotBuilt` until its bead fills it. `Pass(state, apply)` in `pass.go` is the real
+rule dispatcher, not a stub: it runs the registered rules in the fixed order of `contract.go`, never in registration
+order, and, with `apply`, writes their result (receipts before closes, `WithCASRetry` on each status write). It writes
+nothing with no rule registered and returns every rule and store error. **Halt mode.** A rule's `mode` is `ordinary`
+or `halt`. When `State.Halted()`, `Pass` runs only the `halt` rules, in the fixed order, reports `halted`, and with
+`apply` writes only their `halted` closes and receipts; it creates no bead. With no `halt` rule registered it writes
+nothing. Otherwise it runs every rule. Bead 6 adds the core rules (`ordinary`); no bead edits the dispatcher. A rule bead
+(8, 9, 11) registers its rules and checks through `init` in its own files; Bead 8 registers its halt rule as `halt`.
+Bead 1 also adds the `kerneltest` seeders (`PassGate`, `Authorise` for an authorised round, `OpenDecision`, `Answer`,
+`Register`, `Repaired` for a repaired receipt). The bead that builds each producer pins its seeder with
+`TestS134SeedMatch_<seeder>`: real producer vs seeder on twin fixtures. The test normalises only bead ids, wall-clock
+times and token hashes, and compares every other metadata key and value; on a mismatch the bead corrects the seeder.
+Pins: `Enrolled` Bead 5; `PassGate`, `Authorise` Bead 6; `Answer`, `Repaired` Bead 7; `OpenDecision` (the reject kind
+and the limit kind) Bead 8; `Register` Bead 10.
 
 **Shared files.** `cmd/mindspec` registers each verb in its own file; Bead 1 adds `next_action.go`, `lease.go` and
 `submit.go` with their final flags and the `_HelpFlags` and `HelpGolden` lines, so no later bead edits those pins.
@@ -140,14 +147,17 @@ tests in the same bead.
   `https://github.com/gastownhall/beads/releases/download/v1.3.4/beads_1.3.4_linux_amd64.tar.gz`, checks its SHA-256
   `175c26904bde3ff9168d2282ff6b56f17b17f60c22fa5acb3dacc9fb3465303a` (the release `checksums.txt` line), installs `bd`
   to `<dir>` and runs `bd --version | grep -F 1.3.4`. The `test` job runs it before the tests with `$RUNNER_TEMP/bin`
-  and adds that dir to `GITHUB_PATH`. The asset holds one glibc ELF binary; `ubuntu-latest` has glibc. Bead
-  branches are never pushed. Bead 1's bead-level check is local: `go build ./...` and, with bd 1.3.4 first on `PATH`
+  and adds that dir to `GITHUB_PATH`. After the check it prints `bd-installed: ` and the `bd --version` output. The
+  asset holds one glibc ELF binary; `ubuntu-latest` has glibc. Bead branches are never pushed. Bead 1's bead-level check is local: `go build ./...` and, with bd 1.3.4 first on `PATH`
   and no `bin/mindspec` (the CI `test` job's state), `go test -short -race ./...`.
 - **Integration gate.** About 15 bd-gated test files first run in Linux CI. After Bead 1 merges, the orchestrator
-  pushes the spec branch (opening the spec PR as a draft if none exists). Before any wave-2 bead merges, that PR's CI
-  `test` job at the pushed commit concludes `success` with its bd step printing `1.3.4` (`gh run list --workflow ci.yml
-  --branch spec/134-governed-autonomy-kernel --limit 1 --json conclusion,headSha`). Wave-2 beads may be implemented and
-  reviewed meanwhile. A red run is repaired by a fix bead or a Bead 1 follow-up commit on the spec branch first.
+  pushes the spec branch (opening the spec PR as a draft if none exists). This mid-spec push is an exception, granted
+  by the operator for this spec, to the one-push-at-end-of-spec rule of `AGENTS.md`. Before any wave-2 bead merges,
+  the run for the pushed commit passes three checks: `gh run list --workflow ci.yml --branch
+  spec/134-governed-autonomy-kernel --json databaseId,headSha,conclusion` names a run whose `headSha` is the pushed
+  commit; `gh run view <id> --json jobs` shows `conclusion: success` for each `test` job; and
+  `gh run view <id> --log | grep -E 'bd-installed: .*1\.3\.4'` matches. Wave-2 beads may be implemented and reviewed
+  meanwhile. A red run is repaired by a fix bead or a Bead 1 follow-up commit on the spec branch first.
 - **Fake bd.** Fault tests put a script named `bd` first on `PATH`, as `nextHonestyFakeBD`
   (`cmd/mindspec/next_selection_test.go`) and `installFakeBD` (`cmd/mindspec/verb_output_test.go`). A forwarding
   wrapper logs argv, calls real bd and injects a cycle refusal or exit 13 on a named write. When a mindspec binary
@@ -245,7 +255,7 @@ tests in the same bead.
    `HelpGolden`.
 6. Export `phase.WithPhaseLock(root, fn)` over `acquirePhaseLock`. Add `kerneltest` (`Enrolled`, `PreKernelSpec`,
    `Snapshot`, `ID`, `SetClock`, fake bd, `NewRepo`, `RequireBD`, and the seeders `PassGate`, `Authorise`,
-   `OpenDecision`, `Answer`, `Register`) and `TestS134Boundary_` (Package boundary). Add `scripts/ci-install-bd.sh` and
+   `OpenDecision`, `Answer`, `Register`, `Repaired`) and `TestS134Boundary_` (Package boundary). Add `scripts/ci-install-bd.sh` and
    its CI step (Testing Strategy "bd in CI").
 7. Update the doc sections core "Phase lock", execution "bd types and sandbox", workflow "Kernel store and ids", and
    the existing tests that pin `types.custom: "gate"`.
@@ -281,6 +291,11 @@ tests in the same bead.
 - [ ] Each record type round-trips to its golden JSON; a renamed key fails the test.
 - [ ] `Pass` with no rule registered writes nothing (same snapshot) and reports `halted` on a seeded `halt` answer; a
       test rule's create and close are written receipt first; a rule error and a bd error each come back from `Pass`.
+- [ ] Order: two test rules registered in the reverse of their fixed order run in the fixed order; a dispatcher that
+      runs rules in registration order fails the test.
+- [ ] Halt mode: on a seeded `halt` answer, an `ordinary` test rule that creates a step is not called and the snapshot
+      shows no create; a `halt` test rule is called and its `halted` close is written. On a state that is not halted
+      both rules are called.
 - [ ] Boundary: a planted kernel import of `internal/next`, or a planted `kernelid` import of `internal/phase`, makes
       `TestS134Boundary_` fail. CI provisions bd: the `test` job runs the checksummed install before `go test`.
 
@@ -460,7 +475,9 @@ Bead 1, Bead 2
    list and the contracts §4 output. Core rules: implement authorisation (§13.3), round opening and the
    `panel create` entry in `run` (§13.7), slots after `panel create`, the inline tally, a passing gate close (frozen),
    the `complete` entry and re-creation of a deleted kernel bead (its rounds stay in the ledger). A work item is done
-   only when its gate closed `passed` and its branch is merged; any other close releases no dependent (B4).
+   only when its gate closed `passed` and its branch is merged; any other state releases no dependent (B4). The slot
+   rule creates slots only for a registered round that matches the gate's authorised round. A subject move before
+   `panel create` updates the authorised subject only (§13.7).
 2. Add `allowance.go`: `Allowance(state, gate)` is the pinned limit plus each `continue:<n>` answer; rounds count
    through `panel.RoundsForGate`. A round past the allowance gets no `run` entry.
 3. Add `flags.go` for `run-marker-missing`, `foreign-child-open`, `foreign-blocker` (B7 check on each missing link,
@@ -492,6 +509,13 @@ Bead 1, Bead 2
       `kerneltest.Register` of round 1 with 3 slots, `--apply` creates exactly `<1>.review.r1.R1`..`R3`; with 4 rounds
       counted and a closed `<1>.review.r5.fix` seeded, `run` lists `panel create 1`; after `kerneltest.PassGate`,
       `run` lists `complete 1`.
+- [ ] Done = passed and merged: after `kerneltest.PassGate` with item 1 open and `bead/1` not merged, `--apply` creates
+      no `<2>.impl.a1` and lists no action for items 2 or 3. A rule that counts a passed gate as done fails this test.
+- [ ] Authorised slots: `kerneltest.Register` of round 2 while the gate's authorised round is 1: `--apply` creates no
+      `<1>.review.r2.R<s>`.
+- [ ] Subject move: after a receipted close of `<1>.impl.a1`, a commit on `bead/1` before `panel create`: `--apply`
+      sets the gate's authorised subject to the new commit, keeps round 1, creates no slot and lists one `panel create
+      1`; `RoundsForGate` is unchanged.
 - [ ] `--apply` with `types.custom: gate` exits non-zero naming `mindspec setup`; `next-action` on a spec with no
       approved plan exits non-zero; each writes nothing.
 - [ ] `TestS134SeedMatch_PassGate` and `_Authorise` match a real passing tally and a real round opening.
@@ -517,7 +541,9 @@ Bead 1, Bead 2
    then records the claim base (the `bead/<w>` head at the claim) in the lease record. `cmd/mindspec/lease.go` passes
    `next.EnsureWorktree` (the helper `next` uses today). Bead 12 makes `next <w>` call this same function.
 3. Refuse a foreign bead, a gate, a decision, a held or blocked ancestor or upstream (an open epic, work item or gate
-   does not hold), a live lease (name `lease --take`), a halted spec and an unanswered decision (§13.8).
+   does not hold), a live lease (name `lease --take`), a halted spec and an unanswered decision (§13.8). On a halted
+   spec `submit` refuses too, names the halt and writes nothing (no pass); only a retry of the receipted `halt` answer
+   proceeds.
 4. Fill `Submit` and `Answer` in `submit.go`: check the generation, the subject, the artifact blob at its commit and its
    fit per kind through the artifact-check registry. Register the checks for a verdict, a fix commit past the round
    subject on the branch the gate names (`bead/<w>`, or the spec branch for `<epic>.final`) and an implement commit
@@ -552,7 +578,10 @@ Bead 1, Bead 2
 - [ ] `submit` calls `Pass` exactly once after the close (a spy on the seam). Through the real dispatcher: binary
       `submit` of a valid implement commit exits 0; `submit --answer halt` on a seeded halt decision exits 4;
       in-process, a failing test rule makes `submit` exit non-zero with the receipt and close kept.
-- [ ] `TestS134SeedMatch_Answer` matches the records `submit --answer` writes.
+- [ ] `TestS134SeedMatch_Answer` matches the records `submit --answer` writes; `TestS134SeedMatch_Repaired` matches the
+      `repaired` receipt a real `submit` writes after a raw slot close.
+- [ ] Halted spec: with a seeded `halt` answer, `submit` of a valid implement commit and `submit` of a verdict each
+      exit non-zero naming the halt, same snapshot.
 - [ ] Final fix (seeded final round): a final fix commit on a bead branch is refused; one on the spec branch is
       accepted.
 - [ ] AC10 (part): `submit` with a valid verdict and token after a raw slot close writes a `repaired` receipt.
@@ -573,7 +602,7 @@ Bead 1
    the allowance and creates the fix.
 2. Add B10 supersede to `reject.go`: a new subject during round N closes its open slots `superseded` and authorises
    round N+1; a commit in an open fix does not.
-3. Add `halt.go`: from the answer's receipt close every open step and decision under the epic `halted`, except a step
+3. Add `halt.go`, its rule registered in mode `halt` (Contracts first): from the answer's receipt close every open step and decision under the epic `halted`, except a step
    with an open foreign child and its kernel ancestors. Status `halted` wins over `wait`; exit 4. A retry of the `halt`
    answer and `--apply` close the receipted decision and every other closable step `halted`, exit 4 and write nothing
    else (the pass does the closes; `submit` maps `halted` to exit 4). Each `halt` option text says it stops every work
@@ -597,11 +626,14 @@ Bead 1
       other open steps `halted`, `<2>.review` open flagged `foreign-child-open`, `next-action x` exits 4 on each read.
 - [ ] AC9 (halt kill): in a new fixture, the `halt` answer's receipt is seeded with no close (the state a kill after the
       receipt leaves): `--apply` closes the decision and the open steps `halted` and exits 4. A retry of `submit
-      --answer halt` exits 4 and closes the remaining closable steps; a retry that exits 0 fails the test.
+      --answer halt` exits 4 and closes the remaining closable steps; a retry that exits 0 fails the test. In the fixture
+      item 1 is done, so a pass that is not halted creates `<2>.impl.a1`: the snapshot diff of each `--apply` on the halted spec shows only `halted`
+      closes and their receipts, and no create.
 - [ ] After the last item is done, the pass authorises final round 1 on the spec branch head. With the last item's gate
       `passed` but its branch not merged, the pass authorises no final round.
 - [ ] A halt pass never closes a foreign bead (selection by computed id). New strings: no internal record number.
-- [ ] `TestS134SeedMatch_OpenDecision` matches the decision a real REJECT pass creates.
+- [ ] `TestS134SeedMatch_OpenDecision` matches the decision a real REJECT pass creates and the limit decision a real
+      pass at the allowance creates (id, options, tuple).
 
 **Depends on**
 Bead 6, Bead 7
@@ -628,8 +660,8 @@ Bead 6, Bead 7
 
 **Acceptance Criteria**
 - [ ] AC10 (part): `bd close <slot>` with no verdict, or with a verdict and an old token, flags `unreceipted-close` and
-      the next `--apply` creates `<slot>.a2`. With a seeded `repaired` receipt (the shape `submit` writes), `--apply`
-      creates no `<slot>.a2`.
+      the next `--apply` creates `<slot>.a2`. With a `repaired` receipt seeded by `kerneltest.Repaired` (pinned to
+      `submit` in Bead 7), `--apply` creates no `<slot>.a2`.
 - [ ] AC10 (part): after item 1's gate passes (`kerneltest.PassGate`), `bd close <1>` flags `raw-close`, `impl approve`
       exits non-zero naming it, and `--apply` creates no `<2>.impl.a1`. In a fresh fixture `bd close --force <1>` flags
       `forced-close` and `--apply` creates no `<2>.impl.a1`.
@@ -648,7 +680,8 @@ Bead 2, Bead 6
 
 **Steps**
 1. Make `panel create` the one round writer for an enrolled spec: take the subject from the gate, refuse another
-   `--target`, a round the pass has not authorised (no gate round record for it), a round past `kernel.Allowance`, an
+   `--target`, a round the pass has not authorised (the gate's authorised round is not `RoundsForGate` + 1, so a
+   registered round or no record at all refuses), a round past `kernel.Allowance`, an
    open slot on the current subject, an unanswered decision on the
    gate, a passed gate, an id collision (`id-collision`) and a halted spec. Write `"orchestrated": true` in
    `panel.json`. Run one pass (§13.9). The kernel calls live in `cmd/mindspec`; `internal/panel` stays a leaf.
@@ -676,6 +709,10 @@ Bead 2, Bead 6
       --answer continue:1` on the seeded limit decision and round 6 seeded with `kerneltest.Authorise` (real path: the
       Bead 8 fix closes), one more round runs and the next exits non-zero. The same for the final gate (round seeded with
       `Authorise` on the spec branch head). With no authorised round, `panel create` exits non-zero naming it.
+- [ ] Round authorisation: after a refused round 1 (seeded tally) with the reject decision answered `fix` and
+      `<1>.review.r2.fix` open, and separately with all round-1 slots closed and no fix closed, `panel create 1` exits
+      non-zero naming the unauthorised round and writes nothing. After the fix closes and round 2 is authorised (seeded
+      with `Authorise`, the record Bead 8's rule writes on that close), it exits 0. A presence-only check fails the test.
 - [ ] A sixth `plan_approve` round exits 0 with one warning naming the count; a refusal fails the test.
 - [ ] AC8 (verbs): with a seeded unanswered REJECT decision and fix, `lease` on the fix and `panel create 2` exit
       non-zero; after `submit --answer fix`, `lease` exits 0.
@@ -696,8 +733,8 @@ Bead 2, Bead 6, Bead 7
 
 **Steps**
 1. Add `judge.go` (registered rule): compute the accepted subject (§13.2) from the passing panel's subject as `panel
-   rebind` refreshes it and the last `carry-over`. A commit that changes only a panel directory of the gate does not
-   move it.
+   rebind` refreshes it and the last `carry-over`, exported as `kernel.AcceptedSubject(state, gate)` for the highest
+   attempt. A commit that changes only a panel directory of the gate does not move it.
 2. When the newest subject commit of a passed gate is not the accepted subject, create `<gate>.judge.a<k>` (kind
    `change-judge`, child of the gate's parent) unless the item is merged or the epic is closed. Close an open judge
    `superseded` when its subject is not the newest commit or is the accepted subject; its receipt names the rebind.
@@ -744,24 +781,38 @@ Bead 6, Bead 7
    another closed unmerged item or `forced-close` refuse with `bd reopen <w>`. A rerun on a merged item exits 0.
    `MINDSPEC_SKIP_PANEL=1` with no passing gate refuses and names it. Run one pass (§13.9).
 3. Enforce the bead panel gate for every enrolled spec whatever `panel_presence` says; a pre-kernel spec keeps today.
+   For an enrolled spec the gate's subject comes from the kernel gate, not from today's stale-head rule: `complete`
+   takes the highest attempt of `<w>.review`, its passing round and slot count, and `kernel.AcceptedSubject` (the
+   passing subject, or the newer subject of a carry-over or a rebind). A `bead/<w>` head that is the accepted subject,
+   or differs from it only in panel directories, passes; any other moved head refuses. `impl approve`'s final-gate
+   check (`internal/approve/impl_final_gate.go`, `lifecycle_gate.go`) does the same for `<epic>.final` and the spec
+   branch head. A pre-kernel spec keeps today's rule.
 4. Delete `approve.enrolOnApprove`: `plan approve` enrols every new spec. In the same bead update every existing test
    that runs `plan approve`: a test that pins today's verbs seeds `kerneltest.PreKernelSpec`; a test that pins `plan
    approve` asserts the enrolment. Files: `cmd/mindspec/{approval_gates,bead_ready,lettered_spec,next_selection,
    next_ready_gate,panel_preepic_gate,verb_output}_test.go`, `internal/harness/{lifecycle_scenario,scenario}_test.go`,
-   `internal/approve/plan*_test.go`.
+   `internal/approve/plan*_test.go`, and Bead 5's enrolment tests: the kill helper keeps the stage hook and no longer
+   sets the deleted variable.
 5. Add fault and verb tests for AC2 (c), AC3, AC6, AC9 and AC10 below, with a snapshot diff around `next` and
    `complete`. Update workflow "Kernel loop". Text cites no internal record number.
 
 **Verification**
 - [ ] `go test ./cmd/mindspec/... -run '^TestS134(Next|Complete|EnrolFault)_' -v` passes and lists the new tests.
 - [ ] `go test ./internal/complete/... -run '^TestS134Complete_' -v` passes and lists the new tests.
+- [ ] `go test ./internal/approve/... -run '^TestS134ImplFinalGate_' -v` passes and lists the new tests.
 - [ ] `go test -short ./cmd/mindspec/... ./internal/next/... ./internal/complete/... ./internal/approve/... ./internal/harness/...` passes (includes `_NextFlags`, `TestApprovePlan*` and the lifecycle scenario).
 
 **Acceptance Criteria**
 - [ ] AC2 (c): `plan approve` killed after the `<epic>.final` create, foreign links `<epic>.final` blocks a bug blocks
       item 3: `--apply` exits 0 without the item-3-to-final link and flags `foreign-blocker` naming the link. After `bd
       dep remove`, the flag is gone and `--apply` writes the link.
-- [ ] AC2 (part): the pass of `complete 1` creates exactly `<2>.impl.a1` and `<3>.impl.a1`.
+- [ ] AC2 (part): after the gate pass and before `complete 1`, `--apply` creates no `<2>.impl.a1`; then the pass of
+      `complete 1` creates exactly `<2>.impl.a1` and `<3>.impl.a1`.
+- [ ] AC18 (accepted subject): with a carry-over receipt seeded through the record type on `<1>.review` and `bead/1`
+      moved to its new subject, `complete 1` exits 0; the same moved head with no carry-over exits non-zero. A
+      `complete` that keeps the stale-head rule for an enrolled spec fails the first case. The same pair for
+      `<epic>.final` and the spec branch head: the `impl approve` final-gate check passes with the carry-over and
+      refuses without it (`TestS134ImplFinalGate_`).
 - [ ] AC3 (part): `next 1` with no `--spec` resolves `x` and prints a token (generation 1); a second `next 1`, and
       separately `lease <1>.impl.a1` after `next 1`, each exit non-zero naming `lease --take`.
 - [ ] AC6 (part): `panel_presence: warn`, kernel steps force-closed and retyped: `complete` with no passing panel exits
@@ -809,7 +860,10 @@ Bead 5, Bead 6, Bead 7, Bead 8, Bead 9, Bead 10, Bead 11
 - [ ] AC11: one each of `--allow-not-ready`, `--allow-doc-skew`, `--override-adr`, `--allow-net-deletion`, `lease
       --take`, `panel defer`, a decision answer, a repaired unreceipted close, a `carry-over`, and a 3-slot `re-panel`
       after a passing round of 3 slots: `impl approve` and a rerun exit 0 and print 1 each; the re-panel row shows 3
-      slots. A producer that writes a record under another key makes the test fail.
+      slots. A producer that writes a record under another key makes the test fail. After the repaired `submit`,
+      `--apply` creates no `<slot>.a2`.
+- [ ] Round authorisation (real path): a REJECT on round 1 answered `fix`: `panel create 1` exits non-zero until the
+      fix is submitted, then exits 0.
 - [ ] AC12 (pinned): enrolled with defaults, then `panel.max_rounds: 99` and `panel.lease_ttl: 10m`: round 6 exits
       non-zero, and a new lease records an expiry 2h after its issue time.
 - [ ] AC18 (verbs): with a judge open, `complete 1` and `impl approve` exit non-zero naming it. After a carry-over,
@@ -835,7 +889,7 @@ Each `-run` pattern runs in the package its bead's Verification names.
 | AC6 | 1, 5, 6, 12 | `-run '^TestS134(Witness|VerbStub)_'`; `-run '^TestS134(Enrol|Derive)_'`; `-run '^TestS134NextAction_'`; `-run '^TestS134(Complete|Next)_'` |
 | AC7 | 2, 6, 8, 10 | `-run '^TestS134Rounds_'`; `-run '^TestS134Allowance_'`; `-run '^TestS134Reject_'`; `-run '^TestS134PanelCreate_'` |
 | AC8 | 8, 10 | `-run '^TestS134Reject_'`; `-run '^TestS134PanelCreate_'` |
-| AC9 | 7, 8, 10, 12 | `-run '^TestS134Lease_'`; `-run '^TestS134(Halt|Supersede)_'`; `-run '^TestS134PanelCreate_'`; `-run '^TestS134(Next|Complete)_'` |
+| AC9 | 7, 8, 10, 12 | `-run '^TestS134(Lease|Submit)_'`; `-run '^TestS134(Halt|Supersede)_'`; `-run '^TestS134PanelCreate_'`; `-run '^TestS134(Next|Complete)_'` |
 | AC10 | 7, 9, 12 | `-run '^TestS134Submit_'`; `-run '^TestS134(Closes|ImplApprove)_'`; `-run '^TestS134Complete_'` |
 | AC11 | 2, 9, 12, 13 | `-run '^TestS134Friction_'`; `-run '^TestS134Audit_'`; `-run '^TestS134Complete_'`; `-run '^TestS134E2E_'` |
 | AC12 | 2, 5, 13 | `-run '^TestS134Config'`; `-run '^TestS134Enrol_'`; `-run '^TestS134E2E_'` |
@@ -844,5 +898,5 @@ Each `-run` pattern runs in the package its bead's Verification names.
 | AC15 | 1, 2, 4, 5, 13 | `-run '^TestS134Setup_'`; domains `git grep` (Beads 2, 13); the Bead 4 `git grep`, `cmp` and `-run '^TestS134Skills_'`; `-run '^TestS134Enrol_'` |
 | AC16 | all; 3 | each bead's message tests; `-run '^TestS134Surface(Matcher|DiffFn)_'` (red mutations); `-tags surfacescan -run '^TestS134SurfaceBranch_'` |
 | AC17 | 13 | `-run '^TestS134E2E_'` |
-| AC18 | 10, 11, 13 | `-run '^TestS134Panel(Create|Repanel)_'`; `-run '^TestS134(Judge|JudgeCmd)_'`; `-run '^TestS134E2E_'` |
+| AC18 | 10, 11, 12, 13 | `-run '^TestS134Panel(Create|Repanel)_'`; `-run '^TestS134(Judge|JudgeCmd)_'`; `-run '^TestS134(Complete|ImplFinalGate)_'`; `-run '^TestS134E2E_'` |
 | Validation proofs | final review | the Testing Strategy "Gate" commands on the spec branch |
