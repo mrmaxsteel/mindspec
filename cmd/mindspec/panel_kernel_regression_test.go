@@ -424,6 +424,43 @@ func TestS134PanelSubmit_OffRosterRecovery(t *testing.T) {
 	}
 }
 
+func TestS134PanelSubmit_RosterSlotIdentityMismatch(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, err := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, err)
+	path := filepath.Join(f.SpecDir, "reviews", "1", "panel.json")
+	data, err := os.ReadFile(path)
+	f.Must(err)
+	slot := "R1;touch pwned"
+	changed := strings.Replace(string(data), `"slot": "R1"`, `"slot": "`+slot+`"`, 1)
+	if changed == string(data) {
+		t.Fatal("roster slot was not replaced")
+	}
+	f.Must(os.WriteFile(path, []byte(changed), 0644))
+	v := paneltest.Verdict("APPROVE")
+	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
+	file := filepath.Join(f.SpecDir, "reviews", "1", "R1-round-1.json")
+	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
+	before := kerneltest.Snapshot(t, f)
+	out, err = kernelPanelRun(t, panelSubmitCmd, "1", "--spec", f.SpecID, "--slot", slot, "--round", "1", "--file", file)
+	if err == nil {
+		t.Fatal("submit with a changed slot identity succeeded", out)
+	}
+	message := out + err.Error()
+	if !strings.Contains(message, "slot identity differs") {
+		t.Errorf("identity mismatch refusal missing: %s", message)
+	}
+	for _, line := range strings.Split(message, "\n") {
+		if strings.HasPrefix(line, "recovery:") && (strings.Contains(line, "pwned") || strings.Contains(line, ";")) {
+			t.Errorf("caller text in recovery: %s", line)
+		}
+	}
+	if before != kerneltest.Snapshot(t, f) {
+		t.Error("identity mismatch refusal changed kernel state")
+	}
+}
+
 func TestS134PanelSubmit_PublicationBeforeReceipt(t *testing.T) {
 	f, gate, head := kernelPanelFixture(t)
 	kernelPanelAuthorise(f, gate, head, 1, 2)
