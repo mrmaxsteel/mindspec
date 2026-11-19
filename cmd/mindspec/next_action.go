@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -29,7 +30,13 @@ var nextActionCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
+		if err := json.NewEncoder(cmd.OutOrStdout()).Encode(out); err != nil {
+			return err
+		}
+		if code := kernel.OutputExitCode(out); code != 0 {
+			return exitErr(code, fmt.Errorf("next action: %s", out.Status))
+		}
+		return nil
 	},
 }
 
@@ -100,6 +107,10 @@ func kernelCommandState(spec, target string) (kernel.State, error) {
 	store.Epic = epic.ID
 	state, err := kernel.ReadState(store, spec, dir)
 	if err != nil {
+		var failure *termsafe.Failure
+		if errors.As(err, &failure) {
+			return state, termsafe.PrefixFailure(err, "read kernel state: ")
+		}
 		return state, fmt.Errorf("read kernel state: %s\nrecovery: mindspec state show", termsafe.Escape(err.Error()))
 	}
 	return state, nil

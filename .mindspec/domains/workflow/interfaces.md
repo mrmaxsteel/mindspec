@@ -1447,3 +1447,51 @@ The answer remains effective if an open child prevents the close.
 A halt prevents further claims and submissions.
 A retry of the same halt answer can finish the halt.
 The command exits with code 4 when its pass reports a halted spec.
+
+## next-action
+
+`next-action` reads the approved plan and the enrolled tree.
+It returns one JSON document with actions, leases, decisions, commands and flags.
+A read creates no record and changes no file.
+`--apply` reads the state again under the phase lock.
+It applies one ordered reducer pass.
+A repeated pass writes nothing when the state has no change.
+A deleted gate or authorised slot is created again before missing links are repaired.
+A deleted initial implement step is created again when its work remains eligible.
+
+An implement step starts only after each plan upstream has passed and merged.
+A passed gate alone does not release downstream work.
+A removed branch uses its recorded landed merge and verified second parent.
+Only a passed close with a valid receipt can authorise a round.
+The gate must remain open.
+A registered round creates slots only when its round and subject match the authorisation.
+A subject change before registration changes only the authorised subject.
+The panel tally closes a passing gate after every child has closed.
+An open change judge holds the completion command.
+
+The round allowance uses the policy pinned on the epic.
+Each durable continuation answer increases only its own gate allowance.
+The count includes abandoned registrations and directories with only a ledger.
+A malformed ledger refuses the count and names its directory.
+This also applies to an unrelated ledger in the scanned review roots.
+
+Every missing link is checked against child edges and block edges.
+A cyclic link stays absent.
+A foreign blocker flag names the link and its removal command.
+Foreign records receive no kernel action or write.
+An open foreign child holds its parent close and produces a flag.
+A missing run marker retains the default policy and produces a flag.
+An epic, work item or gate with status `in_progress` does not hold work.
+The `raw-claim` flag names that record and gives its status repair command.
+An occupied computed identity is a collision and remains unchanged.
+
+The revision hashes state, named refs, ledgers, verdicts, policy and lease expiry state.
+Display time does not change the revision.
+Actions use plan order, kind order and numeric slot order.
+Commands use argument arrays.
+Terminal text is escaped.
+A live lease sets a waiting entry and the earliest retry time.
+Statuses `work`, `wait`, `halted`, `done` and `indeterminate` exit 0, 3, 4, 5 and 1.
+An empty result on unfinished work is indeterminate.
+The command refuses an unapproved plan.
+Apply also requires the custom step type and a readable store.
