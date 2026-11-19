@@ -9,6 +9,9 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"cmd/mindspec/next_action.go kernelCommandState workspace.SpecDir":                                                  {Count: 1, Gate: "SpecDir validates the resolved spec ID before path composition; an error returns before the state read."},
+	"internal/next/kernel/state.go ReadState workspace.SpecBranch":                                                      {Count: 1, Gate: "SpecBranch validates the spec ID before ref composition; an error returns before git runs."},
+	"internal/next/kernel/state.go ReadState workspace.BeadBranch":                                                      {Count: 1, Gate: "BeadBranch validates each recorded work item ID before ref composition; an error returns before git runs."},
 	"internal/approve/impl_final_gate.go implFinalReviewGate workspace.SpecBranch":                                      {Count: 1, Gate: "SpecBranch validates the spec ID before the final-review gate reads the branch tip; an error refuses the gate; ApproveImpl validates the ID at ingress."},
 	"internal/approve/impl_final_gate.go implFinalReviewGate workspace.SpecWorktreePath":                                {Count: 1, Gate: "SpecWorktreePath validates the spec ID and configured path before the gate checks worktree presence; ApproveImpl validates the ID at ingress."},
 	"internal/approve/impl_final_gate.go implPublishedSubject workspace.SpecBranch":                                     {Count: 1, Gate: "SpecBranch validates the spec ID before the published-subject comparison reads the branch; an error refuses the gate."},

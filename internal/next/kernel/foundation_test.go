@@ -129,6 +129,45 @@ func TestS134Store_IDModesAndOwnership(t *testing.T) {
 		})
 	}
 }
+func TestStoreRejectsMalformedPhysicalIDs(t *testing.T) {
+	for _, id := range []string{"--help", "../test-abc", "test-abc.*", "test-abc.1.review.extra"} {
+		for _, op := range []string{"status", "metadata", "downstream", "upstream", "parent"} {
+			t.Run(id+"/"+op, func(t *testing.T) {
+				f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
+				work := f.Items[0]
+				r := f.Fake.Records[work]
+				r.ID = id
+				r.Metadata[kernel.KeyID] = work
+				f.Fake.Records[work] = r
+				writes := 0
+				f.Fake.Hook = func(args []string) error {
+					if args[0] != "list" {
+						writes++
+					}
+					return nil
+				}
+				var err error
+				switch op {
+				case "status":
+					err = f.Store.SetStatusIf(work, "open", "closed")
+				case "metadata":
+					err = f.Store.WriteMetadata(work, kernel.Metadata("note", "test"))
+				case "downstream":
+					err = f.Store.AddLink(work, f.Items[1])
+				case "upstream":
+					err = f.Store.AddLink(f.Items[1], work)
+				case "parent":
+					key := work + ".impl.a1"
+					_, err = f.Store.Create(kernel.CreateRecord{ID: key, Parent: work, Type: "step", Tuple: mustTuple(t, key)})
+				}
+				if err == nil || writes != 0 {
+					t.Fatalf("invalid physical ID reached a write: err=%v writes=%d", err, writes)
+				}
+			})
+		}
+	}
+}
+
 func mustTuple(t *testing.T, id string) kernel.Tuple {
 	t.Helper()
 	tuple, err := kernelid.Parse(id)

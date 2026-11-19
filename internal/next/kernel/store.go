@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
@@ -146,6 +147,12 @@ func (s *Store) owned(key string) (*Record, error) {
 	}
 	if r == nil {
 		return nil, fmt.Errorf("record is absent: %s", termsafe.Escape(key))
+	}
+	// Physical IDs must pass the tracker grammar or the exact kernel grammar.
+	if err := idvalidate.BeadID(r.ID); err != nil {
+		if _, parseErr := kernelid.Parse(r.ID); parseErr != nil {
+			return nil, err
+		}
 	}
 	if key == s.Epic {
 		return r, nil

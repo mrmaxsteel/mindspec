@@ -11,6 +11,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // State is a fresh read of one epic's recorded work and evidence.
@@ -140,9 +141,17 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 			s.Verdicts[path] = data
 		}
 	}
-	names := []string{"refs/heads/spec/" + specID}
+	specBranch, err := workspace.SpecBranch(specID)
+	if err != nil {
+		return s, err
+	}
+	names := []string{"refs/heads/" + specBranch}
 	for _, id := range s.Items {
-		names = append(names, "refs/heads/bead/"+id)
+		branch, err := workspace.BeadBranch(id)
+		if err != nil {
+			return s, err
+		}
+		names = append(names, "refs/heads/"+branch)
 	}
 	cmd := exec.Command("git", append([]string{"for-each-ref", "--format=%(refname) %(objectname)"}, names...)...)
 	cmd.Dir = s.Root

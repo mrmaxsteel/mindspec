@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 )
@@ -58,6 +59,7 @@ func fixture(t testing.TB, enrolled bool, options ...Option) *Fixture {
 		if err = json.Unmarshal(out, &r); err != nil {
 			t.Fatal(err)
 		}
+		f.Must(idvalidate.BeadID(r.ID))
 		return r
 	}
 	epic := raw("create", "--title", "[mindspec] kernel fixture", "--type", "epic", "--labels", "mindspec", "--metadata", fmt.Sprintf(`{"spec_id":%q,"mindspec_phase":"implement"}`, f.SpecID), "--json")
@@ -153,6 +155,12 @@ func Snapshot(t testing.TB, f *Fixture) string {
 	data, err := f.Store.Run("list", "--all", "--json", "-n", "0")
 	f.Must(err)
 	for _, record := range records {
+		if f.Fake == nil {
+			if err := idvalidate.BeadID(record.ID); err != nil {
+				_, err = kernelid.Parse(record.ID)
+				f.Must(err)
+			}
+		}
 		deps, err := f.Store.Run("dep", "list", record.ID, "--json")
 		f.Must(err)
 		data = append(data, '\n')
