@@ -94,7 +94,8 @@ type ChildInfo struct {
 	// top-level issues. Consumed by Cache.OpenBeads callers (the lifecycle
 	// aggregate scan) to attribute a globally-enumerated bead to its epic
 	// without a per-epic children query.
-	Parent string `json:"parent"`
+	Parent   string                 `json:"parent"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // ActiveSpec holds discovered spec information derived from beads.
@@ -259,11 +260,19 @@ func DerivePhaseWithStatusWithCache(c *Cache, epicID, epicStatus string) (string
 		if cerr != nil {
 			return "", fmt.Errorf("deriving epic %s's phase from its children: %w", idrender.Bead(epicID), cerr)
 		}
+		children, err := lifecycleChildrenWithCache(c, epicID, children)
+		if err != nil {
+			return "", err
+		}
 		return DerivePhaseFromChildren(children), nil
 	}
 	children, cerr := c.GetChildren(epicID)
 	if cerr != nil {
 		return "", fmt.Errorf("deriving epic %s's phase from its children: %w", idrender.Bead(epicID), cerr)
+	}
+	children, err := lifecycleChildrenWithCache(c, epicID, children)
+	if err != nil {
+		return "", err
 	}
 	return DerivePhaseFromChildren(children), nil
 }
@@ -353,10 +362,18 @@ func deriveFromChildrenOrStatusWithCache(c *Cache, epicID, epicStatus string) st
 		if cerr != nil {
 			return ""
 		}
+		children, err := lifecycleChildrenWithCache(c, epicID, children)
+		if err != nil {
+			return ""
+		}
 		return DerivePhaseFromChildren(children)
 	}
 	children, cerr := c.GetChildren(epicID)
 	if cerr != nil {
+		return ""
+	}
+	children, err := lifecycleChildrenWithCache(c, epicID, children)
+	if err != nil {
 		return ""
 	}
 	return DerivePhaseFromChildren(children)
@@ -880,6 +897,7 @@ func ExtractSpecMetadata(epic EpicInfo) (int, string) {
 
 // ParseSpecFromTitle extracts spec_num and spec_title from "[SPEC NNN-slug] ..." title format.
 func ParseSpecFromTitle(title string) (int, string) {
+	title = strings.TrimSpace(strings.TrimPrefix(title, "[mindspec]"))
 	start := strings.Index(title, "[SPEC ")
 	if start < 0 {
 		return 0, ""
