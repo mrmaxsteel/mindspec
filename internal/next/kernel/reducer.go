@@ -7,6 +7,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 func init() {
@@ -73,9 +74,17 @@ func upstreamsDone(s State, item string) bool {
 func subject(s State, gate string) string {
 	t, _ := kernelid.Parse(gate)
 	if t.WorkItem != "" {
-		return s.Refs["refs/heads/bead/"+t.WorkItem]
+		branch, err := workspace.BeadBranch(t.WorkItem)
+		if err != nil {
+			return ""
+		}
+		return s.Refs["refs/heads/"+branch]
 	}
-	return s.Refs["refs/heads/spec/"+s.SpecID]
+	branch, err := workspace.SpecBranch(s.SpecID)
+	if err != nil {
+		return ""
+	}
+	return s.Refs["refs/heads/"+branch]
 }
 func recreate(s State) (Changes, error) {
 	c := Changes{}
@@ -264,7 +273,11 @@ func implement(s State) (Changes, error) {
 		}
 		sub := subject(s, t.Gate)
 		if t.Kind == "implement" {
-			sub = s.Refs["refs/heads/bead/"+t.WorkItem]
+			branch, err := workspace.BeadBranch(t.WorkItem)
+			sub = ""
+			if err == nil {
+				sub = s.Refs["refs/heads/"+branch]
+			}
 		}
 		if v, ok, _ := Decode[Subject](r.Metadata, KeySubject); ok {
 			sub = v.Commit

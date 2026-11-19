@@ -179,8 +179,8 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 			s.Refs[parts[0]] = parts[1]
 		}
 	}
-	for _, id := range s.Items {
-		tip := s.Refs["refs/heads/bead/"+id]
+	for i, id := range s.Items {
+		tip := s.Refs[names[i+1]]
 		if tip == "" {
 			// Completion retains the landed tip when it removes the branch.
 			recorded, _ := s.Records[id].Metadata["mindspec_landed_second_parent"].(string)
