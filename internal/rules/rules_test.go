@@ -19,7 +19,7 @@ func TestRuleTable_MinimumSet(t *testing.T) {
 		"panel.isolated-checkout":            {[]string{"reviewer"}, "advisory"},
 		"panel.scratch-in-slot":              {[]string{"reviewer", "fixer"}, "advisory"},
 		"panel.fix-after-final":              {[]string{"orchestrator"}, "advisory"},
-		"panel.one-fixer":                    {[]string{"orchestrator"}, "advisory"},
+		"panel.one-fixer":                    {[]string{"orchestrator"}, "lease"},
 		"panel.artifact-gate":                {[]string{"orchestrator"}, "advisory"},
 		"panel.clean-before-complete":        {[]string{"orchestrator"}, "complete"},
 		"review.basis":                       {[]string{"reviewer"}, "panel submit"},
@@ -32,7 +32,7 @@ func TestRuleTable_MinimumSet(t *testing.T) {
 		"review.classifier-redispatch":       {[]string{"orchestrator"}, "advisory"},
 		"review.derive":                      {[]string{"implementer", "fixer"}, "advisory"},
 		"lifecycle.no-probe-complete":        {[]string{"orchestrator"}, "advisory"},
-		"lifecycle.complete-by-orchestrator": {[]string{"implementer", "fixer"}, "advisory"},
+		"lifecycle.complete-by-orchestrator": {[]string{"implementer", "fixer"}, "submit"},
 		"sequence.bead-impl-prompt":          {[]string{"orchestrator"}, "advisory"},
 	}
 	loaded, err := Load()

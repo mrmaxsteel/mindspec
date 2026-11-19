@@ -9,6 +9,10 @@ package lint
 // (string, error), fail-closed — spec 120 R2/AC-2); Gate additionally
 // names the earlier ingress/D-gate where one fires first.
 var compositionCallAllowlist = map[string]compEntry{
+	"internal/next/kernel/lease.go Lease workspace.BeadBranch":                                                          {Count: 1, Gate: "BeadBranch validates the tuple work item before claim-base ref construction. Lease returns an error before git runs."},
+	"internal/next/kernel/submit.go checkImplement workspace.BeadBranch":                                                {Count: 1, Gate: "BeadBranch validates the tuple work item before commitPast reads its branch ref. The check returns an error on an invalid ID."},
+	"internal/next/kernel/submit.go checkFix workspace.BeadBranch":                                                      {Count: 1, Gate: "BeadBranch validates the tuple work item before commitPast reads its branch ref. The check returns an error on an invalid ID."},
+	"internal/next/kernel/submit.go checkFix workspace.SpecBranch":                                                      {Count: 1, Gate: "SpecBranch validates the state spec ID before commitPast reads the final fix branch. The check returns an error on an invalid ID."},
 	"internal/next/kernel/reducer.go subject workspace.BeadBranch":                                                      {Count: 1, Gate: "BeadBranch validates the parsed work item before ref lookup. Invalid IDs cannot occur in refs loaded by ReadState and retain the missing-subject result."},
 	"internal/next/kernel/reducer.go subject workspace.SpecBranch":                                                      {Count: 1, Gate: "SpecBranch validates the state spec ID before ref lookup; ReadState already validates it before returning a usable state."},
 	"internal/next/kernel/reducer.go implement workspace.BeadBranch":                                                    {Count: 1, Gate: "BeadBranch validates the tuple work item before ref lookup. Invalid IDs cannot occur in refs loaded by ReadState and retain the missing-subject result."},

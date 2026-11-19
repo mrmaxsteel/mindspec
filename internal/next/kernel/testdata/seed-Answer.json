@@ -29,14 +29,14 @@
     "mindspec_answer": {
       "option": "halt",
       "at": "2026-01-02T03:04:05Z",
-      "actor": "test"
+      "actor": "operator"
     },
     "mindspec_close": {
       "kind": "passed",
       "answer": {
         "option": "halt",
         "at": "2026-01-02T03:04:05Z",
-        "actor": "test"
+        "actor": "operator"
       }
     }
   }

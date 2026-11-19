@@ -23,7 +23,10 @@ var leaseCmd = &cobra.Command{Use: "lease <step>", Short: "Lease a kernel actor 
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Token)
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "generation %d\n", result.Lease.Generation)
+	if err == nil && result.Token != "" {
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Token)
+	}
 	return err
 }}
 
