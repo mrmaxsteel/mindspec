@@ -29,7 +29,13 @@ var nextActionCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
+		if err := json.NewEncoder(cmd.OutOrStdout()).Encode(out); err != nil {
+			return err
+		}
+		if code := kernel.OutputExitCode(out); code != 0 {
+			return exitErr(code, fmt.Errorf("next action: %s", out.Status))
+		}
+		return nil
 	},
 }
 
