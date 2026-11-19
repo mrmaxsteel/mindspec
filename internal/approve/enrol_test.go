@@ -681,3 +681,132 @@ func TestS134Enrol_RunMarkerKeepsPolicyAfterCycleRefusal(t *testing.T) {
 		t.Fatal("post-marker refusal stopped approval or gate creation")
 	}
 }
+
+func TestS134Enrol_PanelWitnessChainCycleNoLinkWrite(t *testing.T) {
+	f := enrolFixture(t)
+	enrolWrite(t, filepath.Join(f.SpecDir, "reviews", "plan-panel", "panel.json"), `{"orchestrated":true}`)
+	enrolKill(t, f, "creates")
+	ids := enrolIDs(t, f)
+	out, err := f.Fake.Run("create", "--title", "foreign bug", "--type", "bug", "--json")
+	f.Must(err)
+	var bug kernel.Record
+	f.Must(json.Unmarshal(out, &bug))
+	_, err = f.Fake.Run("dep", "add", ids[0], bug.ID, "--type", "blocks")
+	f.Must(err)
+	_, err = f.Fake.Run("dep", "add", bug.ID, ids[2], "--type", "blocks")
+	f.Must(err)
+	f.Fake.Calls = nil
+	_, err = enrolApprove(f)
+	if err == nil || !strings.Contains(err.Error(), "bd dep remove "+ids[0]+" "+bug.ID) {
+		t.Fatalf("missing chain recovery: %v", err)
+	}
+	for _, call := range f.Fake.Calls {
+		if len(call) > 1 && call[0] == "dep" && call[1] == "add" {
+			t.Fatalf("cycle wrote link: %v", call)
+		}
+	}
+}
+
+func TestS134Enrol_RawReviewCollisionBeforeWrite(t *testing.T) {
+	f := enrolFixture(t)
+	enrolKill(t, f, "creates")
+	ids := enrolIDs(t, f)
+	_, err := f.Fake.Run("create", "--title", "foreign", "--type", "task", "--parent", ids[0], "--id", ids[0]+".review", "--json")
+	f.Must(err)
+	for range 2 {
+		enrolAssertRefusal(t, f, "id-collision: "+ids[0]+".review")
+	}
+}
+
+func TestS134Enrol_BadPanelRefusesBeforeWrite(t *testing.T) {
+	f := enrolFixture(t)
+	path := filepath.Join(f.SpecDir, "reviews", "old", "panel.json")
+	enrolWrite(t, path, `{not json`)
+	before := enrolSnap(t, f)
+	f.Fake.Calls = nil
+	_, err := enrolApprove(f)
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "invalid character") {
+		t.Fatalf("want parse refusal naming %s, got %v", path, err)
+	}
+	if enrolSnap(t, f) != before {
+		t.Fatal("bad panel refusal changed snapshot")
+	}
+	for _, call := range f.Fake.Calls {
+		if call[0] != "list" && call[0] != "show" && !(len(call) > 1 && call[0] == "dep" && call[1] == "list") {
+			t.Fatalf("bad panel refusal wrote: %v", call)
+		}
+	}
+}
+
+func TestS134Enrol_NewUpstreamRefusesExactly(t *testing.T) {
+	f := enrolFixture(t)
+	enrolKill(t, f, "links")
+	ids := enrolIDs(t, f)
+	enrolAddFourth(t, f)
+	enrolSetDeps(t, f, 2, []int{4})
+	enrolAssertExactRefusal(t, f, "upstream differs for "+ids[1])
+}
+
+func TestS134Enrol_SuccessfulLinkUpdatesCycleCheck(t *testing.T) {
+	f := kerneltest.Enrolled(t, kerneltest.WithFake(kernel.NativeIDs))
+	graph := enrolWaits{}
+	f.Must(enrolAddLink(f.Store, graph, f.Items[2], f.Items[1]))
+	f.Fake.Calls = nil
+	err := enrolAddLink(f.Store, graph, f.Items[1], f.Items[2])
+	want := "foreign-blocker: link " + f.Items[1] + " -> " + f.Items[2] + " forms a cycle through " + f.Items[2] + " -> " + f.Items[1] + "\nrecovery: bd dep remove " + f.Items[2] + " " + f.Items[1]
+	if err == nil || err.Error() != want {
+		t.Fatalf("want graph refusal %q, got %v", want, err)
+	}
+	for _, call := range f.Fake.Calls {
+		if len(call) > 1 && call[0] == "dep" && call[1] == "add" {
+			t.Fatalf("cycle reached link write: %v", call)
+		}
+	}
+}
+
+func TestS134Enrol_CreatedGateUpdatesCycleCheck(t *testing.T) {
+	f := kerneltest.Enrolled(t, kerneltest.WithFake(kernel.NativeIDs))
+	graph := enrolWaits{}
+	item := f.Items[0]
+	gate := item + ".review"
+	delete(f.Fake.Records, f.ID(gate))
+	f.Must(enrolGate(f.Store, graph, gate, item))
+	physical := f.ID(gate)
+	f.Fake.Calls = nil
+	err := enrolAddLink(f.Store, graph, gate, item)
+	want := "foreign-blocker: link " + physical + " -> " + item + " forms a cycle through " + item + " -> " + physical + "\nrecovery: bd dep remove " + item + " " + physical
+	if err == nil || err.Error() != want {
+		t.Fatalf("want graph refusal %q, got %v", want, err)
+	}
+	for _, call := range f.Fake.Calls {
+		if len(call) > 1 && call[0] == "dep" && call[1] == "add" {
+			t.Fatalf("child cycle reached link write: %v", call)
+		}
+	}
+}
+
+func TestS134Enrol_FinalGateReadFailureStopsLinks(t *testing.T) {
+	f := enrolFixture(t)
+	enrolKill(t, f, "creates")
+	final := f.Create(f.Epic+".final", f.Epic)
+	readErr := errors.New("cannot read final dependencies")
+	f.Fake.Hook = func(args []string) error {
+		if len(args) > 2 && args[0] == "dep" && args[1] == "list" && args[2] == final.ID {
+			return readErr
+		}
+		return nil
+	}
+	f.Fake.Calls = nil
+	_, err := enrolApprove(f)
+	if !errors.Is(err, readErr) {
+		t.Fatalf("want final dependency read refusal, got %v", err)
+	}
+	for _, call := range f.Fake.Calls {
+		if len(call) > 1 && call[0] == "dep" && call[1] == "add" {
+			t.Fatalf("read refusal wrote link: %v", call)
+		}
+	}
+	if f.Fake.Records[f.Epic].Metadata[kernel.KeyRun] != nil || f.Fake.Records[f.Epic].Metadata[kernel.KeyPlanApproval] != nil {
+		t.Fatal("read refusal wrote run marker or approval")
+	}
+}

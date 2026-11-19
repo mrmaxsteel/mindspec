@@ -140,8 +140,19 @@ func TestS134Derive_BadOptionalWitnessKeepsLegacyPhase(t *testing.T) {
 				f.Must(err)
 				return got
 			}
+			want := "plan"
+			if bad == "panel" {
+				for _, id := range f.Items {
+					r := f.Fake.Records[id]
+					r.Status = "closed"
+					f.Fake.Records[id] = r
+				}
+				_, err := f.Fake.Run("create", "--title", "foreign task", "--type", "task", "--parent", f.Epic, "--json")
+				f.Must(err)
+				want = "implement"
+			}
 			before := derive()
-			if before != "plan" {
+			if before != want {
 				t.Fatalf("unexpected baseline phase: %s", before)
 			}
 			if bad == "panel" {
@@ -189,5 +200,69 @@ func TestS134Derive_PreKernelDoesNotQueryNestedChildren(t *testing.T) {
 		} else if calls != baseline {
 			t.Fatalf("unrelated records added calls: %d -> %d", baseline, calls)
 		}
+	}
+}
+
+func TestS134Derive_BadPanelDoesNotHideWitness(t *testing.T) {
+	for _, badDir := range []string{"aaa-old", "zzz-old"} {
+		t.Run(badDir, func(t *testing.T) {
+			f := kerneltest.PreKernelSpec(t, kerneltest.WithFake(kernel.NativeIDs))
+			epic := f.Fake.Records[f.Epic]
+			delete(epic.Metadata, "mindspec_phase")
+			f.Fake.Records[f.Epic] = epic
+			for _, id := range f.Items {
+				r := f.Fake.Records[id]
+				r.Status = "closed"
+				f.Fake.Records[id] = r
+			}
+			_, err := f.Fake.Run("create", "--title", "foreign task", "--type", "task", "--parent", f.Epic, "--json")
+			f.Must(err)
+			t.Cleanup(phase.SetRunBDForTest(f.Fake.Run))
+			t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+				return f.Fake.Run(append([]string{"list"}, args...)...)
+			}))
+			for _, panel := range []struct{ dir, data string }{{"witness", `{"orchestrated":true}`}, {badDir, `{not json`}} {
+				path := filepath.Join(f.SpecDir, "reviews", panel.dir, "panel.json")
+				f.Must(os.MkdirAll(filepath.Dir(path), 0755))
+				f.Must(os.WriteFile(path, []byte(panel.data), 0600))
+				got, err := phase.DerivePhaseWithCache(phase.NewCache().WithRoot(f.Root), f.Epic)
+				f.Must(err)
+				if got != "review" {
+					t.Fatalf("panel %s: enrolled phase = %s, want review", panel.dir, got)
+				}
+			}
+		})
+	}
+}
+
+func TestS134Derive_StoreReadSharedAcrossEpics(t *testing.T) {
+	f := kerneltest.PreKernelSpec(t, kerneltest.WithFake(kernel.NativeIDs))
+	epic := f.Fake.Records[f.Epic]
+	delete(epic.Metadata, "mindspec_phase")
+	f.Fake.Records[f.Epic] = epic
+	other := kernel.Record{ID: "other-1", Type: "epic", Status: "open", Title: "[SPEC 003-other] Other", Metadata: map[string]any{"spec_id": "003-other"}}
+	f.Fake.Records[other.ID] = other
+	f.Fake.Records["other-1.1"] = kernel.Record{ID: "other-1.1", Parent: other.ID, Type: "task", Status: "open"}
+	t.Cleanup(phase.SetRunBDForTest(f.Fake.Run))
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+		return f.Fake.Run(append([]string{"list"}, args...)...)
+	}))
+	f.Fake.Calls = nil
+	cache := phase.NewCache().WithRoot(f.Root)
+	for _, id := range []string{f.Epic, other.ID} {
+		got, err := phase.DerivePhaseWithCache(cache, id)
+		f.Must(err)
+		if got != "plan" {
+			t.Fatalf("%s: phase = %s, want plan", id, got)
+		}
+	}
+	reads := 0
+	for _, call := range f.Fake.Calls {
+		if call[0] == "list" && slices.Contains(call, "--all") {
+			reads++
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("store-wide reads = %d, want 1", reads)
 	}
 }

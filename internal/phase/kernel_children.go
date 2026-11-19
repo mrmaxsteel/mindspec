@@ -72,12 +72,8 @@ func lifecycleChildrenWithCache(c *Cache, epicID string, children []ChildInfo) (
 	if !enrolled {
 		// Find closed or retyped nested identities in one read, without a
 		// child query for each work item of an older approval.
-		data, err := listJSONFn("--all", "-n", "0")
+		records, err := c.allRecords()
 		if err != nil {
-			return nil, err
-		}
-		var records []ChildInfo
-		if err = json.Unmarshal(data, &records); err != nil {
 			return nil, err
 		}
 		addWitnesses(records)

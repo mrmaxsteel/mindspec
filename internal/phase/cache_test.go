@@ -413,3 +413,90 @@ func TestFetchChildrenEpicIDGate(t *testing.T) {
 		t.Errorf("argv = %v, want [--parent mindspec-s2mf ...]", gotArgs)
 	}
 }
+
+func TestCache_WithRootKeepsReadPolicy(t *testing.T) {
+	root := t.TempDir()
+	for _, memoized := range []bool{false, true} {
+		t.Run(map[bool]string{false: "nil", true: "cache"}[memoized], func(t *testing.T) {
+			var c *Cache
+			if memoized {
+				c = NewCache()
+			}
+			original := c
+			c = c.WithRoot(root)
+			if memoized && c != original {
+				t.Fatal("WithRoot did not return the receiver")
+			}
+			c = c.WithRoot("")
+			if c.repositoryRoot() != root {
+				t.Fatal("empty root cleared the context")
+			}
+			calls := 0
+			t.Cleanup(SetListJSONForTest(func(args ...string) ([]byte, error) {
+				calls++
+				return []byte(`[]`), nil
+			}))
+			t.Cleanup(SetRunBDForTest(func(args ...string) ([]byte, error) {
+				calls++
+				return []byte(`[]`), nil
+			}))
+			for range 2 {
+				if _, err := c.AllEpics(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.OpenBeads(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.FindEpic("epic-1"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.GetChildren("epic-1"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.allRecords(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.FindEpicBySpecID("001-x"); !errors.Is(err, ErrNoEpicForSpec) {
+					t.Fatalf("spec lookup: %v", err)
+				}
+			}
+			want := 12
+			if memoized {
+				want = 5
+			}
+			if calls != want {
+				t.Fatalf("tracker reads = %d, want %d", calls, want)
+			}
+		})
+	}
+}
+
+func TestCache_AllRecordsRetriesErrors(t *testing.T) {
+	for _, bad := range []string{"read", "parse"} {
+		t.Run(bad, func(t *testing.T) {
+			calls := 0
+			t.Cleanup(SetListJSONForTest(func(args ...string) ([]byte, error) {
+				calls++
+				if calls == 1 {
+					if bad == "read" {
+						return nil, errors.New("read failed")
+					}
+					return []byte(`{bad`), nil
+				}
+				return []byte(`[]`), nil
+			}))
+			c := NewCache()
+			if _, err := c.allRecords(); err == nil {
+				t.Fatal("missing error")
+			}
+			for range 2 {
+				if _, err := c.allRecords(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if calls != 2 {
+				t.Fatalf("tracker reads = %d, want 2", calls)
+			}
+		})
+	}
+}

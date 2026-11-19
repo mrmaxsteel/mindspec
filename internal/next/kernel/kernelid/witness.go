@@ -2,6 +2,7 @@ package kernelid
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -28,8 +29,11 @@ func Enrolled(w Witnesses) (enrolled, markerMissing bool) {
 }
 
 // PanelOrchestrated reads panel witnesses below a spec directory.
+// A valid witness takes priority over parse errors in other files.
+// Without a witness, it returns the first parse error with its file path.
 func PanelOrchestrated(specDir string) (bool, error) {
 	found := false
+	var parseErr error
 	err := filepath.WalkDir(specDir, func(path string, d fs.DirEntry, err error) error {
 		if os.IsNotExist(err) {
 			return nil
@@ -48,10 +52,19 @@ func PanelOrchestrated(specDir string) (bool, error) {
 			Orchestrated bool `json:"orchestrated"`
 		}
 		if err = json.Unmarshal(data, &p); err != nil {
-			return err
+			if parseErr == nil {
+				parseErr = fmt.Errorf("parse %s: %w", path, err)
+			}
+			return nil
 		}
 		found = found || p.Orchestrated
 		return nil
 	})
-	return found, err
+	if found {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, parseErr
 }
