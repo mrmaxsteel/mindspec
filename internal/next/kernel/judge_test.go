@@ -235,6 +235,7 @@ func TestS134Judge_RePanelValidationAndScope(t *testing.T) {
 				f.Must(f.Store.WriteReceipt(gate, kernel.Receipt{Kind: "passed"}))
 			}
 			before := kerneltest.Snapshot(t, f)
+			gateBefore := actorRecord(t, f, gate)
 			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
 			if err == nil || actorRecord(t, f, id).Status != "in_progress" {
 				t.Fatalf("invalid judgement accepted: %v", err)
@@ -244,15 +245,68 @@ func TestS134Judge_RePanelValidationAndScope(t *testing.T) {
 					t.Fatalf("stale subject context: %v", err)
 				}
 			}
-			if before != kerneltest.Snapshot(t, f) {
-				t.Fatal("invalid judgement wrote")
-			}
-			if r, _ := f.Store.Lookup(gate + ".a2"); r != nil {
+			after := kerneltest.Snapshot(t, f)
+			if bad == "bad-receipt" {
+				// The first pass repairs the invalid gate close even when submit refuses.
+				retry := actorRecord(t, f, gate+".a2")
+				want := gateBefore
+				want.ID, want.Status = retry.ID, "open"
+				delete(want.Metadata, kernel.KeyClose)
+				want.Metadata[kernel.KeyID] = gate + ".a2"
+				want.Metadata[kernel.KeyFrom] = gate
+				tuple, _, err := gateBefore.Tuple()
+				f.Must(err)
+				tuple.Attempt = 2
+				want.Metadata[kernel.KeyTuple] = tuple
+				wantData, err := json.Marshal(want)
+				f.Must(err)
+				retryData, err := json.Marshal(retry)
+				f.Must(err)
+				if !jsonEqual(want, retry) {
+					t.Fatalf("invalid close retry: %s, want %s", retryData, wantData)
+				}
+				after = judgeSnapshotWithoutRetry(t, after, retry.ID)
+			} else if r, _ := f.Store.Lookup(gate + ".a2"); r != nil {
 				t.Fatal("invalid judgement made successor")
+			}
+			if before != after {
+				t.Fatal("invalid judgement changed state beyond the gate close retry")
 			}
 			judgeCount(t, f, gate, 1)
 		})
 	}
+}
+
+// judgeSnapshotWithoutRetry removes only the checked retry row and its empty link list.
+func judgeSnapshotWithoutRetry(t *testing.T, snapshot, id string) string {
+	t.Helper()
+	lines := strings.Split(snapshot, "\n")
+	var rows []json.RawMessage
+	if err := json.Unmarshal([]byte(lines[0]), &rows); err != nil {
+		t.Fatal(err)
+	}
+	for i, data := range rows {
+		var row kernel.Record
+		if err := json.Unmarshal(data, &row); err != nil {
+			t.Fatal(err)
+		}
+		if row.ID != id {
+			continue
+		}
+		if lines[i+1] != "null" {
+			t.Fatal("gate close retry has links")
+		}
+		rows = append(rows[:i], rows[i+1:]...)
+		data, err := json.Marshal(rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines[0] = string(data)
+		lines = append(lines[:i+1], lines[i+2:]...)
+		return strings.Join(lines, "\n")
+	}
+	t.Fatal("gate close retry missing from snapshot")
+	return ""
 }
 
 func judgePanelRead(t *testing.T, f *kerneltest.Fixture, dir string) *panel.Panel {

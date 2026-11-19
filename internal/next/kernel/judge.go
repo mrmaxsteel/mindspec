@@ -290,9 +290,13 @@ func judgeSupersede(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
-		sub, _, err := Decode[Subject](r.Metadata, KeySubject)
+		sub, present, err := Decode[Subject](r.Metadata, KeySubject)
 		if err != nil {
 			return c, err
+		}
+		// A missing subject is not evidence that the judge is stale.
+		if !present || sub.Commit == "" {
+			continue
 		}
 		if sub.Commit == newest && sub.Commit != accepted {
 			continue

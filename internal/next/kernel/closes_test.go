@@ -152,14 +152,31 @@ func TestS134Closes_WorkItemBlocksDependent(t *testing.T) {
 		})
 	}
 	// Even a merged item closed over an open child cannot release work.
-	f := reducerFixture(t)
-	item := f.Items[0]
-	kerneltest.PassGate(f, item+".review", "subject")
-	f.Create(item+".review.judge.a1", item)
-	f.Must(f.Store.SetStatusIf(item, "open", "closed"))
-	out := reduce(t, f, true)
-	assertCloseFlag(t, out, "forced-close", item, true)
-	assertRetry(t, f, "", f.Items[1]+".impl.a1", false)
+	for _, subject := range []string{"missing", "empty", "current"} {
+		t.Run(subject, func(t *testing.T) {
+			f := reducerFixture(t)
+			item := f.Items[0]
+			kerneltest.PassGate(f, item+".review", "subject")
+			judge := item + ".review.judge.a1"
+			f.Create(judge, item)
+			if subject != "missing" {
+				commit := ""
+				if subject == "current" {
+					commit = reducerGit(t, f, "rev-parse", "bead/"+item)
+				}
+				f.Must(f.Store.WriteMetadata(judge, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: commit})))
+			}
+			f.Must(f.Store.SetStatusIf(item, "open", "closed"))
+			out := reduce(t, f, true)
+			assertCloseFlag(t, out, "forced-close", item, true)
+			if actorRecord(t, f, judge).Status != "open" {
+				t.Fatal("open judge was closed without a subject change")
+			}
+			for _, dependent := range f.Items[1:] {
+				assertRetry(t, f, "", dependent+".impl.a1", false)
+			}
+		})
+	}
 }
 func TestS134Closes_RawClaimStep(t *testing.T) {
 	for _, row := range []struct {
