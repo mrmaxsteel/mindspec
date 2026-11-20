@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/githooks"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/safeio"
@@ -298,6 +299,14 @@ func ensureGitignore(root string, check bool, r *Result) error {
 
 	if err := gitutil.EnsureGitignoreEntries(root, gitutil.RuntimeIgnoreEntries...); err != nil {
 		return fmt.Errorf("ensuring .gitignore runtime entries: %w", err)
+	}
+
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	if err := gitutil.EnsureGitignoreLiteralEntriesWithHeader(root, "# MindSpec local review files (not version-controlled)", ".mindspec/config.local.yaml", cfg.Panel.IsolationRoot); err != nil {
+		return fmt.Errorf("ensuring local review ignores: %w", err)
 	}
 
 	after, _ := os.ReadFile(path)

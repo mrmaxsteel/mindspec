@@ -341,7 +341,7 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 			return e
 		}
 		if !ok || round.Round != n || (has && registered.Round >= round.Round) {
-			return panelVerbFailure(fmt.Errorf("round %d is not authorized for %s", n, gate))
+			return guard.NewFailure(fmt.Sprintf("round %d is not authorized for %s", n, gate), fmt.Sprintf("mindspec next-action %s --apply", shellQuoteTarget(idrender.Spec(s.SpecID))))
 		}
 		if requested, _ := cmd.Flags().GetInt("round"); cmd.Flags().Changed("round") && requested != round.Round {
 			return panelVerbFailure(fmt.Errorf("the authorized round is %d", round.Round))

@@ -45,8 +45,8 @@ Thesis: beads hold plan and dispatch; git holds evidence; the binary holds rules
    fix; passed fix: the next slots; a subject change after a pass: its judge, §13.2).
 9. A refused tally below the limit creates round N+1's fix under the same open gate. Attempts are counted.
 10. A new subject during round N supersedes its open slots in the same pass. A commit in an open fix does not.
-11. `halt` closes every open step under the epic `halted` in the same pass, except a step with an open foreign
-    child and its kernel ancestors (§13.4). It never closes a foreign bead.
+11. `halt` closes each open step under the epic `halted` when it has no open child or blocking upstream.
+    A step held by an open foreign child or upstream, and its kernel ancestors, stay open. It never closes a foreign bead.
 12. A gate is a child of what it decides. An open bead gate makes raw `bd close <work item>` fail without `--force`.
     A gate closed `passed` is frozen; only a `carry-over` (§13.2) adds to its receipt.
 13. A receipt names path, holding commit and blob id, never the body (a bare digest only if a commit keeps the
@@ -184,6 +184,10 @@ leaves the epic and work items open (§13.4). Spec and plan gates: count and war
 claims, unreceipted closes, carry-overs and the slot count of each re-panel, from durable records. `--allow-not-ready`
 joins both friction registries.
 
+Takeover history is stored in `mindspec_takes`, with one event per lease generation.
+Deferral history is stored in `mindspec_deferrals`, with distinct panel, round, slot, finding and target records.
+The latest `mindspec_take` and `mindspec_defer` records remain readable.
+
 ## 12. Shared bd store
 
 A person or agent that does not use mindspec (a "foreign user") works in the same bd store with bd and git only,
@@ -255,7 +259,8 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    no gate round authorises `<w>.impl.a1`. Each pass creates it for every such item, in plan order, on the one
    controller host (§8); this is not the deferred parallel waves. `<w>.impl.a<k+1>` comes only from §9.
 4. **After halt (OQ6).** The spec stays enrolled. `halt` closes every open step and decision under the epic `halted`
-   that it can. A step with an open foreign child, and its kernel ancestors, stay open, flagged `foreign-child-open`.
+   that it can. A step with an open foreign child or blocking upstream, and its kernel ancestors, stay open.
+   The pass flags the foreign child or blocker. It writes no halt receipt on a step that cannot close.
    The spec is halted from the answer's receipt. Then only writes that finish the halt run: a retry of the same answer
    and `next-action --apply` each close the receipted decision and every other closable step `halted`, exit 4 (not
    §6's 0) and write nothing else. Any other verb that would create, claim or close a kernel step, or claim, close or

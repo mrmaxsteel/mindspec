@@ -82,7 +82,9 @@ func upstreamsDone(s State, item string) bool {
 	}
 	return true
 }
-func subject(s State, gate string) string {
+
+// rawSubject returns the branch tip, including evidence commits.
+func rawSubject(s State, gate string) string {
 	t, _ := kernelid.Parse(gate)
 	if t.WorkItem != "" {
 		branch, err := workspace.BeadBranch(t.WorkItem)
@@ -185,12 +187,15 @@ func roundOpen(s State) (Changes, error) {
 		if registered && reg.Round >= wanted {
 			continue
 		}
-		head := subject(s, gate)
+		head, err := effectiveSubject(s, gate)
+		if err != nil {
+			return c, err
+		}
 		resetScope := false
 		if _, repanel, err := Decode[RePanel](g.Metadata, KeyRePanel); err != nil {
 			return c, err
 		} else if repanel && has && wanted == round.Round {
-			newest, err := newestJudgeSubject(s, gate)
+			newest, err := effectiveSubject(s, gate)
 			if err != nil {
 				return c, err
 			}
@@ -307,7 +312,14 @@ func implement(s State) (Changes, error) {
 			c.Waiting = append(c.Waiting, Waiting{Step: id, Lease: LeaseView{Generation: lease.Generation, Expires: lease.Expires}})
 			continue
 		}
-		sub := subject(s, t.Gate)
+		sub := ""
+		if t.Kind != "implement" {
+			var err error
+			sub, err = effectiveSubject(s, t.Gate)
+			if err != nil {
+				return c, err
+			}
+		}
 		if t.Kind == "implement" {
 			branch, err := workspace.BeadBranch(t.WorkItem)
 			sub = ""
@@ -366,7 +378,11 @@ func tally(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
-		if ok && subject(s, gate) == accepted {
+		head, err := effectiveSubject(s, gate)
+		if err != nil {
+			return c, err
+		}
+		if ok && head == accepted {
 			receipt := Receipt{Kind: "passed", Subject: accepted, Retally: "passing-tally"}
 			c.Writes = append(c.Writes, Write{Kind: "close", ID: gate, Receipt: &receipt})
 		}

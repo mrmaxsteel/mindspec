@@ -479,7 +479,9 @@ An older approved plan selects only its recorded work items.
 Submit the implementation commit with its lease token.
 Run each command in the returned `run` list.
 Run apply again to obtain the review slots after panel creation.
-Commit each verdict in a separate evidence worktree.
+A separate evidence worktree is useful for keeping review files together.
+You can also commit evidence on the subject branch. A commit that changes only
+directories registered to that gate does not move the review subject.
 Submit its artifact path with the slot lease token.
 The submission publishes the committed verdict before it closes the slot.
 Answer an open decision before leasing its fix.

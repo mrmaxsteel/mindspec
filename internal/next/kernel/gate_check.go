@@ -46,13 +46,13 @@ func CheckPassedGate(s State, base string) error {
 		failures = append(failures, err)
 	} else if accepted == "" {
 		failures = append(failures, fmt.Errorf("gate %s has no accepted subject", termsafe.Escape(gate)))
-	} else if subject(s, gate) != "" || (ended && tuple.WorkItem != "") {
-		newest, err := newestJudgeSubject(s, gate)
+	} else if rawSubject(s, gate) != "" || (ended && tuple.WorkItem != "") {
+		newest, err := effectiveSubject(s, gate)
 		if err != nil {
 			failures = append(failures, err)
-		} else if newest != accepted {
+		} else if newest != accepted && !finalizeReplay(s, gate, accepted) {
 			moved = true
-			failures = append(failures, fmt.Errorf("head %s differs from accepted subject %s for gate %s", termsafe.Escape(subject(s, gate)), termsafe.Escape(accepted), termsafe.Escape(gate)))
+			failures = append(failures, fmt.Errorf("head %s differs from accepted subject %s for gate %s", termsafe.Escape(rawSubject(s, gate)), termsafe.Escape(accepted), termsafe.Escape(gate)))
 		}
 	}
 	if len(failures) == 0 {
@@ -91,3 +91,24 @@ func GateBase(item string) string { return strings.TrimSpace(item) + ".review" }
 
 // CheckWorkItem checks holds and upstream blockers before a work item closes.
 func CheckWorkItem(s State, item string) error { return actorBlockers(s, s.Records[item]) }
+
+// finalizeReplay accepts only the recorded publication of a closed final gate.
+// The checkpoint may include panel evidence committed before finalization.
+func finalizeReplay(s State, gate, accepted string) bool {
+	t, err := kernelid.Parse(gate)
+	if err != nil || t.WorkItem != "" || s.Records[s.Epic].Status != "closed" {
+		return false
+	}
+	meta := s.Records[s.Epic].Metadata
+	before, _ := meta["mindspec_pre_finalize_tip"].(string)
+	published, _ := meta["mindspec_finalize_tip"].(string)
+	if !objectID(before) || !objectID(published) || rawSubject(s, gate) != published {
+		return false
+	}
+	checkpoint, err := effectiveSubjectAt(s, gate, before)
+	if err != nil || checkpoint != accepted {
+		return false
+	}
+	_, err = actorGit(s.Root, "merge-base", "--is-ancestor", before, published)
+	return err == nil
+}

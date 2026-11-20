@@ -50,6 +50,9 @@ mindspec submit <step> --lease <token> --artifact <path>
 ```
 
 Keep the evidence in git. The receipt binds its path, holding commit and blob.
+A separate evidence worktree can keep review files together. Evidence can also be
+committed on the subject branch. A commit that changes only directories registered
+to the gate does not move its subject. A commit that changes another path does.
 The same receipt can be submitted again after an interruption.
 A different result for an already closed step is refused.
 

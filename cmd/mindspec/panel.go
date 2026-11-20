@@ -447,12 +447,12 @@ and prints a recovery line.`,
 		// binding is derivable right here: reg carries the matched
 		// registration's spec/target/bead/gate, exactly as the non-bead
 		// leg below already derives its own operands.
-		if d.Action == panel.Block && reg.Err == nil {
+		if d.Action == panel.Block && reg.Err == nil && reg.Panel.Spec != "" && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review") {
 			s, err := panelKernelStateFn(root, reg.Panel.Spec)
-			if err != nil {
+			if err != nil && reg.Panel.Orchestrated {
 				return err
 			}
-			if s != nil && s.Enrolled {
+			if err == nil && s != nil && s.Enrolled {
 				return tallyExitAction(d, tallyRecoveryFacts{SpecID: s.SpecID, Kernel: true})
 			}
 		}

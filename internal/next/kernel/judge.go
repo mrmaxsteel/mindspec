@@ -127,9 +127,13 @@ func registeredJudgePanel(s State, t Tuple, p panel.Registration) bool {
 	return false
 }
 
-// newestJudgeSubject skips commits that change only this gate's panel directories.
-func newestJudgeSubject(s State, gate string) (string, error) {
-	head := subject(s, gate)
+// effectiveSubject skips commits that change only this gate's panel directories.
+// A merge is compared with its first parent. An empty commit moves the subject.
+func effectiveSubject(s State, gate string) (string, error) {
+	return effectiveSubjectAt(s, gate, rawSubject(s, gate))
+}
+
+func effectiveSubjectAt(s State, gate, head string) (string, error) {
 	if head == "" {
 		return "", nil
 	}
@@ -148,6 +152,9 @@ func newestJudgeSubject(s State, gate string) (string, error) {
 			return "", err
 		}
 		dirs = append(dirs, filepath.ToSlash(rel)+"/")
+	}
+	if len(dirs) == 0 {
+		return head, nil
 	}
 	for {
 		if head == accepted {
@@ -219,7 +226,7 @@ func judgeEnded(s State, gate string) (bool, error) {
 		if _, err := actorGit(s.Root, "merge-base", "--is-ancestor", accepted, parents[1]); err != nil {
 			continue
 		}
-		if _, err := actorGit(s.Root, "merge-base", "--is-ancestor", parents[1], subject(s, gate)); err == nil {
+		if _, err := actorGit(s.Root, "merge-base", "--is-ancestor", parents[1], rawSubject(s, gate)); err == nil {
 			return true, nil
 		}
 	}
@@ -241,7 +248,7 @@ func judgeCreate(s State) (Changes, error) {
 		if ended {
 			continue
 		}
-		newest, err := newestJudgeSubject(s, gate)
+		newest, err := effectiveSubject(s, gate)
 		if err != nil {
 			return c, err
 		}
@@ -282,7 +289,7 @@ func judgeSupersede(s State) (Changes, error) {
 			continue
 		}
 		gate := activeGate(s, t.Gate)
-		newest, err := newestJudgeSubject(s, gate)
+		newest, err := effectiveSubject(s, gate)
 		if err != nil {
 			return c, err
 		}
@@ -360,7 +367,7 @@ func validateJudgement(s State, r Record, receipt Receipt, current bool) error {
 	if err != nil {
 		return err
 	}
-	newest, err := newestJudgeSubject(s, gate)
+	newest, err := effectiveSubject(s, gate)
 	if err != nil {
 		return err
 	}

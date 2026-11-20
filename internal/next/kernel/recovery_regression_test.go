@@ -128,10 +128,10 @@ func TestS134Closes_StaleSlotHasNoRetry(t *testing.T) {
 			// Raw close before the pass that would cover the excluded step.
 			f.Must(f.Store.SetStatusIf(slot, "in_progress", "closed"))
 			n := 2
+			// A changed subject authorizes a new round, never a rewrite of the current one.
 			if mode == "subject" {
-				n = 1
+				f.Must(f.Store.WriteMetadata(slot, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: "old-subject"})))
 			}
-			f.Must(f.Store.WriteMetadata(slot, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: "old-subject"})))
 			kerneltest.Authorise(f, gate, gateRound(t, f, gate, n, head))
 			reduce(t, f, true)
 			recoverySuperseded(t, f, slot)

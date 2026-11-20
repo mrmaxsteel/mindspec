@@ -93,11 +93,8 @@ func retryAttempts(s State) (Changes, error) {
 			if err != nil {
 				return c, err
 			}
-			sub, hasSubject, err := Decode[Subject](r.Metadata, KeySubject)
-			if err != nil {
-				return c, err
-			}
-			if has && (t.Round != round.Round || (hasSubject && sub.Commit != round.Subject)) {
+			// Only round lineage can retire a raw close. Slot metadata is not evidence.
+			if has && t.Round < round.Round {
 				receipt := Receipt{Kind: "superseded", Subject: round.Subject}
 				w := Write{Kind: "close", ID: id, Receipt: &receipt}
 				c.Writes = append(c.Writes, w)

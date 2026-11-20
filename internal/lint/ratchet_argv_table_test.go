@@ -7,7 +7,7 @@ package lint
 // non-id); caller-audited is the mechanical wrapper marker that
 // promotes a function's CALL SITES into this same table.
 var argvAuditTable = map[string]argvEntry{
-	"internal/next/kernel/kerneltest/fakebd/main.go main exec-git exec.Command":                   {Count: 1, Disp: dispNonID, Class: opClassStringLiteral, Note: "Test helper: the fixed worktree list query has no ID operand."},
+	"internal/next/kernel/kerneltest/fakebd/main.go main exec-git exec.Command":                   {Count: 3, Disp: dispNonID, Class: opClassPathspec, Note: "Test helper: two fixed worktree list queries and removal of a git-listed fixture path after --. No ID operand reaches git argv."},
 	"internal/next/kernel/kerneltest/seed.go Register exec-git f.Command":                         {Count: 1, Disp: dispNonID, Class: opClassRevParseSHA, Note: "Test fixture: ls-tree -r reads the registration subject as a full commit ref; git resolves the object. No bare ID operand reaches argv."},
 	"internal/approve/enrol.go approveEnrolment call planRunBDFn":                                 {Count: 1, Disp: dispGated, Note: "gate-upstream: resolveTargetEpic calls Cache.FindEpicBySpecID, which validates each matching epic ID with idvalidate.BeadID before return. The create --parent operand is that epic; spec IDs occur only in title and metadata text."},
 	"internal/phase/cache.go Cache.allRecords call listJSONFn":                                    {Count: 1, Disp: dispNonID, Class: opClassStringLiteral, Note: "The list call uses only literal --all and limit flags. It has no ID operand."},

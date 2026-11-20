@@ -16,6 +16,30 @@ import (
 )
 
 func main() {
+	if os.Getenv("MINDSPEC_TEST_FULL_BD") == "1" && len(os.Args) > 3 && os.Args[1] == "worktree" && os.Args[2] == "remove" {
+		if os.Getenv("MINDSPEC_TEST_FAIL_WORKTREE_REMOVE") == "1" {
+			fmt.Fprintln(os.Stderr, "injected cleanup interruption")
+			os.Exit(1)
+		}
+		data, err := exec.Command("git", "worktree", "list", "--porcelain").Output()
+		if err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if path, ok := strings.CutPrefix(line, "worktree "); ok && filepath.Base(path) == os.Args[3] {
+					var out []byte
+					out, err = exec.Command("git", "worktree", "remove", "--force", "--", path).CombinedOutput()
+					if err != nil {
+						fmt.Fprint(os.Stderr, string(out))
+					}
+					break
+				}
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if os.Getenv("MINDSPEC_TEST_FULL_BD") == "1" && len(os.Args) > 2 && os.Args[1] == "worktree" && os.Args[2] == "list" {
 		data, err := exec.Command("git", "worktree", "list", "--porcelain").Output()
 		if err != nil {

@@ -44,7 +44,7 @@ func TestSetupVerbs_EnsureGitignoreRuntimeEntries(t *testing.T) {
 				t.Fatalf("%s: reading .gitignore: %v", v.name, err)
 			}
 			content := string(data)
-			for _, entry := range []string{".mindspec/session.json", ".mindspec/focus"} {
+			for _, entry := range []string{".mindspec/session.json", ".mindspec/focus", ".mindspec-scratch", ".mindspec/config.local.yaml"} {
 				if !strings.Contains(content, entry) {
 					t.Errorf("%s: .gitignore missing %q; got:\n%s", v.name, entry, content)
 				}

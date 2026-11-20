@@ -378,7 +378,11 @@ func checkVerdict(s State, r Record, receipt Receipt) error {
 	if err != nil {
 		return err
 	}
-	if head := subject(s, t.Gate); head != "" && head != round.Subject {
+	head, err := effectiveSubject(s, t.Gate)
+	if err != nil {
+		return err
+	}
+	if head != "" && head != round.Subject {
 		return actorFailure("step subject or round is stale")
 	}
 	bytes, err := actorGitBytes(s.Root, "show", receipt.Commit+":"+receipt.Path)

@@ -1606,12 +1606,25 @@ A successful rerun for a pre-kernel spec directs the operator to `mindspec next`
 
 A refused submit leaves its pre-pass writes in place. The next pass covers the named step.
 A pass closes open slots from older rounds, including retries, with a `superseded` receipt.
-A raw close of a slot from an older round or subject gets that receipt and creates no retry.
+A raw close of a slot from an older round gets that receipt and creates no retry.
+A current-round raw close requires a retry even when its subject metadata differs.
 The open-slot check for `panel create` counts only slots in the current round.
 A halt leaves a step open while it has an open blocking upstream. It writes no halt receipt
 on that step. The halt answer, its retry, and `next-action --apply` exit with the halt code.
 `submit` and `next-action` refusals omit command usage text.
-For an enrolled panel, a blocked tally directs the operator to `next-action --apply`
+For a bead or final review panel of an enrolled spec, a blocked tally directs the operator to `next-action --apply`
 so that the kernel can create the required decision or fix before another round.
+A pre-kernel panel keeps its recovery when a tracker read fails.
+An unauthorized or duplicate kernel round directs the operator to `next-action --apply`.
 Panel submission publishes the canonical verdict and ledger files used by tally readers.
 These files remain in the review directory for finalization.
+
+A commit that changes only directories registered to the gate does not move its subject.
+Round creation, submission, superseding, tally, and approval use the same effective subject.
+A commit that also changes another path moves the subject.
+A merge compares its tree with its first parent; an empty commit moves the subject.
+Panel evidence can be committed on the subject branch.
+After finalization closes the epic, approval can resume at the recorded publication tip.
+The recorded checkpoint must resolve to the accepted subject, and must precede that publication.
+An open epic or any other branch tip still requires the accepted subject.
+Setup ignores the configured panel isolation directory and local panel config, including without init.

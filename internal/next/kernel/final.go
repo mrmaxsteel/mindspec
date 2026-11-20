@@ -50,7 +50,10 @@ func finalRound(s State) (Changes, error) {
 	if err != nil {
 		return c, err
 	}
-	head := subject(s, gate)
+	head, err := effectiveSubject(s, gate)
+	if err != nil {
+		return c, err
+	}
 	if g.Status == "closed" || has || head == "" {
 		return c, nil
 	}

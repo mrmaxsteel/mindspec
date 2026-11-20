@@ -47,7 +47,10 @@ Apply the repository's Bead-loop guardrails. Only the cycle runs `mindspec compl
 4. Submit the evidence with the action's `submit` argv and current token.
    Use `mindspec submit <step> --lease <token> --commit <oid>` for an implementation or fix.
    Use `mindspec submit <step> --lease <token> --artifact <path>` for a verdict or judgement.
-   Keep the evidence in git. A refusal leaves the step open; follow its recovery line.
+   Keep the evidence in git. A separate evidence worktree can keep review files together.
+   Evidence can also be committed on the subject branch. A commit that changes only
+   directories registered to the gate does not move its subject.
+   A refusal leaves the step open; follow its recovery line.
 5. Execute each `run` entry's `argv` as returned. These entries include panel creation,
    work-item completion and implementation approval. Do not invent a next round or merge.
    For a panel creation entry, write the brief file before running it;

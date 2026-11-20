@@ -97,7 +97,10 @@ func supersede(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
-		head := subject(s, gate)
+		head, err := effectiveSubject(s, gate)
+		if err != nil {
+			return c, err
+		}
 		// Replaying an implementation result cannot replace its existing review.
 		if r := s.ExcludedStep; r != nil {
 			step, _, _ := r.Tuple()
