@@ -79,7 +79,7 @@ func TestS134Records_RoundTrips(t *testing.T) {
 			}
 		})
 	}
-	keys := []string{kernel.KeyPlanApproval, kernel.KeyTuple, kernel.KeyID, kernel.KeyFrom, kernel.KeyLinks, kernel.KeyRun, kernel.KeyLease, kernel.KeyRound, kernel.KeyTake, kernel.KeyDecision, kernel.KeyAnswer, kernel.KeyDefer, kernel.KeyJudgement, kernel.KeyRePanel, kernel.KeyClose, kernel.KeySubject, kernel.KeyRegistration, kernel.KeyRawClaims, kernel.KeyCompletion}
+	keys := []string{kernel.KeyPlanApproval, kernel.KeyTuple, kernel.KeyID, kernel.KeyFrom, kernel.KeyLinks, kernel.KeyRun, kernel.KeyLease, kernel.KeyRound, kernel.KeyTake, kernel.KeyTakes, kernel.KeyDeferrals, kernel.KeyDecision, kernel.KeyAnswer, kernel.KeyDefer, kernel.KeyJudgement, kernel.KeyRePanel, kernel.KeyClose, kernel.KeySubject, kernel.KeyRegistration, kernel.KeyRawClaims, kernel.KeyCompletion}
 	golden(t, "record-keys", keys)
 }
 func TestS134Records_PassReceipts(t *testing.T) {

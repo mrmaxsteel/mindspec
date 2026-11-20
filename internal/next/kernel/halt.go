@@ -25,7 +25,7 @@ func finishHalt(s State) (Changes, error) {
 		progress = false
 		for _, id := range ids {
 			r := s.Records[id]
-			if r.Status == "closed" || hasOpenChild(s, id) {
+			if r.Status == "closed" || hasOpenChild(s, id) || hasOpenBlocker(s, id) {
 				continue
 			}
 			receipt := Receipt{Kind: "halted", HaltAnswer: answerID}

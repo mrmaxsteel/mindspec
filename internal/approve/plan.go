@@ -89,6 +89,7 @@ func SetPlanRunBDCombinedForTest(fn func(args ...string) ([]byte, error)) func()
 
 // PlanResult holds the result of plan approval.
 type PlanResult struct {
+	Enrolled bool
 	SpecID   string
 	GateID   string // empty if no gate found
 	BeadIDs  []string

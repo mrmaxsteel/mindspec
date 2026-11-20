@@ -100,7 +100,10 @@ func newKernelE2EWithFixture(t *testing.T, bin string, f *kerneltest.Fixture, si
 	e.must(json.Unmarshal(e.tracker("create", "--title", "[SPEC 001-x] Example", "--type", "epic", "--metadata", `{"spec_id":"001-x","mindspec_phase":"plan"}`, "--json"), &epic))
 	f.Epic = epic.ID
 	f.Store = kernel.NewStore(root, f.Epic, kerneltest.Runner(t, root))
-	e.ok("plan", "approve", f.SpecID)
+	planOutput := e.ok("plan", "approve", f.SpecID)
+	if !strings.Contains(planOutput, "mindspec next-action "+shellQuoteTarget(f.SpecID)+" --apply") || strings.Contains(planOutput, "Plan is approved. Run `mindspec next`") || strings.Contains(planOutput, "**No active worktree.** Run `mindspec next`") {
+		t.Fatalf("new approval did not direct the kernel loop: %s", planOutput)
+	}
 	data, err := os.ReadFile(filepath.Join(f.SpecDir, "plan.md"))
 	e.must(err)
 	fm, err := validate.ParsePlanFrontmatter(string(data))

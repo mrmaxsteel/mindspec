@@ -202,6 +202,7 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 				return err
 			}
 		}
+		result.Enrolled = true
 		enrolStage("run")
 		if err = store.WriteMetadata(epic, kernel.Metadata(kernel.KeyPlanApproval, kernel.PlanApproval(true))); err != nil {
 			return err

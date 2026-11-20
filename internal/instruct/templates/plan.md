@@ -154,7 +154,7 @@ Use reviewers from more than one family for a spec that changes a gate, a schema
 ## Next Action
 {{- if .PlanApproved}}
 
-Plan is approved. Run `mindspec next` to claim the next bead.
+{{if .KernelNextAction}}Plan is approved. Run `{{termsafe .KernelNextAction}}` to see the authorized work.{{else}}Plan is approved. Run `mindspec next` to claim the next bead.{{end}}
 {{- else}}
 
 Complete the plan at `.mindspec/specs/{{.ActiveSpec}}/plan.md`, then run `mindspec plan approve {{.ActiveSpec}}`. After approval, STOP — run `/clear`, then `mindspec next` to claim your first bead.

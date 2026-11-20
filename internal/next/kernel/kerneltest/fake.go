@@ -24,6 +24,22 @@ type FakeBD struct {
 	next    int
 }
 
+func (f *FakeBD) blockedBy(r kernel.Record) []string {
+	var open []string
+	for _, d := range r.Dependencies {
+		up := d.ID
+		if d.DependsOnID != "" {
+			up = d.DependsOnID
+		}
+		if d.Type == "blocks" {
+			if u, ok := f.Records[up]; ok && u.Status != "closed" {
+				open = append(open, up)
+			}
+		}
+	}
+	return open
+}
+
 func NewFakeBD() *FakeBD { return &FakeBD{Records: map[string]kernel.Record{}} }
 func (f *FakeBD) Run(args ...string) ([]byte, error) {
 	f.Calls = append(f.Calls, append([]string{}, args...))
@@ -114,6 +130,11 @@ func (f *FakeBD) Run(args ...string) ([]byte, error) {
 			r.Type = typ
 		}
 		if status := value("--status"); status != "" {
+			if status == "closed" && r.Status != "closed" {
+				if open := f.blockedBy(r); len(open) > 0 {
+					return nil, fmt.Errorf("cannot close blocked issue: %s is blocked by %v", r.ID, open)
+				}
+			}
 			r.Status = status
 		}
 		for _, arg := range args {
@@ -134,6 +155,9 @@ func (f *FakeBD) Run(args ...string) ([]byte, error) {
 			return nil, ExitError(1)
 		}
 		if !slices.Contains(args, "--force") {
+			if open := f.blockedBy(r); len(open) > 0 {
+				return nil, fmt.Errorf("cannot close blocked issue: %s is blocked by %v (use --force to override)", r.ID, open)
+			}
 			for _, child := range f.Records {
 				if child.Parent == r.ID && child.Status != "closed" {
 					return nil, fmt.Errorf("open child %s", child.ID)

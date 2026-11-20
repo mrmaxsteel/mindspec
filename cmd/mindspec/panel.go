@@ -447,6 +447,15 @@ and prints a recovery line.`,
 		// binding is derivable right here: reg carries the matched
 		// registration's spec/target/bead/gate, exactly as the non-bead
 		// leg below already derives its own operands.
+		if d.Action == panel.Block && reg.Err == nil {
+			s, err := panelKernelStateFn(root, reg.Panel.Spec)
+			if err != nil {
+				return err
+			}
+			if s != nil && s.Enrolled {
+				return tallyExitAction(d, tallyRecoveryFacts{SpecID: s.SpecID, Kernel: true})
+			}
+		}
 		if reg.Err == nil && reg.Panel.IsBead() {
 			return tallyExitAction(d, tallyRecoveryFacts{
 				Slug:      slug,
@@ -1078,6 +1087,7 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 // already-validated positional (validatePanelSlug), carried here so the
 // re-panel names the SAME panel this tally adjudicated.
 type tallyRecoveryFacts struct {
+	Kernel    bool
 	Slug      string
 	SpecID    string
 	Target    string
@@ -1135,6 +1145,9 @@ func nextPanelRound(reg panel.Registration, res *panel.Result) int {
 // tree, produces a registration panel.ForBead selects — rather than the
 // mere presence of a recovery line, which is what let this ship.
 func tallyExitAction(d panel.Decision, f tallyRecoveryFacts) error {
+	if d.Action == panel.Block && f.Kernel {
+		return guard.NewFailure(d.Message, fmt.Sprintf("mindspec next-action %s --apply", shellQuoteTarget(idrender.Spec(f.SpecID))))
+	}
 	switch d.Action {
 	case panel.Warn:
 		fmt.Fprintf(tallyWarnOut, "panel advisory: %s\n", d.Message)

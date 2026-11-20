@@ -40,7 +40,8 @@ func TestS134Complete_ForeignBlockerMergedReplay(t *testing.T) {
 				f.Must(err)
 			}
 			if mode != "open-unmerged" {
-				f.Must(f.Store.SetStatusIf(item, "open", "closed"))
+				_, err := f.Store.Run("close", f.ID(item), "--force")
+				f.Must(err)
 			}
 			before := f.State().Records[item]
 			installCompleteKernelRun(t, f)

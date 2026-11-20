@@ -78,6 +78,15 @@ func hasOpenChild(s State, id string) bool {
 	}
 	return false
 }
+func hasOpenBlocker(s State, id string) bool {
+	records, edges := graph(s)
+	for _, e := range edges {
+		if e.kind == "blocks" && e.down == id && records[e.up].Status != "closed" {
+			return true
+		}
+	}
+	return false
+}
 func blocked(s State, id string) bool {
 	records, edges := graph(s)
 	seen := map[string]bool{}

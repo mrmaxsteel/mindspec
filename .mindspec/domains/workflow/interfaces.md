@@ -1601,6 +1601,17 @@ An authored brief can instead be passed with `--brief-file` at initial panel cre
 An unscoped `next` resolves enrolled specs first.
 If the selected enrolled spec has no eligible implementation, it refuses and names `next-action`.
 Name a legacy work item or use `next --spec <spec>` to select legacy work in a mixed repository.
-`plan approve` directs the operator to `next-action <spec> --apply`.
+`plan approve` directs an enrolled spec to `next-action <spec> --apply`.
+A successful rerun for a pre-kernel spec directs the operator to `mindspec next`.
+
+A refused submit leaves its pre-pass writes in place. The next pass covers the named step.
+A pass closes open slots from older rounds, including retries, with a `superseded` receipt.
+A raw close of a slot from an older round or subject gets that receipt and creates no retry.
+The open-slot check for `panel create` counts only slots in the current round.
+A halt leaves a step open while it has an open blocking upstream. It writes no halt receipt
+on that step. The halt answer, its retry, and `next-action --apply` exit with the halt code.
+`submit` and `next-action` refusals omit command usage text.
+For an enrolled panel, a blocked tally directs the operator to `next-action --apply`
+so that the kernel can create the required decision or fix before another round.
 Panel submission publishes the canonical verdict and ledger files used by tally readers.
 These files remain in the review directory for finalization.

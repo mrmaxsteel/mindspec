@@ -91,21 +91,25 @@ func (c *Cache) WithRoot(root string) *Cache {
 	return c
 }
 
-func (c *Cache) repositoryRoot() string {
+func (c *Cache) repositoryRoot() (string, error) {
 	if c != nil {
 		c.mu.Lock()
 		root := c.root
 		c.mu.Unlock()
 		if root != "" {
-			return root
+			return root, nil
 		}
 	}
 	// Legacy callers have no repository context.
-	if cwd, err := os.Getwd(); err == nil {
-		root, _ := workspace.FindRoot(cwd)
-		return root
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
-	return ""
+	root, err := workspace.FindRoot(cwd)
+	if errors.Is(err, workspace.ErrNoRoot) {
+		return "", nil
+	}
+	return root, err
 }
 
 // AllEpics returns every epic (open + in_progress + closed) from bd in a single

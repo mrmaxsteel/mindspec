@@ -68,6 +68,9 @@ func LayoutMarkersFromMindspecChildren(children []string) LayoutMarkers
 
 Used by context-system (for glossary location) and workflow (for spec/bead resolution).
 
+Phase reads and instruction rendering return workspace probe errors.
+A phase read with no repository context may still read tracker data when no root marker exists.
+
 `workspace.FindSlotRoot` finds the nearest ancestor with `slot.json` and `tree/`.
 It returns the slot identity, absolute main root and verified slot directory.
 It checks the exact path against the main root's current isolation-root setting.

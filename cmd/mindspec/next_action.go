@@ -15,7 +15,8 @@ import (
 )
 
 var nextActionCmd = &cobra.Command{
-	Use: "next-action [spec]", Short: "Show the next kernel actions", Args: cobra.MaximumNArgs(1),
+	SilenceUsage: true,
+	Use:          "next-action [spec]", Short: "Show the next kernel actions", Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		spec := ""
 		if len(args) > 0 {

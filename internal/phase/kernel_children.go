@@ -39,9 +39,13 @@ func lifecycleChildrenWithCache(c *Cache, epicID string, children []ChildInfo) (
 			recorded[link.ID] = true
 		}
 	}
-	// Optional files that cannot prove enrolment are not witnesses.
+	root, err := c.repositoryRoot()
+	if err != nil {
+		return nil, err
+	}
+	// Optional files that cannot prove enrollment are not witnesses.
 	if specID, err := ResolveSpec(*epic); err == nil {
-		if dir, err := workspace.SpecDir(c.repositoryRoot(), specID); err == nil {
+		if dir, err := workspace.SpecDir(root, specID); err == nil {
 			w.Orchestrated, _ = kernelid.PanelOrchestrated(dir)
 			if len(recorded) == 0 {
 				data, err := os.ReadFile(filepath.Join(dir, "plan.md"))

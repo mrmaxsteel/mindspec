@@ -428,7 +428,7 @@ func TestCache_WithRootKeepsReadPolicy(t *testing.T) {
 				t.Fatal("WithRoot did not return the receiver")
 			}
 			c = c.WithRoot("")
-			if c.repositoryRoot() != root {
+			if got, err := c.repositoryRoot(); err != nil || got != root {
 				t.Fatal("empty root cleared the context")
 			}
 			calls := 0

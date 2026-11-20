@@ -136,6 +136,9 @@ func TestS134Enrol_CreatesAndRefusesSecondApproval(t *testing.T) {
 	f := enrolFixture(t)
 	result, err := enrolApprove(f)
 	f.Must(err)
+	if !result.Enrolled {
+		t.Fatal("new approval did not report enrollment")
+	}
 	if len(result.BeadIDs) != 3 {
 		t.Fatalf("items: %v", result.BeadIDs)
 	}
@@ -481,7 +484,7 @@ func TestS134Enrol_PreKernelForeignChildUnchanged(t *testing.T) {
 	if !reflect.DeepEqual(result.BeadIDs, f.Items) || enrolSnap(t, f) != before {
 		t.Fatal("pre-kernel rerun mutated records")
 	}
-	if f.State().Enrolled {
+	if result.Enrolled || f.State().Enrolled {
 		t.Fatal("pre-kernel rerun enrolled spec")
 	}
 }

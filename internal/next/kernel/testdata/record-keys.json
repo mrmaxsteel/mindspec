@@ -8,6 +8,8 @@
   "mindspec_lease",
   "mindspec_round",
   "mindspec_take",
+  "mindspec_takes",
+  "mindspec_deferrals",
   "mindspec_decision",
   "mindspec_answer",
   "mindspec_defer",

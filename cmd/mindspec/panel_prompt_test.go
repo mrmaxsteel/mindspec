@@ -18,6 +18,10 @@ import (
 func promptFixture(t *testing.T, schema int, cfg string) (string, paneltest.Fixture) {
 	t.Helper()
 	root := mkPanelTestRoot(t, cfg)
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	subjectCLIWrite(t, root, ".mindspec/specs/test/spec.md", "# Spec\n")
 	withTestChdir(t, root)
 	config.ResetCache()

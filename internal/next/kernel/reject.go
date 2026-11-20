@@ -66,6 +66,23 @@ func openFix(s State, gate string) bool {
 // supersede replaces an unfinished review when its subject moves outside a fix.
 func supersede(s State) (Changes, error) {
 	c := Changes{}
+	// Cover slots left behind when an earlier pass advanced their gate.
+	for _, id := range s.Steps {
+		r := s.Records[id]
+		t, _, _ := r.Tuple()
+		if t.Kind != "review-slot" || r.Status == "closed" || hasOpenChild(s, id) || hasOpenBlocker(s, id) {
+			continue
+		}
+		gate := s.Records[activeGate(s, t.Gate)]
+		round, has, err := Decode[GateRound](gate.Metadata, KeyRound)
+		if err != nil {
+			return c, err
+		}
+		if has && t.Round < round.Round {
+			receipt := Receipt{Kind: "superseded", Subject: round.Subject}
+			c.Writes = append(c.Writes, Write{Kind: "close", ID: id, Receipt: &receipt})
+		}
+	}
 	for _, gate := range s.Gates {
 		g := s.Records[gate]
 		t, _, _ := g.Tuple()
@@ -97,7 +114,7 @@ func supersede(s State) (Changes, error) {
 		held := hasFix
 		if r := s.ExcludedStep; r != nil {
 			st, _, _ := r.Tuple()
-			held = held || (st.Gate == t.Gate && ((st.Kind == "decision" && st.Round == round.Round) || (st.Kind == "fix" && st.Round == round.Round+1)))
+			held = held || (st.Gate == t.Gate && ((st.Kind == "review-slot" && st.Round == round.Round && r.Status != "closed") || (st.Kind == "decision" && st.Round == round.Round) || (st.Kind == "fix" && st.Round == round.Round+1)))
 		}
 		for _, id := range s.Steps {
 			st, _, _ := s.Records[id].Tuple()

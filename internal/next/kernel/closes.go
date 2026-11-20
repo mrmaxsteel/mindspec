@@ -85,6 +85,28 @@ func retryAttempts(s State) (Changes, error) {
 	c := Changes{}
 	created := map[string]bool{}
 	for _, id := range UnreceiptedCloses(s) {
+		r := s.Records[id]
+		t, _, _ := r.Tuple()
+		if t.Kind == "review-slot" {
+			gate := s.Records[activeGate(s, t.Gate)]
+			round, has, err := Decode[GateRound](gate.Metadata, KeyRound)
+			if err != nil {
+				return c, err
+			}
+			sub, hasSubject, err := Decode[Subject](r.Metadata, KeySubject)
+			if err != nil {
+				return c, err
+			}
+			if has && (t.Round != round.Round || (hasSubject && sub.Commit != round.Subject)) {
+				receipt := Receipt{Kind: "superseded", Subject: round.Subject}
+				w := Write{Kind: "close", ID: id, Receipt: &receipt}
+				c.Writes = append(c.Writes, w)
+				if err := overlay(&s, w); err != nil {
+					return c, err
+				}
+				continue
+			}
+		}
 		next, err := nextAttempt(id)
 		if err != nil {
 			return c, err
@@ -92,7 +114,6 @@ func retryAttempts(s State) (Changes, error) {
 		if _, exists := s.Records[next]; exists {
 			continue
 		}
-		r := s.Records[id]
 		parent := r.Parent
 		for key, record := range s.Records {
 			if record.ID == parent {
@@ -101,7 +122,6 @@ func retryAttempts(s State) (Changes, error) {
 			}
 		}
 		w := createStep(next, parent)
-		t, _, _ := r.Tuple()
 		if t.Kind == "decision" {
 			w.Create.Type = "decision"
 		}

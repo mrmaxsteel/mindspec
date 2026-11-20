@@ -349,7 +349,7 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 		for _, id := range s.Steps {
 			r := s.Records[id]
 			t, _, _ := r.Tuple()
-			if t.Gate == gateBase(*s, gate) && t.Kind == "review-slot" && r.Status != "closed" {
+			if t.Gate == gateBase(*s, gate) && t.Kind == "review-slot" && t.Round == round.Round && r.Status != "closed" {
 				return guard.NewFailure(fmt.Sprintf("slot %s is open", id), fmt.Sprintf("mindspec panel launch %s R%d --spec %s", shellQuoteTarget(slug), t.Slot, shellQuoteTarget(idrender.Spec(s.SpecID))))
 			}
 		}

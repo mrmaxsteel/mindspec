@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -177,6 +178,9 @@ func TestS134SubmitCmd_ImplementAndHalt(t *testing.T) {
 		store := actorCmdStore(t, f)
 		for i := 0; i < 2; i++ {
 			out, code := actorCmdRun(t, f, bin, "submit", d, "--answer", "halt")
+			if strings.Contains(out, "Usage:") {
+				t.Fatalf("halt printed usage: %s", out)
+			}
 			if code != 4 || !strings.Contains(out, `"status":"halted"`) || !strings.Contains(out, "spec is halted by "+d) {
 				t.Fatalf("halt exit: %d %s", code, out)
 			}
@@ -205,7 +209,12 @@ func fakeBDBinary(t *testing.T) string {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "go", "build", "-race=false", "-o", path, "./internal/next/kernel/kerneltest/fakebd")
-		cmd.Dir = repoRootFromTestDir(t)
+		_, source, _, ok := runtime.Caller(0)
+		if !ok {
+			fakeBDBuild.err = fmt.Errorf("cannot locate fake bd source")
+			return
+		}
+		cmd.Dir = filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
 		if out, err := cmd.CombinedOutput(); err != nil {
 			fakeBDBuild.err = fmt.Errorf("build fake bd: %w: %s", err, out)
 			return

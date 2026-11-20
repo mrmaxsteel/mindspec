@@ -368,7 +368,6 @@ func TestS134Judge_FinalGateAndEndStates(t *testing.T) {
 		old := judgeCommit(t, f, "final.go", "package final\n")
 		gate := f.Epic + ".final"
 		kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "final-panel", Round: 1, Subject: old, Slots: []string{"R1", "R2", "R3"}})
-		kerneltest.PassGate(f, gate, old)
 		// Release the final gate's plan blockers with real merge evidence.
 		for _, item := range f.Items {
 			kerneltest.PassGate(f, item+".review", old)
@@ -377,6 +376,7 @@ func TestS134Judge_FinalGateAndEndStates(t *testing.T) {
 			f.Must(err)
 			reducerGit(t, f, "update-ref", "refs/heads/"+branch, old)
 		}
+		kerneltest.PassGate(f, gate, old)
 		newest := judgeCommit(t, f, "final.go", "package final\n// final export\n")
 		reduce(t, f, true)
 		id := gate + ".judge.a1"
@@ -412,6 +412,10 @@ func TestS134Judge_FinalGateAndEndStates(t *testing.T) {
 		reducerGit(t, f, "switch", branch)
 		old := judgeCommit(t, f, "final.go", "package final\n")
 		gate := f.Epic + ".final"
+		for _, item := range f.Items {
+			kerneltest.PassGate(f, item+".review", old)
+			f.Must(f.Store.SetStatusIf(item, "open", "closed"))
+		}
 		kerneltest.PassGate(f, gate, old)
 		f.Must(f.Store.SetStatusIf(f.Epic, "open", "closed"))
 		judgeCommit(t, f, "final.go", "package final\n// later\n")
@@ -785,7 +789,6 @@ func TestS134Judge_WorktreeLayouts(t *testing.T) {
 			gate := f.Epic + ".final"
 			kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "final-panel", Round: 1, Subject: old, Slots: []string{"R1", "R2", "R3"}})
 			kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: old, SlotCount: 3})
-			kerneltest.PassGate(f, gate, old)
 			for _, item := range f.Items {
 				kerneltest.PassGate(f, item+".review", old)
 				f.Must(f.Store.SetStatusIf(item, "open", "closed"))
@@ -793,6 +796,7 @@ func TestS134Judge_WorktreeLayouts(t *testing.T) {
 				f.Must(err)
 				reducerGit(t, f, "update-ref", "refs/heads/"+beadBranch, old)
 			}
+			kerneltest.PassGate(f, gate, old)
 			newest := judgeCommit(t, f, "final.go", "package final\n// changed\n")
 			reducerGit(t, f, "switch", "--detach", old)
 			wt := filepath.Join(f.Root, ".worktrees", "worktree-spec-"+f.SpecID)

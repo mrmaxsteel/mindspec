@@ -110,6 +110,9 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 			if present && ValidReceipt(s.Root, old) == nil {
 				receipt.Repaired = old.Repaired
 				if !reflect.DeepEqual(old, receipt) {
+					if old.Kind == "superseded" {
+						return actorFailure("step was superseded by a new subject or round; use the current actions")
+					}
 					return actorFailure("step already has a different result")
 				}
 				// A closed receipt is immutable, even after the gate advances or TTL expires.
@@ -374,6 +377,9 @@ func checkVerdict(s State, r Record, receipt Receipt) error {
 	round, err := activeActorRound(s, r)
 	if err != nil {
 		return err
+	}
+	if head := subject(s, t.Gate); head != "" && head != round.Subject {
+		return actorFailure("step subject or round is stale")
 	}
 	bytes, err := actorGitBytes(s.Root, "show", receipt.Commit+":"+receipt.Path)
 	if err != nil {

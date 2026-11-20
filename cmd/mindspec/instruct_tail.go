@@ -19,9 +19,13 @@ import (
 //
 // root is the main repo root (for spec dirs and guard).
 func emitInstruct(root string) error {
+	return emitInstructWithNextAction(root, "")
+}
+
+func emitInstructWithNextAction(root, nextAction string) error {
 	// ADR-0023: derive state from beads, not focus files.
 	ctx, _ := resolveContextFn(root)
-	return renderInstructTail(root, ctx, true)
+	return renderInstructTail(root, ctx, true, nextAction)
 }
 
 // resolveContextFn is a test seam for emitInstruct's cwd-based read.
@@ -46,7 +50,7 @@ func worktreeRedirect(root string) string {
 // renderInstructTail renders guidance for an already-resolved ctx.
 // allowRedirect is false for a caller whose cwd is not the user's (see
 // emitCompleteTail).
-func renderInstructTail(root string, ctx *phase.Context, allowRedirect bool) error {
+func renderInstructTail(root string, ctx *phase.Context, allowRedirect bool, nextAction ...string) error {
 	// Spec 128 R2.3: a genuine bd/Dolt derivation failure, or an empty
 	// Phase (multi-active-spec ambiguity — the only non-error way Phase
 	// stays "" per ResolveContextFromDirWithCache), renders the honest
@@ -97,6 +101,9 @@ func renderInstructTail(root string, ctx *phase.Context, allowRedirect bool) err
 	}
 
 	iCtx := instruct.BuildContext(root, mc)
+	if len(nextAction) > 0 {
+		iCtx.KernelNextAction = nextAction[0]
+	}
 
 	// Add worktree check when an active worktree is set.
 	if mc.ActiveWorktree != "" {
