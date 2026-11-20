@@ -398,5 +398,15 @@ func completeEntry(s State) (Changes, error) {
 			c.Run = append(c.Run, Run{Actor: "binary", Argv: []string{"mindspec", "complete", item}})
 		}
 	}
+	final := s.Epic + ".final"
+	if s.Records[s.Epic].Status == "closed" || blocked(s, activeGate(s, final)) || CheckPassedGate(s, final) != nil {
+		return c, nil
+	}
+	for _, item := range s.Items {
+		if !itemDone(s, item) {
+			return c, nil
+		}
+	}
+	c.Run = append(c.Run, Run{Actor: "binary", Argv: []string{"mindspec", "impl", "approve", s.SpecID}})
 	return c, nil
 }

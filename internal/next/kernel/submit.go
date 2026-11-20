@@ -23,7 +23,7 @@ type SubmitOptions struct {
 	Commit   string
 	Answer   string
 	// BeforeClose publishes validated evidence before the receipt and final reduction.
-	BeforeClose func(Receipt) error
+	BeforeClose func(State, Receipt) error
 }
 type ArtifactCheck func(State, Record, Receipt) error
 
@@ -130,7 +130,7 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					return err
 				}
 				if options.BeforeClose != nil {
-					if err = options.BeforeClose(receipt); err != nil {
+					if err = options.BeforeClose(s, receipt); err != nil {
 						return err
 					}
 				}

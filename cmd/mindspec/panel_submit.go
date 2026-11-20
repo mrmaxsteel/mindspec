@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -55,6 +57,39 @@ func resolveEffectivePanelSlot(cfg *config.Config, dir string, p panel.Panel, sl
 	return panel.SubmitResolution{Family: family, Model: model, RunnerKind: runner.Kind, RunnerSource: cfg.RunnerSource(family)}, nil
 }
 
+// findPanelSubmitSlot also accepts saved verdicts in a slot attempt directory.
+// Workspace boundaries still stop lookup, including workspaces inside attempts.
+func findPanelSubmitSlot(dir string) (workspace.SlotRoot, bool, error) {
+	slot, found, err := workspace.FindSlotRoot(dir, config.IsolationRootFor)
+	if err != nil || found {
+		return slot, found, err
+	}
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return workspace.SlotRoot{}, false, err
+	}
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	for {
+		if marked, err := workspace.HasRootMarker(dir); err != nil {
+			return workspace.SlotRoot{}, false, err
+		} else if marked {
+			return workspace.SlotRoot{}, false, nil
+		}
+		name := filepath.Base(dir)
+		if n, err := strconv.Atoi(strings.TrimPrefix(name, "attempt-")); err == nil && n > 0 && name == "attempt-"+strconv.Itoa(n) {
+			parent := filepath.Dir(dir)
+			return workspace.FindSlotRoot(parent, config.IsolationRootFor)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return workspace.SlotRoot{}, false, nil
+		}
+		dir = parent
+	}
+}
+
 func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	file, _ := cmd.Flags().GetString("file")
 	if file == "" {
@@ -64,14 +99,14 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fromCWD, hasCWD, err := workspace.FindSlotRoot(cwd, config.IsolationRootFor)
+	fromCWD, hasCWD, err := findPanelSubmitSlot(cwd)
 	if err != nil {
 		return err
 	}
 	var fromFile workspace.SlotRoot
 	hasFile := false
 	if filepath.IsAbs(file) {
-		fromFile, hasFile, err = workspace.FindSlotRoot(filepath.Dir(file), config.IsolationRootFor)
+		fromFile, hasFile, err = findPanelSubmitSlot(filepath.Dir(file))
 		if err != nil {
 			return err
 		}
@@ -197,7 +232,7 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 		if e != nil {
 			return e
 		}
-		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: func(receipt kernel.Receipt) error {
+		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: func(_ kernel.State, receipt kernel.Receipt) error {
 			committed, exists, e := newExecutor(root).FileAtRefOrAbsent(receipt.Commit, receipt.Path)
 			if e != nil {
 				return e

@@ -105,6 +105,9 @@ foreign child keeps it open.
 
 ## 7. Existing verbs
 
+The final `impl approve` run entry appears only when every work item is done, the active final gate has passed,
+no child, judge, or blocker is open, the epic is open, and the spec is not halted.
+
 The existing verbs stay. `run` lists them; each closes the kernel step it names, runs one reducer pass (order:
 §13.9) and keeps today's refusals. `plan approve` enrols the spec (§8) and runs no reducer pass.
 

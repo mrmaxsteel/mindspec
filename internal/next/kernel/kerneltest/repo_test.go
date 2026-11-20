@@ -1,9 +1,14 @@
 package kerneltest
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestS134Probe_PinnedVersion(t *testing.T) {
@@ -35,5 +40,100 @@ func TestS134Fixture_Isolation(t *testing.T) {
 	root := NewRepo(t)
 	if _, err := Runner(t, root)("list", "--all", "--json"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestS134Fixture_EmptyBinaryRepo(t *testing.T) {
+	f := EmptyRepo(t)
+	rows, err := Runner(t, f.Root)("list", "--all", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := os.ReadFile(filepath.Join(f.Root, ".beads/config.yaml"))
+	if err != nil || !strings.Contains(string(config), "metrics.disabled: true") {
+		t.Fatalf("network metrics must be disabled: %v", err)
+	}
+	var records []json.RawMessage
+	if err := json.Unmarshal(rows, &records); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("empty repository seeded records: %s", rows)
+	}
+	out, err := f.BinaryCommand("sh", "-c", "printf stdout; printf stderr >&2")
+	if err != nil || string(out) != "stdoutstderr" {
+		t.Fatalf("combined binary output: %s %v", out, err)
+	}
+	caller := filepath.Join(f.Root, "caller")
+	if err := os.Mkdir(caller, 0700); err != nil {
+		t.Fatal(err)
+	}
+	out, err = f.BinaryCommandIn(caller, "pwd")
+	physical, resolveErr := filepath.EvalSymlinks(caller)
+	if err != nil || resolveErr != nil || strings.TrimSpace(string(out)) != physical {
+		t.Fatalf("binary cwd: %s %v %v", out, err, resolveErr)
+	}
+	rootHome, err := f.BinaryCommand("sh", "-c", `printf %s "$HOME"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callerHome, err := f.BinaryCommandIn(caller, "sh", "-c", `printf %s "$HOME"`)
+	if err != nil || len(rootHome) == 0 || string(callerHome) != string(rootHome) {
+		t.Fatal("binary worktree changed the isolated home")
+	}
+
+}
+
+type deadlineFixture struct {
+	testing.TB
+	at time.Time
+}
+
+func (t deadlineFixture) Deadline() (time.Time, bool) { return t.at, true }
+
+func TestS134Fixture_BinaryDeadline(t *testing.T) {
+	at := time.Now().Add(10 * time.Minute)
+	timed := deadlineFixture{TB: t, at: at}
+	ctx, cancel := commandContext(timed, 0)
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok || !deadline.Equal(at.Add(-5*time.Second)) {
+		t.Fatalf("binary command deadline: %v, present %t; test deadline %v", deadline, ok, at)
+	}
+	expired := deadlineFixture{TB: t, at: time.Now().Add(-time.Second)}
+	f := &Fixture{Root: t.TempDir(), t: expired}
+	for _, run := range []func() ([]byte, error){
+		func() ([]byte, error) { return f.BinaryCommand("sh", "-c", "exit 0") },
+		func() ([]byte, error) { return f.BinaryCommandIn(f.Root, "sh", "-c", "exit 0") },
+	} {
+		if _, err := run(); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("binary command ignored the test deadline: %v", err)
+		}
+	}
+	for _, combined := range []bool{false, true} {
+		expired := deadlineFixture{TB: t, at: time.Now().Add(-time.Second)}
+		_, err := commandIn(expired, t.TempDir(), "", 0, combined, "sh", "-c", "exit 0")
+		if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("timeout reported as a command refusal: %v", err)
+		}
+	}
+}
+
+type noDeadlineFixture struct{ testing.TB }
+
+func (noDeadlineFixture) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func TestS134Fixture_BinaryDeadlineFallback(t *testing.T) {
+	before := time.Now()
+	ctx, cancel := commandContext(noDeadlineFixture{TB: t}, 0)
+	defer cancel()
+	after := time.Now()
+	deadline, ok := ctx.Deadline()
+	if !ok || deadline.Before(before.Add(90*time.Minute)) || deadline.After(after.Add(90*time.Minute)) {
+		t.Fatalf("command without a test deadline needs a bounded fallback: %v, present %t", deadline, ok)
+	}
+	cancel()
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("fallback context did not cancel: %v", ctx.Err())
 	}
 }

@@ -9,6 +9,63 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
+func TestRootLookup_BrokenMarker(t *testing.T) {
+	for _, marker := range []string{".git", ".mindspec"} {
+		t.Run(marker, func(t *testing.T) {
+			outer := t.TempDir()
+			mustMkdirAll(t, filepath.Join(outer, ".mindspec"))
+			near := filepath.Join(outer, "near")
+			start := filepath.Join(near, "sub")
+			mustMkdirAll(t, start)
+			if err := os.Symlink(filepath.Join(outer, "absent"), filepath.Join(near, marker)); err != nil {
+				t.Fatal(err)
+			}
+			if marked, err := HasRootMarker(near); err != nil || !marked {
+				t.Errorf("broken link is not a marker: %t %v", marked, err)
+			}
+			for name, lookup := range map[string]func(string) (string, error){"root": FindRoot, "local": FindLocalRoot} {
+				if got, err := lookup(start); err != nil || got != near {
+					t.Errorf("%s crossed broken marker: got %s want %s, err=%v", name, got, near, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRootLookup_RegularFile(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirAll(t, filepath.Join(root, ".mindspec"))
+	dir := filepath.Join(root, "nested")
+	mustMkdirAll(t, dir)
+	start := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(start, []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for name, lookup := range map[string]func(string) (string, error){"root": FindRoot, "local": FindLocalRoot} {
+		t.Run(name, func(t *testing.T) {
+			if got, err := lookup(start); err != nil || got != root {
+				t.Errorf("got root %q, err=%v; want %q", got, err, root)
+			}
+		})
+	}
+}
+
+func TestRootLookup_MarkerError(t *testing.T) {
+	outer := t.TempDir()
+	mustMkdirAll(t, filepath.Join(outer, ".mindspec"))
+	start := filepath.Join(outer, strings.Repeat("x", 256))
+	_, probeErr := HasRootMarker(start)
+	if probeErr == nil || os.IsNotExist(probeErr) {
+		t.Fatalf("fixture must produce a marker error: %v", probeErr)
+	}
+	for name, lookup := range map[string]func(string) (string, error){"root": FindRoot, "local": FindLocalRoot} {
+		got, err := lookup(start)
+		if got != "" || err == nil || err.Error() != probeErr.Error() {
+			t.Errorf("%s ignored marker error: root=%q err=%v want %v", name, got, err, probeErr)
+		}
+	}
+}
+
 func TestFindRoot_MindspecDir(t *testing.T) {
 	tmp := t.TempDir()
 	// Create .mindspec/ directory marker
