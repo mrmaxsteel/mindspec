@@ -35,6 +35,10 @@ func s134ApproveFixture(t *testing.T) (*kerneltest.Fixture, *executor.MockExecut
 	for _, gate := range f.State().Gates {
 		kerneltest.PassGate(f, gate, strings.TrimSpace(string(head)))
 	}
+	for _, item := range f.Items {
+		f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyCompletion, strings.TrimSpace(string(head)))))
+	}
+
 	for _, branch := range append([]string{"spec/" + f.SpecID}, "bead/"+f.Items[0], "bead/"+f.Items[1], "bead/"+f.Items[2]) {
 		_, err = f.Command("git", "branch", branch, strings.TrimSpace(string(head)))
 		f.Must(err)
@@ -91,6 +95,12 @@ func s134Close(t *testing.T, f *kerneltest.Fixture, id string, receipt *kernel.R
 func s134Slot(f *kerneltest.Fixture) string {
 	id := f.Items[0] + ".review.r1.R1"
 	f.Create(id, f.Items[0]+".review")
+	r, err := f.Store.Lookup(id)
+	f.Must(err)
+	f.Must(f.Store.WriteMetadata(id, map[string]any{kernel.KeyClose: nil}))
+	if r.Status == "closed" {
+		f.Must(f.Store.SetStatusIf(id, "closed", "open"))
+	}
 	return id
 }
 func TestS134ImplApprove_RefusalTable(t *testing.T) {
@@ -454,5 +464,17 @@ func TestS134ImplApprove_RepairArgumentsAreEscaped(t *testing.T) {
 	err := implKernelPreflight(f.State())
 	if err == nil || !strings.Contains(err.Error(), `raw-close: item; repair: "tool\n" "arg\x1b"`) {
 		t.Fatalf("repair arguments not escaped: %v", err)
+	}
+}
+
+func TestS134ImplApprove_RequiresCompletedItems(t *testing.T) {
+	f, mock, _ := s134ApproveFixture(t)
+	f.Must(f.Store.WriteMetadata(f.Items[0], map[string]any{kernel.KeyCompletion: ""}))
+	_, err := ApproveImpl(f.Root, f.SpecID, mock)
+	if err == nil || !strings.Contains(err.Error(), "work item "+f.Items[0]+" is not done") {
+		t.Fatalf("uncompleted work item passed approval: %v", err)
+	}
+	if len(mock.CallsTo("FinalizeEpic")) != 0 {
+		t.Fatal("uncompleted item finalized")
 	}
 }

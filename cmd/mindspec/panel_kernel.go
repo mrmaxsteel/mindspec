@@ -471,8 +471,31 @@ func withKernelPanelVerb(cmd *cobra.Command, slug string, rebind bool, mutate fu
 					finding = "slot"
 				}
 				to, _ := cmd.Flags().GetString("bead")
-				if e = fresh.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyDefer, kernel.DeferRecord{Finding: finding, To: to, Reason: "panel defer", At: kernel.Now().UTC()})); e != nil {
-					return e
+				slot, _ := cmd.Flags().GetString("slot")
+				n, _ := cmd.Flags().GetInt("round")
+				record := kernel.DeferRecord{Finding: finding, To: to, Reason: "panel defer", At: kernel.Now().UTC(), Panel: slug, Round: n, Slot: slot}
+				history, has, err := kernel.Decode[[]kernel.DeferRecord](fresh.Records[gate].Metadata, kernel.KeyDeferrals)
+				if err != nil {
+					return err
+				}
+				if !has {
+					old, ok, err := kernel.Decode[kernel.DeferRecord](fresh.Records[gate].Metadata, kernel.KeyDefer)
+					if err != nil {
+						return err
+					}
+					if ok {
+						history = append(history, old)
+					}
+				}
+				duplicate := false
+				for _, old := range history {
+					duplicate = duplicate || (old.Panel == record.Panel && old.Round == record.Round && old.Slot == record.Slot && old.Finding == record.Finding && old.To == record.To)
+				}
+				if !duplicate {
+					history = append(history, record)
+					if e = fresh.Store.WriteMetadata(gate, map[string]any{kernel.KeyDefer: record, kernel.KeyDeferrals: history}); e != nil {
+						return e
+					}
 				}
 			}
 			if e = closeRetalliedChildren(fresh, gate, reg.Dir); e != nil {

@@ -42,7 +42,7 @@ var nextActionCmd = &cobra.Command{
 
 func init() {
 	nextActionCmd.Flags().Bool("apply", false, "Apply one reduction under the phase lock")
-	nextActionCmd.Flags().Bool("json", false, "Print the action document as JSON")
+	nextActionCmd.Flags().Bool("json", false, "Print JSON (the default output format)")
 	rootCmd.AddCommand(nextActionCmd)
 }
 

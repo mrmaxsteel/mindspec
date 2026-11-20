@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/journal"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
@@ -86,5 +87,40 @@ func TestS134Audit_ApprovalBlockersOrder(t *testing.T) {
 	got, err := kernel.ApprovalBlockers(s)
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("blocker order: %+v, %v; want %+v", got, err, want)
+	}
+}
+
+func TestS134Audit_RepeatedTakeovers(t *testing.T) {
+	f, id, deps := actorFixture(t)
+	leaseActor(t, f, id, deps)
+	for _, reason := range []string{"first replacement", "second replacement"} {
+		_, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: reason}, deps)
+		f.Must(err)
+	}
+	latest, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "third replacement"}, deps)
+	f.Must(err)
+	_, err = kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Renew: latest.Token}, deps)
+	f.Must(err)
+	_, err = kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Release: latest.Token}, deps)
+	f.Must(err)
+	latest, err = kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, deps)
+	f.Must(err)
+	expired := latest.Lease
+	expired.Expires = fixedTime.Add(-time.Hour)
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyLease, expired)))
+	_, err = kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, deps)
+	f.Must(err)
+
+	for replay := 0; replay < 2; replay++ {
+		rows, err := kernel.Audit(f.State(), nil)
+		f.Must(err)
+		for _, row := range rows {
+			if row.Event == "takeovers" {
+				t.Logf("replay %d: takeovers=%d after three successful --take operations", replay, row.Count)
+				if row.Count != 3 {
+					t.Errorf("takeover audit lost an event: got %d, want 3", row.Count)
+				}
+			}
+		}
 	}
 }

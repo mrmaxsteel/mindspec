@@ -59,7 +59,11 @@ func kernelE2EBinary(t *testing.T) string {
 
 func newKernelE2E(t *testing.T, bin string, sizes ...int) *kernelE2E {
 	t.Helper()
-	f := kerneltest.EmptyRepo(t)
+	return newKernelE2EWithFixture(t, bin, kerneltest.EmptyRepo(t), sizes...)
+}
+
+func newKernelE2EWithFixture(t *testing.T, bin string, f *kerneltest.Fixture, sizes ...int) *kernelE2E {
+	t.Helper()
 	e := &kernelE2E{t: t, f: f, bin: bin}
 	root := f.Root
 	t.Logf("sandbox %s", root)
@@ -277,23 +281,37 @@ func (e *kernelE2E) verdict(a kernel.Action, word string) string {
 	e.commit(e.proof, path, string(paneltest.Bytes(e.t, v)))
 	return filepath.Join(e.proof, path)
 }
-func (e *kernelE2E) review(word string) {
+func (e *kernelE2E) review(word string) kernel.Output {
 	e.t.Helper()
 	out := e.apply()
 	n := 0
+	var latest kernel.Output
 	for _, a := range out.Actions {
 		if a.Kind != "review-slot" {
 			continue
 		}
 		token := e.lease(a.Step)
 		path := e.verdict(a, word)
-		e.ok("submit", a.Step, "--lease", token, "--artifact", path)
+		raw := e.ok("submit", a.Step, "--lease", token, "--artifact", path)
+		var submitted kernel.Output
+		e.must(json.Unmarshal([]byte(raw), &submitted))
+		latest = submitted
+		if submitted.Revision == "" {
+			e.t.Fatal("submit omitted its revision")
+		}
+		for _, next := range submitted.Actions {
+			if !next.Exists {
+				e.t.Fatalf("created step reported absent: %+v", next)
+			}
+		}
 		n++
 	}
 	if n != 3 {
 		e.t.Fatalf("review slots %d: %+v", n, out)
 	}
+	return latest
 }
+
 func (e *kernelE2E) judge(value string, n int) {
 	e.t.Helper()
 	out := e.apply()

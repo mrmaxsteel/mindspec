@@ -47,19 +47,41 @@ func Audit(s State, events []journal.Record) ([]AuditRow, error) {
 			return nil, err
 		}
 		byName["raw-claims"].Count += len(claims)
-		deferRecord, has, err := Decode[DeferRecord](r.Metadata, KeyDefer)
+		deferrals, has, err := Decode[[]DeferRecord](r.Metadata, KeyDeferrals)
 		if err != nil {
 			return nil, err
 		}
-		if has && deferRecord.Finding != "" {
-			byName["deferrals"].Count++
+		if !has {
+			old, ok, err := Decode[DeferRecord](r.Metadata, KeyDefer)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				deferrals = append(deferrals, old)
+			}
 		}
-		take, has, err := Decode[TakeReason](r.Metadata, KeyTake)
+		for _, event := range deferrals {
+			if event.Finding != "" {
+				byName["deferrals"].Count++
+			}
+		}
+		takes, has, err := Decode[[]TakeReason](r.Metadata, KeyTakes)
 		if err != nil {
 			return nil, err
 		}
-		if has && take.Generation > 0 {
-			byName["takeovers"].Count++
+		if !has {
+			old, ok, err := Decode[TakeReason](r.Metadata, KeyTake)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				takes = append(takes, old)
+			}
+		}
+		for _, event := range takes {
+			if event.Generation > 0 {
+				byName["takeovers"].Count++
+			}
 		}
 		receipt, has, err := Decode[Receipt](r.Metadata, KeyClose)
 		if err != nil {

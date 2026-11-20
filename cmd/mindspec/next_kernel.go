@@ -12,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -43,7 +44,11 @@ func readNextKernelStates(root, spec string) ([]kernel.State, error) {
 		}
 		s, err := kernel.ReadState(kernel.NewStore(root, r.ID, nil), id, dir)
 		if err != nil {
-			return nil, err
+			if spec != "" {
+				return nil, err
+			}
+			fmt.Fprintf(os.Stderr, "warning: cannot read spec %s: %s\n", idrender.Spec(id), termsafe.Escape(err.Error()))
+			continue
 		}
 		if s.Enrolled {
 			states = append(states, s)
@@ -180,6 +185,9 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 	}
 	for _, warning := range result.Warnings {
 		fmt.Fprintln(cmd.ErrOrStderr(), warning)
+	}
+	if result.Worktree != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "worktree %s\n", termsafe.Escape(result.Worktree))
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "generation %d\n%s\n", result.Lease.Generation, result.Token)
 	return true, err

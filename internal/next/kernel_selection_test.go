@@ -51,4 +51,11 @@ func TestS134Next_PreKernelSelectsRecordedIDs(t *testing.T) {
 	if err != nil || len(rs.Filtered) != 0 {
 		t.Fatalf("empty recorded set selected work: %+v %v", rs.Filtered, err)
 	}
+	named := false
+	for _, miss := range rs.NearMisses {
+		named = named || (strings.Contains(miss.Message, "approved plan has no bead_ids") && strings.Contains(miss.Message, "mindspec next --spec"))
+	}
+	if !named {
+		t.Fatalf("empty approved plan has no recovery: %+v", rs.NearMisses)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
@@ -22,7 +23,7 @@ func TestS134Seed_Goldens(t *testing.T) {
 				golden(t, "seed-enrolled", f.State().Records)
 				return
 			case "PassGate":
-				kerneltest.PassGate(f, gate, "subject")
+				kerneltest.PassGate(f, gate, strings.Repeat("a", 40))
 			case "Authorise":
 				kerneltest.Authorise(f, gate, kernel.GateRound{Round: 2, Subject: "subject", SlotCount: 2, Slots: []string{"R1", "R2"}, Paths: []string{"app.go"}})
 			case "OpenDecision":

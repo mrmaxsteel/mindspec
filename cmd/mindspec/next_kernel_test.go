@@ -238,6 +238,7 @@ func TestS134Next_HaltKeepsReadVerbsAvailable(t *testing.T) {
 
 func TestS134Next_ResolveEnrolledStateWithoutSpec(t *testing.T) {
 	f, _ := nextKernelFixture(t)
+	f.Fake.Records["legacy-2"] = kernel.Record{ID: "legacy-2", Type: "epic", Status: "open", Metadata: map[string]any{"spec_id": "002-y"}}
 	actorCmdStore(t, f)
 	states, err := readNextKernelStates(f.Root, "")
 	f.Must(err)
@@ -412,5 +413,18 @@ func TestS134Next_NoReadyNamesLegacySelection(t *testing.T) {
 	}
 	if before != kerneltest.Snapshot(t, f) {
 		t.Fatal("empty selection wrote")
+	}
+}
+
+func TestS134Next_UnrelatedBrokenWitness(t *testing.T) {
+	f, _ := nextKernelFixture(t)
+	f.Fake.Records["broken-3"] = kernel.Record{ID: "broken-3", Type: "epic", Status: "open", Metadata: map[string]any{"spec_id": "003-z", kernel.KeyRun: "broken"}}
+	actorCmdStore(t, f)
+	states, err := readNextKernelStates(f.Root, "")
+	if err != nil || len(states) != 1 || states[0].Epic != f.Epic {
+		t.Fatalf("unrelated witness blocked next: %+v %v", states, err)
+	}
+	if _, err := readNextKernelStates(f.Root, "003-z"); err == nil {
+		t.Fatal("named broken witness was hidden")
 	}
 }

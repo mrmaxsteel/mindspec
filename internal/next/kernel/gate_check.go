@@ -44,7 +44,9 @@ func CheckPassedGate(s State, base string) error {
 	accepted, err := AcceptedSubject(s, gate)
 	if err != nil {
 		failures = append(failures, err)
-	} else if accepted != "" && (subject(s, gate) != "" || (ended && tuple.WorkItem != "")) {
+	} else if accepted == "" {
+		failures = append(failures, fmt.Errorf("gate %s has no accepted subject", termsafe.Escape(gate)))
+	} else if subject(s, gate) != "" || (ended && tuple.WorkItem != "") {
 		newest, err := newestJudgeSubject(s, gate)
 		if err != nil {
 			failures = append(failures, err)

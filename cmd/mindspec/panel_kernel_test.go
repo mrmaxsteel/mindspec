@@ -766,3 +766,38 @@ func TestS134PanelCreate_KeepsBindingAndBriefRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestS134PanelDefer_RepeatedEvents(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, err := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, err)
+	for _, slot := range []string{"R1", "R2"} {
+		kernelPanelVerdict(t, f, gate, head, "1", slot, "REQUEST_CHANGES", 1)
+	}
+	fake := fakeDeferralBD(t)
+	rebindWrite(t, fake, "epics.json", fmt.Sprintf(`[{"id":%q,"issue_type":"epic","metadata":{"spec_id":%q}}]`, f.Epic, f.SpecID))
+	rebindWrite(t, fake, "follow-up.json", fmt.Sprintf(`[{"id":"follow-up","status":"open","description":"missing test","dependencies":[{"id":%q,"dependency_type":"discovered-from"}]}]`, f.Epic))
+	for _, slot := range []string{"R1", "R1", "R2"} {
+		out, err = kernelPanelRun(t, panelDeferCmd, "1", "--spec", f.SpecID, "--slot", slot, "--round", "1", "--by", "operator", "--bead", "follow-up")
+		kernelPanelRequire(t, out, err)
+	}
+	result, err := panel.Tally(filepath.Join(f.SpecDir, "reviews", "1"))
+	f.Must(err)
+	t.Logf("panel effective deferrals=%d", len(result.EffectiveDeferrals()))
+	if len(result.EffectiveDeferrals()) != 2 {
+		t.Fatal("probe did not establish two effective deferrals")
+	}
+	for replay := 0; replay < 2; replay++ {
+		rows, err := kernel.Audit(f.State(), nil)
+		f.Must(err)
+		for _, row := range rows {
+			if row.Event == "deferrals" {
+				t.Logf("replay %d: deferrals=%d after two successful panel defer commands", replay, row.Count)
+				if row.Count != 2 {
+					t.Errorf("deferral audit lost an event: got %d, want 2", row.Count)
+				}
+			}
+		}
+	}
+}

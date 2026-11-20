@@ -133,7 +133,7 @@ func TestS134Closes_WorkItemBlocksDependent(t *testing.T) {
 			// Use a distinct bead tip so the work item has not merged.
 			newCommit(t, f, "bead/"+item)
 			if !forced {
-				kerneltest.PassGate(f, item+".review", "subject")
+				kerneltest.PassGate(f, item+".review", strings.Repeat("a", 40))
 			}
 			f.Must(f.Store.SetStatusIf(item, "open", "closed"))
 			state := f.State()
@@ -156,7 +156,7 @@ func TestS134Closes_WorkItemBlocksDependent(t *testing.T) {
 		t.Run(subject, func(t *testing.T) {
 			f := reducerFixture(t)
 			item := f.Items[0]
-			kerneltest.PassGate(f, item+".review", "subject")
+			kerneltest.PassGate(f, item+".review", strings.Repeat("a", 40))
 			judge := item + ".review.judge.a1"
 			f.Create(judge, item)
 			if subject != "missing" {
@@ -208,7 +208,7 @@ func TestS134Closes_RawClaimStep(t *testing.T) {
 func TestS134Closes_MergedPassedClosedItem(t *testing.T) {
 	f := reducerFixture(t)
 	item := f.Items[0]
-	kerneltest.PassGate(f, item+".review", "subject")
+	kerneltest.PassGate(f, item+".review", strings.Repeat("a", 40))
 	f.Must(f.Store.SetStatusIf(item, "open", "closed"))
 	s := f.State()
 	if !s.Merged[item] {
@@ -224,7 +224,7 @@ func TestS134Closes_RawClosedJudgeBlocksSamePass(t *testing.T) {
 	f := reducerFixture(t)
 	item := f.Items[0]
 	gate := item + ".review"
-	kerneltest.PassGate(f, gate, "subject")
+	kerneltest.PassGate(f, gate, strings.Repeat("a", 40))
 	id := kerneltest.Judge(f, gate, "new-subject", 1)
 	f.Must(f.Store.SetStatusIf(id, "open", "closed"))
 	out := reduce(t, f, true)

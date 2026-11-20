@@ -62,6 +62,7 @@ func TestS134ImplFinalGate_PanelOnlySubject(t *testing.T) {
 	old, err := kernel.AcceptedSubject(f.State(), gate)
 	f.Must(err)
 	kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "final", Round: 1, Subject: old, Slots: []string{"R1", "R2"}})
+	kerneltest.PassGate(f, gate, old)
 	finalKernelCommit(t, f, filepath.ToSlash(filepath.Join(".mindspec/specs", f.SpecID, "reviews/final/note.txt")))
 	_, _, err = implFinalReviewGate(f.Root, f.SpecID, f.Epic, "review", f.SpecDir, ex, implPlaceholderWrite{})
 	f.Must(err)

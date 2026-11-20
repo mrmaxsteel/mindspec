@@ -12,10 +12,12 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
@@ -87,6 +89,7 @@ func TestS134Complete_AcceptedSubjectAndJudge(t *testing.T) {
 func TestS134Complete_PanelOnlySubject(t *testing.T) {
 	f, gate, head := completeKernelFixture(t)
 	kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "passed", Round: 1, Subject: head, Slots: []string{"R1", "R2"}})
+	kerneltest.PassGate(f, gate, head)
 	completeKernelMove(t, f, filepath.ToSlash(filepath.Join(".mindspec/specs", f.SpecID, "reviews/passed/note.txt")))
 	_, err := prepareKernelComplete(f.State(), f.Items[0], true)
 	f.Must(err)
@@ -145,6 +148,7 @@ func TestS134Complete_PassingGateCannotBeSkipped(t *testing.T) {
 			f, gate, _ := completeKernelFixture(t)
 			t.Setenv("MINDSPEC_SKIP_PANEL", skip)
 			f.Must(f.Store.SetStatusIf(gate, "closed", "open"))
+			f.Must(f.Store.WriteMetadata(gate, map[string]any{kernel.KeyRegistration: nil}))
 			_, err := prepareKernelComplete(f.State(), f.Items[0], true)
 			if err == nil || !strings.Contains(err.Error(), gate) {
 				t.Fatalf("missing gate refusal: %v", err)
@@ -167,7 +171,7 @@ func TestS134Complete_EnablesDependentsOnlyAfterMerge(t *testing.T) {
 		}
 	}
 	prior := map[string]bool{}
-	for _, id := range f.State().Steps {
+	for id := range f.State().Records {
 		prior[id] = true
 	}
 	f.Must(f.Store.SetStatusIf(f.Items[0], "open", "closed"))
@@ -177,8 +181,8 @@ func TestS134Complete_EnablesDependentsOnlyAfterMerge(t *testing.T) {
 	f.Must(err)
 	f.Must(finishKernelComplete(f.State(), f.Items[0]))
 	created := []string{}
-	for _, id := range f.State().Steps {
-		if tuple, ok, err := f.State().Records[id].Tuple(); err == nil && ok && tuple.Kind == "implement" && !prior[id] {
+	for id := range f.State().Records {
+		if !prior[id] {
 			created = append(created, id)
 		}
 	}
@@ -186,7 +190,7 @@ func TestS134Complete_EnablesDependentsOnlyAfterMerge(t *testing.T) {
 	sort.Strings(created)
 	sort.Strings(expected)
 	if !reflect.DeepEqual(created, expected) {
-		t.Fatalf("new implementation identities: got %v want %v", created, expected)
+		t.Fatalf("new record identities: got %v want %v", created, expected)
 	}
 	for _, item := range f.Items[1:] {
 		r, err := f.Store.Lookup(item + ".impl.a1")
@@ -271,13 +275,16 @@ func TestS134Complete_RunAcceptsCarryOverAndPanelOnly(t *testing.T) {
 			}
 			if mode == "missing-gate" {
 				f.Must(f.Store.SetStatusIf(gate, "closed", "open"))
+				f.Must(f.Store.WriteMetadata(gate, map[string]any{kernel.KeyRegistration: nil}))
 				t.Setenv("MINDSPEC_SKIP_PANEL", "1")
 			} else if mode == "panel-only" {
 				kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "passed", Round: 1, Subject: old, Slots: []string{"R1", "R2"}})
+				kerneltest.PassGate(f, gate, old)
 				completeKernelMove(t, f, filepath.ToSlash(filepath.Join(".mindspec/specs", f.SpecID, "reviews/passed/note.txt")))
 			} else if mode != "raw-close" {
 				if mode == "carry-over" {
 					kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "passed", Round: 1, Subject: old, Slots: []string{"R1", "R2"}})
+					kerneltest.PassGate(f, gate, old)
 					_, err := f.Command("git", "add", ".")
 					f.Must(err)
 					_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "panel registration")
@@ -407,4 +414,39 @@ func installCompleteKernelRun(t *testing.T, f *kerneltest.Fixture) {
 		return next.BeadInfo{ID: id, Status: r.Status}, err
 	}
 
+}
+
+func TestS134Complete_EnrolledSkipsLegacyPanelGate(t *testing.T) {
+	saveAndRestore(t)
+	f, _, head := completeKernelFixture(t)
+	f.Must(os.WriteFile(filepath.Join(f.Root, ".mindspec/config.yaml"), []byte("enforcement:\n  panel_gate: true\n  panel_presence: enforce\n"), 0600))
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+	cfg, err := config.Load(f.Root)
+	f.Must(err)
+	if !cfg.Enforcement.PanelGate {
+		t.Fatal("fixture did not enable the legacy gate")
+	}
+	installCompleteKernelRun(t, f)
+	fake := deferralBD(t, f.Epic)
+	setDeferredIssue(t, fake, "closed")
+	oldSkip, oldScan := panelSkipEnvFn, panelScanFn
+	t.Cleanup(func() { panelSkipEnvFn = oldSkip; panelScanFn = oldScan })
+	panelSkipEnvFn = func() bool { return false }
+	scans := 0
+	panelScanFn = func(...string) []panel.Registration { scans++; return nil }
+	f.Must(f.Store.WriteMetadata(f.Items[0], map[string]any{stageMarkerAttestationKey: head, "panel_deferred_entries": []PanelDeferredEntry{{Spec: f.SpecID, Panel: "legacy", Deferral: panel.Deferral{Slot: "R1", Round: 1, Finding: "slot", FindingSHA256: strings.Repeat("a", 64), FindingText: "follow-up finding", Bead: "follow-up", By: "operator", CreatedAt: "2026-01-02T03:04:05Z"}, FindingTexts: []string{"follow-up finding"}}}}))
+	ex := &s134CompletionExecutor{MockExecutor: &executor.MockExecutor{}, fixture: f}
+	ex.ReadStageMarkerFn = func(string) (string, string, bool, error) { return head, stageArtifactSync, true, nil }
+	ex.RevParseRefFn = func(string, string) (string, error) { return head, nil }
+	result, err := Run(f.Root, f.Items[0], f.SpecID, "", ex, CompleteOpts{})
+	if err != nil || result == nil || !result.BeadClosed {
+		t.Fatalf("enrolled resume used the legacy panel gate: %+v %v", result, err)
+	}
+	if scans != 0 {
+		t.Fatal("enrolled resume scanned legacy panel state")
+	}
+	if len(ex.CallsTo("ReadStageMarker")) == 0 || len(ex.CallsTo("SnapshotWorktreeTree")) != 0 {
+		t.Fatal("fixture did not resume the attested stage")
+	}
 }

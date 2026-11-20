@@ -24,6 +24,13 @@ func init() {
 }
 
 func validClose(s State, r Record) bool {
+	t, _, _ := r.Tuple()
+	if t.Kind == "bead-gate" || t.Kind == "final-gate" {
+		receipt, _, _ := Decode[Receipt](r.Metadata, KeyClose)
+		if receipt.Kind == "passed" {
+			return passed(s, r)
+		}
+	}
 	receipt, ok, err := Decode[Receipt](r.Metadata, KeyClose)
 	return r.Status == "closed" && ok && err == nil && ValidReceipt(s.Root, receipt) == nil
 }
@@ -189,4 +196,61 @@ func receiptedSlots(s State, round GateRound) bool {
 		}
 	}
 	return true
+}
+
+// SlotLineageRoot verifies every retry link back to its registered slot.
+func SlotLineageRoot(s State, id string) (string, error) {
+	for {
+		if !owned(s, id) {
+			return "", actorFailure("slot lineage contains a foreign step")
+		}
+		r := s.Records[id]
+		tuple, _, _ := r.Tuple()
+		if tuple.Kind != "review-slot" {
+			return "", actorFailure("slot lineage contains a different kind")
+		}
+		from, has, err := Decode[From](r.Metadata, KeyFrom)
+		if err != nil {
+			return "", err
+		}
+		if tuple.Attempt == 1 {
+			if has {
+				return "", actorFailure("root slot has a retry predecessor")
+			}
+			return id, nil
+		}
+		predecessor := string(from)
+		next, err := nextAttempt(predecessor)
+		if !has || err != nil || next != id || !owned(s, predecessor) {
+			return "", actorFailure("slot retry has no valid predecessor")
+		}
+		prior := s.Records[predecessor]
+		if prior.Status != "closed" || validClose(s, prior) {
+			return "", actorFailure("slot retry would duplicate a valid vote")
+		}
+		id = predecessor
+	}
+}
+
+// SlotLineageHead selects the newest verified retry of a registered slot.
+func SlotLineageHead(s State, root string) (Record, error) {
+	r, exists := s.Records[root]
+	if !exists {
+		return Record{}, actorFailure("registered slot is absent")
+	}
+	for {
+		next, err := nextAttempt(r.Key())
+		if err != nil {
+			return Record{}, err
+		}
+		candidate, exists := s.Records[next]
+		if !exists {
+			return r, nil
+		}
+		verified, err := SlotLineageRoot(s, next)
+		if err != nil || verified != root {
+			return Record{}, actorFailure("slot retry lineage is invalid")
+		}
+		r = candidate
+	}
 }

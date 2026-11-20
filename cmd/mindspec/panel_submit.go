@@ -222,6 +222,11 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 			return guard.NewFailure("slot identity differs from its roster position", "select a slot from the panel roster")
 		}
 		step := fmt.Sprintf("%s.r%d.R%d", gateBase(*state, gate), round, rosterIndex+1)
+		head, e := kernel.SlotLineageHead(*state, step)
+		if e != nil {
+			return e
+		}
+		step = head.Key()
 		if token == "" {
 			return guard.NewFailure("--lease is required for this slot", "mindspec lease "+step)
 		}
@@ -268,7 +273,7 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 
 func init() {
 	panelSubmitCmd.Flags().String("lease", "", "Current slot lease token")
-	panelSubmitCmd.Flags().String("file", "", "Verdict file; - reads stdin")
+	panelSubmitCmd.Flags().String("file", "", "Verdict file; kernel slots require a committed file in this repository; other panels accept - for stdin")
 	panelSubmitCmd.Flags().String("slot", "", "Roster slot")
 	panelSubmitCmd.Flags().Int("round", 0, "Panel round")
 	panelSubmitCmd.Flags().String("spec", "", "Owning spec")

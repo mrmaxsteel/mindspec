@@ -26,12 +26,12 @@ func acquireFileLock(path string) (func(), error) {
 	}
 	// Re-assert 0600 in case the lockfile pre-existed under a permissive umask.
 	_ = f.Chmod(fileMode)
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil { // #nosec G115 -- Unix file descriptors from os.OpenFile fit in int.
 		_ = f.Close()
 		return nil, fmt.Errorf("flock LOCK_EX: %w", err)
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) // #nosec G115 -- Unix file descriptors from os.OpenFile fit in int.
 		_ = f.Close()
 	}, nil
 }

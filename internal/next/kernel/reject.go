@@ -183,8 +183,8 @@ func refusedRound(s State) (Changes, error) {
 		// A superseded slot cannot supply a refused tally on a later pass.
 		ready := len(round.Slots) > 0
 		for _, slot := range round.Slots {
-			r, exists := s.Records[slot]
-			ready = ready && exists && passed(s, r)
+			r, err := SlotLineageHead(s, slot)
+			ready = ready && err == nil && passed(s, r)
 		}
 		if !ready {
 			continue

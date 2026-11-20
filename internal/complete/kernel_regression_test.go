@@ -30,6 +30,7 @@ func TestS134Complete_MergedSubject(t *testing.T) {
 				head = strings.TrimSpace(string(raw))
 			case "panel-only":
 				kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "passed", Round: 1, Subject: accepted, Slots: []string{"R1", "R2"}})
+				kerneltest.PassGate(f, gate, accepted)
 				head = completeKernelMove(t, f, filepath.ToSlash(filepath.Join(".mindspec/specs", f.SpecID, "reviews/passed/note.txt")))
 			case "missing-gate":
 				f.Must(f.Store.WriteMetadata(gate, map[string]any{kernel.KeyClose: nil}))

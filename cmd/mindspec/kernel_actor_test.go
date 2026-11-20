@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,52 +18,6 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 )
 
-// TestS134FakeBDProcess is a subprocess helper for binary tests. It only uses a
-// serialized fake store in a temporary directory, never an installed tracker.
-func TestS134FakeBDProcess(t *testing.T) {
-	if os.Getenv("MINDSPEC_TEST_FAKE_BD") != "1" {
-		return
-	}
-	args := os.Args
-	for len(args) > 0 && args[0] != "--" {
-		args = args[1:]
-	}
-	if len(args) == 0 {
-		os.Exit(2)
-	}
-	path := os.Getenv("MINDSPEC_TEST_FAKE_STORE")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	fake := kerneltest.NewFakeBD()
-	if err = json.Unmarshal(data, &fake.Records); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	out, err := fake.Run(args[1:]...)
-	if err != nil {
-		var code interface{ ExitCode() int }
-		fmt.Fprintln(os.Stderr, err)
-		if errors.As(err, &code) {
-			os.Exit(code.ExitCode())
-		}
-		os.Exit(1)
-	}
-	data, err = json.Marshal(fake.Records)
-	if err == nil {
-		err = os.WriteFile(path, data, 0600)
-	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	if _, err = os.Stdout.Write(out); err != nil {
-		os.Exit(2)
-	}
-	os.Exit(0)
-}
 func actorCmdGit(t *testing.T, f *kerneltest.Fixture, args ...string) string {
 	t.Helper()
 	data, err := f.Command("git", args...)
@@ -86,11 +42,7 @@ func actorCmdStore(t *testing.T, f *kerneltest.Fixture) string {
 	data, err := json.Marshal(f.Fake.Records)
 	f.Must(err)
 	f.Must(os.WriteFile(statePath, data, 0600))
-	executable, err := os.Executable()
-	f.Must(err)
-	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
-	script := "#!/bin/sh\nexec " + quote(executable) + " -test.run='^TestS134FakeBDProcess$' -- \"$@\"\n"
-	f.Must(os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0755))
+	f.Must(os.Symlink(fakeBDBinary(t), filepath.Join(dir, "bd")))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("MINDSPEC_TEST_FAKE_BD", "1")
 	t.Setenv("MINDSPEC_TEST_FAKE_STORE", statePath)
@@ -116,7 +68,7 @@ func actorCmdRead(t *testing.T, path string, id string) kernel.Record {
 }
 func actorCmdRun(t *testing.T, f *kerneltest.Fixture, bin string, args ...string) (string, int) {
 	t.Helper()
-	out, err := f.Command(bin, args...)
+	out, err := f.BinaryCommand(bin, args...)
 	if err == nil {
 		return string(out), 0
 	}
@@ -236,4 +188,36 @@ func TestS134SubmitCmd_ImplementAndHalt(t *testing.T) {
 			}
 		}
 	})
+}
+
+var fakeBDBuild struct {
+	sync.Once
+	data []byte
+	err  error
+}
+
+// fakeBDBinary keeps the helper bytes for the lifetime of the test process.
+// Each fixture gets a binary with its own temporary directory lifetime.
+func fakeBDBinary(t *testing.T) string {
+	t.Helper()
+	fakeBDBuild.Do(func() {
+		path := filepath.Join(t.TempDir(), "bd")
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "go", "build", "-race=false", "-o", path, "./internal/next/kernel/kerneltest/fakebd")
+		cmd.Dir = repoRootFromTestDir(t)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			fakeBDBuild.err = fmt.Errorf("build fake bd: %w: %s", err, out)
+			return
+		}
+		fakeBDBuild.data, fakeBDBuild.err = os.ReadFile(path)
+	})
+	if fakeBDBuild.err != nil {
+		t.Fatal(fakeBDBuild.err)
+	}
+	path := filepath.Join(t.TempDir(), "bd")
+	if err := os.WriteFile(path, fakeBDBuild.data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

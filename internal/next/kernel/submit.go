@@ -155,16 +155,25 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 			return err
 		}
 		if !changed {
-			output = actorOutput(s)
-			return nil
+			result, err := Pass(Rules(), s, false)
+			output = OutputForPass(result, s, false)
+			return err
 		}
 		fresh, err := refreshActorState(s)
 		if err != nil {
 			return err
 		}
 		result, err := Pass(Rules(), fresh, true)
-		output = result.Output
-		return err
+		if err != nil {
+			return err
+		}
+		committed, err := refreshActorState(s)
+		if err != nil {
+			return err
+		}
+		committed.At = result.State.At
+		output = OutputForPass(result, committed, true)
+		return nil
 	})
 	return output, err
 }
@@ -247,7 +256,7 @@ func resolveArtifact(s State, o SubmitOptions) (Receipt, error) {
 		}
 		evidenceRoot, err = actorGit(filepath.Dir(path), "rev-parse", "--show-toplevel")
 		if err != nil {
-			return receipt, err
+			return receipt, actorFailure("artifact must be a committed file in a worktree of this repository")
 		}
 		common, err := actorGit(s.Root, "rev-parse", "--path-format=absolute", "--git-common-dir")
 		if err != nil {
@@ -318,17 +327,7 @@ func checkImplement(s State, r Record, receipt Receipt) error {
 }
 func activeActorRound(s State, r Record) (GateRound, error) {
 	t, _, _ := r.Tuple()
-	gateID := t.Gate
-	if parent, ok := s.Records[r.Parent]; ok {
-		gateID = parent.Key()
-	} else {
-		for _, candidate := range s.Records {
-			if candidate.ID == r.Parent {
-				gateID = candidate.Key()
-				break
-			}
-		}
-	}
+	gateID := activeGate(s, t.Gate)
 	gate, ok := s.Records[gateID]
 	if !ok {
 		return GateRound{}, actorFailure("gate is absent")
@@ -387,9 +386,13 @@ func checkVerdict(s State, r Record, receipt Receipt) error {
 	if verdict.Status != "final" || verdict.Slot != "R"+strconv.Itoa(t.Slot) || verdict.Round != round.Round || verdict.ReviewedSHA != round.Subject {
 		return actorFailure("verdict slot, round or subject does not match the step")
 	}
+	root, err := SlotLineageRoot(s, r.Key())
+	if err != nil {
+		return err
+	}
 	listed := false
 	for _, slot := range round.Slots {
-		if slot == r.Key() || slot == r.ID || slot == verdict.Slot {
+		if slot == root {
 			listed = true
 		}
 	}

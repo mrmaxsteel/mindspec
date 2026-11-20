@@ -22,6 +22,8 @@ const (
 	KeyLease      = "mindspec_lease"
 	KeyRound      = "mindspec_round"
 	KeyTake       = "mindspec_take"
+	KeyTakes      = "mindspec_takes"
+	KeyDeferrals  = "mindspec_deferrals"
 	KeyRawClaims  = "mindspec_raw_claims"
 	KeyAnswer     = "mindspec_answer"
 	KeyDefer      = "mindspec_defer"
@@ -95,6 +97,9 @@ type DecisionAnswer struct {
 	Actor  string    `json:"actor"`
 }
 type DeferRecord struct {
+	Panel   string    `json:"panel,omitempty"`
+	Round   int       `json:"round,omitempty"`
+	Slot    string    `json:"slot,omitempty"`
 	Finding string    `json:"finding"`
 	To      string    `json:"to"`
 	Reason  string    `json:"reason"`

@@ -323,6 +323,10 @@ func Tally(dir string) (*Result, error) {
 }
 
 func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, error) {
+	return tallyWithPanel(dir, readLedger, nil)
+}
+
+func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), registered *Panel) (*Result, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
@@ -336,7 +340,10 @@ func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, erro
 	res := &Result{Dir: abs, IntegrityErr: ledgerErr}
 
 	// Registration.
-	if _, statErr := os.Stat(filepath.Join(dir, FileName)); statErr == nil {
+	if registered != nil {
+		res.Panel = registered
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, FileName)); statErr == nil && registered == nil {
 		reg := load(dir)
 		if reg.Err != nil {
 			res.PanelErr = reg.Err
@@ -374,6 +381,9 @@ func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, erro
 			continue
 		}
 		round, err := strconv.Atoi(m[2])
+		if registered != nil && round != registered.Round {
+			continue
+		}
 		if err != nil {
 			continue // unreachable for \d+ short of overflow
 		}
@@ -565,4 +575,74 @@ func (r *Result) ReviewerModel(slot string) string {
 		return s.Model
 	}
 	return ""
+}
+
+// TallyRegisteredRound reads the durable round and its votes after a gate freezes.
+// Later snapshots and rebinds cannot replace the original registration.
+func TallyRegisteredRound(dir, spec string, number int, subject string) (*Result, error) {
+	lines, err := ReadLedger(dir)
+	if err != nil {
+		return nil, err
+	}
+	var registered *Panel
+	filtered := [][]byte{}
+	currentRound := 0
+	for _, line := range lines {
+		var event struct {
+			Record string `json:"record"`
+			Round  int    `json:"round"`
+		}
+		if err := json.Unmarshal(line, &event); err != nil {
+			return nil, err
+		}
+		if event.Record == RecordRound {
+			currentRound = event.Round
+		}
+		if event.Record == RecordAbandon && currentRound == number {
+			filtered = append(filtered, line)
+			continue
+		}
+		if event.Round != number {
+			continue
+		}
+		if event.Record == RecordRound {
+			var round RoundRecord
+			if err := json.Unmarshal(line, &round); err != nil {
+				return nil, err
+			}
+			if round.Spec != spec || round.ReviewedHeadSHA != subject {
+				continue
+			}
+			registered = &Panel{Spec: round.Spec, BeadID: round.BeadID, Target: round.Target, Gate: round.Gate, Round: round.Round, Scope: round.Scope, VerdictSchema: round.VerdictSchema, ReviewedHeadSHA: round.ReviewedHeadSHA, SubjectDigest: round.SubjectDigest, Roster: round.Roster, ExpectedReviewers: round.ExpectedReviewers, ReviewerCountSource: round.ReviewerCountSource, Telemetry: round.Telemetry}
+		}
+		filtered = append(filtered, line)
+	}
+	if registered == nil {
+		return nil, fmt.Errorf("registered passing round is absent")
+	}
+	for _, line := range filtered {
+		var event struct {
+			Record string `json:"record"`
+		}
+		if err := json.Unmarshal(line, &event); err != nil {
+			return nil, err
+		}
+		switch event.Record {
+		case RecordRefutation:
+			var entry Refutation
+			if err := json.Unmarshal(line, &entry); err != nil {
+				return nil, err
+			}
+			registered.Refutations = append(registered.Refutations, entry)
+		case RecordDeferral:
+			var entry Deferral
+			if err := json.Unmarshal(line, &entry); err != nil {
+				return nil, err
+			}
+			registered.Deferrals = append(registered.Deferrals, entry)
+		case RecordAbandon:
+			registered.Abandoned = true
+		}
+	}
+	return tallyWithPanel(dir, func(string) ([][]byte, error) { return filtered, nil }, registered)
 }

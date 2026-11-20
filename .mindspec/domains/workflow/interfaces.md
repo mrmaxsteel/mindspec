@@ -1480,6 +1480,8 @@ The command exits with code 4 when its pass reports a halted spec.
 
 `next-action` reads the approved plan and the enrolled tree.
 It returns one JSON document with actions, leases, decisions, commands and flags.
+JSON is the default output format; `--json` selects the same format.
+A flag may omit its message when its code and repair command describe the state.
 A read creates no record and changes no file.
 `--apply` reads the state again under the phase lock.
 It applies one ordered reducer pass.
@@ -1517,6 +1519,11 @@ The revision hashes state, named refs, ledgers, verdicts, policy and lease expir
 Display time does not change the revision.
 Actions use plan order, kind order and numeric slot order.
 Commands use argument arrays.
+Implement and fix actions submit with `--commit <commit>`.
+Review slots and change judges submit with `--artifact <path>`.
+A successful actor submit returns the current action document, including step existence and revision.
+The revision uses a fresh read after the writes, including assigned store ids.
+An exact retry returns the current read-only document.
 Terminal text is escaped.
 A live lease sets a waiting entry and the earliest retry time.
 Statuses `work`, `wait`, `halted`, `done` and `indeterminate` exit 0, 3, 4, 5 and 1.
@@ -1530,6 +1537,11 @@ Apply also requires the custom step type and a readable store.
 A kernel close needs a valid receipt.
 Artifact receipts identify a path, holding commit and blob.
 Reducer receipts identify their close reason.
+A gate pass requires a registered round with the same nonempty subject,
+valid receipts for every slot, and a passing panel tally.
+A path or close-reason label alone supplies no gate evidence.
+Readers use the durable registration and votes for a frozen gate.
+Rebind and carry-over records may extend its accepted subject.
 A verdict file alone does not permit a gate tally.
 Every registered slot needs a valid close or a completed retry.
 An invalid close produces `unreceipted-close`.
@@ -1537,6 +1549,10 @@ The next apply creates one retry with predecessor lineage.
 A valid repaired receipt or a valid completed retry clears the flag.
 A retry retains its subject and decision options.
 It receives no old lease or receipt.
+A slot retry must name its exact predecessor in `mindspec_from` at every hop.
+The predecessor must be closed without a valid vote.
+The chain must reach the slot in the active round.
+Both submit verbs select this verified lineage; a retry cannot add a second vote.
 
 A closed, unmerged work item with a passing gate produces `raw-close`.
 A work item closed over an open child produces `forced-close`.
@@ -1547,6 +1563,7 @@ These flags are computed from the current state.
 Implementation approval checks the enrolled tree before any write.
 It refuses open steps, open decisions, invalid closes and open foreign children.
 It also refuses raw work-item closes and forced closes.
+Every recorded work item must be done, with a nonempty completed subject that matches its accepted subject.
 Finalization uses only recorded work-item ids.
 After branch removal, merge checks use the recorded publication tip.
 Specs without enrolment retain the existing approval path.
@@ -1556,7 +1573,34 @@ Escape-hatch counts come from the local journal.
 The journal has no project identity, so these counts cover this machine.
 Typed metadata supplies deferrals, takeovers, timed answers, repaired closes,
 carry-overs and each re-panel's slot count.
+`mindspec_takes` retains takeover events by lease generation.
+`mindspec_deferrals` retains distinct panel, round, slot, finding and target records.
+The latest `mindspec_take` and `mindspec_defer` records remain readable.
+An older latest record supplies one event when no history array exists.
+Renewal, release, expiry and an exact deferral retry add no event.
 A lease that replaces a raw claim retains a timed claim record.
 Raw-claim counts include retained records and current unrepaired claims.
 Audit counts do not block approval.
 An audit read error gives a warning.
+
+The kernel content check reads halt state, plan membership and closed-item refusals.
+It runs content checks before any review pass, receipt or completion write.
+Plain completion still requires a passing gate and no open child.
+It writes a completed subject only when that subject is nonempty.
+
+With an enrolled spec, `next` prints the worktree path with its lease token.
+An unscoped scan warns and skips an unrelated spec whose state cannot be read.
+A named unreadable spec still refuses.
+An approved legacy plan without recorded work item ids names the missing `bead_ids` and their recovery.
+
+Kernel verdict artifacts must be committed files in a worktree of the repository.
+Other panel types can read a verdict from stdin.
+If a panel brief has stubs, fill the named `BRIEF.md`, then retry `panel prompt`.
+An authored brief can instead be passed with `--brief-file` at initial panel creation.
+
+An unscoped `next` resolves enrolled specs first.
+If the selected enrolled spec has no eligible implementation, it refuses and names `next-action`.
+Name a legacy work item or use `next --spec <spec>` to select legacy work in a mixed repository.
+`plan approve` directs the operator to `next-action <spec> --apply`.
+Panel submission publishes the canonical verdict and ledger files used by tally readers.
+These files remain in the review directory for finalization.

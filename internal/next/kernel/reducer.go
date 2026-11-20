@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 
@@ -44,7 +45,15 @@ func owned(s State, id string) bool {
 }
 func passed(s State, r Record) bool {
 	receipt, ok, err := Decode[Receipt](r.Metadata, KeyClose)
-	return r.Status == "closed" && err == nil && ok && receipt.Kind == "passed" && ValidReceipt(s.Root, receipt) == nil
+	if r.Status != "closed" || err != nil || !ok || receipt.Kind != "passed" || ValidReceipt(s.Root, receipt) != nil {
+		return false
+	}
+	t, _, _ := r.Tuple()
+	if t.Kind == "bead-gate" || t.Kind == "final-gate" {
+		accepted, valid, err := gatePassEvidence(s, r)
+		return err == nil && valid && receipt.Subject != "" && receipt.Subject == accepted && receipt.Retally != "" && receipt.Path == "" && receipt.Commit == "" && receipt.Blob == "" && receipt.Answer == nil
+	}
+	return true
 }
 func activeGate(s State, base string) string {
 	best, attempt := base, 0
@@ -322,7 +331,11 @@ func implement(s State) (Changes, error) {
 			}
 			brief = []string{"mindspec", "panel", "prompt", reg.Slug, "--slot", fmt.Sprintf("R%d", t.Slot), "--spec", s.SpecID}
 		}
-		c.Actions = append(c.Actions, Action{Step: id, Kind: t.Kind, Round: t.Round, Subject: Subject{Commit: sub}, Claim: []string{"mindspec", "lease", id}, Brief: brief, Submit: []string{"mindspec", "submit", id, "--lease", "<token>", "--artifact", "<path>"}})
+		flag, placeholder := "--artifact", "<path>"
+		if t.Kind == "implement" || t.Kind == "fix" {
+			flag, placeholder = "--commit", "<commit>"
+		}
+		c.Actions = append(c.Actions, Action{Step: id, Kind: t.Kind, Round: t.Round, Subject: Subject{Commit: sub}, Claim: []string{"mindspec", "lease", id}, Brief: brief, Submit: []string{"mindspec", "submit", id, "--lease", "<token>", flag, placeholder}})
 	}
 	for _, r := range s.OpenDecisions() {
 		d, _, err := Decode[DecisionRecord](r.Metadata, KeyDecision)
@@ -349,32 +362,13 @@ func tally(s State) (Changes, error) {
 		if g.Status == "closed" || hasOpenChild(s, gate) {
 			continue
 		}
-		round, ok, err := Decode[GateRound](g.Metadata, KeyRound)
+		accepted, ok, err := gatePassEvidence(s, g)
 		if err != nil {
 			return c, err
 		}
-		if !ok {
-			continue
-		}
-		reg, ok, err := Decode[RegistrationRecord](g.Metadata, KeyRegistration)
-		if err != nil {
-			return c, err
-		}
-		if !ok || reg.Round != round.Round || reg.Subject != round.Subject || !receiptedSlots(s, round) {
-			continue
-		}
-		for _, p := range s.Panels {
-			if p.Slug() != reg.Slug || p.Panel.Abandoned || p.Panel.Round != round.Round || p.Panel.ReviewedHeadSHA != round.Subject {
-				continue
-			}
-			res, err := panel.Tally(p.Dir)
-			if err != nil {
-				return c, err
-			}
-			if res.PassRule(subject(s, gate) == round.Subject) {
-				receipt := Receipt{Kind: "passed", Subject: round.Subject, Retally: "passing-tally"}
-				c.Writes = append(c.Writes, Write{Kind: "close", ID: gate, Receipt: &receipt})
-			}
+		if ok && subject(s, gate) == accepted {
+			receipt := Receipt{Kind: "passed", Subject: accepted, Retally: "passing-tally"}
+			c.Writes = append(c.Writes, Write{Kind: "close", ID: gate, Receipt: &receipt})
 		}
 	}
 	return c, nil
@@ -410,3 +404,65 @@ func completeEntry(s State) (Changes, error) {
 	c.Run = append(c.Run, Run{Actor: "binary", Argv: []string{"mindspec", "impl", "approve", s.SpecID}})
 	return c, nil
 }
+
+// gatePassEvidence is the common evidence check for gate writers and readers.
+// A close reason alone cannot replace a registered, fully receipted passing panel.
+func gatePassEvidence(s State, gate Record) (string, bool, error) {
+	round, has, err := Decode[GateRound](gate.Metadata, KeyRound)
+	if err != nil || !has {
+		return "", false, err
+	}
+	reg, has, err := Decode[RegistrationRecord](gate.Metadata, KeyRegistration)
+	if err != nil || !has {
+		return "", false, err
+	}
+	if round.Subject == "" || reg.Round != round.Round || reg.Subject != round.Subject || len(reg.Slots) != round.SlotCount || !receiptedSlots(s, round) {
+		return "", false, nil
+	}
+	tuple, _, _ := gate.Tuple()
+	for i, id := range round.Slots {
+		slot, ok, err := s.Records[id].Tuple()
+		if err != nil || !ok || slot.Gate != tuple.Gate || slot.Round != round.Round || slot.Slot != i+1 || reg.Slots[i] != fmt.Sprintf("R%d", i+1) {
+			return "", false, nil
+		}
+	}
+	for _, candidate := range s.Panels {
+		dir := candidate.Dir
+		if candidate.Slug() != reg.Slug {
+			continue
+		}
+		var result *panel.Result
+		if gate.Status == "closed" {
+			matchingRound := false
+			for _, line := range s.Ledgers[dir] {
+				var event panel.RoundRecord
+				if err := json.Unmarshal(line, &event); err != nil {
+					return "", false, err
+				}
+				matchingRound = matchingRound || (event.Record == panel.RecordRound && event.Spec == s.SpecID && event.Round == round.Round && event.ReviewedHeadSHA == round.Subject && gatePanel(tuple, panel.Panel{BeadID: event.BeadID, Gate: event.Gate}))
+			}
+			if !matchingRound {
+				continue
+			}
+			result, err = panel.TallyRegisteredRound(dir, s.SpecID, round.Round, round.Subject)
+		} else {
+			if candidate.Panel.Abandoned || candidate.Panel.Round != round.Round || candidate.Panel.ReviewedHeadSHA != round.Subject || candidate.Panel.Spec != s.SpecID {
+				continue
+			}
+			result, err = panel.Tally(dir)
+		}
+		if err != nil {
+			return "", false, err
+		}
+		if result.Panel == nil || !gatePanel(tuple, *result.Panel) || result.Panel.Abandoned || result.Panel.Round != round.Round || result.RoundReviewedHeadSHA != round.Subject {
+			continue
+		}
+		if result.PassRule(true) {
+			return round.Subject, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// ItemDone reports whether completion has landed the accepted work item subject.
+func ItemDone(s State, item string) bool { return itemDone(s, item) }

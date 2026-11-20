@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"path/filepath"
 	"time"
 
@@ -14,9 +15,62 @@ import (
 )
 
 func PassGate(f *Fixture, gate, subject string) {
+	round, has, err := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	if !has {
+		round = kernel.GateRound{Round: 1, Subject: subject, SlotCount: 3, Slots: []string{}}
+	}
+	round.Subject = subject
+	reg, has, err := kernel.Decode[kernel.RegistrationRecord](f.State().Records[gate].Metadata, kernel.KeyRegistration)
+	f.Must(err)
+	if !has {
+		reg = kernel.RegistrationRecord{Slug: gate, Round: round.Round, Subject: subject}
+		for i := 1; i <= round.SlotCount; i++ {
+			reg.Slots = append(reg.Slots, fmt.Sprintf("R%d", i))
+		}
+	}
+	needsRegistration := !has || reg.Subject != subject
+	if has && reg.Subject != subject {
+		reg.Slug += "-" + subject
+	}
+	reg.Subject = subject
+	round.Round = reg.Round
+	round.SlotCount = len(reg.Slots)
+	round.Slots = nil
+	tuple, err := kernelid.Parse(gate)
+	f.Must(err)
+	for _, slot := range reg.Slots {
+		round.Slots = append(round.Slots, fmt.Sprintf("%s.r%d.%s", tuple.Gate, round.Round, slot))
+	}
+	Authorise(f, gate, round) //nolint:misspell // Keep the shared fixture name.
+	if needsRegistration {
+		Register(f, gate, reg)
+	}
+	seedPassingSlots(f, gate, reg)
 	f.Must(f.Store.WriteReceipt(gate, kernel.Receipt{Kind: "passed", Subject: subject, Retally: "passing-tally"}))
 	closeRecord(f, gate)
 }
+
+func seedPassingSlots(f *Fixture, gate string, reg kernel.RegistrationRecord) {
+	tuple, err := kernelid.Parse(gate)
+	f.Must(err)
+	dir := filepath.Join(f.SpecDir, "reviews", reg.Slug)
+	for _, slot := range reg.Slots {
+		v := paneltest.Verdict("APPROVE")
+		v.Slot, v.Round, v.ReviewedSHA, v.Model = slot, reg.Round, reg.Subject, "test-model"
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: reg.Slug, Slot: slot, Round: reg.Round}, paneltest.Bytes(f.t, v), func(p panel.Panel, roster panel.RosterSlot) (panel.SubmitResolution, error) {
+			return panel.SubmitResolution{Family: roster.Family, Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
+		})
+		f.Must(err)
+		id := fmt.Sprintf("%s.r%d.%s", tuple.Gate, reg.Round, slot)
+		if _, exists := f.State().Records[id]; !exists {
+			f.Create(id, gate)
+		}
+		f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Retally: "seeded-verdict"}))
+		closeRecord(f, id)
+	}
+}
+
 func closeRecord(f *Fixture, id string) {
 	f.Must(kernel.WithCASRetry(func() error {
 		r, err := f.Store.Lookup(id)
@@ -89,8 +143,7 @@ func Register(f *Fixture, gate string, registration kernel.RegistrationRecord) {
 	digest := "subject-digest"
 	if len(registration.Subject) == 40 || len(registration.Subject) == 64 {
 		listing, err := f.Command("git", "ls-tree", "-r", registration.Subject)
-		f.Must(err)
-		if len(listing) > 0 {
+		if err == nil && len(listing) > 0 {
 			digest, err = panel.SubjectDigest(string(listing), panel.Subject(gateKind, f.SpecDir))
 			f.Must(err)
 		}

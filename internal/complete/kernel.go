@@ -64,6 +64,12 @@ func prepareKernelComplete(s kernel.State, item string, apply bool) (kernel.Stat
 		if closed && kernel.ForcedClose(s, item) {
 			return fmt.Errorf("closed work item %s has not finished its gate\nrecovery: bd reopen %s", idrender.Bead(item), idrender.Bead(item))
 		}
+		if !apply {
+			if closed {
+				return fmt.Errorf("closed work item %s cannot be checked; use mindspec complete %s", idrender.Bead(item), idrender.Bead(item))
+			}
+			return nil
+		}
 		if closed && s.Merged[item] {
 			return errors.Join(kernel.CheckWorkItem(s, item), kernel.CheckPassedGate(s, kernel.GateBase(item)))
 		}
@@ -95,6 +101,9 @@ func finishKernelComplete(s kernel.State, item string) error {
 		accepted, err := kernel.AcceptedSubject(fresh, kernel.GateBase(item))
 		if err != nil {
 			return err
+		}
+		if accepted == "" {
+			return fmt.Errorf("work item %s has no accepted subject", idrender.Bead(item))
 		}
 		if fresh.Records[item].Metadata[kernel.KeyCompletion] != accepted {
 			if err = fresh.Store.WriteMetadata(item, map[string]any{kernel.KeyCompletion: accepted}); err != nil {

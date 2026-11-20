@@ -116,7 +116,7 @@ func NewRepo(t testing.TB) string {
 	root := gitRepo(t)
 	// Pin a local store before init can search enclosing configuration.
 	write(t, filepath.Join(root, ".beads", "config.yaml"), []byte("sync.remote: \"\"\nmetrics.disabled: true\n"))
-	if out, err := command(t, root, path, "init", "--sandbox", "--skip-hooks", "--skip-agents", "--non-interactive", "--remote=", "-q", "--database", "beads", "--prefix", "kernel"); err != nil {
+	if out, err := commandWithTimeout(t, root, 90*time.Second, false, path, "init", "--sandbox", "--skip-hooks", "--skip-agents", "--non-interactive", "--remote=", "-q", "--database", "beads", "--prefix", "kernel"); err != nil {
 		t.Fatalf("bd init: %v %s", err, out)
 	}
 	if _, err := bead.EnsureBeadsConfig(root, false); err != nil {

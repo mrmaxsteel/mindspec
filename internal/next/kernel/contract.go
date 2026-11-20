@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-var ErrNotBuilt = errors.New("this kernel operation is not available yet\nrecovery: mindspec next")
 var ErrPreKernel = errors.New("this spec uses the existing lifecycle; use mindspec next, mindspec complete and mindspec impl approve\nrecovery: mindspec next")
 
 type Subject struct {

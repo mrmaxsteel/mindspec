@@ -1,6 +1,7 @@
 package kernel_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -511,19 +512,20 @@ func TestS134Reducer_BranchRemovalKeepsMerge(t *testing.T) {
 	}
 }
 
-func TestS134Reducer_PassedGateHasPendingAuthorisation(t *testing.T) {
+func TestS134Reducer_PassedGateRejectsUnregisteredAuthorization(t *testing.T) {
 	f := reducerFixture(t)
 	item := f.Items[0]
 	gate := item + ".review"
 	registerRound(t, f, 1)
 	closePass(t, f, gate+".r2.fix")
-	authorise(t, f, 2)
 	kerneltest.PassGate(f, gate, reducerGit(t, f, "rev-parse", "bead/"+item))
+	authorise(t, f, 2)
 	before := kerneltest.Snapshot(t, f)
-	out := reduce(t, f, true)
-	if !hasRun(out, "mindspec", "complete", item) || hasRun(out, "mindspec", "panel", "create", item) || kerneltest.Snapshot(t, f) != before {
-		t.Fatalf("passed gate with a pending authorisation changed: %+v", out)
+	out := reduce(t, f, false)
+	if hasRun(out, "mindspec", "complete", item) || hasRun(out, "mindspec", "panel", "create", item) || kerneltest.Snapshot(t, f) != before {
+		t.Fatalf("unregistered authorization advanced the frozen gate: %+v", out)
 	}
+	assertCloseFlag(t, out, "unreceipted-close", gate, true)
 }
 
 func TestS134Reducer_UnapprovedReadOnlyWritesNothing(t *testing.T) {
@@ -604,5 +606,26 @@ func TestS134Reducer_BranchRemovalRejectsWrongParent(t *testing.T) {
 	}
 	if out := reduce(t, f, true); len(out.Actions) != 0 {
 		t.Fatalf("wrong second parent released downstream: %+v", out)
+	}
+}
+
+func TestS134Reducer_FrozenGateScopesLedgerRound(t *testing.T) {
+	f := reducerFixture(t)
+	passingPanel(t, f)
+	reduce(t, f, true)
+	state := f.State()
+	gate := f.Items[0] + ".review"
+	round, _, err := kernel.Decode[kernel.GateRound](state.Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	dir := filepath.Join(t.TempDir(), "panel")
+	f.Must(os.MkdirAll(dir, 0755))
+	item := f.Items[0]
+	event := panel.RoundRecord{Record: panel.RecordRound, Spec: "002-y", Round: round.Round, ReviewedHeadSHA: round.Subject, Gate: "bead", BeadID: &item}
+	line, err := json.Marshal(event)
+	f.Must(err)
+	state.Ledgers[dir] = [][]byte{line}
+	state.Panels = append([]panel.Registration{{Dir: dir, Panel: panel.Panel{Spec: "002-y", Round: round.Round, ReviewedHeadSHA: round.Subject, Gate: "bead", BeadID: &item}}}, state.Panels...)
+	if err := kernel.CheckPassedGate(state, gate); err != nil {
+		t.Fatalf("another spec's same-name panel invalidated the passed gate: %v", err)
 	}
 }

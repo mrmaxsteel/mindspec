@@ -182,6 +182,9 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 					}
 					if strings.EqualFold(fm.Status, "Approved") && !slices.Contains(fm.BeadIDs, item.ID) {
 						info.mapped, info.why = false, "not a recorded work item of the approved plan"
+						if len(fm.BeadIDs) == 0 {
+							info.why = "the approved plan has no bead_ids; record the ids of its approved work items in plan.md, then run mindspec next --spec " + idrender.Spec(specFlag)
+						}
 					}
 				}
 			}

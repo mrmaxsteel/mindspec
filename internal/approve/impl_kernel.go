@@ -89,6 +89,11 @@ func implKernelPreflight(s kernel.State) error {
 	// Compute refusals first so malformed audit records cannot hide a blocking id.
 	flags, blockerErr := kernel.ApprovalBlockers(s)
 	var gateErr error
+	for _, item := range s.Items {
+		if !kernel.ItemDone(s, item) {
+			gateErr = errors.Join(gateErr, fmt.Errorf("work item %s is not done; run mindspec complete %s", idrender.Bead(item), idrender.Bead(item)))
+		}
+	}
 	for _, gate := range s.Gates {
 		r := s.Records[gate]
 		receipt, ok, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)

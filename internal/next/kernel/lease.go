@@ -133,7 +133,22 @@ func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, erro
 					}
 				}
 				if options.Take {
-					updates[KeyTake] = TakeReason{Reason: options.Reason, At: s.At, Generation: lease.Generation}
+					history, has, err := Decode[[]TakeReason](r.Metadata, KeyTakes)
+					if err != nil {
+						return err
+					}
+					if !has {
+						old, ok, err := Decode[TakeReason](r.Metadata, KeyTake)
+						if err != nil {
+							return err
+						}
+						if ok && old.Generation > 0 {
+							history = append(history, old)
+						}
+					}
+					take := TakeReason{Reason: options.Reason, At: s.At, Generation: lease.Generation}
+					updates[KeyTakes] = append(history, take)
+					updates[KeyTake] = take
 				}
 			}
 			updates[KeyLease] = lease
