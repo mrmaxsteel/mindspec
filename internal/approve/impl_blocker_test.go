@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,9 +21,24 @@ func TestS134ImplApprove_MergedForeignBlocker(t *testing.T) {
 		t.Fatal("fixture is not closed and merged")
 	}
 	before := kerneltest.Snapshot(t, f)
-	_, err := ApproveImpl(f.Root, f.SpecID, ex)
+	flags, err := kernel.ApprovalBlockers(f.State())
+	f.Must(err)
+	i := slices.IndexFunc(flags, func(flag kernel.Flag) bool { return flag.Step == item })
+	if i < 0 || flags[i].Code != "work-item-blocked" ||
+		flags[i].Message != "step is held or blocked by foreign-bug" ||
+		!slices.Equal(flags[i].Repair, []string{"mindspec", "next-action"}) {
+		t.Fatalf("blocker diagnostic: %+v", flags)
+	}
+	refusal := kernel.CheckWorkItem(f.State(), item)
+	if refusal == nil || !strings.Contains(refusal.Error(), "recovery: "+strings.Join(flags[i].Repair, " ")) {
+		t.Fatalf("repair differs from work-item refusal: %v", refusal)
+	}
+	_, err = ApproveImpl(f.Root, f.SpecID, ex)
 	if err == nil || !strings.Contains(err.Error(), "step is held or blocked by foreign-bug") {
 		t.Fatalf("approval bypassed blocker: %v", err)
+	}
+	if !strings.Contains(err.Error(), "work-item-blocked: "+item) || !strings.Contains(err.Error(), "; repair: mindspec next-action") {
+		t.Fatalf("approval omitted kind or repair: %v", err)
 	}
 	if kerneltest.Snapshot(t, f) != before {
 		t.Fatal("refused approval wrote")

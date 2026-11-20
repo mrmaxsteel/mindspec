@@ -114,6 +114,9 @@ func implKernelPreflight(s kernel.State) error {
 		var reasons []string
 		for _, flag := range flags {
 			line := termsafe.Escape(flag.Code) + ": " + termsafe.Escape(flag.Step)
+			if flag.Message != "" {
+				line += "; " + termsafe.Escape(flag.Message)
+			}
 			if len(flag.Repair) > 0 {
 				args := make([]string, len(flag.Repair))
 				for i, arg := range flag.Repair {

@@ -184,6 +184,25 @@ func TestS134Complete_DeletedRawBranchCannotComplete(t *testing.T) {
 	}
 }
 
+func TestS134Complete_ClosedEpicMissingSubject(t *testing.T) {
+	saveAndRestore(t)
+	f, gate, accepted := completeKernelFixture(t)
+	item := f.Items[0]
+	rawLandCompletion(t, f)
+	f.Must(f.Store.SetStatusIf(item, "open", "closed"))
+	f.Must(f.Store.SetStatusIf(f.Epic, "open", "closed"))
+	_, err := f.Command("git", "branch", "-D", "bead/"+item)
+	f.Must(err)
+	installCompleteKernelRun(t, f)
+	_, err = Run(f.Root, item, f.SpecID, "", &s134CompletionExecutor{MockExecutor: &executor.MockExecutor{}, fixture: f}, CompleteOpts{})
+	if err == nil || !strings.Contains(err.Error(), "head  differs from accepted subject "+accepted+" for gate "+gate) {
+		t.Fatalf("missing subject bypassed ended gate check: %v", err)
+	}
+	if f.State().Records[item].Metadata[kernel.KeyCompletion] != nil || completionReleased(t, f, f.Store.Lookup, f.Items[1:]) {
+		t.Fatal("missing subject released dependents")
+	}
+}
+
 func TestS134Complete_RecordedCompletionStillRespectsBlocker(t *testing.T) {
 	saveAndRestore(t)
 	f, _, accepted := completeKernelFixture(t)
