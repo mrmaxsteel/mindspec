@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/spf13/cobra"
 )
@@ -31,6 +33,7 @@ var submitCmd = &cobra.Command{Use: "submit <step-or-decision>", Short: "Submit 
 	if options.Answer != "" {
 		out, err = kernel.Answer(state, options.Step, options.Answer)
 	} else {
+		options.BeforeClose = func(receipt kernel.Receipt) error { return publishSubmittedReview(state, options.Step, receipt) }
 		out, err = kernel.Submit(state, options)
 	}
 	if err != nil {
@@ -66,4 +69,56 @@ func init() {
 	submitCmd.Flags().String("answer", "", "Listed option for a decision")
 	submitCmd.MarkFlagsMutuallyExclusive("artifact", "commit", "answer")
 	rootCmd.AddCommand(submitCmd)
+}
+
+// publishSubmittedReview makes a committed slot verdict visible to the panel tally.
+// The kernel invokes this only after it validates the token and artifact.
+func publishSubmittedReview(state kernel.State, step string, receipt kernel.Receipt) error {
+	row := state.Records[step]
+	tuple, _, err := row.Tuple()
+	if err != nil || tuple.Kind != "review-slot" {
+		return err
+	}
+	for _, reg := range state.Panels {
+		if reg.Err != nil {
+			return reg.Err
+		}
+		if reg.Panel.KernelGate == "" || state.Records[reg.Panel.KernelGate].ID != row.Parent {
+			continue
+		}
+		data, exists, err := newExecutor(state.Root).FileAtRefOrAbsent(receipt.Commit, receipt.Path)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return panelVerbFailure(fmt.Errorf("committed verdict is missing"))
+		}
+		cfg, err := config.Load(state.Root)
+		if err != nil {
+			return err
+		}
+		iso, err := config.IsolationRootFor(state.Root)
+		if err != nil {
+			return err
+		}
+		slot := fmt.Sprintf("R%d", tuple.Slot)
+		layout, err := panel.NewSlotLayout(state.Root, iso, state.SpecID, reg.Slug(), tuple.Round, slot)
+		if err != nil {
+			return err
+		}
+		_, err = panel.Submit(panel.SubmitTarget{Dir: reg.Dir, Spec: state.SpecID, Panel: reg.Slug(), Slot: slot, Round: tuple.Round, SlotDir: layout.Dir}, data, func(p panel.Panel, roster panel.RosterSlot) (panel.SubmitResolution, error) {
+			resolved, err := resolveEffectivePanelSlot(cfg, reg.Dir, p, roster)
+			if err != nil {
+				return resolved, err
+			}
+			item := ""
+			if p.BeadID != nil {
+				item = *p.BeadID
+			}
+			resolved.Landed, err = landedBindingFor(panelSubmitMetadataFn, item, reg.Slug(), tuple.Round)
+			return resolved, err
+		})
+		return err
+	}
+	return panelVerbFailure(fmt.Errorf("slot has no registered panel"))
 }

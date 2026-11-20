@@ -223,7 +223,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if err := validate.SpecID(specID); err != nil {
 		return nil, err
 	}
-	// Find the epic for this spec directly (ADR-0023).
+	// Find the owning epic directly from the tracker.
 	epicID, err := phase.FindEpicBySpecID(specID)
 	if err != nil {
 		return nil, fmt.Errorf("no epic found for spec %s: %w", specID, err)

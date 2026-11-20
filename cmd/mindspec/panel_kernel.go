@@ -170,23 +170,30 @@ func panelCreateKernelGate(root, slug, spec, target, item string) string {
 	if spec != "" && slug == spec {
 		return "final_review"
 	}
-	dirs := []string{}
+	specIDs := []string{}
 	if spec != "" {
 		if idvalidate.SpecID(spec) != nil {
 			return ""
 		}
-		if dir, err := workspace.SpecDir(root, spec); err == nil {
-			dirs = append(dirs, dir)
-		}
+		specIDs = append(specIDs, spec)
 	} else {
 		entries, _ := os.ReadDir(workspace.SpecsDir(root))
 		for _, entry := range entries {
 			if entry.IsDir() && idvalidate.SpecID(entry.Name()) == nil {
-				dirs = append(dirs, filepath.Join(workspace.SpecsDir(root), entry.Name()))
+				specIDs = append(specIDs, entry.Name())
 			}
 		}
 	}
+	dirs := []string{}
+	for _, id := range specIDs {
+		if dir, err := workspace.SpecDir(root, id); err == nil {
+			dirs = append(dirs, dir)
+		}
+	}
 	for _, dir := range dirs {
+		if slug == filepath.Base(dir) {
+			return "final_review"
+		}
 		data, err := os.ReadFile(filepath.Join(dir, "plan.md"))
 		if err != nil {
 			continue

@@ -458,7 +458,11 @@ merge, unset the `mindspec_merge_only` metadata key.
 ## Kernel loop
 
 Approve a new plan to enrol its work items and pin its policy.
-Run `mindspec next-action <spec> --apply` to create authorised steps.
+Run the loop from the spec worktree.
+Panel creation resolves work-item and final-review targets from its approved plan.
+Run `mindspec next-action <spec> --apply --json` to create authorised steps.
+Lease each returned actor step with `mindspec lease <step>`.
+Keep the printed token for its evidence submission.
 Use `mindspec next <work-item>` to lease its current implementation step.
 The command prints the lease generation and token.
 The first implementation lease advances the phase to implementation.
@@ -468,8 +472,19 @@ A live lease requires `mindspec lease --take` with a reason.
 An automatic selection skips halted specs.
 An older approved plan selects only its recorded work items.
 
-Submit the implementation evidence with its lease token.
+Submit the implementation commit with its lease token.
 Run each command in the returned `run` list.
+Run apply again to obtain the review slots after panel creation.
+Commit each verdict in a separate evidence worktree.
+Submit its artifact path with the slot lease token.
+The submission publishes the committed verdict before it closes the slot.
+Answer an open decision before leasing its fix.
+Submit the fix commit before opening the next round.
+Repeat apply, lease, submission, and the returned commands until the status is `done`.
+After all work items merge and the final gate passes, apply returns implementation approval.
+Open children and blockers hold that command.
+The final approval prints durable audit counts and exports the tracker state.
+An approval retry preserves those counts.
 Complete a work item after its highest review attempt passes.
 Close every child first.
 Completion checks the accepted subject from the gate receipt and panel ledger.

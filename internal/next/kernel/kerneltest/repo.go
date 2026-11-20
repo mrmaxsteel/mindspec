@@ -30,13 +30,21 @@ func RequireBD(t testing.TB) string {
 }
 func command(t testing.TB, root, name string, args ...string) ([]byte, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	return commandWithTimeout(t, root, 30*time.Second, false, name, args...)
+}
+func commandWithTimeout(t testing.TB, root string, limit time.Duration, combined bool, name string, args ...string) ([]byte, error) {
+	t.Helper()
+	return commandIn(t, root, root, limit, combined, name, args...)
+}
+func commandIn(t testing.TB, root, dir string, limit time.Duration, combined bool, name string, args ...string) ([]byte, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = root
+	cmd.Dir = dir
 	for _, e := range os.Environ() {
 		key, _, _ := strings.Cut(e, "=")
-		if key != "HOME" && !strings.HasPrefix(key, "XDG_") && !strings.HasPrefix(key, "BEADS_") && !strings.HasPrefix(key, "BD_") && !strings.HasPrefix(key, "DOLT_") && !strings.HasPrefix(key, "GIT_") {
+		if key != "HOME" && !strings.HasPrefix(key, "XDG_") && !strings.HasPrefix(key, "BEADS_") && !strings.HasPrefix(key, "BD_") && !strings.HasPrefix(key, "DOLT_") && !strings.HasPrefix(key, "GIT_") && !strings.HasPrefix(key, "OTEL_") && key != "CLAUDE_CODE_ENABLE_TELEMETRY" {
 			cmd.Env = append(cmd.Env, e)
 		}
 	}
@@ -54,6 +62,9 @@ func command(t testing.TB, root, name string, args ...string) ([]byte, error) {
 		cmd.Env = append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(root), "BEADS_DIR="+filepath.Join(root, ".beads"))
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
+	if combined {
+		return cmd.CombinedOutput()
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		if e, ok := err.(*exec.ExitError); ok {
@@ -82,7 +93,7 @@ func NewRepo(t testing.TB) string {
 	path := RequireBD(t)
 	root := gitRepo(t)
 	// Pin a local store before init can search enclosing configuration.
-	write(t, filepath.Join(root, ".beads", "config.yaml"), []byte("sync.remote: \"\"\n"))
+	write(t, filepath.Join(root, ".beads", "config.yaml"), []byte("sync.remote: \"\"\nmetrics.disabled: true\n"))
 	if out, err := command(t, root, path, "init", "--sandbox", "--skip-hooks", "--skip-agents", "--non-interactive", "--remote=", "-q", "--database", "beads", "--prefix", "kernel"); err != nil {
 		t.Fatalf("bd init: %v %s", err, out)
 	}
@@ -123,4 +134,22 @@ func pinnedVersion(output string) bool {
 		}
 	}
 	return false
+}
+
+// EmptyRepo creates a real isolated repository without seeding lifecycle records.
+// Binary tests use it to create their fixtures through the public commands.
+func EmptyRepo(t testing.TB) *Fixture {
+	t.Helper()
+	return &Fixture{Root: NewRepo(t), t: t}
+}
+
+// BinaryCommand captures both output streams with a bounded lifecycle timeout.
+// It uses the same isolated environment as tracker and git fixture commands.
+func (f *Fixture) BinaryCommand(name string, args ...string) ([]byte, error) {
+	return commandWithTimeout(f.t, f.Root, 4*time.Minute, true, name, args...)
+}
+
+// BinaryCommandIn retains the store and home while selecting a live worktree.
+func (f *Fixture) BinaryCommandIn(dir, name string, args ...string) ([]byte, error) {
+	return commandIn(f.t, f.Root, dir, 4*time.Minute, true, name, args...)
 }

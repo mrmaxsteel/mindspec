@@ -1,8 +1,10 @@
 package kerneltest
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,4 +38,45 @@ func TestS134Fixture_Isolation(t *testing.T) {
 	if _, err := Runner(t, root)("list", "--all", "--json"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestS134Fixture_EmptyBinaryRepo(t *testing.T) {
+	f := EmptyRepo(t)
+	rows, err := Runner(t, f.Root)("list", "--all", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := os.ReadFile(filepath.Join(f.Root, ".beads/config.yaml"))
+	if err != nil || !strings.Contains(string(config), "metrics.disabled: true") {
+		t.Fatalf("network metrics must be disabled: %v", err)
+	}
+	var records []json.RawMessage
+	if err := json.Unmarshal(rows, &records); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("empty repository seeded records: %s", rows)
+	}
+	out, err := f.BinaryCommand("sh", "-c", "printf stdout; printf stderr >&2")
+	if err != nil || string(out) != "stdoutstderr" {
+		t.Fatalf("combined binary output: %s %v", out, err)
+	}
+	caller := filepath.Join(f.Root, "caller")
+	if err := os.Mkdir(caller, 0700); err != nil {
+		t.Fatal(err)
+	}
+	out, err = f.BinaryCommandIn(caller, "pwd")
+	physical, resolveErr := filepath.EvalSymlinks(caller)
+	if err != nil || resolveErr != nil || strings.TrimSpace(string(out)) != physical {
+		t.Fatalf("binary cwd: %s %v %v", out, err, resolveErr)
+	}
+	rootHome, err := f.BinaryCommand("sh", "-c", `printf %s "$HOME"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callerHome, err := f.BinaryCommandIn(caller, "sh", "-c", `printf %s "$HOME"`)
+	if err != nil || len(rootHome) == 0 || string(callerHome) != string(rootHome) {
+		t.Fatal("binary worktree changed the isolated home")
+	}
+
 }
