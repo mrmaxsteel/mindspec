@@ -380,7 +380,11 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 			roster[i] = panel.RosterSlot{Slot: r.Slot, Family: r.Family, Model: r.Model, Lens: r.Lens}
 			slots[i] = r.Slot
 		}
-		dir, specDir, e := panelDirFor(s.Root, s.SpecID, slug, p.Gate)
+		panelRoot := workspace.TreeRootForSpecDir(s.SpecDir)
+		if panelRoot == "" {
+			panelRoot = s.Root
+		}
+		dir, specDir, e := panelDirFor(panelRoot, s.SpecID, slug, p.Gate)
 		if e != nil {
 			return e
 		}

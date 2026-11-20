@@ -64,6 +64,11 @@ func newKernelE2E(t *testing.T, bin string, sizes ...int) *kernelE2E {
 
 func newKernelE2EWithFixture(t *testing.T, bin string, f *kerneltest.Fixture, sizes ...int) *kernelE2E {
 	t.Helper()
+	return newKernelE2EWithLayout(t, bin, f, ".mindspec", sizes...)
+}
+
+func newKernelE2EWithLayout(t *testing.T, bin string, f *kerneltest.Fixture, docs string, sizes ...int) *kernelE2E {
+	t.Helper()
 	e := &kernelE2E{t: t, f: f, bin: bin}
 	root := f.Root
 	t.Logf("sandbox %s", root)
@@ -72,14 +77,14 @@ func newKernelE2EWithFixture(t *testing.T, bin string, f *kerneltest.Fixture, si
 		size = sizes[0]
 	}
 	f.SpecID = "001-x"
-	f.SpecDir = filepath.Join(root, ".mindspec/specs", f.SpecID)
+	f.SpecDir = filepath.Join(root, docs, "specs", f.SpecID)
 	e.git(root, "config", "user.name", "Kernel Test")
 	e.git(root, "config", "user.email", "kernel@example.invalid")
 	e.git(root, "config", "core.hooksPath", "/dev/null")
 	e.git(root, "branch", "-M", "main")
 	e.write(root, ".gitignore", ".worktrees/\n.mindspec/phase.lock\n.beads/*\n!.beads/config.yaml\n!.beads/issues.jsonl\n")
 	e.write(root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\nauto_open_finalize_pr: false\npanel:\n  reviewers:\n    - family: harness\n      model: test-model\n      lens: correctness\n      count: 3\n")
-	e.write(root, ".mindspec/adr/ADR-9001.md", "# ADR-9001: Fixture\n\n- **Status**: Accepted\n- **Domain(s)**: workflow\n\n## Decision\nExercise the local kernel.\n")
+	e.write(root, filepath.Join(docs, "adr", "ADR-9001.md"), "# ADR-9001: Fixture\n\n- **Status**: Accepted\n- **Domain(s)**: workflow\n\n## Decision\nExercise the local kernel.\n")
 	e.write(root, ".beads/issues.jsonl", "")
 	e.git(root, "add", "-f", ".beads/config.yaml", ".beads/issues.jsonl")
 	e.git(root, "add", ".")
@@ -91,9 +96,9 @@ func newKernelE2EWithFixture(t *testing.T, bin string, f *kerneltest.Fixture, si
 	e.must(err)
 	e.cwd = filepath.Join(root, ".worktrees", name)
 	e.git(root, "worktree", "add", e.cwd, branch)
-	f.SpecDir = filepath.Join(e.cwd, ".mindspec/specs", f.SpecID)
-	e.write(e.cwd, ".mindspec/specs/001-x/spec.md", "---\nstatus: Approved\n---\n# Example\n\n## Goal\nExercise the kernel.\n\n## Impacted Domains\n- workflow\n")
-	e.write(e.cwd, ".mindspec/specs/001-x/plan.md", strings.Replace(kerneltest.EnrolmentPlan(f.SpecID, size), "version:", "adr_citations: [ADR-9001]\nversion:", 1))
+	f.SpecDir = filepath.Join(e.cwd, docs, "specs", f.SpecID)
+	e.write(e.cwd, filepath.Join(docs, "specs", f.SpecID, "spec.md"), "---\nstatus: Approved\n---\n# Example\n\n## Goal\nExercise the kernel.\n\n## Impacted Domains\n- workflow\n")
+	e.write(e.cwd, filepath.Join(docs, "specs", f.SpecID, "plan.md"), strings.Replace(kerneltest.EnrolmentPlan(f.SpecID, size), "version:", "adr_citations: [ADR-9001]\nversion:", 1))
 	e.git(e.cwd, "add", ".")
 	e.git(e.cwd, "commit", "-qm", "spec")
 	var epic kernel.Record

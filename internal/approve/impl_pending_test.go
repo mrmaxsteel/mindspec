@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -97,6 +99,18 @@ func TestS134ImplApprove_SupersedeADRBeforeMutation(t *testing.T) {
 	}
 }
 
+type pendingPanelPolicyExecutor struct {
+	executor.Executor
+	path string
+}
+
+func (e *pendingPanelPolicyExecutor) FinalizeEpic(epicID, specID, branch string, allow []string, reason string, resolve, remote bool, policies ...executor.FinalizeArtifactPolicy) (executor.FinalizeResult, error) {
+	if len(policies) != 1 || !panel.FinalizeArtifactPath(e.path, policies[0].SpecDir, policies[0].PanelDirs...) {
+		return executor.FinalizeResult{}, fmt.Errorf("finalization policy refused recorded path %s", e.path)
+	}
+	return e.Executor.FinalizeEpic(epicID, specID, branch, allow, reason, resolve, remote, policies...)
+}
+
 func TestS134ImplApprove_PendingPanelAuthority(t *testing.T) {
 	for _, dir := range []string{"review/evil", "reviews/evil", "reviews/other-spec-panel", "recorded-bead", "recorded-final"} {
 		for _, file := range []string{"x.go", "x_test.go"} {
@@ -119,7 +133,7 @@ func TestS134ImplApprove_PendingPanelAuthority(t *testing.T) {
 				}
 				ex.StatusResult = "?? " + name
 				before := kerneltest.Snapshot(t, f)
-				_, err := ApproveImpl(f.Root, f.SpecID, ex)
+				_, err := ApproveImpl(f.Root, f.SpecID, &pendingPanelPolicyExecutor{Executor: ex, path: name})
 				if allowed {
 					if err != nil || len(ex.CallsTo("FinalizeEpic")) != 1 {
 						t.Fatalf("recorded panel directory refused: %v", err)

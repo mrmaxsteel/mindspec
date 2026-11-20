@@ -1462,6 +1462,9 @@ Implementation commits must follow the claim base on the work branch.
 Fix commits must follow the round subject on the gate branch.
 Final fixes use the spec branch.
 Review verdicts must match the active slot, round, and subject.
+Verdict and judgment artifact paths use the same recorded panel directory set as subject checks.
+A stored directory list replaces the canonical path; a path outside every recorded directory is refused.
+Enrolled panel creation writes in the worktree that contains the spec, including non-flat layouts.
 An artifact can come from any linked worktree of the same repository.
 Its receipt uses the path relative to that worktree root.
 The command writes a receipt before it closes the step.
@@ -1626,7 +1629,8 @@ A commit that changes only directories registered to the gate does not move its 
 An exempt directory must be a lexical `review/<slug>` or `reviews/<slug>` location under
 the repository root, `.mindspec`, or the spec directory. Paths are relative to the root
 of the worktree that contains them, even when the store uses another checkout.
-Every directory component below that root must be a real directory. A symlink grants no exemption.
+Existing directory components below that root must be real directories. A symlink grants no exemption.
+A recorded directory remains in the set when it is absent from disk.
 Only directories recorded by the kernel store for the same gate grant an exemption.
 Panel creation records the directory and keeps earlier directories of that gate.
 An older record with no directory list uses its canonical spec review location.

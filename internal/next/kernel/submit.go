@@ -409,20 +409,12 @@ func checkVerdict(s State, r Record, receipt Receipt) error {
 	if !listed {
 		return actorFailure("slot is not in the active gate round")
 	}
-	reg, exists, err := Decode[RegistrationRecord](s.Records[activeGate(s, t.Gate)].Metadata, KeyRegistration)
+	_, exists, err := Decode[RegistrationRecord](s.Records[activeGate(s, t.Gate)].Metadata, KeyRegistration)
 	if err != nil {
 		return err
 	}
-	if exists {
-		prefix, e := actorGit(s.SpecDir, "rev-parse", "--show-prefix")
-		if e != nil {
-			return e
-		}
-		expected := filepath.Join(prefix, "reviews", reg.Slug)
-		rel, e := filepath.Rel(expected, filepath.FromSlash(receipt.Path))
-		if e != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return actorFailure("verdict must be in its registered panel directory")
-		}
+	if exists && !registeredPanelArtifact(s, t.Gate, receipt.Path) {
+		return actorFailure("verdict must be in its registered panel directory")
 	}
 	return nil
 }

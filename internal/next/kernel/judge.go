@@ -107,28 +107,6 @@ func gateRebind(s State, g Record) (string, string, error) {
 	return accepted, evidence, nil
 }
 
-func judgePanelPath(dir string) (string, error) {
-	prefix, err := actorGit(dir, "rev-parse", "--show-prefix")
-	return strings.TrimSuffix(prefix, "/"), err
-}
-
-// registeredJudgePanel includes registrations retained only in the ledger.
-func registeredJudgePanel(s State, t Tuple, p panel.Registration) bool {
-	if p.Panel.Spec == s.SpecID && gatePanel(t, p.Panel) {
-		return true
-	}
-	for _, line := range s.Ledgers[p.Dir] {
-		var event panel.RoundRecord
-		if json.Unmarshal(line, &event) != nil || event.Record != panel.RecordRound || event.Spec != s.SpecID {
-			continue
-		}
-		if gatePanel(t, panel.Panel{BeadID: event.BeadID, Gate: event.Gate}) {
-			return true
-		}
-	}
-	return false
-}
-
 // effectiveSubject skips commits that change only this gate's panel directories.
 // A merge is compared with its first parent. An empty commit moves the subject.
 func effectiveSubject(s State, gate string) (string, error) {
@@ -215,6 +193,9 @@ func lexicalPanelPath(s State, dir string) (string, bool) {
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {
 		current = filepath.Join(current, part)
 		info, err := os.Lstat(current)
+		if os.IsNotExist(err) {
+			continue
+		}
 		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return "", false
 		}
@@ -302,6 +283,15 @@ func RegisteredPanelPaths(s State, gate string) []string {
 		}
 	}
 	return paths
+}
+
+func registeredPanelArtifact(s State, gate, path string) bool {
+	for _, dir := range RegisteredPanelPaths(s, gate) {
+		if strings.HasPrefix(path, dir) {
+			return true
+		}
+	}
+	return false
 }
 
 // FinalizePanelPaths returns recorded panel directories for this spec's gates.
@@ -539,18 +529,7 @@ func validateJudgement(s State, r Record, receipt Receipt, current bool) error {
 	if !registered {
 		return actorFailure("judgement needs a registered panel directory")
 	}
-	dir := filepath.Join(s.SpecDir, "reviews", reg.Slug)
-	for _, p := range s.Panels {
-		if p.Slug() == reg.Slug && registeredJudgePanel(s, t, p) && (p.Panel.Round == 0 || p.Panel.Round == reg.Round) {
-			dir = p.Dir
-			break
-		}
-	}
-	rel, err := judgePanelPath(dir)
-	if err != nil {
-		return err
-	}
-	if !strings.HasPrefix(receipt.Path, filepath.ToSlash(rel)+"/") {
+	if !registeredPanelArtifact(s, gate, receipt.Path) {
 		return actorFailure("judgement must be in its registered panel directory")
 	}
 	switch j.Value {

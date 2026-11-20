@@ -1,0 +1,104 @@
+package kernel_test
+
+import (
+	"encoding/json"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
+)
+
+func TestS134Submit_RecordedPanelDirectory(t *testing.T) {
+	for _, mode := range []string{"recorded-root", "recorded-flat", "old-flat", "unrecorded-root", "unrecorded-flat"} {
+		t.Run(mode, func(t *testing.T) {
+			f, id, lease, subject := slotFixture(t)
+			gate := f.Items[0] + ".review"
+			flat, err := filepath.Rel(f.Root, filepath.Join(f.SpecDir, "reviews", "panel"))
+			f.Must(err)
+			dir := "review/panel"
+			reg := kernel.RegistrationRecord{Slug: "panel", Round: 1, Subject: subject, Slots: []string{"R1", "R2"}, Directories: []string{dir}}
+			switch mode {
+			case "recorded-flat":
+				dir = filepath.ToSlash(flat)
+				reg.Directories = []string{dir}
+			case "old-flat":
+				dir = filepath.ToSlash(flat)
+				reg.Directories = nil
+			case "unrecorded-root":
+				dir = "review/other"
+			case "unrecorded-flat":
+				dir = filepath.ToSlash(flat)
+			}
+			f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRegistration, reg)))
+			path := filepath.Join(dir, "verdict.json")
+			actorCommit(t, f, path, verdictBytes(subject, "R1"), "")
+			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: filepath.Join(f.Root, path)})
+			if strings.HasPrefix(mode, "unrecorded") {
+				if err == nil || !strings.Contains(err.Error(), "verdict must be in its registered panel directory") {
+					t.Fatalf("unrecorded verdict: %v", err)
+				}
+				if actorRecord(t, f, id).Status == "closed" {
+					t.Fatal("unrecorded verdict closed slot")
+				}
+				return
+			}
+			f.Must(err)
+			receipt := actorReceipt(t, f, id)
+			if actorRecord(t, f, id).Status != "closed" || receipt.Path != filepath.ToSlash(path) || kernel.ValidReceipt(f.Root, receipt) != nil {
+				t.Fatalf("missing committed verdict receipt: %+v", receipt)
+			}
+		})
+	}
+}
+
+func TestS134Judge_RecordedPanelDirectory(t *testing.T) {
+	for _, mode := range []string{"recorded-root", "unrecorded-root", "unrecorded-flat"} {
+		t.Run(mode, func(t *testing.T) {
+			f, gate, old := judgeFixture(t)
+			reg, _, err := kernel.Decode[kernel.RegistrationRecord](actorRecord(t, f, gate).Metadata, kernel.KeyRegistration)
+			f.Must(err)
+			reg.Directories = []string{"review/panel"}
+			f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRegistration, reg)))
+			newest := judgeChange(t, f)
+			reduce(t, f, true)
+			id := gate + ".judge.a1"
+			lease := leaseActor(t, f, id, kernel.LeaseDeps{})
+			wt := filepath.Join(t.TempDir(), "evidence")
+			reducerGit(t, f, "worktree", "add", "--detach", wt, newest)
+			data, err := json.Marshal(kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "same result"})
+			f.Must(err)
+			path := "review/panel/judgement.json"
+			if mode == "unrecorded-root" {
+				path = "review/other/judgement.json"
+			}
+			if mode == "unrecorded-flat" {
+				rel, e := filepath.Rel(f.Root, filepath.Join(f.SpecDir, "reviews", reg.Slug, "judgement.json"))
+				f.Must(e)
+				path = filepath.ToSlash(rel)
+			}
+			mainRoot := f.Root
+			f.Root = wt
+			judgeCommit(t, f, path, string(data))
+			f.Root = mainRoot
+			before := kerneltest.Snapshot(t, f)
+			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: filepath.Join(wt, filepath.FromSlash(path))})
+			if mode != "recorded-root" {
+				if err == nil || !strings.Contains(err.Error(), "judgement must be in its registered panel directory") {
+					t.Fatalf("unrecorded judgement: %v", err)
+				}
+				if before != kerneltest.Snapshot(t, f) {
+					t.Fatal("location refusal wrote state")
+				}
+				return
+			}
+			f.Must(err)
+			accepted, err := kernel.AcceptedSubject(f.State(), gate)
+			f.Must(err)
+			if accepted != newest {
+				t.Fatalf("accepted=%s want=%s", accepted, newest)
+			}
+		})
+	}
+}
