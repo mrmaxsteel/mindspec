@@ -2,11 +2,11 @@ package executor
 
 import (
 	"fmt"
-	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"path/filepath"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
@@ -15,16 +15,17 @@ import (
 // The workflow supplies it only for an enrolled spec.
 type FinalizeArtifactPolicy struct {
 	SpecDir         string
+	PanelDirs       []string
 	AcceptedSubject string
 }
 
 // CheckFinalizeArtifacts refuses pending user content without writing anything.
-func CheckFinalizeArtifacts(exec Executor, worktree, specDir string) error {
+func CheckFinalizeArtifacts(exec Executor, worktree, specDir string, panelDirs ...string) error {
 	status, err := exec.Status(worktree)
 	if err != nil {
 		return err
 	}
-	paths, err := panel.FinalizeSubjectDirt(worktree, specDir, status)
+	paths, err := panel.FinalizeSubjectDirt(worktree, specDir, status, panelDirs...)
 	if err != nil {
 		return err
 	}
@@ -52,7 +53,7 @@ func (g *MindspecExecutor) checkFinalizeTree(policy FinalizeArtifactPolicy, bran
 	}
 	var dirt []string
 	for _, name := range paths {
-		if !panel.FinalizeArtifactPath(name, policy.SpecDir) {
+		if !panel.FinalizeArtifactPath(name, policy.SpecDir, policy.PanelDirs...) {
 			dirt = append(dirt, name)
 		}
 	}

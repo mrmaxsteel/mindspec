@@ -118,8 +118,9 @@ func finalizeReplay(s State, gate, accepted string) bool {
 	if err != nil {
 		return false
 	}
+	panelDirs := FinalizePanelPaths(s)
 	for _, name := range strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00") {
-		if name != "" && !panel.FinalizeArtifactPath(name, s.SpecDir) {
+		if name != "" && !panel.FinalizeArtifactPath(name, s.SpecDir, panelDirs...) {
 			return false
 		}
 	}

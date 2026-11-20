@@ -249,7 +249,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		if err != nil {
 			return nil, err
 		}
-		policies = append(policies, executor.FinalizeArtifactPolicy{SpecDir: kernelState.SpecDir, AcceptedSubject: accepted})
+		policies = append(policies, executor.FinalizeArtifactPolicy{SpecDir: kernelState.SpecDir, AcceptedSubject: accepted, PanelDirs: kernel.FinalizePanelPaths(*kernelState)})
 	}
 
 	// Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on first

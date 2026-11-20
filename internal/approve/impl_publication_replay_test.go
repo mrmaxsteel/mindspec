@@ -10,7 +10,7 @@ import (
 )
 
 func TestS134ImplApprove_FinalizeExportReplay(t *testing.T) {
-	for _, mode := range []string{"recorded-tip", "moved-head", "open-epic", "wrong-checkpoint", "unrelated-publication", "source-publication"} {
+	for _, mode := range []string{"recorded-tip", "moved-head", "open-epic", "wrong-checkpoint", "unrelated-publication", "source-publication", "review/evil/x.go", "review/evil/x_test.go", "reviews/evil/x.go", "reviews/evil/x_test.go", "reviews/other-spec-panel/x.go", "reviews/other-spec-panel/x_test.go", "recorded-bead", "recorded-final"} {
 		t.Run(mode, func(t *testing.T) {
 			f, ex, _ := s134ApproveFixture(t)
 			accepted, err := kernel.AcceptedSubject(f.State(), f.Epic+".final")
@@ -23,13 +23,33 @@ func TestS134ImplApprove_FinalizeExportReplay(t *testing.T) {
 			f.Must(err)
 			_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "chore: export finalized beads")
 			f.Must(err)
+			name := ""
 			if mode == "source-publication" {
-				f.Must(os.WriteFile(filepath.Join(f.Root, "unreviewed.go"), []byte("package source\n"), 0644))
-				_, err = f.Command("git", "add", "unreviewed.go")
+				name = "unreviewed.go"
+			} else if strings.Contains(mode, "/") {
+				name = mode
+			} else if mode == "recorded-bead" || mode == "recorded-final" {
+				gate := f.Epic + ".final"
+				if mode == "recorded-bead" {
+					gate = f.Items[0] + ".review"
+				}
+				reg, _, err := kernel.Decode[kernel.RegistrationRecord](f.State().Records[gate].Metadata, kernel.KeyRegistration)
 				f.Must(err)
-				_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "unreviewed source")
+				reg.Directories = []string{"review/honest"}
+				f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRegistration, reg)))
+				name = "review/honest/x.go"
+			}
+			// Another spec's registration never grants publication authority.
+			f.Fake.Records["other-1.final"] = kernel.Record{ID: "other-1.final", Parent: "other-1", Type: "step", Status: "closed", Metadata: map[string]any{kernel.KeyTuple: kernel.Tuple{Epic: "other-1", Gate: "other-1.final", Kind: "final-gate", Attempt: 1}, kernel.KeyRegistration: kernel.RegistrationRecord{Slug: "other-spec-panel", Directories: []string{"reviews/other-spec-panel"}}}}
+			if name != "" {
+				f.Must(os.MkdirAll(filepath.Dir(filepath.Join(f.Root, name)), 0755))
+				f.Must(os.WriteFile(filepath.Join(f.Root, name), []byte("package source\n"), 0644))
+				_, err = f.Command("git", "add", name)
+				f.Must(err)
+				_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "publication content")
 				f.Must(err)
 			}
+
 			data, err := f.Command("git", "rev-parse", "HEAD")
 			f.Must(err)
 			publication := strings.TrimSpace(string(data))
@@ -59,7 +79,7 @@ func TestS134ImplApprove_FinalizeExportReplay(t *testing.T) {
 				}
 			}
 			_, err = ApproveImpl(f.Root, f.SpecID, ex)
-			if mode == "recorded-tip" {
+			if mode == "recorded-tip" || strings.HasPrefix(mode, "recorded-") {
 				if err != nil {
 					t.Fatalf("recorded finalizer export prevents cleanup replay: %v", err)
 				}

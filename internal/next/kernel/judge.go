@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
@@ -301,6 +302,30 @@ func RegisteredPanelPaths(s State, gate string) []string {
 		}
 	}
 	return paths
+}
+
+// FinalizePanelPaths returns recorded panel directories for this spec's gates.
+func FinalizePanelPaths(s State) []string {
+	allowed := map[string]bool{s.Epic + ".final": true}
+	for _, item := range s.Items {
+		allowed[GateBase(item)] = true
+	}
+	paths := map[string]bool{}
+	for _, gate := range s.Gates {
+		t, err := kernelid.Parse(gate)
+		if err != nil || !allowed[t.Gate] || !owned(s, gate) {
+			continue
+		}
+		for _, dir := range RegisteredPanelPaths(s, gate) {
+			paths[dir] = true
+		}
+	}
+	result := make([]string, 0, len(paths))
+	for dir := range paths {
+		result = append(result, dir)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func judgeEnded(s State, gate string) (bool, error) {

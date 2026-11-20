@@ -815,13 +815,16 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	var policy *FinalizeArtifactPolicy
 	if len(policies) > 0 {
 		policy = &policies[0]
+		if err := g.checkFinalizeTree(*policy, specBranch); err != nil {
+			return result, err
+		}
 		for _, dir := range append([]string{specWtPath}, finalizeCandidatePaths(candidates)...) {
 			if _, err := os.Stat(dir); os.IsNotExist(err) {
 				continue
 			} else if err != nil {
 				return result, err
 			}
-			if err := CheckFinalizeArtifacts(g, dir, policy.SpecDir); err != nil {
+			if err := CheckFinalizeArtifacts(g, dir, policy.SpecDir, policy.PanelDirs...); err != nil {
 				return result, err
 			}
 		}
@@ -870,7 +873,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 			return result, guard.NewFailure(termsafe.Escape(err.Error()), fmt.Sprintf("commit or move the named symlink, then run mindspec impl approve %s", idrender.Spec(specID)))
 		}
 		if policy != nil {
-			if err := CheckFinalizeArtifacts(g, specWtPath, policy.SpecDir); err != nil {
+			if err := CheckFinalizeArtifacts(g, specWtPath, policy.SpecDir, policy.PanelDirs...); err != nil {
 				return result, err
 			}
 		}
@@ -912,7 +915,7 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		if e.Path != "" && !alreadyMerged {
 			if _, statErr := os.Stat(e.Path); !os.IsNotExist(statErr) {
 				if policy != nil {
-					if err := CheckFinalizeArtifacts(g, e.Path, policy.SpecDir); err != nil {
+					if err := CheckFinalizeArtifacts(g, e.Path, policy.SpecDir, policy.PanelDirs...); err != nil {
 						return result, err
 					}
 				}

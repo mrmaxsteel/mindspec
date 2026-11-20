@@ -269,3 +269,44 @@ func TestS134Closes_RawSlotsCannotPassTally(t *testing.T) {
 		t.Fatal("repaired slots still flagged")
 	}
 }
+
+func TestS134Closes_StaleRawSlotAudit(t *testing.T) {
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	registerGate(t, f, gate, "review", 1)
+	reduce(t, f, true)
+	id := gate + ".r1.R1"
+	head := beadCommit(t, f, "bead/"+f.Items[0])
+	f.Must(f.Store.SetStatusIf(id, "open", "closed"))
+	before := kerneltest.Snapshot(t, f)
+	reduce(t, f, false)
+	if before != kerneltest.Snapshot(t, f) {
+		t.Fatal("probe wrote")
+	}
+	reduce(t, f, true)
+	receipt := actorReceipt(t, f, id)
+	if receipt.Kind != "superseded" || receipt.Subject != head || !receipt.Repaired {
+		t.Fatalf("supersede lost raw close: %+v", receipt)
+	}
+	for i := 0; i < 2; i++ {
+		rows, err := kernel.Audit(f.State(), nil)
+		f.Must(err)
+		found := false
+		for _, row := range rows {
+			if row.Event == "unreceipted-closes" {
+				found = true
+				if row.Count != 1 {
+					t.Fatalf("raw close audit=%d want 1", row.Count)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("audit row absent")
+		}
+		snapshot := kerneltest.Snapshot(t, f)
+		reduce(t, f, true)
+		if snapshot != kerneltest.Snapshot(t, f) {
+			t.Fatal("supersede replay wrote")
+		}
+	}
+}

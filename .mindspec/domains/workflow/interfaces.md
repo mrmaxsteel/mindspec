@@ -1546,7 +1546,9 @@ Rebind and carry-over records may extend its accepted subject.
 A verdict file alone does not permit a gate tally.
 Every registered slot needs a valid close or a completed retry.
 An invalid close produces `unreceipted-close`.
-The next apply creates one retry with predecessor lineage.
+A stale review slot closed without a valid receipt keeps the raw-close evidence when superseded.
+Its supersede receipt sets `repaired`, so the audit counts the close once on every read.
+For an active slot, the next apply creates one retry with predecessor lineage.
 A valid repaired receipt or a valid completed retry clears the flag.
 A retry retains its subject and decision options.
 It receives no old lease or receipt.
@@ -1638,7 +1640,7 @@ After finalization closes the epic, approval can resume at the recorded publicat
 The recorded checkpoint must resolve to the accepted subject, and must precede that publication.
 The publication tree may differ from the accepted subject only in finalization artifact paths.
 Before any approval write, an enrolled spec refuses pending user content in its spec or lifecycle bead worktrees.
-Allowed paths are its own spec directory, root and `.mindspec` `review/<slug>` and `reviews/<slug>` directories,
+Allowed paths are its own spec directory, repository-relative panel directories recorded for this spec's bead and final gates,
 and `.beads/issues.jsonl`. The refusal names each path and requires a commit through the normal workflow
 with a new review round, or moving the changes out. An enrolled approval cannot create a new ADR;
 create and review it through the normal workflow first.

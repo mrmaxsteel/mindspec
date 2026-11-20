@@ -8,17 +8,16 @@ import (
 )
 
 // FinalizeArtifactPath reports whether a path can change during finalization.
-func FinalizeArtifactPath(name, specDir string) bool {
-	if name == ".beads/issues.jsonl" {
+func FinalizeArtifactPath(name, specDir string, panelDirs ...string) bool {
+	if name == ToolArtifactPaths(specDir)[0] {
 		return true
 	}
 	own := strings.TrimSuffix(Subject("spec_approve", specDir).Roots[0], "/")
 	if strings.HasPrefix(name, own+"/") {
 		return true
 	}
-	for _, root := range []string{"review/", "reviews/", ".mindspec/review/", ".mindspec/reviews/"} {
-		rest, ok := strings.CutPrefix(name, root)
-		if ok && strings.Contains(rest, "/") {
+	for _, dir := range panelDirs {
+		if strings.HasPrefix(name, strings.TrimSuffix(dir, "/")+"/") {
 			return true
 		}
 	}
@@ -63,14 +62,14 @@ func PendingPaths(worktree, status string) ([]string, error) {
 }
 
 // FinalizeSubjectDirt lists pending content outside the finalization artifact set.
-func FinalizeSubjectDirt(worktree, specDir, status string) ([]string, error) {
+func FinalizeSubjectDirt(worktree, specDir, status string, panelDirs ...string) ([]string, error) {
 	paths, err := PendingPaths(worktree, status)
 	if err != nil {
 		return nil, err
 	}
 	var dirt []string
 	for _, name := range paths {
-		if !FinalizeArtifactPath(name, specDir) {
+		if !FinalizeArtifactPath(name, specDir, panelDirs...) {
 			dirt = append(dirt, name)
 		}
 	}

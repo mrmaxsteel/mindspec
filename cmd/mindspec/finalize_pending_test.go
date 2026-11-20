@@ -8,14 +8,14 @@ import (
 )
 
 func TestS134E2E_FinalApprovalPendingSource(t *testing.T) {
-	testFinalApprovalPendingSource(t, newKernelE2E(t, kernelE2EBinary(t), 1))
+	testFinalApprovalPendingSource(t, newKernelE2E(t, kernelE2EBinary(t), 1), "review/evil/x.go")
 }
 
 func TestS134Final_PendingSourceBeforeMutation(t *testing.T) {
-	testFinalApprovalPendingSource(t, finalKernelFixture(t))
+	testFinalApprovalPendingSource(t, finalKernelFixture(t), "review/evil/x.go", "review/evil/x_test.go", "reviews/evil/x.go", "reviews/evil/x_test.go")
 }
 
-func testFinalApprovalPendingSource(t *testing.T, e *kernelE2E) {
+func testFinalApprovalPendingSource(t *testing.T, e *kernelE2E, extraModes ...string) {
 	t.Helper()
 	e.apply()
 	step := e.f.Items[0] + ".impl.a1"
@@ -29,11 +29,14 @@ func testFinalApprovalPendingSource(t *testing.T, e *kernelE2E) {
 	e.review("APPROVE")
 	reviewed := e.git(e.cwd, "rev-parse", "HEAD")
 	main := e.git(e.f.Root, "rev-parse", "main")
-	for _, mode := range []string{"untracked", "modified", "deleted"} {
+	for _, mode := range append([]string{"untracked", "modified", "deleted"}, extraModes...) {
 		t.Run(mode, func(t *testing.T) {
 			name := "source.go"
 			if mode == "untracked" {
 				name = "unreviewed.go"
+			}
+			if strings.Contains(mode, "/") {
+				name = mode
 			}
 			full := filepath.Join(e.cwd, name)
 			if mode == "deleted" {
@@ -52,8 +55,8 @@ func testFinalApprovalPendingSource(t *testing.T, e *kernelE2E) {
 			if e.git(e.cwd, "diff", "--cached", "--name-only") != "" {
 				t.Fatal("refusal staged pending source")
 			}
-			if mode == "untracked" {
-				e.must(os.Rename(full, filepath.Join(t.TempDir(), name)))
+			if mode == "untracked" || strings.Contains(mode, "/") {
+				e.must(os.Rename(full, filepath.Join(t.TempDir(), filepath.Base(name))))
 			} else {
 				e.write(e.cwd, name, "package source\n")
 			}

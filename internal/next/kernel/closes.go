@@ -95,7 +95,7 @@ func retryAttempts(s State) (Changes, error) {
 			}
 			// Only round lineage can retire a raw close. Slot metadata is not evidence.
 			if has && t.Round < round.Round {
-				receipt := Receipt{Kind: "superseded", Subject: round.Subject}
+				receipt := Receipt{Kind: "superseded", Subject: round.Subject, Repaired: true}
 				w := Write{Kind: "close", ID: id, Receipt: &receipt}
 				c.Writes = append(c.Writes, w)
 				if err := overlay(&s, w); err != nil {

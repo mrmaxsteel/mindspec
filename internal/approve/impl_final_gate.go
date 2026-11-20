@@ -471,13 +471,14 @@ func implKernelArtifactPreflight(root string, s kernel.State, exec executor.Exec
 			paths = append(paths, e.Path)
 		}
 	}
+	panelDirs := kernel.FinalizePanelPaths(s)
 	for _, dir := range paths {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			continue
 		} else if err != nil {
 			return err
 		}
-		if err := executor.CheckFinalizeArtifacts(exec, dir, s.SpecDir); err != nil {
+		if err := executor.CheckFinalizeArtifacts(exec, dir, s.SpecDir, panelDirs...); err != nil {
 			return err
 		}
 	}
