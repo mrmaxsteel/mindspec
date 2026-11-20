@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/journal"
@@ -127,6 +128,12 @@ func ApprovalBlockers(s State) ([]Flag, error) {
 	for _, id := range s.Foreign {
 		if s.Records[id].Status != "closed" {
 			flags = append(flags, Flag{Code: "foreign-child-open", Step: id})
+		}
+	}
+	for _, item := range s.Items {
+		if err := CheckWorkItem(s, item); err != nil {
+			message := strings.TrimSuffix(err.Error(), "\nrecovery: mindspec next-action")
+			flags = append(flags, Flag{Code: "work-item-blocked", Step: item, Message: message, Repair: []string{"mindspec", "next-action"}})
 		}
 	}
 	registry := Rules()

@@ -50,9 +50,10 @@ type Run struct {
 	Paths []string `json:"paths,omitempty"`
 }
 type Flag struct {
-	Code   string   `json:"code"`
-	Step   string   `json:"step,omitempty"`
-	Repair []string `json:"repair"`
+	Code    string   `json:"code"`
+	Step    string   `json:"step,omitempty"`
+	Message string   `json:"message,omitempty"`
+	Repair  []string `json:"repair"`
 }
 type Output struct {
 	Schema    string     `json:"schema"`

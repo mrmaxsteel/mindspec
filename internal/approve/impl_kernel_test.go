@@ -26,14 +26,15 @@ func s134ApproveFixture(t *testing.T) (*kerneltest.Fixture, *executor.MockExecut
 	saveAndRestore(t)
 	f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
 	t.Setenv(journal.StateDirEnv, t.TempDir())
-	for _, gate := range f.State().Gates {
-		kerneltest.PassGate(f, gate, "subject")
-	}
+
 	for _, item := range f.Items {
 		f.Must(f.Store.SetStatusIf(item, "open", "closed"))
 	}
 	head, err := f.Command("git", "rev-parse", "HEAD")
 	f.Must(err)
+	for _, gate := range f.State().Gates {
+		kerneltest.PassGate(f, gate, strings.TrimSpace(string(head)))
+	}
 	for _, branch := range append([]string{"spec/" + f.SpecID}, "bead/"+f.Items[0], "bead/"+f.Items[1], "bead/"+f.Items[2]) {
 		_, err = f.Command("git", "branch", branch, strings.TrimSpace(string(head)))
 		f.Must(err)
@@ -194,7 +195,9 @@ func TestS134ImplApprove_AuditAndRerun(t *testing.T) {
 	slot := s134Slot(f)
 	s134Close(t, f, slot, nil)
 	kerneltest.Repaired(f, slot, kernel.Receipt{Kind: "passed", Retally: "repair"})
-	receipt := kernel.Receipt{Kind: "passed", Retally: "passing-tally", CarryOvers: []kernel.CarryOver{{OldSubject: "old", NewSubject: "new", Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", Retally: "judgement"}}}}
+	accepted, err := kernel.AcceptedSubject(f.State(), gate)
+	f.Must(err)
+	receipt := kernel.Receipt{Kind: "passed", Subject: accepted, Retally: "passing-tally", CarryOvers: []kernel.CarryOver{{OldSubject: accepted, NewSubject: accepted, Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", Retally: "judgement"}}}}
 	f.Must(f.Store.WriteReceipt(gate, receipt))
 	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRePanel, kernel.RePanel{SlotCount: 3, Paths: []string{"source.go"}})))
 	f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyRawClaims, []kernel.RawClaim{{At: now}})))

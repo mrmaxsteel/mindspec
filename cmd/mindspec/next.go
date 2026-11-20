@@ -151,6 +151,10 @@ team lead spawns fresh agents per bead.`,
 			}
 		}
 
+		if handled, err := runKernelNext(cmd, root, specFlag, beadID, pick, namedSignals, flagGiven, evidencePath); handled {
+			return err
+		}
+
 		// Step 0d: Resolve target spec if ambiguous. MOVED ahead of the
 		// dirty-tree guard below (spec 128 Bead 7 round-1 panel fix): the
 		// guard's entanglement enumeration is per-spec-aware (it must know

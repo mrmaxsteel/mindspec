@@ -1664,7 +1664,10 @@ The answer does not authorise a round. A passed fix authorises the next round.
 A new subject during a review supersedes its open slots and authorises the next
 round. A commit during an open fix does not supersede the review.
 The final review starts on the spec branch head after every work item has a
-passed gate, a closed work item and a merged branch. It uses the same limits
+passed gate, a closed work item and a completion record from `complete`.
+The record names the accepted subject. A raw close and Git ancestry alone
+release no dependent. A retry of `complete` repairs a missing completion pass.
+The final review uses the same limits
 and decisions as a work item review.
 
 The `halt` option stops the spec and every work item. Its answer receipt is

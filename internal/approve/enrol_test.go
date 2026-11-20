@@ -34,9 +34,9 @@ func enrolWrite(t *testing.T, path, text string) {
 func enrolPlan(n int) string { return kerneltest.EnrolmentPlan("001-x", n) }
 func enrolInstall(t *testing.T, fake *kerneltest.FakeBD) {
 	t.Helper()
-	old, hook := enrolOnApprove, enrolStageHook
-	enrolOnApprove, enrolStageHook = true, nil
-	t.Cleanup(func() { enrolOnApprove, enrolStageHook = old, hook })
+	hook := enrolStageHook
+	enrolStageHook = nil
+	t.Cleanup(func() { enrolStageHook = hook })
 	t.Cleanup(SetPlanRunBDForTest(fake.Run))
 	t.Cleanup(phase.SetRunBDForTest(fake.Run))
 	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
@@ -72,7 +72,7 @@ func enrolInstall(t *testing.T, fake *kerneltest.FakeBD) {
 	}))
 	// The validator has its own process boundary. Keep it on a local fake too.
 	bin := t.TempDir()
-	enrolWrite(t, filepath.Join(bin, "bd"), "#!/bin/sh\nif [ \"$1\" = show ]; then exit 0; fi\nexit 90\n")
+	enrolWrite(t, filepath.Join(bin, "bd"), "#!/bin/sh\nif [ \"$1\" = show ] || [ \"$1\" = export ]; then exit 0; fi\nexit 90\n")
 	if err := os.Chmod(filepath.Join(bin, "bd"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -808,5 +808,54 @@ func TestS134Enrol_FinalGateReadFailureStopsLinks(t *testing.T) {
 	}
 	if f.Fake.Records[f.Epic].Metadata[kernel.KeyRun] != nil || f.Fake.Records[f.Epic].Metadata[kernel.KeyPlanApproval] != nil {
 		t.Fatal("read refusal wrote run marker or approval")
+	}
+}
+
+func TestS134Enrol_FinalCycleAfterKilledCreate(t *testing.T) {
+	f := enrolFixture(t)
+	enrolKill(t, f, "final")
+	ids := enrolIDs(t, f)
+	final := f.Epic + ".final"
+	finalID := f.ID(final)
+	bug := kernel.Record{ID: "foreign-bug", Status: "open", Type: "bug", Dependencies: []kernel.Dependency{{ID: finalID, Type: "blocks"}}}
+	f.Fake.Records[bug.ID] = bug
+	third := f.Fake.Records[ids[2]]
+	third.Dependencies = append(third.Dependencies, kernel.Dependency{ID: bug.ID, Type: "blocks"})
+	f.Fake.Records[third.ID] = third
+	out, err := kernel.NextAction(f.State(), true)
+	f.Must(err)
+	cycle := false
+	for _, flag := range out.Flags {
+		if flag.Code == "foreign-blocker" && slices.Contains(flag.Repair, finalID) && slices.Contains(flag.Repair, bug.ID) {
+			cycle = true
+		}
+	}
+	if !cycle {
+		t.Fatalf("missing cycle flag: %+v", out.Flags)
+	}
+	r, err := f.Store.Lookup(final)
+	f.Must(err)
+	for _, d := range r.Dependencies {
+		if d.ID == third.ID {
+			t.Fatal("cyclic final link written")
+		}
+	}
+	bug.Dependencies = nil
+	f.Fake.Records[bug.ID] = bug
+	out, err = kernel.NextAction(f.State(), true)
+	f.Must(err)
+	for _, flag := range out.Flags {
+		if slices.Contains(flag.Repair, finalID) && slices.Contains(flag.Repair, bug.ID) {
+			t.Fatalf("cycle flag retained: %+v", flag)
+		}
+	}
+	r, err = f.Store.Lookup(final)
+	f.Must(err)
+	found := false
+	for _, d := range r.Dependencies {
+		found = found || d.ID == third.ID
+	}
+	if !found {
+		t.Fatal("missing final link after removal")
 	}
 }

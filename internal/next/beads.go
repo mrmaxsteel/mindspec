@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -174,6 +176,13 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 					info.why = "no plan.md exists yet for " + idrender.Spec(specFlag)
 				} else {
 					info.mapped, info.why = readiness.PlanMapsBead(plan, n)
+					fm, parseErr := validate.ParsePlanFrontmatter(plan)
+					if parseErr != nil {
+						return rs, parseErr
+					}
+					if strings.EqualFold(fm.Status, "Approved") && !slices.Contains(fm.BeadIDs, item.ID) {
+						info.mapped, info.why = false, "not a recorded work item of the approved plan"
+					}
 				}
 			}
 			if isReadyPlanMember(item, rs.EpicID, info) {

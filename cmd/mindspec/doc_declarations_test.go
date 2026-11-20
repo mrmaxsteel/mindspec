@@ -19,7 +19,7 @@ case "$1 $2" in
  'show bead-1') echo '[{"id":"bead-1","status":"in_progress","metadata":{"sentinel":"unchanged"},"dependencies":[{"id":"epic-docs","issue_type":"epic","dependency_type":"parent-child"}]}]' ;;
  'show doc-owner') printf '[{"id":"doc-owner","status":"%s","metadata":{},"dependencies":[{"id":"epic-docs","issue_type":"epic","dependency_type":"parent-child"}]}]\n' "$S133_DOC_STATUS" ;;
  'show epic-docs'|'list --type=epic') echo '[{"id":"epic-docs","issue_type":"epic","status":"open","metadata":{"spec_id":"999-check","spec_title":"999-check","mindspec_phase":"implement"}}]' ;;
- 'worktree list') echo '[]' ;;
+ 'worktree list'|'list --all') echo '[]' ;;
  *) echo "unexpected tracker operation: $*" >&2; exit 99 ;;
 esac
 `

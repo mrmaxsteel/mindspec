@@ -13,6 +13,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 )
 
@@ -110,22 +112,23 @@ func TestLifecycle_LetteredSpecResolves(t *testing.T) {
 			t.Cleanup(phase.SetMergeMetadataForTest(func(string, map[string]interface{}) error { return nil }))
 			t.Cleanup(approve.SetPlanMergeMetadataForTest(func(string, map[string]interface{}) error { return nil }))
 			t.Cleanup(approve.SetPlanListJSONForTest(func(...string) ([]byte, error) { return []byte(`[]`), nil }))
+			writeVerbFixtureFile(t, f.root, ".beads/config.yaml", "types.custom: gate,step\n")
+			fake := kerneltest.NewFakeBD()
+			fake.Records["epic-letter"] = kernel.Record{ID: "epic-letter", Type: "epic", Status: "open", Metadata: meta}
 			created := false
 			fakeCreate := func(args ...string) ([]byte, error) {
 				if len(args) > 0 && args[0] == "create" {
-					parent := ""
-					for i, a := range args {
-						if a == "--parent" && i+1 < len(args) {
-							parent = args[i+1]
+					task := false
+					for i, arg := range args {
+						if arg == "--type" && i+1 < len(args) && args[i+1] == "task" {
+							task = true
 						}
 					}
-					if parent != "epic-letter" {
-						t.Fatalf("plan used wrong epic: %v", args)
+					if task {
+						created = true
 					}
-					created = true
-					return []byte(`{"id":"epic-letter.1"}`), nil
 				}
-				return []byte(`[]`), nil
+				return fake.Run(args...)
 			}
 			t.Cleanup(approve.SetPlanRunBDForTest(fakeCreate))
 			t.Cleanup(approve.SetPlanRunBDCombinedForTest(fakeCreate))
@@ -133,6 +136,9 @@ func TestLifecycle_LetteredSpecResolves(t *testing.T) {
 			result, err := approve.ApprovePlan(f.root, specID, "test", mock)
 			if err != nil || !created || result.SpecID != specID {
 				t.Fatalf("plan approval: %+v %v", result, err)
+			}
+			if _, ok := fake.Records["epic-letter"].Metadata[kernel.KeyRun]; !ok {
+				t.Fatal("lettered plan did not enrol")
 			}
 			calls := mock.CallsTo("HandoffEpic")
 			if len(calls) != 1 || calls[0].Args[0] != "epic-letter" || calls[0].Args[1] != specID {

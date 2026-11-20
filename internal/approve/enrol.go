@@ -17,6 +17,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -45,7 +46,7 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 		}
 		sections := validate.ParseBeadSections(content)
 		if err = validate.ValidateWorkChunkAlignment(fm.WorkChunks, len(sections)); err != nil {
-			return err
+			return fmt.Errorf("misaligned plan: %w", err)
 		}
 		if err = checkBeadSectionContents(content, sections); err != nil {
 			return err
@@ -229,7 +230,7 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 			return documentGateAuditFailure(err)
 		}
 		if err = exec.CommitAll(worktree, "chore: approve plan for "+specID); err != nil {
-			return err
+			return fmt.Errorf("auto-commit plan approval failed: %w", err)
 		}
 		if err = exec.CommitAll(worktree, "chore: sync tracker state after plan approval"); err != nil {
 			return err
@@ -237,8 +238,18 @@ func approveEnrolment(root, specID, approvedBy, specDir, planPath string, result
 		if err = exec.IsTreeClean(worktree); err != nil {
 			return err
 		}
+
+		if err := recording.EmitPhaseMarker(root, specID, "plan", "plan-approved"); err != nil {
+			result.Warnings = append(result.Warnings, "could not emit recording marker: "+termsafe.Escape(err.Error()))
+		}
+		if err := recording.UpdatePhase(root, specID, "plan", "plan-approved"); err != nil {
+			result.Warnings = append(result.Warnings, "could not update recording phase: "+termsafe.Escape(err.Error()))
+		}
 		result.BeadIDs = ids
-		return exec.HandoffEpic(epic, specID, ids)
+		if err := exec.HandoffEpic(epic, specID, ids); err != nil {
+			result.Warnings = append(result.Warnings, "handoff epic failed: "+termsafe.Escape(err.Error()))
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

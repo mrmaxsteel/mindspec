@@ -453,3 +453,35 @@ For a conflict, resolve and stage the files. Re-enter with
 merge-only call stays merge-only on a plain retry. After it records the
 merge, run complete again to close. To abandon pending mode before its
 merge, unset the `mindspec_merge_only` metadata key.
+
+
+## Kernel loop
+
+Approve a new plan to enrol its work items and pin its policy.
+Run `mindspec next-action <spec> --apply` to create authorised steps.
+Use `mindspec next <work-item>` to lease its current implementation step.
+The command prints the lease generation and token.
+The first implementation lease advances the phase to implementation.
+A phase-cache warning preserves the token.
+Use the printed repair command before continuing.
+A live lease requires `mindspec lease --take` with a reason.
+An automatic selection skips halted specs.
+An older approved plan selects only its recorded work items.
+
+Submit the implementation evidence with its lease token.
+Run each command in the returned `run` list.
+Complete a work item after its highest review attempt passes.
+Close every child first.
+Completion checks the accepted subject from the gate receipt and panel ledger.
+A carry-over or a successful rebind can extend that subject.
+A commit that changes only a registered panel directory needs no new judgement.
+An open judge and an unaccepted head both appear in the refusal.
+The final review uses the same subject checks.
+A panel skip setting cannot pass an enrolled gate.
+
+Completion merges a raw-closed item only when its gate passed.
+Reopen a force-closed item before finishing its gate.
+A completion retry of a merged item writes nothing.
+The pass after a merge creates each newly authorised implementation step.
+Foreign items and links stay unchanged.
+Remove a foreign cycle link with the tracker before retrying apply.

@@ -472,3 +472,11 @@ Doctor reports each missing required member.
 Plain `mindspec setup` adds missing members in an existing Beads repository.
 The harness applies these settings after sandbox initialization.
 `bead.RunBDAt` runs a command in the specified repository without a process directory change.
+
+
+## Sandbox tracker records
+
+Lifecycle scenarios use a local tracker fake with complete records.
+The fake keeps metadata, child links, blocking links, and status changes.
+A plan approval test checks the pinned enrolment marker.
+Sandbox configuration includes the required step type.

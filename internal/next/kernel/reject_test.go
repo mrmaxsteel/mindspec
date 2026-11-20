@@ -125,6 +125,7 @@ func doneItem(t *testing.T, f *kerneltest.Fixture, item string) {
 	kerneltest.PassGate(f, item+".review", head)
 	f.Must(f.Store.SetStatusIf(item, "open", "closed"))
 	mergeItem(t, f, item, head)
+	f.Must(f.Store.WriteMetadata(item, map[string]any{kernel.KeyCompletion: head}))
 	if !f.State().Merged[item] {
 		t.Fatal("fixture branch not merged")
 	}
@@ -319,6 +320,9 @@ func TestS134Final_RequiresLastMerge(t *testing.T) {
 	tree := reducerGit(t, f, "rev-parse", head+"^{tree}")
 	merge := reducerGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit-tree", tree, "-p", base, "-p", head, "-m", "Merge bead/"+last)
 	reducerGit(t, f, "update-ref", "refs/heads/spec/"+f.SpecID, merge)
+	out = reduce(t, f, true)
+	assertNoPanel(t, out, f.SpecID)
+	f.Must(f.Store.WriteMetadata(last, map[string]any{kernel.KeyCompletion: head}))
 	out = reduce(t, f, true)
 	round, _, _ := kernel.Decode[kernel.GateRound](record(t, f, f.Epic+".final").Metadata, kernel.KeyRound)
 	if round.Round != 1 || round.Subject != merge || !hasRun(out, "mindspec", "panel", "create", f.SpecID) {

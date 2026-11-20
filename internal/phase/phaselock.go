@@ -6,7 +6,8 @@ package phase
 // ApprovePlan phase-write closure), `spec approve`'s existing-epic
 // backfill (internal/approve/spec.go's backfillExistingEpicPhase),
 // `next`'s claim-time advance (cmd/mindspec/next.go's
-// advancePhaseOnClaim — bead 2's OQ-3 writer), `complete`'s step-6.5
+// advancePhaseOnClaim — bead 2's OQ-3 writer), implementation leases
+// (internal/next/kernel/lease.go's Lease), `complete`'s step-6.5
 // sync (internal/complete/complete.go's completeSyncPhase), `release`'s
 // step-6.5 sync (via phase.SanctionedDerivedSync, sanctioned_sync.go —
 // release.go itself never calls WithPhaseWriteLock directly),
@@ -248,14 +249,28 @@ func readPhaseForLock(c *Cache, epicID string) (phaseReadOutcome, error) {
 //     self-blocks on its own held lock until the bounded wait expires,
 //     surfacing as ErrPhaseLockTimeout — never a deadlock detection, and
 //     never automatic reentry.
-func WithPhaseWriteLock(root, epicID string, mergeMetadata MergeMetadataFunc, fn func(stored string, present bool) (updates map[string]interface{}, err error)) error {
+//
+// An optional readStored callback uses the caller's scoped store. The lock
+// invokes it fresh after acquisition. It must not return a pre-lock snapshot.
+func WithPhaseWriteLock(root, epicID string, mergeMetadata MergeMetadataFunc, fn func(stored string, present bool) (updates map[string]interface{}, err error), readStored ...func() (string, bool, error)) error {
 	unlock, err := acquirePhaseLock(root)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
-	outcome, err := readPhaseForLock(NewCache(), epicID)
+	if len(readStored) > 1 {
+		return errors.New("phase: supply at most one stored-phase reader")
+	}
+	var outcome phaseReadOutcome
+	if len(readStored) == 1 {
+		outcome.Stored, outcome.Present, err = readStored[0]()
+		if !state.IsValidPhase(outcome.Stored) {
+			outcome.Stored = ""
+		}
+	} else {
+		outcome, err = readPhaseForLock(NewCache(), epicID)
+	}
 	if err != nil {
 		return err
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/safefile"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -48,6 +49,15 @@ func SetLifecycleMergeMetadataForTest(fn func(string, map[string]interface{}) er
 // runLifecycleGate reads all registrations for an approval, without mutation.
 func runLifecycleGate(root, specID, gate, worktree string, out io.Writer) (Outcome, error) {
 	o := Outcome{Gate: gate}
+	if gate == "final_review" {
+		s, err := implKernelStateFn(root, specID)
+		if err != nil {
+			return o, err
+		}
+		if s != nil {
+			return o, kernel.CheckPassedGate(*s, s.Epic+".final")
+		}
+	}
 	recovery := fmt.Sprintf("mindspec panel create <slug> --spec %s --gate %s --target spec/%s", idrender.Spec(specID), termsafe.Escape(gate), idrender.Spec(specID))
 	refuse := func(slug, leg string, err error) (Outcome, error) {
 		o.Action = panel.Block

@@ -102,7 +102,9 @@ func TestS134Output_StatusAndOrdering(t *testing.T) {
 func TestS134Output_Done(t *testing.T) {
 	f := reducerFixture(t)
 	for _, item := range f.Items {
-		kerneltest.PassGate(f, item+".review", reducerGit(t, f, "rev-parse", "bead/"+item))
+		head := reducerGit(t, f, "rev-parse", "bead/"+item)
+		kerneltest.PassGate(f, item+".review", head)
+		f.Must(f.Store.WriteMetadata(item, map[string]any{kernel.KeyCompletion: head}))
 		f.Must(f.Store.SetStatusIf(item, "open", "closed"))
 	}
 	f.Must(f.Store.SetStatusIf(f.Epic, "open", "closed"))

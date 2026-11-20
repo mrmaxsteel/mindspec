@@ -12,20 +12,21 @@ import (
 )
 
 const (
-	KeyTuple     = "mindspec_tuple"
-	KeyID        = "mindspec_key"
-	KeyClose     = "mindspec_close"
-	KeyFrom      = "mindspec_from"
-	KeyLinks     = "mindspec_links"
-	KeyRun       = "mindspec_run"
-	KeyLease     = "mindspec_lease"
-	KeyRound     = "mindspec_round"
-	KeyTake      = "mindspec_take"
-	KeyRawClaims = "mindspec_raw_claims"
-	KeyAnswer    = "mindspec_answer"
-	KeyDefer     = "mindspec_defer"
-	KeyJudgement = "mindspec_judgement"
-	KeyRePanel   = "mindspec_repanel"
+	KeyTuple      = "mindspec_tuple"
+	KeyID         = "mindspec_key"
+	KeyClose      = "mindspec_close"
+	KeyCompletion = "mindspec_completed_subject"
+	KeyFrom       = "mindspec_from"
+	KeyLinks      = "mindspec_links"
+	KeyRun        = "mindspec_run"
+	KeyLease      = "mindspec_lease"
+	KeyRound      = "mindspec_round"
+	KeyTake       = "mindspec_take"
+	KeyRawClaims  = "mindspec_raw_claims"
+	KeyAnswer     = "mindspec_answer"
+	KeyDefer      = "mindspec_defer"
+	KeyJudgement  = "mindspec_judgement"
+	KeyRePanel    = "mindspec_repanel"
 )
 
 const (

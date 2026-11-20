@@ -86,7 +86,11 @@ bead, a gate, a decision; a held or blocked ancestor or upstream (B1, B2; an ope
 hold); a live lease; a halted spec; an unanswered decision (§13.8). `--take` revokes, issues generation N+1 and
 records the reason. `panel.lease_ttl` defaults to `2h` and is renewable.
 The metadata key `mindspec_raw_claims` holds an array of raw-claim records: `[{"at":"<RFC3339 time>"}]`.
-Each record stores the time when a lease replaces a raw claim. The lease write appends the record and keeps earlier records.
+Each raw-claim record stores the time when a lease replaces a raw claim. The lease write appends the record and keeps earlier records.
+
+The work-item metadata key `mindspec_completed_subject` holds a commit id as a JSON string. `complete` writes it
+after the item is closed and merged and its halt, blocker, and gate checks pass. It must equal the accepted subject
+for the item to count as done.
 An epic, work item or gate with status `in_progress` does not hold work. The pass flags `raw-claim` and names the record.
 
 ## 6. `submit <step> --lease <t> (--artifact <path> | --commit <oid>)` | `submit <decision> --answer <opt>`
