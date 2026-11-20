@@ -96,6 +96,9 @@ func TestFindSlotRoot_RepositoryBoundary(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "slot.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(tree, ".mindspec"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	// A checkout can use either a git directory or a worktree git file.
 	for _, gitFile := range []bool{false, true} {
 		t.Run(fmt.Sprintf("git-file-%t", gitFile), func(t *testing.T) {
@@ -146,6 +149,26 @@ func TestFindSlotRoot_RepositoryBoundary(t *testing.T) {
 			}
 		})
 	}
+	t.Run("mindspec-only", func(t *testing.T) {
+		for _, nested := range []string{filepath.Join(tree, "tmp", "fixture"), filepath.Join(tree, "tmp", "tree")} {
+			if err := os.MkdirAll(filepath.Join(nested, ".mindspec"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(nested, "sub"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			for _, cwd := range []string{nested, filepath.Join(nested, "sub")} {
+				called := false
+				_, found, err := FindSlotRoot(cwd, func(string) (string, error) { called = true; return "scratch", nil })
+				if err != nil || found || called {
+					t.Errorf("nested workspace captured at %s: found=%t resolved=%t err=%v", cwd, found, called, err)
+				}
+				if normal, err := FindRoot(cwd); err != nil || normal != nested {
+					t.Errorf("nested root: got %s want %s, err=%v", normal, nested, err)
+				}
+			}
+		}
+	})
 	scratch := filepath.Join(dir, "scratch")
 	if err := os.Mkdir(scratch, 0700); err != nil {
 		t.Fatal(err)

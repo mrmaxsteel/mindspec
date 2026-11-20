@@ -58,7 +58,7 @@ func resolveEffectivePanelSlot(cfg *config.Config, dir string, p panel.Panel, sl
 }
 
 // findPanelSubmitSlot also accepts saved verdicts in a slot attempt directory.
-// Repository boundaries still stop lookup, including repositories inside attempts.
+// Workspace boundaries still stop lookup, including workspaces inside attempts.
 func findPanelSubmitSlot(dir string) (workspace.SlotRoot, bool, error) {
 	slot, found, err := workspace.FindSlotRoot(dir, config.IsolationRootFor)
 	if err != nil || found {
@@ -72,19 +72,15 @@ func findPanelSubmitSlot(dir string) (workspace.SlotRoot, bool, error) {
 		dir = real
 	}
 	for {
-		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
-			return workspace.SlotRoot{}, false, nil
-		} else if !os.IsNotExist(err) {
+		if marked, err := workspace.HasRootMarker(dir); err != nil {
 			return workspace.SlotRoot{}, false, err
+		} else if marked {
+			return workspace.SlotRoot{}, false, nil
 		}
 		name := filepath.Base(dir)
 		if n, err := strconv.Atoi(strings.TrimPrefix(name, "attempt-")); err == nil && n > 0 && name == "attempt-"+strconv.Itoa(n) {
 			parent := filepath.Dir(dir)
-			slot, found, err := workspace.FindSlotRoot(parent, config.IsolationRootFor)
-			if found && err == nil && slot.Dir != parent {
-				return workspace.SlotRoot{}, false, nil
-			}
-			return slot, found, err
+			return workspace.FindSlotRoot(parent, config.IsolationRootFor)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

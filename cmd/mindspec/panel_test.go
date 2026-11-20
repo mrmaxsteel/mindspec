@@ -21,6 +21,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -2043,6 +2044,69 @@ func TestPanelCreate_ZeroConfigNoGateUsesSixReviewers(t *testing.T) {
 	if got.ExpectedReviewers != 6 {
 		t.Errorf("expected_reviewers = %d, want 6 (zero config, no --gate)", got.ExpectedReviewers)
 	}
+}
+
+func TestPanelCreate_NestedWorkspaceUnderSlot(t *testing.T) {
+	host, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	slotTestGit(t, host, "init", "-q")
+	slotWrite(t, filepath.Join(host, ".mindspec", "config.yaml"), "panel: {isolation_root: .mindspec-scratch}\n")
+	config.ResetCache()
+	t.Cleanup(config.ResetCache)
+	layout, err := panel.NewSlotLayout(host, ".mindspec-scratch", "900-test", "p", 1, "R1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := filepath.Join(layout.Tree, "tmp")
+	if err := os.MkdirAll(tmp, 0700); err != nil {
+		t.Fatal(err)
+	}
+	slotWrite(t, filepath.Join(layout.Tree, ".git"), "gitdir: "+filepath.Join(host, ".git")+"\n")
+	if err := panel.WriteSlotMetadata(layout, panel.SlotMetadata{Spec: "900-test", Slug: "p", Round: 1, Slot: "R1", MainRoot: host}); err != nil {
+		t.Fatal(err)
+	}
+	verified, found, err := workspace.FindSlotRoot(layout.Tree, config.IsolationRootFor)
+	if err != nil || !found || verified.Dir != layout.Dir || verified.MainRoot != host {
+		t.Fatalf("slot setup: %+v %t %v", verified, found, err)
+	}
+	t.Setenv("TMPDIR", tmp)
+	t.Run("nested", func(t *testing.T) {
+		fixture, err := filepath.EvalSymlinks(mkPanelTestRoot(t, ""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rel, err := filepath.Rel(layout.Tree, fixture); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatalf("fixture is outside the slot checkout: %s %v", fixture, err)
+		}
+		withTestChdir(t, fixture)
+		resetPanelCreateFlags(t)
+		stubNonBeadRevParse(t, func(string, string) (string, error) { return strings.Repeat("a", 40), nil })
+		before := slotSnapshot(t, host)
+		out, runErr := runPanelCmd("create", "nested", "--spec", "900-test", "--target", "spec/900-test")
+		after := slotSnapshot(t, host)
+		rel, err := filepath.Rel(host, fixture)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, snapshot := range []map[string]string{before, after} {
+			for path := range snapshot {
+				if path == rel || strings.HasPrefix(path, rel+string(filepath.Separator)) {
+					delete(snapshot, path)
+				}
+			}
+		}
+		if !reflect.DeepEqual(before, after) {
+			t.Error("panel create wrote outside the nested workspace")
+		}
+		if runErr != nil {
+			t.Fatalf("panel create: %v\n%s", runErr, out)
+		}
+		if _, err := os.Stat(filepath.Join(fixture, "review", "nested", panel.FileName)); err != nil {
+			t.Fatalf("panel was not created in the nested workspace: %v", err)
+		}
+	})
 }
 
 func TestPanelCreate_NoGateUsesGlobalThreshold(t *testing.T) {

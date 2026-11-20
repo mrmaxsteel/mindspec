@@ -27,7 +27,7 @@ func slotRootComponent(s string) bool {
 
 // FindSlotRoot finds the nearest ancestor with both markers and verifies its
 // full path against the main root's current isolation configuration.
-// It accepts only the slot directory and its checkout, and stops at other repositories.
+// It accepts only the slot directory and its checkout, and stops at other workspaces.
 func FindSlotRoot(cwd string, isolationRoot func(string) (string, error)) (SlotRoot, bool, error) {
 	var slot SlotRoot
 	dir, err := filepath.Abs(cwd)
@@ -40,19 +40,16 @@ func FindSlotRoot(cwd string, isolationRoot func(string) (string, error)) (SlotR
 	}
 	start := dir
 	for {
-		// Only the slot checkout may cross a repository boundary.
-		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
-			if filepath.Base(dir) != "tree" {
-				return SlotRoot{}, false, nil
-			}
+		// Only the slot checkout may cross a workspace boundary.
+		if marked, err := HasRootMarker(dir); err != nil {
+			return SlotRoot{}, false, err
+		} else if marked {
 			if _, err := os.Lstat(filepath.Join(filepath.Dir(dir), "slot.json")); err != nil {
 				if !os.IsNotExist(err) {
 					return SlotRoot{}, false, err
 				}
 				return SlotRoot{}, false, nil
 			}
-		} else if !os.IsNotExist(err) {
-			return SlotRoot{}, false, err
 		}
 		metadata := filepath.Join(dir, "slot.json")
 		tree := filepath.Join(dir, "tree")

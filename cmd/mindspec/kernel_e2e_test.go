@@ -1065,28 +1065,46 @@ func TestS134PanelCreate_NonEnrolledSpecShorthand(t *testing.T) {
 }
 
 func TestS134PanelSubmit_AttemptDirectoryBoundary(t *testing.T) {
-	f := newCLIV2(t)
-	file := f.shortSetup(t, 1)
-	attempt := filepath.Dir(file)
-	sub := filepath.Join(attempt, "sub")
-	if err := os.Mkdir(sub, 0700); err != nil {
-		t.Fatal(err)
+	for _, marker := range []string{".git", ".mindspec"} {
+		t.Run(marker, func(t *testing.T) {
+			f := newCLIV2(t)
+			file := f.shortSetup(t, 1)
+			attempt := filepath.Dir(file)
+			sub := filepath.Join(attempt, "sub")
+			if err := os.Mkdir(sub, 0700); err != nil {
+				t.Fatal(err)
+			}
+			for _, dir := range []string{attempt, sub} {
+				slot, found, err := findPanelSubmitSlot(dir)
+				if err != nil || !found || slot.Dir != f.layout.Dir {
+					t.Fatalf("attempt lookup: %+v %t %v", slot, found, err)
+				}
+			}
+			for _, repo := range []string{sub, attempt} {
+				if err := os.Mkdir(filepath.Join(repo, marker), 0700); err != nil {
+					t.Fatal(err)
+				}
+				for _, dir := range []string{repo, sub} {
+					slot, found, err := findPanelSubmitSlot(dir)
+					if err != nil || found {
+						t.Fatalf("attempt workspace captured: %+v %t %v", slot, found, err)
+					}
+				}
+			}
+		})
 	}
-	for _, dir := range []string{attempt, sub} {
-		slot, found, err := findPanelSubmitSlot(dir)
-		if err != nil || !found || slot.Dir != f.layout.Dir {
-			t.Fatalf("attempt lookup: %+v %t %v", slot, found, err)
-		}
-	}
-	for _, repo := range []string{sub, attempt} {
-		if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
-			t.Fatal(err)
-		}
-		for _, dir := range []string{repo, sub} {
+	for _, name := range []string{"attempt-01", "attempt-+1"} {
+		t.Run(name, func(t *testing.T) {
+			f := newCLIV2(t)
+			f.shortSetup(t, 1)
+			dir := filepath.Join(f.layout.Dir, name, "sub")
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
 			slot, found, err := findPanelSubmitSlot(dir)
 			if err != nil || found {
-				t.Fatalf("attempt repository captured: %+v %t %v", slot, found, err)
+				t.Fatalf("noncanonical attempt accepted: %+v %t %v", slot, found, err)
 			}
-		}
+		})
 	}
 }

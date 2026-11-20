@@ -37,7 +37,7 @@ func FindRoot(startDir string) (string, error) {
 	}
 
 	for {
-		if exists(filepath.Join(dir, ".mindspec")) || exists(filepath.Join(dir, ".git")) {
+		if marked, _ := HasRootMarker(dir); marked {
 			if resolved := resolveWorktreeRoot(dir); resolved != "" {
 				return resolved, nil
 			}
@@ -52,6 +52,19 @@ func FindRoot(startDir string) (string, error) {
 	}
 
 	return "", ErrNoRoot
+}
+
+// HasRootMarker reports whether dir has a .mindspec or .git entry.
+// A symlink is a marker even when its target is absent.
+func HasRootMarker(dir string) (bool, error) {
+	for _, name := range []string{".mindspec", ".git"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // resolveWorktreeRoot checks if dir is a git worktree and returns the main
@@ -94,7 +107,7 @@ func resolveWorktreeRoot(dir string) string {
 
 	// commondir is the main .git directory; its parent is the main repo root
 	mainRoot := filepath.Dir(commondir)
-	if exists(filepath.Join(mainRoot, ".mindspec")) || exists(filepath.Join(mainRoot, ".git")) {
+	if marked, _ := HasRootMarker(mainRoot); marked {
 		return mainRoot
 	}
 	return ""
@@ -111,7 +124,7 @@ func FindLocalRoot(startDir string) (string, error) {
 	}
 
 	for {
-		if exists(filepath.Join(dir, ".mindspec")) || exists(filepath.Join(dir, ".git")) {
+		if marked, _ := HasRootMarker(dir); marked {
 			return dir, nil
 		}
 
