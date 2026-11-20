@@ -400,8 +400,14 @@ var ErrPhaseLockTimeout error
 // reads epicID's stored mindspec_phase, calls fn(stored, present) for the
 // caller's decision, performs fn's returned conditional MergeMetadata
 // write (mergeMetadata), and releases. EVERY mindspec_phase writer in the
-// codebase routes through this.
-func WithPhaseWriteLock(root, epicID string, mergeMetadata MergeMetadataFunc, fn func(stored string, present bool) (updates map[string]interface{}, err error)) error
+// codebase routes through this, including implementation leases
+// (internal/next/kernel/lease.go's Lease).
+//
+// The optional readStored reader is called fresh after the lock is held, so
+// the stored phase comes from the caller's scoped store. Without it, the lock
+// reads through a new default cache. At most one reader is allowed; an invalid
+// phase value reads as empty.
+func WithPhaseWriteLock(root, epicID string, mergeMetadata MergeMetadataFunc, fn func(stored string, present bool) (updates map[string]interface{}, err error), readStored ...func() (string, bool, error)) error
 
 // DescribeLockFailure renders the ADR-0035 recovery text for a lock
 // failure (naming the lock path + recoveryCommand) when

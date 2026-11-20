@@ -184,7 +184,8 @@ existing-epic backfill (`internal/approve/spec.go`'s
 `WithPhaseWriteLock` write), `next`'s claim-time advance
 (`cmd/mindspec/next.go`'s `advancePhaseOnClaim` — the bead-2 writer this
 spec itself added, classified forward-by-intent in lifecycle-modes.md's
-writer taxonomy), `complete`'s step-6.5 sync (`internal/complete/complete.go`),
+writer taxonomy), implementation leases (`internal/next/kernel/lease.go`'s
+`Lease`), `complete`'s step-6.5 sync (`internal/complete/complete.go`),
 `release`'s step-6.5 sync (`cmd/mindspec/release.go`), `impl approve`'s
 reconcile and done writes (`internal/approve/impl.go`), `impl adopt`'s done
 write (`internal/approve/adopt.go`), `mindspec repair phase`
@@ -196,6 +197,11 @@ mergeMetadata, fn)`: a repo-scoped, KERNEL-HELD lock at `.mindspec/phase.lock`
 (`PhaseLockRelPath`) that reads the stored phase, hands it to `fn`, performs
 `fn`'s returned conditional `MergeMetadata` write, and releases — so a
 concurrent writer can never land a stale value over a fresher one (AC-5(v)).
+`WithPhaseWriteLock` takes an optional trailing `readStored func() (string,
+bool, error)`. The lock calls it fresh after it gets the lock, so the stored
+phase comes from the caller's scoped store. Without it, the lock reads through
+a new default cache. More than one reader is an error. An invalid phase value
+reads as empty.
 Kernel-held on both platforms means a crashed holder's lock releases with its
 process: `flock(2) LOCK_EX` on unix (`phaselock_unix.go`), and on Windows
 (`phaselock_windows.go`) `LockFileEx` (an exclusive byte-range lock) on a
