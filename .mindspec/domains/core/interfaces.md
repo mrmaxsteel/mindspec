@@ -7,7 +7,11 @@
 ```go
 package workspace
 
-// FindRoot walks up from startDir looking for .mindspec/ or .git.
+// FindRoot walks up from startDir and stops at the first directory with a
+// .mindspec or .git entry (a dangling symlink counts). A regular-file start
+// path walks up from its parent. A marker probe error other than not-exist
+// or not-a-directory is returned. HasRootMarker is the shared marker test;
+// FindLocalRoot uses the same rule but does not resolve a worktree.
 func FindRoot(startDir string) (string, error)
 
 // DocsDir returns the canonical-or-legacy docs root (no flat tier). Retained
@@ -68,6 +72,8 @@ Used by context-system (for glossary location) and workflow (for spec/bead resol
 It returns the slot identity, absolute main root and verified slot directory.
 It checks the exact path against the main root's current isolation-root setting.
 It refuses invalid metadata, unsafe path parts and a path that does not match.
+It stops at a nearer workspace root marker, so an outer slot never captures a nested workspace.
+A marked directory counts as a slot checkout only when it is the real directory named `tree` beside `slot.json`.
 
 ### Health Check Report
 
