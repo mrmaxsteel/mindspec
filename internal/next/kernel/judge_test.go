@@ -896,6 +896,8 @@ func TestS134Judge_LegacyPanelDirectory(t *testing.T) {
 	lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 	data, err := json.Marshal(kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "same result"})
 	f.Must(err)
+	// A relocated registration needs committed evidence for its new location.
+	reducerGit(t, f, "add", "--", filepath.Join("review", "panel", "panel.json"), filepath.Join("review", "panel", "dispositions.jsonl"))
 	judgeCommit(t, f, filepath.Join("review", "panel", "judgement.json"), string(data))
 	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: filepath.Join(dir, "judgement.json")})
 	f.Must(err)

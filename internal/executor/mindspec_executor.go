@@ -851,6 +851,9 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	currentTip, _ := gitutil.RevParseRef(g.Root, specBranch)
 	status, statusErr := gitutil.Status(specWtPath)
 	if _, statErr := os.Stat(specWtPath); !os.IsNotExist(statErr) && (savedTip == "" || savedTip != currentTip || statusErr != nil || strings.TrimSpace(status) != "") {
+		if err := checkArtifactSymlinks(specWtPath); err != nil {
+			return result, guard.NewFailure(termsafe.Escape(err.Error()), fmt.Sprintf("mindspec impl approve %s", idrender.Spec(specID)))
+		}
 		if err := g.commitWithExport(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
 			// A failed export or commit must preserve pending work. A
 			// preserved merge keeps its specific resolution recovery.

@@ -25,6 +25,11 @@ func subjectEvidenceCommit(t *testing.T, f *kerneltest.Fixture, branch, artifact
 		}
 	}()
 	reducerGit(t, f, "read-tree", base)
+	for _, name := range []string{"panel.json", "dispositions.jsonl"} {
+		rel := filepath.ToSlash(filepath.Join(filepath.Dir(artifact), name))
+		oid := reducerGit(t, f, "hash-object", "-w", filepath.Join(f.Root, filepath.FromSlash(rel)))
+		reducerGit(t, f, "update-index", "--add", "--cacheinfo", "100644,"+oid+","+rel)
+	}
 	blob := reducerGit(t, f, "rev-parse", evidence+":"+filepath.ToSlash(artifact))
 	reducerGit(t, f, "update-index", "--add", "--cacheinfo", "100644,"+blob+","+filepath.ToSlash(artifact))
 	if mixed {
@@ -43,7 +48,7 @@ func subjectEvidenceCommit(t *testing.T, f *kerneltest.Fixture, branch, artifact
 
 func TestS134Subject_PanelCommitsOnSubjectBranch(t *testing.T) {
 	for _, final := range []bool{false, true} {
-		for _, mode := range []string{"panel-only", "mixed", "panel-merge", "mixed-merge"} {
+		for _, mode := range []string{"panel-only", "mixed", "panel-merge", "mixed-merge", "empty"} {
 			t.Run(fmt.Sprintf("final=%t/%s", final, mode), func(t *testing.T) {
 				f := reducerFixture(t)
 				gate, branch := f.Items[0]+".review", "bead/"+f.Items[0]
@@ -60,8 +65,17 @@ func TestS134Subject_PanelCommitsOnSubjectBranch(t *testing.T) {
 				lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: slot}, kernel.LeaseDeps{})
 				f.Must(err)
 				artifact := recoveryVerdict(t, f, "R2", 1, old.Subject, "verdict-1-R2.json")
-				mixed := mode == "mixed" || mode == "mixed-merge"
-				head := subjectEvidenceCommit(t, f, branch, artifact, mixed, mode == "panel-merge" || mode == "mixed-merge")
+				mixed := mode == "mixed" || mode == "mixed-merge" || mode == "empty"
+				var head string
+				if mode == "empty" {
+					wt := filepath.Join(t.TempDir(), "empty-worktree")
+					reducerGit(t, f, "worktree", "add", "--detach", wt, branch)
+					reducerGit(t, f, "-C", wt, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "empty subject move")
+					head = reducerGit(t, f, "-C", wt, "rev-parse", "HEAD")
+					reducerGit(t, f, "update-ref", "refs/heads/"+branch, head)
+				} else {
+					head = subjectEvidenceCommit(t, f, branch, artifact, mixed, mode == "panel-merge" || mode == "mixed-merge")
+				}
 				// A read or apply must not supersede a round for evidence alone.
 				reduce(t, f, true)
 				if mixed {

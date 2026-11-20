@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -142,22 +143,18 @@ func effectiveSubjectAt(s State, gate, head string) (string, error) {
 		return "", err
 	}
 	t, _ := kernelid.Parse(gate)
-	dirs := []string{}
-	for _, p := range s.Panels {
-		if !registeredJudgePanel(s, t, p) {
-			continue
-		}
-		rel, err := judgePanelPath(p.Dir)
-		if err != nil {
-			return "", err
-		}
-		dirs = append(dirs, filepath.ToSlash(rel)+"/")
-	}
-	if len(dirs) == 0 {
-		return head, nil
-	}
 	for {
 		if head == accepted {
+			return head, nil
+		}
+		dirs := storedPanelPaths(s, gate)
+		for _, p := range s.Panels {
+			rel, ok := lexicalPanelPath(s, p.Dir)
+			if ok && committedPanel(s, t, head, rel) {
+				dirs = append(dirs, filepath.ToSlash(rel)+"/")
+			}
+		}
+		if len(dirs) == 0 {
 			return head, nil
 		}
 		line, err := actorGit(s.Root, "rev-list", "--parents", "-n", "1", head, "--")
@@ -174,6 +171,9 @@ func effectiveSubjectAt(s State, gate, head string) (string, error) {
 		}
 		onlyPanel := len(data) > 0
 		for _, name := range strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00") {
+			if name == "" {
+				continue
+			}
 			excluded := false
 			for _, dir := range dirs {
 				excluded = excluded || strings.HasPrefix(name, dir)
@@ -185,6 +185,131 @@ func effectiveSubjectAt(s State, gate, head string) (string, error) {
 		}
 		head = parents[1]
 	}
+}
+
+// lexicalPanelPath accepts only panel locations with no symlink components.
+// The repository root itself can have a system path alias.
+func lexicalPanelPath(s State, dir string) (string, bool) {
+	root, err := filepath.Abs(s.Root)
+	if err != nil {
+		return "", false
+	}
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return "", false
+	}
+	location := filepath.Dir(dir)
+	segment := filepath.Base(location)
+	if segment != "review" && segment != "reviews" {
+		return "", false
+	}
+	base := filepath.Dir(location)
+	if base == filepath.Clean(s.SpecDir) {
+		var ok bool
+		root, ok = specPanelRoot(s)
+		if !ok {
+			return "", false
+		}
+	} else if base != root && base != filepath.Join(root, ".mindspec") {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	current := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return "", false
+		}
+	}
+	return rel, true
+}
+
+// specPanelRoot finds the lexical worktree root for the known spec directory.
+// The store can use another checkout of the same repository.
+func specPanelRoot(s State) (string, bool) {
+	root, err := filepath.Abs(s.Root)
+	if err != nil {
+		return "", false
+	}
+	if workspace.TreeRootForSpecDir(s.SpecDir) == root {
+		return root, true
+	}
+	data, err := actorGit(s.SpecDir, "rev-parse", "--show-toplevel", "--show-prefix")
+	if err != nil {
+		return "", false
+	}
+	lines := strings.SplitN(data, "\n", 2)
+	prefix := ""
+	if len(lines) == 2 {
+		prefix = strings.TrimSuffix(lines[1], "/")
+	}
+	root = filepath.Clean(s.SpecDir)
+	if prefix != "" {
+		for range strings.Split(prefix, "/") {
+			root = filepath.Dir(root)
+		}
+	}
+	rel, err := filepath.Rel(root, s.SpecDir)
+	if err != nil || (prefix != "" && filepath.ToSlash(rel) != prefix) {
+		return "", false
+	}
+	physical, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", false
+	}
+	gitRoot, err := filepath.EvalSymlinks(lines[0])
+	if err != nil || physical != gitRoot {
+		return "", false
+	}
+	return root, true
+}
+
+// storedPanelPaths uses canonical locations of this gate's durable registrations.
+func storedPanelPaths(s State, gate string) []string {
+	paths := []string{}
+	wanted, err := kernelid.Parse(gate)
+	if err != nil {
+		return paths
+	}
+	for _, id := range s.Gates {
+		t, err := kernelid.Parse(id)
+		if err != nil || t.Gate != wanted.Gate {
+			continue
+		}
+		reg, ok, err := Decode[RegistrationRecord](s.Records[id].Metadata, KeyRegistration)
+		if err != nil || !ok || reg.Slug == "" || reg.Slug == "." || reg.Slug == ".." || filepath.Base(reg.Slug) != reg.Slug {
+			continue
+		}
+		if rel, ok := lexicalPanelPath(s, filepath.Join(s.SpecDir, "reviews", reg.Slug)); ok {
+			paths = append(paths, filepath.ToSlash(rel)+"/")
+		}
+	}
+	return paths
+}
+
+// committedPanel reads registration evidence from the commit being judged.
+// Working files cannot create an exemption or change its gate identity.
+func committedPanel(s State, t Tuple, head, rel string) bool {
+	data, err := actorGitBytes(s.Root, "show", head+":"+filepath.ToSlash(filepath.Join(rel, "panel.json")))
+	var p panel.Panel
+	if err == nil && json.Unmarshal(data, &p) == nil && p.Spec == s.SpecID && gatePanel(t, p) {
+		return true
+	}
+	data, err = actorGitBytes(s.Root, "show", head+":"+filepath.ToSlash(filepath.Join(rel, "dispositions.jsonl")))
+	if err != nil {
+		return false
+	}
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		var event panel.RoundRecord
+		if json.Unmarshal(line, &event) == nil && event.Record == panel.RecordRound && event.Spec == s.SpecID && gatePanel(t, panel.Panel{BeadID: event.BeadID, Gate: event.Gate}) {
+			return true
+		}
+	}
+	return false
 }
 
 func judgeEnded(s State, gate string) (bool, error) {

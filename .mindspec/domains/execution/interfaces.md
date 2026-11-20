@@ -480,3 +480,9 @@ Lifecycle scenarios use a local tracker fake with complete records.
 The fake keeps metadata, child links, blocking links, and status changes.
 A plan approval test checks the pinned enrolment marker.
 Sandbox configuration includes the required step type.
+
+### Remaining artifact commits
+
+Finalization commits pending files from the whole spec worktree, including files outside
+the spec directory. Before export or staging, it refuses a pending file with a symlink
+component. The refusal preserves the pending files, index and branch tip.

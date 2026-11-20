@@ -1700,7 +1700,7 @@ func FormatResult(r *Result) string {
 		return fmt.Sprintf("Bead %s is already complete.\n", idrender.Bead(r.BeadID))
 	}
 	if r != nil && r.Check {
-		return "Content gates passed.\n"
+		return "Content gates passed. Panel and kernel gates were not checked.\n"
 	}
 	if r != nil && r.MergeOnly {
 		var out strings.Builder

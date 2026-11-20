@@ -225,6 +225,10 @@ func TestS134PanelCreate_AuthorisationAndFrozenGate(t *testing.T) {
 				n = 2
 			}
 			kernelPanelRefusal(t, out, e, fmt.Sprintf("round %d is not authorized", n))
+			wantRecovery := "recovery: mindspec next-action '" + f.SpecID + "' --apply"
+			if !strings.Contains(out+fmt.Sprint(e), wantRecovery) {
+				t.Fatalf("missing runnable round recovery %q: %s %v", wantRecovery, out, e)
+			}
 			if before != kerneltest.Snapshot(t, f) {
 				t.Fatal("unauthorized create wrote")
 			}

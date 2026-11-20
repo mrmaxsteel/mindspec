@@ -209,7 +209,7 @@ func RunClaude(root string, check bool) (*Result, error) {
 	// AGENTS.md byte-unchanged rather than leaving a half-healed file
 	// (title fixed, block still leaked). Narrowly gated on positively
 	// detecting a leak (never a general takeover of AGENTS.md), so a clean
-	// repo is unaffected and never even loads config.
+	// repo needs no config for this heal.
 	if !check {
 		if err := healLegacyAgentsMD(root); err != nil {
 			return nil, err
@@ -303,7 +303,8 @@ func ensureGitignore(root string, check bool, r *Result) error {
 
 	cfg, err := config.Load(root)
 	if err != nil {
-		return err
+		cfg = config.DefaultConfig()
+		r.Notices = append(r.Notices, "warning: cannot load config; using the default panel isolation directory for ignore entries")
 	}
 	if err := gitutil.EnsureGitignoreLiteralEntriesWithHeader(root, "# MindSpec local review files (not version-controlled)", ".mindspec/config.local.yaml", cfg.Panel.IsolationRoot); err != nil {
 		return fmt.Errorf("ensuring local review ignores: %w", err)

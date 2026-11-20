@@ -85,3 +85,33 @@ func TestSetupVerbs_CheckModeWritesNoGitignore(t *testing.T) {
 		})
 	}
 }
+
+func TestS134SetupClaude_BadConfigUsesDefaultIgnore(t *testing.T) {
+	for _, body := range []string{"panel: [\n", "runner: typoo\n"} {
+		t.Run(body, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, ".mindspec/config.yaml"), []byte(body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			result, err := RunClaude(root, false)
+			if err != nil {
+				t.Fatalf("irrelevant config prevents setup: %v", err)
+			}
+			if !strings.Contains(strings.Join(result.Notices, "\n"), "warning: cannot load config") {
+				t.Fatal("missing config warning", result.Notices)
+			}
+			data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range []string{".mindspec-scratch", ".mindspec/config.local.yaml"} {
+				if !strings.Contains(string(data), entry) {
+					t.Fatalf("missing default ignore %s: %s", entry, data)
+				}
+			}
+		})
+	}
+}

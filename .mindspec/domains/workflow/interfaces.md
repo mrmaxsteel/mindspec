@@ -1334,7 +1334,8 @@ under both presence policies. These checks do not change approval state.
 
 `mindspec complete <bead> --check` reports doc-sync, ADR and work-destruction
 failures on the same candidate and landing tree as completion. It skips panel
-review and coverage. It leaves git, worktrees and bead records unchanged. The
+review, kernel gates and coverage. Its success output names the skipped gate checks.
+It leaves git, worktrees and bead records unchanged. The
 bead must be open, have a branch and have no pending merge-only run. Check refuses
 `--merge-only`, `--resolve-merge`, `--override-adr`, `--supersede-adr` and
 `--allow-net-deletion`. Completion also reports all failing content gates.
@@ -1620,6 +1621,13 @@ Panel submission publishes the canonical verdict and ledger files used by tally 
 These files remain in the review directory for finalization.
 
 A commit that changes only directories registered to the gate does not move its subject.
+An exempt directory must be a lexical `review/<slug>` or `reviews/<slug>` location under
+the repository root, `.mindspec`, or the spec directory. Paths are relative to the root
+of the worktree that contains them, even when the store uses another checkout.
+Every directory component below that root must be a real directory. A symlink grants no exemption.
+The commit being judged must contain a panel file or round ledger that registers that gate,
+or the kernel store must record the slug at its canonical spec review location.
+Untracked and ignored working files cannot define an exemption.
 Round creation, submission, superseding, tally, and approval use the same effective subject.
 A commit that also changes another path moves the subject.
 A merge compares its tree with its first parent; an empty commit moves the subject.
@@ -1628,3 +1636,4 @@ After finalization closes the epic, approval can resume at the recorded publicat
 The recorded checkpoint must resolve to the accepted subject, and must precede that publication.
 An open epic or any other branch tip still requires the accepted subject.
 Setup ignores the configured panel isolation directory and local panel config, including without init.
+If config cannot load, the ignore step warns and uses the default isolation directory.

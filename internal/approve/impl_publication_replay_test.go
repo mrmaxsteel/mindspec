@@ -1,15 +1,16 @@
 package approve
 
 import (
-	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 )
 
 func TestS134ImplApprove_FinalizeExportReplay(t *testing.T) {
-	for _, mode := range []string{"recorded-tip", "moved-head", "open-epic", "wrong-checkpoint"} {
+	for _, mode := range []string{"recorded-tip", "moved-head", "open-epic", "wrong-checkpoint", "unrelated-publication"} {
 		t.Run(mode, func(t *testing.T) {
 			f, ex, _ := s134ApproveFixture(t)
 			accepted, err := kernel.AcceptedSubject(f.State(), f.Epic+".final")
@@ -25,6 +26,15 @@ func TestS134ImplApprove_FinalizeExportReplay(t *testing.T) {
 			data, err := f.Command("git", "rev-parse", "HEAD")
 			f.Must(err)
 			publication := strings.TrimSpace(string(data))
+			if mode == "unrelated-publication" {
+				tree, err := f.Command("git", "rev-parse", publication+"^{tree}")
+				f.Must(err)
+				data, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit-tree", strings.TrimSpace(string(tree)), "-m", "unrelated publication")
+				f.Must(err)
+				publication = strings.TrimSpace(string(data))
+				_, err = f.Command("git", "update-ref", "refs/heads/spec/"+f.SpecID, publication)
+				f.Must(err)
+			}
 			f.Must(f.Store.WriteMetadata(f.Epic, map[string]any{"mindspec_pre_finalize_tip": accepted, "mindspec_finalize_tip": publication}))
 			if mode != "open-epic" {
 				f.Must(f.Store.SetStatusIf(f.Epic, "open", "closed"))
@@ -35,6 +45,11 @@ func TestS134ImplApprove_FinalizeExportReplay(t *testing.T) {
 			if mode == "moved-head" {
 				_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "later source move")
 				f.Must(err)
+			}
+			if mode == "unrelated-publication" {
+				if gateErr := kernel.CheckPassedGate(f.State(), f.Epic+".final"); gateErr == nil {
+					t.Fatal("publication outside checkpoint ancestry passed the final gate")
+				}
 			}
 			_, err = ApproveImpl(f.Root, f.SpecID, ex)
 			if mode == "recorded-tip" {
