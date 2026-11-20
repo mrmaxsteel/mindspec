@@ -37,7 +37,9 @@ func FindRoot(startDir string) (string, error) {
 	}
 
 	for {
-		if marked, _ := HasRootMarker(dir); marked {
+		if marked, err := HasRootMarker(dir); err != nil {
+			return "", err
+		} else if marked {
 			if resolved := resolveWorktreeRoot(dir); resolved != "" {
 				return resolved, nil
 			}
@@ -124,7 +126,9 @@ func FindLocalRoot(startDir string) (string, error) {
 	}
 
 	for {
-		if marked, _ := HasRootMarker(dir); marked {
+		if marked, err := HasRootMarker(dir); err != nil {
+			return "", err
+		} else if marked {
 			return dir, nil
 		}
 

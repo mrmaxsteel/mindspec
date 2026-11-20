@@ -169,6 +169,68 @@ func TestFindSlotRoot_RepositoryBoundary(t *testing.T) {
 			}
 		}
 	})
+	for _, marker := range []string{".git", ".mindspec"} {
+		for _, kind := range []string{"absent", "file", "broken-link", "directory"} {
+			t.Run("stray-slot/"+marker+"/"+kind, func(t *testing.T) {
+				parent := filepath.Join(tree, "stray-"+marker+"-"+kind)
+				nested := filepath.Join(parent, "fixture")
+				mustMkdirAll(t, filepath.Join(nested, marker))
+				mustMkdirAll(t, filepath.Join(nested, "sub"))
+				mustWriteFile(t, filepath.Join(parent, "slot.json"), "{}")
+				switch kind {
+				case "file":
+					mustWriteFile(t, filepath.Join(parent, "tree"), "file")
+				case "broken-link":
+					if err := os.Symlink(filepath.Join(parent, "absent"), filepath.Join(parent, "tree")); err != nil {
+						t.Fatal(err)
+					}
+				case "directory":
+					mustMkdirAll(t, filepath.Join(parent, "tree"))
+				}
+				for _, cwd := range []string{nested, filepath.Join(nested, "sub")} {
+					called := false
+					_, found, err := FindSlotRoot(cwd, func(string) (string, error) { called = true; return "scratch", nil })
+					if err != nil || found || called {
+						t.Errorf("nested workspace captured at %s: found=%t resolved=%t err=%v", cwd, found, called, err)
+					}
+					if normal, err := FindRoot(cwd); err != nil || normal != nested {
+						t.Errorf("nested root: got %s want %s, err=%v", normal, nested, err)
+					}
+				}
+			})
+		}
+		t.Run("forged-slot/"+marker, func(t *testing.T) {
+			parent := filepath.Join(tree, "forged-"+marker)
+			nested := filepath.Join(parent, "tree")
+			mustMkdirAll(t, filepath.Join(nested, marker))
+			mustMkdirAll(t, filepath.Join(nested, "sub"))
+			mustWriteFile(t, filepath.Join(parent, "slot.json"), string(raw))
+			for _, cwd := range []string{nested, filepath.Join(nested, "sub")} {
+				_, found, err := FindSlotRoot(cwd, func(string) (string, error) { return "scratch", nil })
+				if !found || err == nil || !strings.Contains(err.Error(), "invalid slot directory") {
+					t.Errorf("forged slot accepted: found=%t err=%v", found, err)
+				}
+				if normal, err := FindRoot(cwd); err != nil || normal != nested {
+					t.Errorf("nested root: got %s want %s, err=%v", normal, nested, err)
+				}
+			}
+		})
+	}
+	t.Run("symlink-checkout", func(t *testing.T) {
+		linked := filepath.Join(root, "linked-workspace")
+		mustMkdirAll(t, filepath.Join(linked, ".mindspec"))
+		slotDir := filepath.Join(root, "link-scratch", "test", "p", "r1", "R1")
+		mustWriteFile(t, filepath.Join(slotDir, "slot.json"), string(raw))
+		if err := os.Symlink(linked, filepath.Join(slotDir, "tree")); err != nil {
+			t.Fatal(err)
+		}
+		// An absent child prevents path resolution from hiding the link.
+		called := false
+		_, found, err := FindSlotRoot(filepath.Join(slotDir, "tree", "absent"), func(string) (string, error) { called = true; return "link-scratch", nil })
+		if err != nil || found || called {
+			t.Errorf("linked checkout accepted: found=%t resolved=%t err=%v", found, called, err)
+		}
+	})
 	scratch := filepath.Join(dir, "scratch")
 	if err := os.Mkdir(scratch, 0700); err != nil {
 		t.Fatal(err)

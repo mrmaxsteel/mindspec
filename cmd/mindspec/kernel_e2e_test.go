@@ -1065,6 +1065,28 @@ func TestS134PanelCreate_NonEnrolledSpecShorthand(t *testing.T) {
 }
 
 func TestS134PanelSubmit_AttemptDirectoryBoundary(t *testing.T) {
+	t.Run("stray-slot", func(t *testing.T) {
+		f := newCLIV2(t)
+		f.shortSetup(t, 1)
+		parent := filepath.Join(f.layout.Tree, "nested")
+		nested := filepath.Join(parent, "fixture")
+		sub := filepath.Join(nested, "sub")
+		if err := os.MkdirAll(sub, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(nested, ".mindspec"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(parent, "slot.json"), []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		for _, cwd := range []string{nested, sub} {
+			slot, found, err := findPanelSubmitSlot(cwd)
+			if err != nil || found {
+				t.Errorf("nested workspace captured: %+v %t %v", slot, found, err)
+			}
+		}
+	})
 	for _, marker := range []string{".git", ".mindspec"} {
 		t.Run(marker, func(t *testing.T) {
 			f := newCLIV2(t)

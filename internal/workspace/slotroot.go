@@ -44,6 +44,17 @@ func FindSlotRoot(cwd string, isolationRoot func(string) (string, error)) (SlotR
 		if marked, err := HasRootMarker(dir); err != nil {
 			return SlotRoot{}, false, err
 		} else if marked {
+			parent := filepath.Dir(dir)
+			if dir != filepath.Join(parent, "tree") {
+				return SlotRoot{}, false, nil
+			}
+			info, err := os.Lstat(dir)
+			if err != nil {
+				return SlotRoot{}, false, err
+			}
+			if !info.IsDir() {
+				return SlotRoot{}, false, nil
+			}
 			if _, err := os.Lstat(filepath.Join(filepath.Dir(dir), "slot.json")); err != nil {
 				if !os.IsNotExist(err) {
 					return SlotRoot{}, false, err
