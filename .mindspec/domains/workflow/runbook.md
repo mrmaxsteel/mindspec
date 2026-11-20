@@ -457,7 +457,8 @@ merge, unset the `mindspec_merge_only` metadata key.
 
 ## Kernel loop
 
-Run the full lifecycle tests with `go test ./cmd/mindspec/... -run '^TestS134E2E_' -count=1 -v -timeout 45m`.
+Run the full lifecycle tests with `go test ./cmd/mindspec/... -run '^TestS134E2E_' -count=1 -v -timeout 90m`.
+The group is sensitive to host load. Its long lifecycle tests skip in `-short` mode.
 The test deadline bounds each binary command and leaves time to report a timeout.
 
 Approve a new plan to enrol its work items and pin its policy.

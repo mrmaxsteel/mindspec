@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -55,6 +57,43 @@ func resolveEffectivePanelSlot(cfg *config.Config, dir string, p panel.Panel, sl
 	return panel.SubmitResolution{Family: family, Model: model, RunnerKind: runner.Kind, RunnerSource: cfg.RunnerSource(family)}, nil
 }
 
+// findPanelSubmitSlot also accepts saved verdicts in a slot attempt directory.
+// Repository boundaries still stop lookup, including repositories inside attempts.
+func findPanelSubmitSlot(dir string) (workspace.SlotRoot, bool, error) {
+	slot, found, err := workspace.FindSlotRoot(dir, config.IsolationRootFor)
+	if err != nil || found {
+		return slot, found, err
+	}
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return workspace.SlotRoot{}, false, err
+	}
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	for {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return workspace.SlotRoot{}, false, nil
+		} else if !os.IsNotExist(err) {
+			return workspace.SlotRoot{}, false, err
+		}
+		name := filepath.Base(dir)
+		if n, err := strconv.Atoi(strings.TrimPrefix(name, "attempt-")); err == nil && n > 0 && name == "attempt-"+strconv.Itoa(n) {
+			parent := filepath.Dir(dir)
+			slot, found, err := workspace.FindSlotRoot(parent, config.IsolationRootFor)
+			if found && err == nil && slot.Dir != parent {
+				return workspace.SlotRoot{}, false, nil
+			}
+			return slot, found, err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return workspace.SlotRoot{}, false, nil
+		}
+		dir = parent
+	}
+}
+
 func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	file, _ := cmd.Flags().GetString("file")
 	if file == "" {
@@ -64,14 +103,14 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fromCWD, hasCWD, err := workspace.FindSlotRoot(cwd, config.IsolationRootFor)
+	fromCWD, hasCWD, err := findPanelSubmitSlot(cwd)
 	if err != nil {
 		return err
 	}
 	var fromFile workspace.SlotRoot
 	hasFile := false
 	if filepath.IsAbs(file) {
-		fromFile, hasFile, err = workspace.FindSlotRoot(filepath.Dir(file), config.IsolationRootFor)
+		fromFile, hasFile, err = findPanelSubmitSlot(filepath.Dir(file))
 		if err != nil {
 			return err
 		}

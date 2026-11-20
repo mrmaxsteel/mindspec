@@ -81,7 +81,8 @@ func commandIn(t testing.TB, root, dir string, limit time.Duration, combined boo
 }
 
 // commandContext reserves time for error output before the test deadline.
-// A zero limit lets the test deadline bound a lifecycle command.
+// A zero limit uses the test deadline or a bounded fallback.
+// Temporary directory cleanup can use the reporting margin; it is not a cleanup guarantee.
 func commandContext(t testing.TB, limit time.Duration) (context.Context, context.CancelFunc) {
 	if limit > 0 {
 		return context.WithTimeout(context.Background(), limit) // #nosec G118 -- The caller cancels the returned context.
@@ -91,7 +92,7 @@ func commandContext(t testing.TB, limit time.Duration) (context.Context, context
 			return context.WithDeadline(context.Background(), deadline.Add(-5*time.Second)) // #nosec G118 -- The caller cancels the returned context.
 		}
 	}
-	return context.WithCancel(context.Background()) // #nosec G118 -- The caller cancels the returned context.
+	return context.WithTimeout(context.Background(), 90*time.Minute) // #nosec G118 -- The caller cancels the returned context.
 }
 
 func gitRepo(t testing.TB) string {

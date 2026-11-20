@@ -1009,3 +1009,84 @@ func TestS134SubmitCmd_PublishesCommittedReview(t *testing.T) {
 		t.Fatal("identical resubmit changed the ledger or tracker")
 	}
 }
+
+func TestS134SubmitCmd_RefreshesPublicationState(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	stale := f.State()
+	if len(stale.Panels) != 0 {
+		t.Fatal("stale fixture already has a panel")
+	}
+	out, err := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, err)
+	id := gate + ".r1.R1"
+	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+	f.Must(err)
+	v := paneltest.Verdict("APPROVE")
+	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
+	file := filepath.Join(f.SpecDir, "reviews", "1", "committed-verdict.json")
+	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0600))
+	actorCmdGit(t, f, "add", ".")
+	actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "verdict")
+	// Keep the command's initial read before registration; the actor lock must refresh it.
+	old := submitCommandStateFn
+	submitCommandStateFn = func(_, target string) (kernel.State, error) {
+		if target != id {
+			t.Fatalf("unexpected target %s", target)
+		}
+		return stale, nil
+	}
+	t.Cleanup(func() { submitCommandStateFn = old })
+	out, err = kernelPanelRun(t, submitCmd, id, "--lease", lease.Token, "--artifact", file)
+	kernelPanelRequire(t, out, err)
+	subs, err := panel.LatestSubmissions(filepath.Dir(file), 1)
+	f.Must(err)
+	row := kernelPanelRecord(t, f, id)
+	receipt, ok, err := kernel.Decode[kernel.Receipt](row.Metadata, kernel.KeyClose)
+	f.Must(err)
+	if row.Status != "closed" || !ok || len(subs) != 1 || subs["R1"].Verdict != "APPROVE" || subs["R1"].Seq != 1 {
+		t.Fatal("submit did not publish with refreshed registration", row.Status, ok, subs)
+	}
+	f.Must(kernel.ValidReceipt(f.Root, receipt))
+}
+
+func TestS134PanelCreate_NonEnrolledSpecShorthand(t *testing.T) {
+	f, _, _ := kernelPanelFixture(t)
+	state := f.State()
+	state.Enrolled = false
+	panelKernelStateFn = func(_, _ string) (*kernel.State, error) { return &state, nil }
+	before := kerneltest.Snapshot(t, f)
+	if got := panelCreateKernelGate(f.Root, f.SpecID, "", "", ""); got != "" {
+		t.Fatalf("non-enrolled spec shorthand claimed as %q", got)
+	}
+	if after := kerneltest.Snapshot(t, f); after != before {
+		t.Fatal("shorthand lookup changed state")
+	}
+}
+
+func TestS134PanelSubmit_AttemptDirectoryBoundary(t *testing.T) {
+	f := newCLIV2(t)
+	file := f.shortSetup(t, 1)
+	attempt := filepath.Dir(file)
+	sub := filepath.Join(attempt, "sub")
+	if err := os.Mkdir(sub, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{attempt, sub} {
+		slot, found, err := findPanelSubmitSlot(dir)
+		if err != nil || !found || slot.Dir != f.layout.Dir {
+			t.Fatalf("attempt lookup: %+v %t %v", slot, found, err)
+		}
+	}
+	for _, repo := range []string{sub, attempt} {
+		if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		for _, dir := range []string{repo, sub} {
+			slot, found, err := findPanelSubmitSlot(dir)
+			if err != nil || found {
+				t.Fatalf("attempt repository captured: %+v %t %v", slot, found, err)
+			}
+		}
+	}
+}

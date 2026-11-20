@@ -13,8 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var submitCommandStateFn = kernelCommandState
+
 var submitCmd = &cobra.Command{Use: "submit <step-or-decision>", Short: "Submit evidence or answer a kernel decision", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-	state, err := kernelCommandState("", args[0])
+	state, err := submitCommandStateFn("", args[0])
 	if err != nil {
 		return err
 	}

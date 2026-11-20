@@ -160,6 +160,7 @@ func refreshPanelState(s kernel.State) (kernel.State, error) {
 }
 
 // panelCreateKernelGate selects lifecycle shorthand from the approved spec tree.
+// It reads tracker state to check enrollment for an inferred final review.
 func panelCreateKernelGate(root, slug, spec, target, item string) string {
 	if item != "" || strings.HasPrefix(target, "bead/") {
 		return "bead"

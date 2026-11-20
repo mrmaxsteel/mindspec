@@ -118,3 +118,22 @@ func TestS134Fixture_BinaryDeadline(t *testing.T) {
 		}
 	}
 }
+
+type noDeadlineFixture struct{ testing.TB }
+
+func (noDeadlineFixture) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func TestS134Fixture_BinaryDeadlineFallback(t *testing.T) {
+	before := time.Now()
+	ctx, cancel := commandContext(noDeadlineFixture{TB: t}, 0)
+	defer cancel()
+	after := time.Now()
+	deadline, ok := ctx.Deadline()
+	if !ok || deadline.Before(before.Add(90*time.Minute)) || deadline.After(after.Add(90*time.Minute)) {
+		t.Fatalf("command without a test deadline needs a bounded fallback: %v, present %t", deadline, ok)
+	}
+	cancel()
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("fallback context did not cancel: %v", ctx.Err())
+	}
+}
