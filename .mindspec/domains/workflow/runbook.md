@@ -457,6 +457,9 @@ merge, unset the `mindspec_merge_only` metadata key.
 
 ## Kernel loop
 
+Run the full lifecycle tests with `go test ./cmd/mindspec/... -run '^TestS134E2E_' -count=1 -v -timeout 45m`.
+The test deadline bounds each binary command and leaves time to report a timeout.
+
 Approve a new plan to enrol its work items and pin its policy.
 Run the loop from the spec worktree.
 Panel creation resolves work-item and final-review targets from its approved plan.

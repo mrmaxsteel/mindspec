@@ -33,7 +33,9 @@ var submitCmd = &cobra.Command{Use: "submit <step-or-decision>", Short: "Submit 
 	if options.Answer != "" {
 		out, err = kernel.Answer(state, options.Step, options.Answer)
 	} else {
-		options.BeforeClose = func(receipt kernel.Receipt) error { return publishSubmittedReview(state, options.Step, receipt) }
+		options.BeforeClose = func(fresh kernel.State, receipt kernel.Receipt) error {
+			return publishSubmittedReview(fresh, options.Step, receipt)
+		}
 		out, err = kernel.Submit(state, options)
 	}
 	if err != nil {

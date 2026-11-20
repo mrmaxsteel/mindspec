@@ -197,7 +197,7 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 		if e != nil {
 			return e
 		}
-		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: func(receipt kernel.Receipt) error {
+		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: func(_ kernel.State, receipt kernel.Receipt) error {
 			committed, exists, e := newExecutor(root).FileAtRefOrAbsent(receipt.Commit, receipt.Path)
 			if e != nil {
 				return e

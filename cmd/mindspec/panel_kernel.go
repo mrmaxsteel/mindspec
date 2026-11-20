@@ -159,7 +159,7 @@ func refreshPanelState(s kernel.State) (kernel.State, error) {
 	return kernel.ReadState(s.Store, s.SpecID, s.SpecDir)
 }
 
-// panelCreateKernelGate selects only lifecycle shorthand without reading the tracker.
+// panelCreateKernelGate selects lifecycle shorthand from the approved spec tree.
 func panelCreateKernelGate(root, slug, spec, target, item string) string {
 	if item != "" || strings.HasPrefix(target, "bead/") {
 		return "bead"
@@ -177,10 +177,21 @@ func panelCreateKernelGate(root, slug, spec, target, item string) string {
 		}
 		specIDs = append(specIDs, spec)
 	} else {
-		entries, _ := os.ReadDir(workspace.SpecsDir(root))
+		roots := []string{root}
+		entries, _ := os.ReadDir(workspace.DefaultWorktreesDir(root))
 		for _, entry := range entries {
-			if entry.IsDir() && idvalidate.SpecID(entry.Name()) == nil {
-				specIDs = append(specIDs, entry.Name())
+			if entry.IsDir() {
+				roots = append(roots, filepath.Join(workspace.DefaultWorktreesDir(root), entry.Name()))
+			}
+		}
+		seen := map[string]bool{}
+		for _, tree := range roots {
+			entries, _ := os.ReadDir(workspace.SpecsDir(tree))
+			for _, entry := range entries {
+				if entry.IsDir() && idvalidate.SpecID(entry.Name()) == nil && !seen[entry.Name()] {
+					specIDs = append(specIDs, entry.Name())
+					seen[entry.Name()] = true
+				}
 			}
 		}
 	}
@@ -192,7 +203,10 @@ func panelCreateKernelGate(root, slug, spec, target, item string) string {
 	}
 	for _, dir := range dirs {
 		if slug == filepath.Base(dir) {
-			return "final_review"
+			s, err := panelKernelStateFn(root, slug)
+			if err == nil && s != nil && s.Enrolled && s.SpecID == slug {
+				return "final_review"
+			}
 		}
 		data, err := os.ReadFile(filepath.Join(dir, "plan.md"))
 		if err != nil {

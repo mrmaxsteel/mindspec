@@ -38,7 +38,7 @@ func commandWithTimeout(t testing.TB, root string, limit time.Duration, combined
 }
 func commandIn(t testing.TB, root, dir string, limit time.Duration, combined bool, name string, args ...string) ([]byte, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	ctx, cancel := commandContext(t, limit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
@@ -62,10 +62,16 @@ func commandIn(t testing.TB, root, dir string, limit time.Duration, combined boo
 		cmd.Env = append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(root), "BEADS_DIR="+filepath.Join(root, ".beads"))
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
+	var out []byte
+	var err error
 	if combined {
-		return cmd.CombinedOutput()
+		out, err = cmd.CombinedOutput()
+	} else {
+		out, err = cmd.Output()
 	}
-	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return out, fmt.Errorf("command timed out: %w", ctx.Err())
+	}
 	if err != nil {
 		if e, ok := err.(*exec.ExitError); ok {
 			return out, fmt.Errorf("%w: %s", err, e.Stderr)
@@ -73,6 +79,21 @@ func commandIn(t testing.TB, root, dir string, limit time.Duration, combined boo
 	}
 	return out, err
 }
+
+// commandContext reserves time for error output before the test deadline.
+// A zero limit lets the test deadline bound a lifecycle command.
+func commandContext(t testing.TB, limit time.Duration) (context.Context, context.CancelFunc) {
+	if limit > 0 {
+		return context.WithTimeout(context.Background(), limit) // #nosec G118 -- The caller cancels the returned context.
+	}
+	if timed, ok := t.(interface{ Deadline() (time.Time, bool) }); ok {
+		if deadline, ok := timed.Deadline(); ok {
+			return context.WithDeadline(context.Background(), deadline.Add(-5*time.Second)) // #nosec G118 -- The caller cancels the returned context.
+		}
+	}
+	return context.WithCancel(context.Background()) // #nosec G118 -- The caller cancels the returned context.
+}
+
 func gitRepo(t testing.TB) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "kernel")
@@ -143,13 +164,13 @@ func EmptyRepo(t testing.TB) *Fixture {
 	return &Fixture{Root: NewRepo(t), t: t}
 }
 
-// BinaryCommand captures both output streams with a bounded lifecycle timeout.
+// BinaryCommand captures both output streams and uses the test deadline.
 // It uses the same isolated environment as tracker and git fixture commands.
 func (f *Fixture) BinaryCommand(name string, args ...string) ([]byte, error) {
-	return commandWithTimeout(f.t, f.Root, 4*time.Minute, true, name, args...)
+	return commandWithTimeout(f.t, f.Root, 0, true, name, args...)
 }
 
 // BinaryCommandIn retains the store and home while selecting a live worktree.
 func (f *Fixture) BinaryCommandIn(dir, name string, args ...string) ([]byte, error) {
-	return commandIn(f.t, f.Root, dir, 4*time.Minute, true, name, args...)
+	return commandIn(f.t, f.Root, dir, 0, true, name, args...)
 }

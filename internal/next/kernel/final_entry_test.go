@@ -8,7 +8,7 @@ import (
 )
 
 func TestS134Reducer_FinalApprovalEntry(t *testing.T) {
-	for _, hold := range []string{"none", "foreign-child", "foreign-blocker", "judge", "item-incomplete", "final-open", "epic-closed"} {
+	for _, hold := range []string{"none", "foreign-child", "foreign-blocker", "judge", "item-incomplete", "item-link-missing", "raw-close", "decision", "halted", "final-open", "epic-closed"} {
 		t.Run(hold, func(t *testing.T) {
 			f := reducerFixture(t)
 			for _, item := range f.Items {
@@ -31,8 +31,35 @@ func TestS134Reducer_FinalApprovalEntry(t *testing.T) {
 				f.Fake.Records[r.ID] = r
 			case "judge":
 				kerneltest.Judge(f, final, newCommit(t, f, "spec/"+f.SpecID), 1)
-			case "item-incomplete":
+			case "item-incomplete", "item-link-missing", "raw-close":
 				f.Must(f.Store.WriteMetadata(f.Items[0], map[string]any{kernel.KeyCompletion: ""}))
+				if hold == "item-link-missing" {
+					r := f.Fake.Records[f.ID(final)]
+					links := r.Dependencies[:0]
+					for _, link := range r.Dependencies {
+						if link.ID != f.ID(f.Items[0]) {
+							links = append(links, link)
+						}
+					}
+					r.Dependencies = links
+					f.Fake.Records[r.ID] = r
+					// A foreign cycle prevents the pass from restoring the missing link.
+					f.Fake.Records["foreign-bridge"] = kernel.Record{ID: "foreign-bridge", Type: "task", Status: "closed", Dependencies: []kernel.Dependency{{ID: f.ID(final), Type: "blocks"}}}
+					item := f.Fake.Records[f.ID(f.Items[0])]
+					item.Dependencies = append(item.Dependencies, kernel.Dependency{ID: "foreign-bridge", Type: "blocks"})
+					f.Fake.Records[item.ID] = item
+				}
+				if hold == "raw-close" {
+					newCommit(t, f, "bead/"+f.Items[0])
+					if !kernel.RawClose(f.State(), f.Items[0]) {
+						t.Fatal("fixture has no raw close")
+					}
+				}
+			case "decision":
+				kerneltest.OpenDecision(f, final, "limit", 1, "continue:<n>", "halt")
+			case "halted":
+				d := kerneltest.OpenDecision(f, final, "limit", 1, "continue:<n>", "halt")
+				kerneltest.Answer(f, d, "halt")
 			case "epic-closed":
 				f.Must(f.Store.SetStatusIf(f.Epic, "open", "closed"))
 			}

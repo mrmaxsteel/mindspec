@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,8 +75,6 @@ func newKernelE2E(t *testing.T, bin string, sizes ...int) *kernelE2E {
 	e.git(root, "branch", "-M", "main")
 	e.write(root, ".gitignore", ".worktrees/\n.mindspec/phase.lock\n.beads/*\n!.beads/config.yaml\n!.beads/issues.jsonl\n")
 	e.write(root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\nauto_open_finalize_pr: false\npanel:\n  reviewers:\n    - family: harness\n      model: test-model\n      lens: correctness\n      count: 3\n")
-	e.write(root, ".mindspec/specs/001-x/spec.md", "---\nstatus: Approved\n---\n# Example\n\n## Goal\nExercise the kernel.\n\n## Impacted Domains\n- workflow\n")
-	e.write(root, ".mindspec/specs/001-x/plan.md", strings.Replace(kerneltest.EnrolmentPlan(f.SpecID, size), "version:", "adr_citations: [ADR-9001]\nversion:", 1))
 	e.write(root, ".mindspec/adr/ADR-9001.md", "# ADR-9001: Fixture\n\n- **Status**: Accepted\n- **Domain(s)**: workflow\n\n## Decision\nExercise the local kernel.\n")
 	e.write(root, ".beads/issues.jsonl", "")
 	e.git(root, "add", "-f", ".beads/config.yaml", ".beads/issues.jsonl")
@@ -89,6 +88,10 @@ func newKernelE2E(t *testing.T, bin string, sizes ...int) *kernelE2E {
 	e.cwd = filepath.Join(root, ".worktrees", name)
 	e.git(root, "worktree", "add", e.cwd, branch)
 	f.SpecDir = filepath.Join(e.cwd, ".mindspec/specs", f.SpecID)
+	e.write(e.cwd, ".mindspec/specs/001-x/spec.md", "---\nstatus: Approved\n---\n# Example\n\n## Goal\nExercise the kernel.\n\n## Impacted Domains\n- workflow\n")
+	e.write(e.cwd, ".mindspec/specs/001-x/plan.md", strings.Replace(kerneltest.EnrolmentPlan(f.SpecID, size), "version:", "adr_citations: [ADR-9001]\nversion:", 1))
+	e.git(e.cwd, "add", ".")
+	e.git(e.cwd, "commit", "-qm", "spec")
 	var epic kernel.Record
 	e.must(json.Unmarshal(e.tracker("create", "--title", "[SPEC 001-x] Example", "--type", "epic", "--metadata", `{"spec_id":"001-x","mindspec_phase":"plan"}`, "--json"), &epic))
 	f.Epic = epic.ID
@@ -163,6 +166,9 @@ func (e *kernelE2E) run(args ...string) (string, int) {
 			e.seen[key] = true
 		}
 		return string(out), 0
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		e.t.Fatalf("binary %v timed out: %v\n%s", args[:min(len(args), 3)], err, out)
 	}
 	var ex *exec.ExitError
 	if !errors.As(err, &ex) {
@@ -519,8 +525,11 @@ func TestS134E2E_KernelPath(t *testing.T) {
 		if rounds != 1 {
 			t.Fatalf("round count %d", rounds)
 		}
-		if raw, code := e.run("panel", "create", item); code == 0 {
-			t.Fatalf("duplicate round: %s", raw)
+		e.refuse("not authorized", "panel", "create", item)
+		after, err := panel.RoundsForGate(panel.ForBead(panel.Scan(e.f.SpecDir), item), e.f.SpecID, "bead", item)
+		e.must(err)
+		if after != rounds {
+			t.Fatalf("duplicate create changed round count: %d to %d", rounds, after)
 		}
 		e.review("APPROVE")
 		out = e.apply()
@@ -536,7 +545,11 @@ func TestS134E2E_KernelPath(t *testing.T) {
 			t.Fatalf("no completion: %+v", out)
 		}
 	}
-	e.create(e.apply())
+	final := e.apply()
+	if len(final.Run) != 1 || !reflect.DeepEqual(final.Run[0].Argv, []string{"mindspec", "panel", "create", e.f.SpecID}) {
+		t.Fatalf("final review command: %+v", final)
+	}
+	e.create(final)
 	e.review("APPROVE")
 	out := e.apply()
 	if len(out.Run) != 0 || out.Status != "wait" {
@@ -821,7 +834,7 @@ func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		audit := e.ok("impl", "approve", e.f.SpecID)
 		for _, event := range []string{"--allow-not-ready", "--allow-doc-skew", "--override-adr", "--allow-net-deletion", "takeovers", "deferrals", "decision-answers", "unreceipted-closes", "carry-overs", "re-panels"} {
-			if !strings.Contains(audit, event+" | 1") {
+			if !auditHasCount(audit, event, "1") {
 				t.Fatalf("audit %d missing one %s:\n%s", i, event, audit)
 			}
 		}
@@ -848,21 +861,62 @@ func TestS134E2E_SharedReadyViews(t *testing.T) {
 	e.ready()
 }
 func TestS134E2E_RunPanelTargetsUseSpecWorktree(t *testing.T) {
-	t.Parallel()
-	f := kerneltest.Enrolled(t, kerneltest.WithFake(kernel.NativeIDs))
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
 	name, err := workspace.SpecWorktreeName(f.SpecID)
 	f.Must(err)
 	dir := filepath.Join(f.Root, ".worktrees", name, ".mindspec/specs", f.SpecID)
-	data, err := os.ReadFile(filepath.Join(f.SpecDir, "plan.md"))
-	f.Must(err)
-	f.Must(os.MkdirAll(dir, 0700))
-	f.Must(os.WriteFile(filepath.Join(dir, "plan.md"), data, 0600))
-	f.Must(os.WriteFile(filepath.Join(f.SpecDir, "plan.md"), []byte("---\nstatus: Draft\n---\n# Plan\n"), 0600))
+	f.Must(os.MkdirAll(filepath.Dir(dir), 0700))
+	f.Must(os.Rename(f.SpecDir, dir))
+	f.SpecDir = dir
 	if got := panelCreateKernelGate(f.Root, f.Items[0], "", "", ""); got != "bead" {
 		t.Fatalf("item target resolved as %q", got)
 	}
 	if got := panelCreateKernelGate(f.Root, f.SpecID, "", "", ""); got != "final_review" {
 		t.Fatalf("final target resolved as %q", got)
+	}
+	out, err := kernelPanelRun(t, panelCreateCmd, f.Items[0])
+	kernelPanelRequire(t, out, err)
+	registration, ok, err := kernel.Decode[kernel.RegistrationRecord](kernelPanelRecord(t, f, gate).Metadata, kernel.KeyRegistration)
+	f.Must(err)
+	rounds, err := panel.RoundsForGate(panel.Scan(dir), f.SpecID, "bead", f.Items[0])
+	f.Must(err)
+	if !ok || registration.Round != 1 || registration.Slug != f.Items[0] || rounds != 1 {
+		t.Fatalf("returned command did not register round one: %+v, rounds %d", registration, rounds)
+	}
+}
+
+func TestS134PanelCreate_LegacySpecShorthand(t *testing.T) {
+	f, _, _ := kernelPanelFixture(t)
+	f.Must(os.MkdirAll(filepath.Join(filepath.Dir(f.SpecDir), "002-legacy"), 0700))
+	if got := panelCreateKernelGate(f.Root, "002-legacy", "", "", ""); got != "" {
+		t.Fatalf("legacy spec shorthand claimed as %q", got)
+	}
+	before := kerneltest.Snapshot(t, f)
+	out, err := kernelPanelRun(t, panelCreateCmd, "002-legacy")
+	kernelPanelRefusal(t, out, err, "--spec is required")
+	if after := kerneltest.Snapshot(t, f); after != before {
+		t.Fatal("legacy panel command changed enrolled state")
+	}
+}
+
+func auditHasCount(audit, event, count string) bool {
+	for _, line := range strings.Split(audit, "\n") {
+		fields := strings.Split(line, " | ")
+		if len(fields) >= 2 && fields[0] == event && fields[1] == count {
+			return true
+		}
+	}
+	return false
+}
+
+func TestS134Audit_ExactCount(t *testing.T) {
+	for _, count := range []string{"0", "1", "2", "10", "11", "19"} {
+		for _, suffix := range []string{"", " | 3 slots"} {
+			if got := auditHasCount("other | 1\nre-panels | "+count+suffix+"\n", "re-panels", "1"); got != (count == "1") {
+				t.Fatalf("count %s%s accepted=%t", count, suffix, got)
+			}
+		}
 	}
 }
 
@@ -898,7 +952,7 @@ func TestS134SubmitCmd_PublishesCommittedReview(t *testing.T) {
 	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
 	f.Must(err)
 	v := paneltest.Verdict("APPROVE")
-	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
+	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "wrong-model"
 	file := filepath.Join(f.SpecDir, "reviews", "1", "committed-verdict.json")
 	data := paneltest.Bytes(t, v)
 	f.Must(os.WriteFile(file, data, 0600))
@@ -912,12 +966,30 @@ func TestS134SubmitCmd_PublishesCommittedReview(t *testing.T) {
 	if len(subs) != 0 {
 		t.Fatal("invalid submission published a verdict", subs)
 	}
+	ledgerBefore, err := panel.ReadLedger(filepath.Dir(file))
+	f.Must(err)
+	out, err = kernelPanelRun(t, submitCmd, id, "--lease", lease.Token, "--artifact", file)
+	kernelPanelRefusal(t, out, err, "effective model")
+	row := actorCmdRead(t, store, id)
+	_, hasReceipt, err := kernel.Decode[kernel.Receipt](row.Metadata, kernel.KeyClose)
+	f.Must(err)
+	ledgerAfter, err := panel.ReadLedger(filepath.Dir(file))
+	f.Must(err)
+	subs, err = panel.LatestSubmissions(filepath.Dir(file), 1)
+	f.Must(err)
+	if row.Status != "in_progress" || hasReceipt || len(subs) != 0 || !reflect.DeepEqual(ledgerBefore, ledgerAfter) {
+		t.Fatal("refused publication closed the slot, wrote a receipt, or changed the ledger", row, subs)
+	}
+	v.Model = "test-model"
+	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0600))
+	actorCmdGit(t, f, "add", ".")
+	actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "correct verdict")
 	out, err = kernelPanelRun(t, submitCmd, id, "--lease", lease.Token, "--artifact", file)
 	kernelPanelRequire(t, out, err)
 	subs, err = panel.LatestSubmissions(filepath.Dir(file), 1)
 	f.Must(err)
-	row := actorCmdRead(t, store, id)
-	if row.Status != "closed" || len(subs) != 1 || subs["R1"].Verdict != "APPROVE" {
+	row = actorCmdRead(t, store, id)
+	if row.Status != "closed" || len(subs) != 1 || subs["R1"].Verdict != "APPROVE" || subs["R1"].Seq != 1 {
 		t.Fatal("generic submit did not publish its committed verdict", row, subs)
 	}
 	receipt, ok, err := kernel.Decode[kernel.Receipt](row.Metadata, kernel.KeyClose)
@@ -926,4 +998,14 @@ func TestS134SubmitCmd_PublishesCommittedReview(t *testing.T) {
 		t.Fatal("published submission has no receipt")
 	}
 	f.Must(kernel.ValidReceipt(f.Root, receipt))
+	ledgerBefore, err = panel.ReadLedger(filepath.Dir(file))
+	f.Must(err)
+	before := kerneltest.Snapshot(t, f)
+	out, err = kernelPanelRun(t, submitCmd, id, "--lease", lease.Token, "--artifact", file)
+	kernelPanelRequire(t, out, err)
+	ledgerAfter, err = panel.ReadLedger(filepath.Dir(file))
+	f.Must(err)
+	if !reflect.DeepEqual(ledgerBefore, ledgerAfter) || before != kerneltest.Snapshot(t, f) {
+		t.Fatal("identical resubmit changed the ledger or tracker")
+	}
 }

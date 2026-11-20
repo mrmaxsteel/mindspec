@@ -1,11 +1,14 @@
 package kerneltest
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestS134Probe_PinnedVersion(t *testing.T) {
@@ -79,4 +82,39 @@ func TestS134Fixture_EmptyBinaryRepo(t *testing.T) {
 		t.Fatal("binary worktree changed the isolated home")
 	}
 
+}
+
+type deadlineFixture struct {
+	testing.TB
+	at time.Time
+}
+
+func (t deadlineFixture) Deadline() (time.Time, bool) { return t.at, true }
+
+func TestS134Fixture_BinaryDeadline(t *testing.T) {
+	at := time.Now().Add(10 * time.Minute)
+	timed := deadlineFixture{TB: t, at: at}
+	ctx, cancel := commandContext(timed, 0)
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok || !deadline.Equal(at.Add(-5*time.Second)) {
+		t.Fatalf("binary command deadline: %v, present %t; test deadline %v", deadline, ok, at)
+	}
+	expired := deadlineFixture{TB: t, at: time.Now().Add(-time.Second)}
+	f := &Fixture{Root: t.TempDir(), t: expired}
+	for _, run := range []func() ([]byte, error){
+		func() ([]byte, error) { return f.BinaryCommand("sh", "-c", "exit 0") },
+		func() ([]byte, error) { return f.BinaryCommandIn(f.Root, "sh", "-c", "exit 0") },
+	} {
+		if _, err := run(); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("binary command ignored the test deadline: %v", err)
+		}
+	}
+	for _, combined := range []bool{false, true} {
+		expired := deadlineFixture{TB: t, at: time.Now().Add(-time.Second)}
+		_, err := commandIn(expired, t.TempDir(), "", 0, combined, "sh", "-c", "exit 0")
+		if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "timed out") {
+			t.Fatalf("timeout reported as a command refusal: %v", err)
+		}
+	}
 }
