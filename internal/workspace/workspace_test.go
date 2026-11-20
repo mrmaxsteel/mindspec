@@ -32,6 +32,24 @@ func TestRootLookup_BrokenMarker(t *testing.T) {
 	}
 }
 
+func TestRootLookup_RegularFile(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirAll(t, filepath.Join(root, ".mindspec"))
+	dir := filepath.Join(root, "nested")
+	mustMkdirAll(t, dir)
+	start := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(start, []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for name, lookup := range map[string]func(string) (string, error){"root": FindRoot, "local": FindLocalRoot} {
+		t.Run(name, func(t *testing.T) {
+			if got, err := lookup(start); err != nil || got != root {
+				t.Errorf("got root %q, err=%v; want %q", got, err, root)
+			}
+		})
+	}
+}
+
 func TestRootLookup_MarkerError(t *testing.T) {
 	outer := t.TempDir()
 	mustMkdirAll(t, filepath.Join(outer, ".mindspec"))

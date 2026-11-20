@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -62,7 +63,7 @@ func HasRootMarker(dir string) (bool, error) {
 	for _, name := range []string{".mindspec", ".git"} {
 		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
 			return true, nil
-		} else if !os.IsNotExist(err) {
+		} else if !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTDIR) {
 			return false, err
 		}
 	}
