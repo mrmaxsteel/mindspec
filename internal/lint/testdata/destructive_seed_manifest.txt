@@ -147,6 +147,7 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+internal/executor/finalize_artifacts.go	finalizeArtifactRefusal	arg2:unprovable
 cmd/mindspec/panel_prompt.go	resolvePanelPrompt	arg1:unprovable
 cmd/mindspec/panel_kernel.go	panelKernelGuard	arg1:unprovable
 cmd/mindspec/panel_kernel.go	tryKernelPanelCreate	arg1:unprovable

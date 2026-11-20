@@ -59,6 +59,9 @@ func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec
 			fmt.Sprintf("re-create the spec worktree at spec/%s, then run a final-review panel", idrender.Spec(specID)))
 	}
 	if s != nil {
+		if err := implKernelArtifactPreflight(root, *s, exec); err != nil {
+			return Outcome{}, false, err
+		}
 		return Outcome{Gate: "final_review"}, false, kernel.CheckPassedGate(*s, s.Epic+".final")
 	}
 	o, err := runLifecycleGate(root, specID, "final_review", wt, warnWriter)
@@ -440,6 +443,43 @@ func implPlaceholderPreflight(exec executor.Executor, worktree, specDir, head st
 	if len(paths) > 0 {
 		sort.Strings(paths)
 		return refuse("placeholder changes are outside this approval's write set:\n" + strings.Join(paths, "\n"))
+	}
+	return nil
+}
+
+// implKernelArtifactPreflight checks every worktree before approval writes.
+func implKernelArtifactPreflight(root string, s kernel.State, exec executor.Executor) error {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	wt, err := workspace.SpecWorktreePath(root, cfg, s.SpecID)
+	if err != nil {
+		return err
+	}
+	paths := []string{wt}
+	entries, err := implWorktreeListFn()
+	if err != nil {
+		return err
+	}
+	allowed := map[string]bool{}
+	for _, id := range s.Items {
+		allowed[id] = true
+	}
+	for _, e := range entries {
+		if id, ok := strings.CutPrefix(e.Branch, workspace.BeadBranchPrefix); ok && allowed[id] && e.Path != "" {
+			paths = append(paths, e.Path)
+		}
+	}
+	for _, dir := range paths {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := executor.CheckFinalizeArtifacts(exec, dir, s.SpecDir); err != nil {
+			return err
+		}
 	}
 	return nil
 }

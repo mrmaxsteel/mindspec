@@ -37,7 +37,7 @@ func subjectFilesCommit(t *testing.T, f *kerneltest.Fixture, branch string, file
 
 func TestS134Subject_RegistrationBoundary(t *testing.T) {
 	for _, final := range []bool{false, true} {
-		for _, mode := range []string{"untracked-panel", "untracked-ledger", "untracked-same-slug", "untracked-link-panel", "untracked-link-ledger", "ignored-panel", "leaf-physical", "leaf-lexical", "parent-lexical", "tracked-panel", "tracked-ledger", "stored-panel"} {
+		for _, mode := range []string{"untracked-panel", "untracked-ledger", "untracked-same-slug", "untracked-link-panel", "untracked-link-ledger", "ignored-panel", "leaf-physical", "leaf-lexical", "parent-lexical", "tracked-panel", "tracked-ledger", "same-commit-panel", "same-commit-ledger", "stored-panel"} {
 			t.Run(fmt.Sprintf("final=%t/%s", final, mode), func(t *testing.T) {
 				f := reducerFixture(t)
 				gate, branch, slug := f.Items[0]+".review", "bead/"+f.Items[0], "panel"
@@ -66,7 +66,7 @@ func TestS134Subject_RegistrationBoundary(t *testing.T) {
 				}
 				dir := filepath.Join(base, segment, dirSlug)
 				name := "panel.json"
-				if mode == "untracked-ledger" || mode == "tracked-ledger" || mode == "untracked-link-ledger" {
+				if mode == "untracked-ledger" || mode == "tracked-ledger" || mode == "same-commit-ledger" || mode == "untracked-link-ledger" {
 					name = "dispositions.jsonl"
 				}
 				data, err := os.ReadFile(filepath.Join(f.SpecDir, "reviews", slug, name))
@@ -97,8 +97,12 @@ func TestS134Subject_RegistrationBoundary(t *testing.T) {
 					f.Must(os.Rename(parent, parent+"-real"))
 					f.Must(os.Symlink(parent+"-real", parent))
 				}
-				head := subjectFilesCommit(t, f, branch, map[string][]byte{changed: []byte("package source\n")})
-				honest := mode == "tracked-panel" || mode == "tracked-ledger" || mode == "stored-panel"
+				files := map[string][]byte{changed: []byte("package source\n")}
+				if mode == "same-commit-panel" || mode == "same-commit-ledger" {
+					files[filepath.Join(rel, name)] = data
+				}
+				head := subjectFilesCommit(t, f, branch, files)
+				honest := mode == "stored-panel"
 				if !final {
 					err := kernel.CheckPassedGate(f.State(), gate)
 					if honest && err != nil {
@@ -123,5 +127,56 @@ func TestS134Subject_RegistrationBoundary(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestS134Subject_StoredRegistrationGateIdentity(t *testing.T) {
+	for _, other := range []string{"other-bead", "other-spec"} {
+		t.Run(other, func(t *testing.T) {
+			f := reducerFixture(t)
+			passingPanel(t, f)
+			reduce(t, f, true)
+			gate := f.Items[0] + ".review"
+			foreign := f.Items[1] + ".review"
+			if other == "other-spec" {
+				foreign = "other-1.1.review"
+			}
+			dir := filepath.Join(f.SpecDir, "reviews", "foreign")
+			f.Must(os.MkdirAll(dir, 0755))
+			s := f.State()
+			s.Gates = append(s.Gates, foreign)
+			s.Records[foreign] = kernel.Record{Metadata: kernel.Metadata(kernel.KeyRegistration, kernel.RegistrationRecord{Slug: "foreign"})}
+			rel, err := filepath.Rel(f.Root, dir)
+			f.Must(err)
+			head := subjectFilesCommit(t, f, "bead/"+f.Items[0], map[string][]byte{filepath.Join(rel, "code.go"): []byte("package source\n")})
+			s.Refs["refs/heads/bead/"+f.Items[0]] = head
+			if err := kernel.CheckPassedGate(s, gate); err == nil {
+				t.Fatal("another gate's stored registration exempted source")
+			}
+		})
+	}
+}
+
+func TestS134Subject_StoredRegistrationSymlink(t *testing.T) {
+	for _, parent := range []bool{false, true} {
+		t.Run(fmt.Sprintf("parent=%t", parent), func(t *testing.T) {
+			f := reducerFixture(t)
+			passingPanel(t, f)
+			reduce(t, f, true)
+			dir := filepath.Join(f.SpecDir, "reviews", "panel")
+			if parent {
+				dir = filepath.Dir(dir)
+			}
+			target := filepath.Join(f.Root, "source")
+			f.Must(os.Rename(dir, target))
+			f.Must(os.Symlink(target, dir))
+			name := filepath.Join(f.SpecDir, "reviews", "panel", "code.go")
+			rel, err := filepath.Rel(f.Root, name)
+			f.Must(err)
+			subjectFilesCommit(t, f, "bead/"+f.Items[0], map[string][]byte{rel: []byte("package source\n")})
+			if err := kernel.CheckPassedGate(f.State(), f.Items[0]+".review"); err == nil {
+				t.Fatal("stored registration through a symlink exempted source")
+			}
+		})
 	}
 }

@@ -271,6 +271,9 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
 5. **Refusal sets (OQ11).** No refusal list in §4-§9 or `spec.md` is exhaustive. Each verb keeps today's refusals
    and adds every refusal that §5-§12 give it. Flag codes: `unreceipted-close`, `raw-close`, `raw-claim`,
    `forced-close`, `run-marker-missing`, `foreign-child-open`, `foreign-blocker`, `id-collision`.
+   - `open-step`: an actor step remains open when implementation approval checks the epic.
+   - `open-decision`: a decision remains open when implementation approval checks the epic.
+   - `work-item-blocked`: a work item has a hold or blocker that prevents implementation approval.
 6. **Skill halt rows (OQ11).** A REJECT is local to its gate. Rows in both copies of each skill that halt the whole
    spec go: in `ms-bead-cycle`, "any REJECT / HARD block → halt", "do not proceed to the next bead", `max-rounds`; in
    `ms-spec-autopilot`, "One halted bead halts the spec", "Any bead REJECT verdict", "Two consecutive impl-subagent

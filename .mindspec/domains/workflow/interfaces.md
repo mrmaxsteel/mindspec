@@ -1625,8 +1625,10 @@ An exempt directory must be a lexical `review/<slug>` or `reviews/<slug>` locati
 the repository root, `.mindspec`, or the spec directory. Paths are relative to the root
 of the worktree that contains them, even when the store uses another checkout.
 Every directory component below that root must be a real directory. A symlink grants no exemption.
-The commit being judged must contain a panel file or round ledger that registers that gate,
-or the kernel store must record the slug at its canonical spec review location.
+Only directories recorded by the kernel store for the same gate grant an exemption.
+Panel creation records the directory and keeps earlier directories of that gate.
+An older record with no directory list uses its canonical spec review location.
+Panel files and ledgers in a judged commit cannot define an exemption.
 Untracked and ignored working files cannot define an exemption.
 Round creation, submission, superseding, tally, and approval use the same effective subject.
 A commit that also changes another path moves the subject.
@@ -1634,6 +1636,12 @@ A merge compares its tree with its first parent; an empty commit moves the subje
 Panel evidence can be committed on the subject branch.
 After finalization closes the epic, approval can resume at the recorded publication tip.
 The recorded checkpoint must resolve to the accepted subject, and must precede that publication.
+The publication tree may differ from the accepted subject only in finalization artifact paths.
+Before any approval write, an enrolled spec refuses pending user content in its spec or lifecycle bead worktrees.
+Allowed paths are its own spec directory, root and `.mindspec` `review/<slug>` and `reviews/<slug>` directories,
+and `.beads/issues.jsonl`. The refusal names each path and requires a commit through the normal workflow
+with a new review round, or moving the changes out. An enrolled approval cannot create a new ADR;
+create and review it through the normal workflow first.
 An open epic or any other branch tip still requires the accepted subject.
 Setup ignores the configured panel isolation directory and local panel config, including without init.
-If config cannot load, the ignore step warns and uses the default isolation directory.
+If config cannot load, the ignore step prints under `Warnings` and uses the default isolation directory.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -411,7 +412,22 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 		if e = panel.Create(dir, in); e != nil {
 			return panelCreateFailure(e, slug, in)
 		}
-		registration := kernel.RegistrationRecord{Slug: slug, Round: round.Round, Subject: round.Subject, Slots: slots}
+		directories := []string{}
+		for _, path := range kernel.RegisteredPanelPaths(*s, gate) {
+			directories = append(directories, strings.TrimSuffix(path, "/"))
+		}
+		recordRoot := workspace.TreeRootForSpecDir(specDir)
+		if recordRoot == "" {
+			recordRoot = s.Root
+		}
+		rel, e := filepath.Rel(recordRoot, dir)
+		if e != nil {
+			return e
+		}
+		directories = append(directories, filepath.ToSlash(rel))
+		sort.Strings(directories)
+		directories = slices.Compact(directories)
+		registration := kernel.RegistrationRecord{Slug: slug, Round: round.Round, Subject: round.Subject, Slots: slots, Directories: directories}
 		if e = s.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRegistration, registration)); e != nil {
 			return e
 		}

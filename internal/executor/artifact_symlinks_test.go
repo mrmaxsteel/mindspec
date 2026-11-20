@@ -50,6 +50,9 @@ func TestS134Finalize_ArtifactSymlinks(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "symlink") {
 				t.Fatalf("artifact symlink was not refused: %v", err)
 			}
+			if !strings.Contains(err.Error(), "commit or move the named symlink, then run mindspec impl approve "+spec) {
+				t.Fatalf("symlink recovery does not remove the cause: %v", err)
+			}
 			if exports != 0 || refHash(t, root, "spec/"+spec) != before {
 				t.Fatal("refusal exported or committed artifacts")
 			}

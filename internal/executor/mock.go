@@ -228,7 +228,7 @@ func (m *MockExecutor) PushProbe(branch string) error {
 	return m.PushProbeErr
 }
 
-func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error) {
+func (m *MockExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool, policies ...FinalizeArtifactPolicy) (FinalizeResult, error) {
 	m.record("FinalizeEpic", epicID, specID, specBranch, lifecycleAllowSet, overrideReason, resolveMerge, hasRemote)
 	return m.FinalizeEpicResult, m.FinalizeEpicErr
 }

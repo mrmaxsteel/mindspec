@@ -20,6 +20,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -234,9 +235,21 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, err
 	}
 	if kernelState != nil {
+		if err := implKernelArtifactPreflight(root, *kernelState, exec); err != nil {
+			return nil, err
+		}
 		if err := implKernelPreflight(*kernelState); err != nil {
 			return nil, err
 		}
+	}
+
+	var policies []executor.FinalizeArtifactPolicy
+	if kernelState != nil {
+		accepted, err := kernel.AcceptedSubject(*kernelState, kernelState.Epic+".final")
+		if err != nil {
+			return nil, err
+		}
+		policies = append(policies, executor.FinalizeArtifactPolicy{SpecDir: kernelState.SpecDir, AcceptedSubject: accepted})
 	}
 
 	// Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on first
@@ -492,8 +505,10 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 		return nil, err
 	}
 
-	if err := implBeadWorktreePreflight(specID, lifecycleAllowSet, exec); err != nil {
-		return nil, err
+	if kernelState == nil {
+		if err := implBeadWorktreePreflight(specID, lifecycleAllowSet, exec); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := implPanelCore3Preflight(root, specID, warnWriter); err != nil {
@@ -535,6 +550,9 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// follows the write.
 	var supersedeNewID string
 	if o.SupersedeADR != "" {
+		if kernelState != nil {
+			return nil, guard.NewFailure("approval cannot create an ADR outside the accepted subject", "create and commit the ADR through the normal workflow, then run a new final-review round")
+		}
 		title := "Placeholder for " + o.SupersedeADR
 		writeRoot := workspace.TreeRootForSpecDir(specDir)
 		if writeRoot == "" {
@@ -658,7 +676,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	// MUTATION (3/3, terminal): delegate to executor for merge/push,
 	// scoped to lifecycleAllowSet (Spec 119 Bead 3, R6/P6) resolved
 	// above.
-	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet, o.AllowNetDeletion, o.ResolveMerge, hasRemote)
+	fr, err := exec.FinalizeEpic(epicID, specID, specBranch, lifecycleAllowSet, o.AllowNetDeletion, o.ResolveMerge, hasRemote, policies...)
 	if err != nil {
 		stage := "finalize"
 		var failure *executor.FinalizeStageError

@@ -155,6 +155,9 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/executor/finalize_artifacts.go", Func: "finalizeArtifactRefusal", Detail: "arg2:unprovable",
+		Rationale:  "The recovery uses next-action or implementation approval with the validated spec directory basename rendered by idrender.Spec. It executes no command.",
+		Obligation: "internal/approve TestS134ImplApprove_PendingSourceBeforeMutation checks the concrete commands against the destructive floor and verifies refusal before state writes."},
 	{File: "cmd/mindspec/panel_prompt.go", Func: "resolvePanelPrompt", Detail: "arg1:unprovable", Rationale: "The recovery names the existing brief to fill, then retries the prompt command. Its path, registration identifiers and roster slot are shell quoted. It executes no command.", Obligation: "TestPanelPrompt_UnfilledBriefRecovery checks the actual path and prompt command and rejects destructive recovery text."},
 	{File: "cmd/mindspec/panel_kernel.go", Func: "panelKernelGuard", Detail: "arg1:unprovable", Rationale: "The recovery answers the computed gate decision with a listed option. It executes no command.", Obligation: "TestS134PanelCreate_LocalDecisionAndLease pins the decision and runnable answer before the fix can be leased."},
 	{File: "cmd/mindspec/panel_kernel.go", Func: "tryKernelPanelCreate", Detail: "arg1:unprovable", Rationale: "The recovery launches the recorded panel slot. The slug and spec are shell quoted; the slot is computed from the tuple.", Obligation: "TestS134PanelCreate_CollisionHaltAndOpenSlot pins the runnable slot command and unchanged snapshot."},

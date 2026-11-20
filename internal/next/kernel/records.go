@@ -39,10 +39,11 @@ const (
 )
 
 type RegistrationRecord struct {
-	Slug    string   `json:"slug"`
-	Round   int      `json:"round"`
-	Subject string   `json:"subject"`
-	Slots   []string `json:"slots"`
+	Directories []string `json:"directories,omitempty"`
+	Slug        string   `json:"slug"`
+	Round       int      `json:"round"`
+	Subject     string   `json:"subject"`
+	Slots       []string `json:"slots"`
 }
 
 type Tuple = kernelid.Tuple

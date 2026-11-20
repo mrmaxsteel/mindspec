@@ -100,8 +100,12 @@ func TestS134SetupClaude_BadConfigUsesDefaultIgnore(t *testing.T) {
 			if err != nil {
 				t.Fatalf("irrelevant config prevents setup: %v", err)
 			}
-			if !strings.Contains(strings.Join(result.Notices, "\n"), "warning: cannot load config") {
-				t.Fatal("missing config warning", result.Notices)
+			if !strings.Contains(strings.Join(result.Warnings, "\n"), "warning: cannot load config") {
+				t.Fatal("missing config warning", result.Warnings)
+			}
+			summary := result.FormatSummary()
+			if !strings.Contains(summary, "Warnings:\n  ! warning: cannot load config") || strings.Contains(summary, "Notices (user-modified, left in place):") {
+				t.Fatalf("wrong config warning heading: %s", summary)
 			}
 			data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
 			if err != nil {

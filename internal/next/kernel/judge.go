@@ -142,18 +142,11 @@ func effectiveSubjectAt(s State, gate, head string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	t, _ := kernelid.Parse(gate)
 	for {
 		if head == accepted {
 			return head, nil
 		}
-		dirs := storedPanelPaths(s, gate)
-		for _, p := range s.Panels {
-			rel, ok := lexicalPanelPath(s, p.Dir)
-			if ok && committedPanel(s, t, head, rel) {
-				dirs = append(dirs, filepath.ToSlash(rel)+"/")
-			}
-		}
+		dirs := RegisteredPanelPaths(s, gate)
 		if len(dirs) == 0 {
 			return head, nil
 		}
@@ -268,8 +261,9 @@ func specPanelRoot(s State) (string, bool) {
 	return root, true
 }
 
-// storedPanelPaths uses canonical locations of this gate's durable registrations.
-func storedPanelPaths(s State, gate string) []string {
+// RegisteredPanelPaths returns the repository-relative directories recorded for this gate.
+// Older records without directory paths use the canonical spec location.
+func RegisteredPanelPaths(s State, gate string) []string {
 	paths := []string{}
 	wanted, err := kernelid.Parse(gate)
 	if err != nil {
@@ -284,32 +278,29 @@ func storedPanelPaths(s State, gate string) []string {
 		if err != nil || !ok || reg.Slug == "" || reg.Slug == "." || reg.Slug == ".." || filepath.Base(reg.Slug) != reg.Slug {
 			continue
 		}
-		if rel, ok := lexicalPanelPath(s, filepath.Join(s.SpecDir, "reviews", reg.Slug)); ok {
-			paths = append(paths, filepath.ToSlash(rel)+"/")
+		dirs := reg.Directories
+		if len(dirs) == 0 {
+			if rel, ok := lexicalPanelPath(s, filepath.Join(s.SpecDir, "reviews", reg.Slug)); ok {
+				paths = append(paths, filepath.ToSlash(rel)+"/")
+			}
+			continue
+		}
+		for _, dir := range dirs {
+			if dir == "." || filepath.IsAbs(dir) || filepath.ToSlash(filepath.Clean(dir)) != dir || dir == ".." || strings.HasPrefix(dir, "../") {
+				continue
+			}
+			root := s.Root
+			if specRoot, ok := specPanelRoot(s); ok {
+				if specRel, err := filepath.Rel(specRoot, s.SpecDir); err == nil && strings.HasPrefix(dir, filepath.ToSlash(specRel)+"/") {
+					root = specRoot
+				}
+			}
+			if rel, ok := lexicalPanelPath(s, filepath.Join(root, filepath.FromSlash(dir))); ok {
+				paths = append(paths, filepath.ToSlash(rel)+"/")
+			}
 		}
 	}
 	return paths
-}
-
-// committedPanel reads registration evidence from the commit being judged.
-// Working files cannot create an exemption or change its gate identity.
-func committedPanel(s State, t Tuple, head, rel string) bool {
-	data, err := actorGitBytes(s.Root, "show", head+":"+filepath.ToSlash(filepath.Join(rel, "panel.json")))
-	var p panel.Panel
-	if err == nil && json.Unmarshal(data, &p) == nil && p.Spec == s.SpecID && gatePanel(t, p) {
-		return true
-	}
-	data, err = actorGitBytes(s.Root, "show", head+":"+filepath.ToSlash(filepath.Join(rel, "dispositions.jsonl")))
-	if err != nil {
-		return false
-	}
-	for _, line := range bytes.Split(data, []byte("\n")) {
-		var event panel.RoundRecord
-		if json.Unmarshal(line, &event) == nil && event.Record == panel.RecordRound && event.Spec == s.SpecID && gatePanel(t, panel.Panel{BeadID: event.BeadID, Gate: event.Gate}) {
-			return true
-		}
-	}
-	return false
 }
 
 func judgeEnded(s State, gate string) (bool, error) {

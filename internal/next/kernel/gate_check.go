@@ -8,6 +8,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -110,5 +111,17 @@ func finalizeReplay(s State, gate, accepted string) bool {
 		return false
 	}
 	_, err = actorGit(s.Root, "merge-base", "--is-ancestor", before, published)
-	return err == nil
+	if err != nil {
+		return false
+	}
+	data, err := actorGitBytes(s.Root, "diff", "--no-renames", "--name-only", "-z", accepted, published, "--")
+	if err != nil {
+		return false
+	}
+	for _, name := range strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00") {
+		if name != "" && !panel.FinalizeArtifactPath(name, s.SpecDir) {
+			return false
+		}
+	}
+	return true
 }

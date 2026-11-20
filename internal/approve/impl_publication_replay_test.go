@@ -10,7 +10,7 @@ import (
 )
 
 func TestS134ImplApprove_FinalizeExportReplay(t *testing.T) {
-	for _, mode := range []string{"recorded-tip", "moved-head", "open-epic", "wrong-checkpoint", "unrelated-publication"} {
+	for _, mode := range []string{"recorded-tip", "moved-head", "open-epic", "wrong-checkpoint", "unrelated-publication", "source-publication"} {
 		t.Run(mode, func(t *testing.T) {
 			f, ex, _ := s134ApproveFixture(t)
 			accepted, err := kernel.AcceptedSubject(f.State(), f.Epic+".final")
@@ -23,6 +23,13 @@ func TestS134ImplApprove_FinalizeExportReplay(t *testing.T) {
 			f.Must(err)
 			_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "chore: export finalized beads")
 			f.Must(err)
+			if mode == "source-publication" {
+				f.Must(os.WriteFile(filepath.Join(f.Root, "unreviewed.go"), []byte("package source\n"), 0644))
+				_, err = f.Command("git", "add", "unreviewed.go")
+				f.Must(err)
+				_, err = f.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "unreviewed source")
+				f.Must(err)
+			}
 			data, err := f.Command("git", "rev-parse", "HEAD")
 			f.Must(err)
 			publication := strings.TrimSpace(string(data))

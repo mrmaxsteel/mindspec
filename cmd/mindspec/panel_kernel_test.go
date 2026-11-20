@@ -805,3 +805,18 @@ func TestS134PanelDefer_RepeatedEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestS134PanelCreate_StoresDirectoryHistory(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "older", Round: 1, Subject: head, Slots: []string{"R1", "R2"}})
+	kernelPanelAuthorise(f, gate, head, 2, 2)
+	out, err := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, err)
+	reg, ok, err := kernel.Decode[kernel.RegistrationRecord](kernelPanelRecord(t, f, gate).Metadata, kernel.KeyRegistration)
+	f.Must(err)
+	prefix := ".mindspec/specs/" + f.SpecID + "/reviews/"
+	want := []string{prefix + "1", prefix + "older"}
+	if !ok || !reflect.DeepEqual(reg.Directories, want) {
+		t.Fatalf("recorded directories=%v want=%v", reg.Directories, want)
+	}
+}

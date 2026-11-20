@@ -29,6 +29,7 @@ type Result struct {
 	Skipped      []string
 	Refreshed    []string           // mindspec-owned skill files refreshed in place to canonical content (Req 19)
 	Removed      []string           // stale mindspec-owned skill dirs removed (Req 18)
+	Warnings     []string           // configuration warnings
 	Notices      []string           // user-modified files left in place (provenance HC-6)
 	BeadsRan     bool               // true if bd setup <agent> was run
 	BeadsMsg     string             // output/error from bd setup <agent>
@@ -95,6 +96,16 @@ func (r *Result) FormatSummary() string {
 			sb.WriteString("  ! ")
 			sb.WriteString(p)
 			sb.WriteString("\n")
+		}
+	}
+
+	if len(r.Warnings) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("Warnings:\n")
+		for _, warning := range r.Warnings {
+			sb.WriteString("  ! " + warning + "\n")
 		}
 	}
 
@@ -304,7 +315,7 @@ func ensureGitignore(root string, check bool, r *Result) error {
 	cfg, err := config.Load(root)
 	if err != nil {
 		cfg = config.DefaultConfig()
-		r.Notices = append(r.Notices, "warning: cannot load config; using the default panel isolation directory for ignore entries")
+		r.Warnings = append(r.Warnings, "warning: cannot load config; using the default panel isolation directory for ignore entries")
 	}
 	if err := gitutil.EnsureGitignoreLiteralEntriesWithHeader(root, "# MindSpec local review files (not version-controlled)", ".mindspec/config.local.yaml", cfg.Panel.IsolationRoot); err != nil {
 		return fmt.Errorf("ensuring local review ignores: %w", err)

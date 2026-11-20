@@ -483,6 +483,12 @@ Sandbox configuration includes the required step type.
 
 ### Remaining artifact commits
 
-Finalization commits pending files from the whole spec worktree, including files outside
-the spec directory. Before export or staging, it refuses a pending file with a symlink
-component. The refusal preserves the pending files, index and branch tip.
+The workflow passes `FinalizeArtifactPolicy` for an enrolled spec, with its spec directory and accepted subject.
+Before any finalization write, the executor checks pending paths in the spec and lifecycle bead worktrees.
+It repeats the check before each artifact commit. Allowed paths are the spec's own directory,
+root and `.mindspec` `review/<slug>` and `reviews/<slug>` directories, and `.beads/issues.jsonl`.
+Other pending paths refuse with a recovery to commit through the normal workflow and run a new review round,
+or move the changes out. Before publication, the executor checks that the tree differs from the accepted subject
+only in allowed paths. A pre-kernel spec keeps the existing whole-worktree artifact commit behavior.
+Before the spec artifact export or staging, all specs refuse a pending file with a symlink component.
+The refusal preserves pending files, index and branch tips, and requires committing or moving the symlink before retrying.

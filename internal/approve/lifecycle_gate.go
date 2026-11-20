@@ -196,7 +196,10 @@ func lifecycleSubjectDirt(exec executor.Executor, worktree, head, specDir, gate 
 	roots := panel.Subject(gate, specDir)
 	relSpec := strings.TrimSuffix(panel.Subject("spec_approve", specDir).Roots[0], "/")
 	var dirt []string
-	var paths []string
+	paths, err := panel.PendingPaths(worktree, status)
+	if err != nil {
+		return nil, err
+	}
 	listing, err := exec.LsTree(worktree, head)
 	if err != nil {
 		return nil, err
@@ -218,35 +221,6 @@ func lifecycleSubjectDirt(exec executor.Executor, worktree, head, specDir, gate 
 			return nil, fmt.Errorf("malformed subject tree listing")
 		}
 		modes[name] = fields[0]
-	}
-	for _, line := range strings.Split(status, "\n") {
-		name, err := panel.PorcelainPath(line)
-		if err != nil {
-			return nil, err
-		}
-		if name == "" {
-			continue
-		}
-		if strings.HasSuffix(name, "/") {
-			err := filepath.WalkDir(filepath.Join(worktree, filepath.FromSlash(name)), func(full string, e os.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if e.IsDir() {
-					return nil
-				}
-				rel, err := filepath.Rel(worktree, full)
-				if err == nil {
-					paths = append(paths, filepath.ToSlash(rel))
-				}
-				return err
-			})
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			paths = append(paths, name)
-		}
 	}
 	for _, name := range paths {
 		if !panel.SubjectIncludes(name, roots) {
