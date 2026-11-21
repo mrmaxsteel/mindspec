@@ -436,11 +436,11 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    - `open-step`: an actor step remains open when implementation approval checks the epic.
    - `open-decision`: a decision remains open when implementation approval checks the epic.
    - `work-item-blocked`: a work item has a hold or blocker that prevents implementation approval.
-6. **Skill halt rows (OQ11).** A REJECT is local to its gate. Rows in both copies of each skill that halt the whole
-   spec go: in `ms-bead-cycle`, "any REJECT / HARD block → halt", "do not proceed to the next bead", `max-rounds`; in
-   `ms-spec-autopilot`, "One halted bead halts the spec", "Any bead REJECT verdict", "Two consecutive impl-subagent
-   failures", `max-rounds-per-bead`, the NOT READY row, "Don't keep going after a halt". Rows that stay: a failed
-   merge, a dependency mismatch, and rows that return an open decision to the user.
+6. **Skill halt rows (OQ11).** A REJECT is local to its gate. No skill halts the whole spec: in `ms-bead-cycle`,
+   "any REJECT / HARD block → halt", "do not proceed to the next bead", `max-rounds`; in `ms-spec-autopilot`, "One
+   halted bead halts the spec", "Any bead REJECT verdict", "Two consecutive impl-subagent failures",
+   `max-rounds-per-bead`, the NOT READY row, "Don't keep going after a halt" go. A skill keeps no halt table
+   (`spec.md` R12); `next-action` reports `wait`, `halted`, `indeterminate` and open decisions.
 7. **Round opening (OQ10, OQ12).** `panel create` is the one writer of a round record (the registration and its ledger
    `round` line, which `ForBead` and §10 count). These outcomes authorise round N on a subject commit: a closed
    implement step (round 1); a closed fix `<gate>.r<N>.fix` (round N); a `re-panel` judgement, or under it a verify

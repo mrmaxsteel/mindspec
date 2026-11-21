@@ -271,11 +271,15 @@ work_chunks:
       id: 21
       key_file_paths:
         - cmd/mindspec/kernel_e2e_test.go
-        - .claude/skills/ms-bead-cycle/SKILL.md
         - plugins/mindspec/skills/ms-bead-cycle/SKILL.md
-        - .claude/skills/ms-spec-autopilot/SKILL.md
         - plugins/mindspec/skills/ms-spec-autopilot/SKILL.md
+        - plugins/mindspec/skills/ms-bead-impl/SKILL.md
+        - plugins/mindspec/skills/ms-bead-fix/SKILL.md
+        - plugins/mindspec/skills/ms-panel-tally/SKILL.md
+        - internal/setup/historical_skills
+        - internal/setup/review_discipline_test.go
         - internal/rules/rules.yaml
+        - internal/rules/rules_test.go
         - project-docs/user/guides/autonomy.md
 ---
 # Plan: 134-governed-autonomy-kernel
@@ -520,7 +524,7 @@ record); Bead 15 pins `Verify`; Bead 16 pins `Authorise` on a verify that leaves
 - **Gate.** The final review runs, from the spec worktree, `make test`; `git fetch origin main` then
   `MINDSPEC_SURFACE_BASE=$(git merge-base HEAD origin/main) go test -tags surfacescan ./cmd/mindspec/ -run
   '^TestS134SurfaceBranch_' -v` (after main is merged into the spec branch, the merge base is that main commit, so
-  main's lines are not scanned); and the two AC15 `git grep` commands. It checks that the spec PR's CI `test` job is
+  main's lines are not scanned); and the AC15 and AC16 skill checks. It checks that the spec PR's CI `test` job is
   green with its bd step printing 1.3.4.
 
 ## Bead 1: Kernel foundation and contracts
@@ -1837,13 +1841,17 @@ Bead 15, Bead 17, Bead 19
 **Steps**
 1. Update `kernel_e2e_test.go` so the loop drives the lens step, `panel create`, slots, a refused round, its verify, the
    fix and the next round, with `lease`, `next` and each brief from `brief` or `panel prompt`.
-2. Update both copies of `ms-bead-cycle`, `ms-spec-autopilot` and `ms-panel-tally`: dispatch each brief the binary
-   prints to a fresh agent per step (a verifier is not a slot reviewer of its round or an author of its subject, and a
-   fixer is not its verifier; the kernel does not check this), and run the verify step; `ms-bead-cycle` and `ms-panel-tally` keep the
-   `review.reproduce` literal that `internal/setup/review_discipline_test.go` pins. `internal/rules/rules_test.go`
-   (`"review.reproduce"` entry, :30) pins the rule's roles and mode; keep both, or update that test in this bead. State in `internal/rules/rules.yaml` that `review.reproduce` applies
-   to a pre-kernel spec; an enrolled spec runs the verify step.
-3. Update `project-docs/user/guides/autonomy.md` and workflow "Kernel loop". Fix a defect found here in its bead's
+2. Rewrite `ms-bead-cycle`, `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally` under
+   `plugins/mindspec/skills` as harness adapters of at most 50 lines (spec R12): loop on `next-action --apply`; for
+   each actor step, `lease`, then start a fresh agent with the output of the action's `brief` argv; return through
+   `submit` and each `run` entry. Copy each to `.claude/skills` byte-equal, and add each old text to
+   `internal/setup/historical_skills` so existing installs refresh. Remove each skill pin test assertion that pins
+   removed text (`internal/setup/*_test.go`, `internal/lint/destructive_guidance_test.go`), or move it to the binary
+   output that now carries the rule.
+3. In `internal/rules/rules.yaml`, add rule `dispatch.fresh-agent` (scope orchestrator, `enforced_by: advisory`)
+   with the dispatch rule of spec R8. State that `review.reproduce` applies to a pre-kernel spec and that an enrolled
+   spec runs the verify step. Add the new id to `internal/rules/rules_test.go`.
+4. Update `project-docs/user/guides/autonomy.md` and workflow "Kernel loop". Fix a defect found here in its bead's
    files and list each fix in the commit message.
 
 **Verification**
@@ -1855,6 +1863,8 @@ Bead 15, Bead 17, Bead 19
       and verify steps on the path.
 - [ ] AC11: every row, old and new, prints the spec's AC11 count through its real verb.
 - [ ] AC19-AC22 hold on fixtures made by this binary.
+- [ ] AC15, AC16 (skills): the five adapters pass the line, word and `cmp` checks; no `SKILL.md` grows against
+      `371dc360`; `mindspec instruct` renders `dispatch.fresh-agent`.
 
 **Depends on**
 Bead 14, Bead 15, Bead 16, Bead 17, Bead 18, Bead 19, Bead 20
@@ -1879,8 +1889,8 @@ Each `-run` pattern runs in the package its bead's Verification names.
 | AC12 | 2, 5, 13 | `-run '^TestS134Config'`; `-run '^TestS134Enrol_'`; `-run '^TestS134E2E_'` |
 | AC13 | 1, 5, 6, 7, 9, 10, 11, 12, 13 | `-run '^TestS134Store_'`; `-run '^TestS134Enrol_'`; `-run '^TestS134(Flags|NextAction)_'`; `-run '^TestS134Lease'`; `-run '^TestS134(Closes|ImplApprove)_'`; `-run '^TestS134Panel'`; `-run '^TestS134JudgeCmd_'`; `-run '^TestS134(Next|Complete)_'`; `-run '^TestS134E2E_'` |
 | AC14 | 1, 6, 7, 10 | `-run '^TestS134Store_'`; `-run '^TestS134(Flags|NextAction)_'`; `-run '^TestS134Submit_'`; `-run '^TestS134PanelCreate_'` |
-| AC15 | 1, 2, 4, 5, 13 | `-run '^TestS134Setup_'`; domains `git grep` (Beads 2, 13); the Bead 4 `git grep`, `cmp` and `-run '^TestS134Skills_'`; `-run '^TestS134Enrol_'` |
-| AC16 | all; 3 | each bead's message tests; `-run '^TestS134Surface(Matcher|DiffFn)_'` (red mutations); `-tags surfacescan -run '^TestS134SurfaceBranch_'` |
+| AC15 | 1, 2, 4, 5, 13, 21 | `-run '^TestS134Setup_'`; domains `git grep` (Beads 2, 13); the Bead 4 `git grep`, `cmp` and `-run '^TestS134Skills_'`; `-run '^TestS134Enrol_'`; the Bead 21 skill checks |
+| AC16 | all; 3; 21 | each bead's message tests; `-run '^TestS134Surface(Matcher|DiffFn)_'` (red mutations); `-tags surfacescan -run '^TestS134SurfaceBranch_'`; the Bead 21 `git diff --numstat` check |
 | AC17 | 13, 19, 21 | `-run '^TestS134E2E_'` |
 | AC18 | 10, 11, 12, 13 | `-run '^TestS134Panel(Create|Repanel)_'`; `-run '^TestS134(Judge|JudgeCmd)_'`; `-run '^TestS134(Complete|ImplFinalGate)_'`; `-run '^TestS134E2E_'` |
 | AC19 | 15, 18, 21 | `-run '^TestS134(Verify|VerifyCmd)_'`; `-run '^TestS134Brief_'`; `-run '^TestS134E2E_'` |

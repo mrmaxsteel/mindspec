@@ -65,8 +65,9 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
 8. **Local decisions and cascades.** A REJECT that the verify reproduces adds a `fix`/`halt` decision for that gate
    only (§13.8); a refuted veto passes; `halt` stops the spec (B11, §13.4). A complete, refused round gets a verify;
    only its reproduced findings go to the fix, and no approval count resolves a finding. Verifier and fixer
-   independence (rulings B4, B7) is a dispatch rule: the dispatcher gives each step a fresh agent, the kernel does not
-   check it, and the skills state it (Bead 21). Failure: `Load` forces
+   independence (rulings B4, B7) is a dispatch rule: each actor step gets a fresh agent, a verifier is not a slot
+   reviewer of its round or an author of its subject, and a fixer is not its verifier. The kernel does not check it;
+   rule `dispatch.fresh-agent` in `internal/rules/rules.yaml` states it. Failure: `Load` forces
    `on_reject: halt`; the `review.reproduce` rule is advisory.
 9. **Unreceipted closes and audit.** §9 and §11: a close whose evidence still fits gets its receipt under `submit
    --repair`, with no retry; `--allow-not-ready` joins `escapeHatchFlags` and
@@ -77,12 +78,15 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
     with no mindspec command or setup, and nothing conflicts (§12). Failure: a `bd create --parent <epic>` child
     counts as lifecycle work (`classifyChild`); bd has no default view filter; the finalizer once merged another
     spec's bead (`77daf455`); risk: a concurrent bd write loses or doubles a step.
-12. **Skills, docs and setup.** `ms-bead-cycle` loops `next-action --apply`, `lease`, dispatch, `submit` and each
-    `run` entry; skills and docs drop deleted keys and spec-wide halt rows (§13.6); `setup` adds `step` and keeps
+12. **Skills, docs and setup.** The binary owns sequence and rules; a skill keeps only harness mechanics. Both copies
+    of `ms-bead-cycle`, `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally` are adapters of
+    about 50 lines or fewer: loop on `next-action --apply`, `lease`, a fresh agent per actor step with the brief the
+    binary prints, `submit` and each `run` entry. They hold no other command sequence, pick order, round cap, halt
+    table, rule or rationale. Docs drop deleted keys and spec-wide halt rows (§13.6); `setup` adds `step` and keeps
     other `types.custom` entries. Each brief comes from the binary (§13.11): `panel prompt` for a slot, `brief <step>`
-    for a lens, verify, fix or change judge; a lens step supplies slot lenses. Failure: skills name default-3 rounds;
-    `setup --force` replaces `types.custom`; the `panel create` entry leaves the BRIEF stub, so `panel prompt` refuses,
-    and a fix brief carries no findings.
+    for a lens, verify, fix or change judge; a lens step supplies slot lenses. Failure: skills name default-3 rounds
+    and carry rules the binary does not enforce; `setup --force` replaces `types.custom`; the `panel create` entry
+    leaves the BRIEF stub, so `panel prompt` refuses, and a fix brief carries no findings.
 
 **Constraints.** Consumer-facing text (CLI output, refusals, recovery lines, `next-action` output, skills, setup
 files) cites no ADR, spec, requirement, bead or issue number. No new use of the committed `.beads/issues.jsonl`.
@@ -205,12 +209,16 @@ blocks Y" = Y waits for X.
   `git grep -n -i -E "$K|Any bead REJECT|REJECT / HARD block|do not proceed to the next bead|on_reject|loop\.halt|
   max-rounds|One halted bead|keep going after a halt|default .?3" -- .claude/skills plugins/mindspec/skills
   plugins/mindspec/README.md README.md project-docs/user/guides` and `git grep -n -E "$K|on_reject|type Loop struct"
-  -- .mindspec/domains` each exit 1 (`historical_skills` keeps old text). Both `ms-bead-cycle` copies name
-  `next-action --apply`, `lease`, `submit`; `cmp` of each skill pair exits 0. With `types.custom: gate,spike2`, `plan
+  -- .mindspec/domains` each exit 1 (`historical_skills` keeps old text). For S = both copies of `ms-bead-cycle`,
+  `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally`: each file has at most 50 lines and names
+  `next-action` and `submit`; `git grep -n -i -w -E "must|never|only after" -- S` exits 1; `cmp` of each skill pair
+  exits 0. With `types.custom: gate,spike2`, `plan
   approve` exits non-zero naming `mindspec setup`; after plain `mindspec setup` (an old install), it holds
   `gate,spike2,step` and each installed skill copy matches its source.
 - [ ] AC16 (constraints): added non-test Go lines under `cmd/`, `internal/` and skill lines hold no ADR, spec,
-  requirement, bead or issue number and do not touch `.beads/issues.jsonl`.
+  requirement, bead or issue number and do not touch `.beads/issues.jsonl`. Against the spec base `371dc360`, `git
+  diff --numstat` of each `SKILL.md` under `.claude/skills` and `plugins/mindspec/skills` shows no more added lines
+  than deleted lines.
 - [ ] AC17 (R1-R4, B8): only `next-action --apply`, `lease`, `submit` and each `run` entry reach `impl approve` exit 0
   and `"status":"done"`. After `submit <1>.impl.a1`, `--apply` creates `<1>.review.r1.lens`
   and `run` has no `panel create 1`; after the lens `submit`, `run` lists `panel create 1`; after it, `--apply` lists slots
