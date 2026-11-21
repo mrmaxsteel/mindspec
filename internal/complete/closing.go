@@ -215,11 +215,23 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath st
 				writePanelAuditMetadata(beadID, &decisions[0].Registration, os.Stderr)
 			}
 		case 4:
-			var done bool
-			done, err = closePublicationDone(beadID, specBranch, specWT, ledgers, exec)
+			// A repo that ignores and does not track the export keeps
+			// the close in the beads database only (step 1 verified it).
+			// Publish only the ledgers there, and nothing when there are none.
+			var published, done bool
+			published, err = exec.BeadsExportPublished(specWT)
+			if err == nil {
+				done, err = closePublicationDone(beadID, specBranch, specWT, ledgers, published, exec)
+			}
 			if err == nil && !done {
-				paths := append([]string{".beads/issues.jsonl"}, ledgers...)
-				err = exec.PublishBeadClose(specWT, paths)
+				var paths []string
+				if published {
+					paths = append(paths, ".beads/issues.jsonl")
+				}
+				paths = append(paths, ledgers...)
+				if len(paths) > 0 {
+					err = exec.PublishBeadClose(specWT, paths)
+				}
 			}
 		case 5:
 			var oid string
@@ -346,7 +358,34 @@ func mergedRangeFailure(root, beadID, specBranch, specWT string, row executor.Me
 
 // closePublicationDone uses the committed close and current ledger bytes.
 // Later metadata-marker cleanup does not invalidate a published close.
-func closePublicationDone(beadID, specBranch, specWT string, ledgers []string, exec executor.Executor) (bool, error) {
+// When the repo does not publish the export, only the ledgers decide: the
+// close itself lives in the beads database, verified by closing step 1.
+func closePublicationDone(beadID, specBranch, specWT string, ledgers []string, exportPublished bool, exec executor.Executor) (bool, error) {
+	if exportPublished {
+		closed, err := closeExportCommitted(beadID, specBranch, exec)
+		if err != nil || !closed {
+			return false, err
+		}
+	}
+	for _, path := range ledgers {
+		committed, present, err := exec.FileAtRefOrAbsent(specBranch, path)
+		if err != nil || !present {
+			return false, err
+		}
+		current, err := os.ReadFile(filepath.Join(specWT, path))
+		if err != nil {
+			return false, err
+		}
+		if !bytes.Equal(committed, current) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// closeExportCommitted reports whether the export committed at specBranch
+// records the bead as closed.
+func closeExportCommitted(beadID, specBranch string, exec executor.Executor) (bool, error) {
 	data, present, err := exec.FileAtRefOrAbsent(specBranch, ".beads/issues.jsonl")
 	if err != nil || !present {
 		return false, err
@@ -367,23 +406,7 @@ func closePublicationDone(beadID, specBranch, specWT string, ledgers []string, e
 			closed = strings.EqualFold(strings.TrimSpace(row.Status), "closed")
 		}
 	}
-	if !closed {
-		return false, nil
-	}
-	for _, path := range ledgers {
-		committed, present, err := exec.FileAtRefOrAbsent(specBranch, path)
-		if err != nil || !present {
-			return false, err
-		}
-		current, err := os.ReadFile(filepath.Join(specWT, path))
-		if err != nil {
-			return false, err
-		}
-		if !bytes.Equal(committed, current) {
-			return false, nil
-		}
-	}
-	return true, nil
+	return closed, nil
 }
 
 // ledgerShellArg quotes an operand for a POSIX shell, escaping display controls.

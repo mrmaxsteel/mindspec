@@ -39,8 +39,14 @@ type Executor interface {
 	FirstParentMerges(ref string) ([]MergeIdentity, error)
 	// CompletionState reads merge state, staged paths and new commits.
 	CompletionState(workdir, base, head string) (CompletionState, error)
-	// PublishBeadClose exports the tracker and commits only the supplied paths.
+	// PublishBeadClose commits only the supplied paths. It refreshes the
+	// tracker export first only when the paths include it. Empty paths
+	// commit nothing.
 	PublishBeadClose(workdir string, paths []string) error
+	// BeadsExportPublished reports whether the checkout at workdir
+	// publishes .beads/issues.jsonl through git. An ignored, untracked
+	// export is not published; the beads database is the store of record.
+	BeadsExportPublished(workdir string) (bool, error)
 
 	// InitSpecWorkspace creates a workspace for spec authoring.
 	// Creates branch, worktree, and ensures gitignore entries.
