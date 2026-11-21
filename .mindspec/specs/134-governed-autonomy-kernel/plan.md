@@ -1288,7 +1288,8 @@ Bead 8, Bead 9, Bead 10, Bead 11, Bead 12
 
 **Steps**
 1. In `kernelid`, add `.r<N>.verify` and `.r<N>.lens` to the grammar and `Format`, with `.a<k>` attempts.
-2. In `records.go`, add the kinds `verify` and `lens` (and to the `RegisterArtifactCheck` kind switch in `submit.go`)
+2. In `records.go`, add the kinds `verify` and `lens` (and to the `RegisterArtifactCheck` kind switch in `submit.go`,
+   with a close-write hook per kind that every receipt path runs before the receipt, §6; Beads 15 and 19 fill it)
    and the records: verify record and its returns (`ground`, `ac`, `reason`, `evidence`, `target`), lens record,
    `mindspec_reproduced`, `mindspec_actors`, lease `actor` and `ended`, take event `via`, `generation`, `actor`,
    `revoked_actor`, `revoked_token_hash` and `subject`, receipt `generation`, `superseded_generation`, `taken`, `actor`
@@ -1306,10 +1307,13 @@ Bead 8, Bead 9, Bead 10, Bead 11, Bead 12
    `supersede` from `reject.go` and its tests; delete the `resetScope` branch of `roundOpen` that restores a full round
    after a re-panel (Bead 16 adds its replacement). Register `verify-apply` and `lens-create` as rules that write
    nothing until Beads 15 and 19 fill them.
-6. Add the seeders `Verify` and `Lens`. Update workflow "Kernel store and ids".
+6. In `store.go`, make `WriteMetadata` and `SetStatusMetadataIf` give bd the merged metadata as `--metadata @<file>`
+   (a temporary file outside the repository) and refuse merged metadata over 16 MiB before any bd call, naming the
+   largest key and the size; add `CapText` (2048 or 1024 bytes at a UTF-8 boundary, §13.10) for the writers.
+7. Add the seeders `Verify` and `Lens`. Update workflow "Kernel store and ids".
 
 **Verification**
-- [ ] `go test ./internal/next/kernel/... -run '^TestS134(IDs|Contract|Records|Output|Reducer|Submit)_' -v` passes and lists the new tests.
+- [ ] `go test ./internal/next/kernel/... -run '^TestS134(IDs|Contract|Records|Output|Reducer|Submit|Store)_' -v` passes and lists the new tests.
 - [ ] `go test -short ./internal/next/... ./cmd/mindspec/...` passes.
 
 **Acceptance Criteria**
@@ -1317,6 +1321,9 @@ Bead 8, Bead 9, Bead 10, Bead 11, Bead 12
       and `<w>.review.r2.lenses` do not.
 - [ ] The output golden names `mindspec.next-action/v2`; actions of all six kinds sort in the §4 order.
 - [ ] The rule golden equals the Amendment 1 list; it has no `supersede`.
+- [ ] A fake bd runner sees `--metadata @<file>` and no argv string over 128 KiB for a 1 MiB value (a mutation that
+      passes the JSON inline fails); 17 MiB of metadata refuses with no bd call, naming the key and the size (a
+      mutation without the bound fails); `CapText` cuts a 4096-byte multibyte text to at most 2048 bytes of valid UTF-8.
 - [ ] AC9 (reducer, part): a commit on `bead/2` during round 2: `--apply` closes no slot and authorises no round, and
       each slot's `submit` of a verdict on the round subject exits 0 (`TestS134Submit_`).
 
@@ -1329,7 +1336,7 @@ Bead 13
 1. Change `refusedRound` (`reject.go`; bead and final gates share it): when every slot step of round N is closed
    `passed`, the tally is complete (`Complete()`, which it already checks, and no roster verdict INVALID) and it does
    not pass, create `<gate>.r<N>.verify` (kind `verify`, child of the gate) on the gate's review subject (§6), write
-   its id to `mindspec_round.verify`, pin `mindspec_findings` and `mindspec_read` from the files it read on disk
+   its id to `mindspec_round.verify`, pin `mindspec_findings` (texts cut by `CapText`) and `mindspec_read` from the files it read on disk
    (§13.10; a pass without `--apply` computes them and writes nothing), and create no fix or decision. When the tally does not count a roster verdict
    (§13.10 incomplete tally), create that slot's next attempt `<gate>.r<N>.R<s>.a<k+1>` and no verify. At the cap (§13.10: one slot or more
    with 3 uncounted attempts above the attempt recorded for it by the highest decision that lists it and was answered
@@ -1350,10 +1357,12 @@ Bead 13
    not change. `refusedRound` writes nothing and returns an internal error when the enumerator returns no finding.
    The artifact check for `submit` (shape and existence only, each refusal names its condition, step open): unknown
    fields, coverage, a non-empty list, no `deferred` for a `veto`, the `refuted` fields as `panel refute` checks them,
-   and the `bead.CheckDeferral` checks on each `deferred` target, all before the receipt. On the close, write each `ccr` or `slot` return that is `refuted`
+   and the `bead.CheckDeferral` checks on each `deferred` target, all before the receipt. In the verify close-write
+   hook (Bead 14; it runs before the receipt on every receipt path), write each `ccr` or `slot` return that is `refuted`
    as `panel refute` writes a refutation and each `deferred` return as `panel defer` writes a deferral, both with a new
    `verify_step` field (`panel.Refutation`, `panel.Deferral` in `internal/panel/panel.go`, omitted when empty), and
-   write every return to `mindspec_returns`. No later rule reads the record file.
+   write every return to `mindspec_returns` (`reason`, `evidence` and `target` cut by `CapText`); each write is keyed, so
+   a rerun makes only the missing ones. No later rule reads the record file.
 3. Fill `verify-apply`: with no `reproduced` return, close the gate `passed` (receipt `retally: "verify"`), a refuted
    REJECT included (Bead 16 adds the branch under a `re-panel` judgement). Make `passed()` and
    `gatePassEvidence` (`reducer.go`) and `CheckPassedGate` (`gate_check.go`) accept that receipt on the §13.10
@@ -1378,12 +1387,20 @@ Bead 13
    `mindspec_round.verify`; `refused-round` opens the attempt when the tally is complete and refused again). The refutation and deferral writers
    (`cmd/mindspec/panel_refute.go`, `panel_defer.go`, or a helper they share with the verify close) carry
    `verify_step`: empty for the verbs, the verify step for a verify close. On an enrolled gate the same-key dedupe (§13.10 key; `panel defer` also
-   compares `SourceVerdict` and `SourceFileSHA256`) of the verbs (the `found` loop in `panel_refute.go` and `panel_defer.go`) and of the verify close compares only records
+   compares `SourceVerdict` and `SourceFileSHA256`) of the verbs (the `found` loop in `panel_refute.go` and `panel_defer.go`), of the verify close and of the
+   `mindspec_deferrals` history in `panel_kernel.go` (today keyed on panel, round, slot, finding and target only; add
+   `finding_sha256`, `SourceVerdict` and `SourceFileSHA256` to `kernel.DeferRecord`) compares the same key and only records
    that the filter keeps, with the verify close's own receipt `at` as its cutoff (§13.10).
-5. On an enrolled gate, `internal/instruct/panelstate.go` reports the kernel gate state (the gate's status and
-   receipt) in place of `panel.PanelGateDecision`, whose step (9) in `internal/panel/gate.go` blocks on any REJECT
-   whatever its refutations; `gate.go` and the pre-kernel path do not change.
-6. Update workflow "Verify step" and "Rounds, decisions and halt". Text cites no internal record number.
+5. In `gatherPanelState` (`internal/instruct/panelstate.go`), for a spec that is enrolled (§8 witness), read the
+   kernel state through a seam that opens the bd store as `completeKernelStateFn` (`internal/complete/kernel.go`) does
+   and `kernel.ReadState`, and report `kernel.CheckPassedGate` for the gate in place of `panel.PanelGateDecision`, whose
+   step (9) in `internal/panel/gate.go` blocks on any REJECT whatever its refutations. On a bd read failure it reports
+   a notice that names the error and no halt. `verdict()` stays pure, `HasIncompletePanel` stays file-system only (the
+   SessionStart hook reads no bd), and `gate.go` and the pre-kernel path do not change.
+6. Update the existing tests that the verify step changes (a refused round now gives a verify, not a fix or decision):
+   `cmd/mindspec` `kernel_e2e_test.go`, `kernel_final_regression_test.go` and `panel_kernel_test.go`, and
+   `internal/next/kernel` `reject_test.go` and the final-gate tests, which lease and submit the verify.
+7. Update workflow "Verify step" and "Rounds, decisions and halt". Text cites no internal record number.
 
 **Verification**
 - [ ] `go test ./internal/next/kernel/... -run '^TestS134(Verify|Reject|Final|SeedMatch)_' -v` passes and lists the new tests.
@@ -1430,6 +1447,12 @@ Bead 13
       says it stops the spec; a refuted veto closes the gate `passed` and `CheckPassedGate` accepts it. A reproduced
       `hard_block` veto creates the fix and no decision.
 - [ ] AC5 (part): with the verify open, a passing `panel refute` closes the gate `passed` and the verify `superseded`.
+- [ ] Crash: a verify `submit` killed after its close writes and before the receipt, then the same submit: one
+      refutation record per finding, `mindspec_returns` and the receipt.
+- [ ] Bound: a round of 9 slots with 100 `ccr` items of 4096 bytes each gives the verify with each stored text 2048
+      bytes and the full-text `finding_sha256`, and its all-`refuted` close writes `mindspec_returns`; a mutation without
+      the cut stores 4096-byte texts and fails.
+- [ ] Instruct: with the bd read failing, `mindspec instruct` prints the notice and no halt.
 - [ ] `RoundsForGate` is the same before and after a verify close. `TestS134SeedMatch_Verify` matches a real verify
       close.
 
@@ -1441,7 +1464,12 @@ Bead 14
 **Steps**
 1. In `judge.go`, compute the accepted subject of an open gate (§13.2) and the panel-directory and kernel-directory
    exemption; `effectiveSubjectAt` applies the `<spec dir>/kernel/` exemption also when the gate has no registration
-   (today it returns the head early), and `panel.Subject` (`internal/panel/subject.go`) excludes `<specs>/*/kernel/**`. `judge-create` skips a commit that a judge of the gate (any attempt, open or
+   (today it returns the head early), and `panel.Subject` (`internal/panel/subject.go`) appends `<specs>/*/kernel/**` after its four exclusions
+   (`ToolArtifactPaths` in `artifacts.go` reads `Exclusions[0]`). Update the five-entry list in `TestSubject_PerGate`
+   (`internal/panel/subject_test.go`), the "excludes exactly" text of the spec-130 amendment in
+   `.mindspec/adr/ADR-0037-panel-gate-enforced-contract.md` and in `.mindspec/domains/workflow/interfaces.md`, and the
+   phrases that `internal/validate/adr_spec130_subject_test.go` asserts. In `isDocFile` (`internal/validate/docsync.go`)
+   do not count `<specs>/*/kernel/**` as documentation. `judge-create` skips a commit that a judge of the gate (any attempt, open or
    closed `passed`) has as its subject. Case (a) fires only when a tally or verify retally is due: every slot step of round N is closed `passed`, no
    `uncounted` decision of round N is open and round N is not frozen, or round N's current verify is closed `passed` and not applied (§13.2, §13.10); a frozen
    round gives no case (a) judge. Add the moved-subject guard: `tally`, `refused-round`, `verify-apply` and the
@@ -1466,16 +1494,17 @@ Bead 14
    verify that is not applied (§13.10) for `<gate>.r<N>.verify.a<k+1>` on the review subject; `carry-over` applies the held tally to the
    review subject; `re-panel` records the re-panel on the gate; a passing tally (`tally`), or a verify that leaves no
    reproduced finding (`verify-apply`), writes the round N+1 record itself (N+1 = the last registered round + 1; for a
-   scoped round `roundOpen` skips the registered round N), copying the round N record into `prior` (§13.7: `verify` only for a verify closed `passed`) with `read` (each
-   round-N verdict file and `panel.json` as the rule read them from disk, path -> sha256) and `asks` (the rendered
-   asks, §13.7), and writes no git object; a pass without `--apply` computes them and writes nothing; a passing `panel refute` or `panel defer` retally (`cmd/mindspec/panel_kernel.go`) does the same,
+   scoped round `roundOpen` skips the registered round N), copying the round N record into `prior` (§13.7: `verify` only for a verify closed `passed`) with `asks` and `read`
+   by the §13.7 source rule (with `prior.verify`: findings and texts from its `mindspec_findings` joined with its
+   `mindspec_returns` and the kept verb records, `read` copied from its `mindspec_read`; else from the files the rule
+   read on disk), texts cut by `CapText`, and writes no git object; a pass without `--apply` computes them and writes nothing; a passing `panel refute` or `panel defer` retally (`cmd/mindspec/panel_kernel.go`) does the same,
    with the `panel.json` the verb wrote, and does not close the gate; when it closes the verify `superseded`, `prior`
    has no `verify`; a refused tally creates the verify on
    the new subject. A round N+1 that a retally authorises past the allowance gives a limit decision, `.a<k+1>` after an
    earlier limit decision of round N (extend `decisionWrite`, which today no-ops on an existing id); its `continue:<n>`
    creates that round's lens step (§13.8). In `roundOpen`, when a closed fix authorises round N+1 over the round N
-   record, copy that record, without its own `prior`, into `prior` with `read` and `asks`, and keep `prior` on each
-   later rewrite.
+   record, copy that record, without its own `prior`, into `prior` with `asks` and `read` by the same rule (a closed
+   fix always has a `prior.verify`, so `roundOpen` reads no verdict file), and keep `prior` on each later rewrite.
 4. Replace the full-round restore after a `re-panel` (§13.7): a non-panel commit before `panel create` makes
    `judge-create` open a judge on the newest commit, old subject = the accepted subject; on its submit, close the
    unregistered successor `superseded` (open gate: withdraw the authorised round, restore `prior` as the gate round
@@ -1489,7 +1518,7 @@ Bead 14
 **Verification**
 - [ ] `go test ./internal/next/kernel/... -run '^TestS134(Judge|Reducer|SeedMatch)_' -v` passes and lists the new tests.
 - [ ] `go test ./cmd/mindspec/... -run '^TestS134(JudgeCmd|PanelRepanel|PanelRefute)_' -v` passes and lists the new tests.
-- [ ] `go test -short ./internal/next/... ./cmd/mindspec/...` passes.
+- [ ] `go test -short ./internal/next/... ./internal/panel/... ./internal/validate/... ./cmd/mindspec/...` passes.
 
 **Acceptance Criteria**
 - [ ] AC20 (tally): a commit during round 1, then the last verdict: the judge, gate open, no gate close or verify. A
@@ -1533,9 +1562,19 @@ Bead 14
       slot count and scope and a fresh lens attempt; the gate stays open until that round passes. A mutation that
       closes the gate after a2 fails.
 - [ ] AC19 (prior): after `<2>.review.r2.fix` closes, `mindspec_round.prior.verify` names `<2>.review.r1.verify`
-      and `prior` holds `read` and `asks`; a mutation in which `roundOpen` writes no `prior` fails. A pass with and
+      and `prior` holds `asks` and `read` equal to the verify's `mindspec_read`; a mutation in which `roundOpen` writes
+      no `prior` fails. With the fix leased, f's verdict file replaced by APPROVE, a stray verdict added and no copy of
+      the original left on disk: after the fix closes, `prior.asks` holds the verified findings only; a mutation that
+      enumerates the files on disk when the fix closes fails. A pass with and
       without `--apply` leaves `git count-objects` unchanged, and the pass without `--apply` writes no bd record.
 - [ ] AC20 (cover): a `re-panel` whose paths miss one changed path exits non-zero naming it, step open.
+- [ ] AC10 (verify): a leased verify raw-closed with an all-`refuted` record: after `submit --take` the gate closes
+      `passed` (`retally: "verify"`), with the refutation records, and no `.verify.a2`; the retry of a verify raw-closed
+      with no record, once submitted, closes the gate the same way, and the retry of a fix raw-closed with no commit,
+      once submitted, authorises round 2. A mutation in which the take writes only the receipt fails.
+- [ ] Subject: a golden tree with no `kernel/` directory keeps its digest, and a tree that differs from it only under
+      `<specs>/<spec>/kernel/` has the same digest (a mutation that drops the exclusion fails); `ToolArtifactPaths` is
+      unchanged; `go test ./internal/panel/... ./internal/validate/...` passes.
 - [ ] AC20 (re-judge): after a passed-gate `re-panel` and before `panel create`, a commit: no full round; a judge on
       the newest commit whose old subject is the accepted subject; on `carry-over`, `<gate>.a2` closes `superseded` and
       the frozen gate's receipt adds the carry-over.
@@ -1563,13 +1602,13 @@ Bead 14, Bead 15, Bead 17
    step refuses with the receipt unchanged.
 3. Add `submit <id> --take --actor <id> --reason <text> (--artifact | --commit)` for an unreceipted close only: run the
    §6 checks and the §13.10 actor refusals, append a take event `via: "receipt"` with the current generation and a
-   `mindspec_actors` entry, issue no generation, write the receipt `repaired: true`, `taken: true`,
-   `actor`. Refuse it, naming the condition, on an open step, on a step that was never leased (generation 0), on a
+   `mindspec_actors` entry, issue no generation, run the kind's close-write hook (Bead 14), then write the receipt
+   `repaired: true`, `taken: true`, `actor`. The §9 receipt with no reopen runs the hook before its receipt too. Refuse it, naming the condition, on an open step, on a step that was never leased (generation 0), on a
    step with a valid receipt, and on evidence that does not resolve or fit its kind and subject.
 4. In `closes.go`, before a retry, check the evidence at the step's fixed location (§9); when the step was leased and
    it fits, create no
    `.a<k+1>` and list the `submit --take` entry in `run`. In `retryAttempts`, copy the keys of the kind (§9): add
-   `mindspec_reproduced` for a fix, and point `mindspec_round.lens` or `mindspec_round.verify` at a lens or verify
+   `mindspec_reproduced` for a fix and `mindspec_findings` and `mindspec_read` for a verify, and point `mindspec_round.lens` or `mindspec_round.verify` at a lens or verify
    retry. The pass, `panel create` and `submit` read the highest attempt not closed `superseded` of a slot or fix and
    the attempt that `mindspec_round` names of a lens or verify; the independence checks read every attempt.
 5. Pass `--actor` in every existing test that leases, calls `next` on an enrolled spec or uses `submit --take`:
@@ -1596,10 +1635,14 @@ Bead 14, Bead 15, Bead 17
       generation and the lease generation does not change. With no verdict, or a verdict on another subject, `.a2`.
       `submit --take` on an open step, on a step with a valid receipt, and with a verdict of another subject exits
       non-zero, step unchanged; a leased, raw-closed verify with its `<spec dir>/kernel/<step id>.json` record gets its
-      receipt; a never-leased one gets no `run` entry, `submit --take` exits non-zero and the pass creates `.verify.a2`.
-- [ ] AC10 (retry): raw-close a lens, a fix and a verify with no fitting evidence: the lens retry is the step
-      `mindspec_round.lens` names, the fix retry keeps `mindspec_reproduced`, the verify retry is the step
-      `mindspec_round.verify` names; after each retry's submit, `panel create`, the round or the gate pass proceeds.
+      receipt, and a seeded lens or verify take runs the kind's close-write hook before the receipt (a recording hook;
+      a mutation in which the take writes only the receipt fails); a never-leased one gets no `run` entry, `submit
+      --take` exits non-zero and the pass creates `.verify.a2`.
+- [ ] AC10 (retry): on seeded steps (seeders `Lens`, `Verify`), raw-close a lens, a fix and a verify with no fitting
+      evidence: the lens retry is the step `mindspec_round.lens` names, the fix retry keeps `mindspec_reproduced`, the
+      verify retry is the step `mindspec_round.verify` names and keeps `mindspec_findings` and `mindspec_read`, and the
+      frozen-round retally over it compares that `mindspec_read`. A mutation that copies only subject, round,
+      registration and decision fails (Beads 16 and 19 test that the pass proceeds after each retry).
 - [ ] AC19 (actors): a verify lease with a round-1 slot's actor, the `<w>.impl.a1` actor, or (round 2) the
       `r2.fix` actor exits non-zero naming the step, also when the actor held a generation that an expiry
       replacement later revoked; a fix lease with the verify's actor exits non-zero. `panel refute --actor` with a
@@ -1642,10 +1685,10 @@ Bead 14
       prints the §13.11 items; the fix brief names no refuted finding.
 - [ ] AC19 (part): the round-2 slot body shows each round-1 finding with its verify return and the paths changed since
       round 1's subject.
-- [ ] AC19 (frozen brief): with the fix leased, commits edit a closed round-1 slot's verdict file and add a stray
-      `R9-round-1.json`; after the fix closes, the round-2 slot body shows the findings and returns that the verify
-      record names and no text from the edit or the stray file. A mutation that reads the verdict files at the branch
-      head fails. After `git gc --prune=now` and an edit of each round-1 verdict file on disk, the round-2 slot body is
+- [ ] AC19 (frozen brief): with the fix leased, f's verdict file is replaced by APPROVE, a stray `R9-round-1.json`
+      is added and no copy of the original is left on disk; after the fix closes, the round-2 slot body shows the findings
+      and returns that the verify pinned and no text from the edit or the stray file. Mutations that read the verdict
+      files at the branch head, or enumerate the files on disk when the fix closes, fail. After `git gc --prune=now` and an edit of each round-1 verdict file on disk, the round-2 slot body is
       unchanged; a mutation that reads the panel directory at render fails.
 - [ ] AC20 (passed prior): open gate, round 1 refused on a moved subject, `panel refute` of its finding while the
       judge is open and no commit after it, `re-panel` 2, then a commit replaces that round-1 verdict with APPROVE
@@ -1679,11 +1722,14 @@ Bead 15, Bead 16
 2. Register the lens artifact check for `submit` (§13.11, shape only): no unknown field, one non-empty lens per slot of
    the round except an adversary slot, none for it; each refusal names the slot.
 3. Make `panel create` resolve the lens step from `mindspec_round.lens` and refuse while it is not closed `passed`,
-   naming it; list `panel create` in `run` only after the lens close. The lens close records each lens in the gate
-   round record; `panel create` writes it from there to a new `focus` field of `RosterSlot` (`internal/panel/panel.go`, omitted when empty); `panel prompt`
+   naming it; list `panel create` in `run` only after the lens close. The lens close-write hook (Bead 14; it runs
+   before the receipt on every receipt path) records each lens in the gate round record; `panel create` writes it from there to a new `focus` field of `RosterSlot` (`internal/panel/panel.go`, omitted when empty); `panel prompt`
    (`cmd/mindspec/panel_prompt.go`) prints Focus from it, else from the configured lens text. The adversary slot has
    no `focus`.
-4. Update workflow "Lens step".
+4. Update the existing tests that the lens step changes (`panel create` needs a closed lens step): the
+   `kerneltest` seeders create a closed lens step for each authorised round, and `cmd/mindspec` `kernel_e2e_test.go`,
+   `kernel_final_regression_test.go` and `panel_kernel_test.go` lease and submit it before `panel create`.
+5. Update workflow "Lens step".
 
 **Verification**
 - [ ] `go test ./internal/next/kernel/... -run '^TestS134(Lens|SeedMatch)_' -v` passes and lists the new tests.
@@ -1695,6 +1741,10 @@ Bead 15, Bead 16
       close exits non-zero naming it; after it, `panel prompt` shows each slot's lens and the adversary slot's
       configured lens.
 - [ ] AC17 (part): after `submit <1>.impl.a1`, `--apply` creates `<1>.review.r1.lens` and `run` has no `panel create 1`.
+- [ ] AC10 (lens): a leased lens step raw-closed with a fitting record: after `submit --take`, `panel create` exits 0
+      and each slot's `focus` is its drafted lens (a mutation in which the take writes only the receipt fails); a lens
+      raw-closed with no record gives the retry that `mindspec_round.lens` names, and after its submit `panel create`
+      exits 0.
 - [ ] A scoped `re-panel` round of 3 slots on the default roster (adversary fourth) has roster R1, R2, R3 (R3 =
       configured slot 4, lens `adversarial`); its lens step takes lenses for R1 and R2 only; `panel create`, the slot
       steps, each slot `submit`, the tally, `CheckPassedGate` and `complete` exit 0 on it, and a mutation that takes

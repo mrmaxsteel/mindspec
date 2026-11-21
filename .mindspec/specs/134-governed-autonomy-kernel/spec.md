@@ -163,11 +163,15 @@ blocks Y" = Y waits for X.
   --take --actor <actor> --reason`; that submit exits 0 with a receipt `taken: true` and one take event `via:
   "receipt"` with the step's current generation, and the lease generation does not change. `submit --take` exits
   non-zero, step unchanged, on an open step, on a step with a valid receipt and with a verdict of another subject; a
-  leased, raw-closed verify with its record at `<spec dir>/kernel/<step id>.json` gets a receipt from `submit --take`. A
+  leased, raw-closed verify with an all-`refuted` record at `<spec dir>/kernel/<step id>.json` gets a receipt from
+  `submit --take`, its refutation records and a gate closed `passed` (`retally: "verify"`), and no `.verify.a2`; a
+  leased, raw-closed lens step with a fitting record gets a receipt from `submit --take`, and `panel create` gives each
+  slot its drafted `focus` (mutation: the take writes only the receipt). A
   never-leased verify, raw-closed with a fitting record: `run` lists no `submit --take`, `submit --take` exits
   non-zero, and the pass creates `.verify.a2`. Raw-closed
   with no fitting evidence: a lens retry is the step `mindspec_round.lens` names, a fix retry keeps
-  `mindspec_reproduced`, a verify retry is the step `mindspec_round.verify` names; after each retry's `submit`, the
+  `mindspec_reproduced`, a verify retry is the step `mindspec_round.verify` names and keeps `mindspec_findings` and `mindspec_read` (mutation:
+  the retry copies only subject, round, registration and decision); after each retry's `submit`, the
   next step (`panel create`, the round, the gate pass) proceeds. After
   item 1's gate passes, `bd close <1>` flags `raw-close`: `impl approve` exits non-zero naming it, no `<2>.impl.a1`,
   then `complete 1` exits 0 and clears it. In a fresh fixture, `bd close --force <1>` flags `forced-close`: `complete 1`
@@ -252,11 +256,12 @@ blocks Y" = Y waits for X.
   `mindspec_reproduced` names g (mutation: the filter keeps a verb refutation made before the verify closed); then
   `panel refute --actor X` of g appends a record and the retally closes the gate `passed` (mutation: the verbs' same-key
   dedupe compares all records). Fresh fixture, the fix created and leased by F, then a commit
-  that edits a closed round-1 slot's verdict file and one that adds a stray `R9-round-1.json`: `--apply` creates no
+  that replaces f's round-1 verdict file with APPROVE and one that adds a stray `R9-round-1.json`, with no copy of the
+  original left on disk: `--apply` creates no
   `.verify.a2` and no slot attempt, the fix keeps its `mindspec_reproduced`, after the fix closes `panel create 2`
   exits 0 (mutation: the changed-finding trigger acts on round 1), and the round-2 slot brief shows the round-1
-  findings and returns that the verify record names and no text from the edit or from `R9-round-1.json` (mutation: the
-  brief reads the verdict files at the branch head). No public event leases a verify after its fix exists, so the
+  findings and returns that the verify record names and no text from the edit or from `R9-round-1.json` (mutations: the
+  brief reads the verdict files at the branch head; `round-open` enumerates the files on disk when the fix closes). No public event leases a verify after its fix exists, so the
   fixture seeds `.verify.a2`: its lease with `--actor F` exits non-zero naming the fix step, and another actor's lease
   exits 0. After round 2 is refused, a
   `<2>.review.r2.verify` lease with the actor of `<2>.review.r2.fix` exits non-zero.

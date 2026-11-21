@@ -118,8 +118,11 @@ artifact fits the kind (a lens record for a lens step, §13.11; a verdict for a 
 §13.10; for a fix, a commit on the branch the gate names past the fix step's subject that changes, relative to that
 subject, a path outside the panel directories and the kernel directory, §13.11, so the step's subject itself and any
 commit that the step's subject contains are refused; a commit past the claim base for an implement step; a judgement
-for a change judge, §13.2). It writes the receipt (with the accepted `generation` and that generation's `actor` from
-`mindspec_actors`), closes, and runs one reducer pass (order: §13.9). Refuses: an absent token; a token of no
+for a change judge, §13.2). For a lens or verify step it first makes the close writes of its kind (§13.10, §13.11).
+Then it writes the receipt (with the accepted `generation` and that generation's `actor` from
+`mindspec_actors`), closes, and runs one reducer pass (order: §13.9). The §9 receipt with no reopen and `submit --take`
+make the same close writes before their receipt. Each close write is keyed and made once, so a rerun after a crash
+before the receipt makes only the missing writes, then the receipt. Refuses: an absent token; a token of no
 generation of the step; a stale subject; a foreign slot; a missing artifact; a different result for a closed step (the
 step stays closed and its receipt does not change); a `submit --take` on a step that is open, on a step that was never leased, on a step
 with a valid receipt, or with evidence that does not resolve or fit its kind and subject (§9), each with the step unchanged.
@@ -130,7 +133,7 @@ because a step's subject never changes: a subject move closes an open lens or ju
 closes an open verify `superseded` when it retires it, each with a new attempt (§13.2, §13.7, §13.10). On a late acceptance the current lease ends `superseded` (lease
 record `ended`), and the receipt names the accepted generation, its actor and the superseded generation
 (`superseded_generation`). Else it refuses and names the condition. The same receipt
-again on a closed step exits 0 with no change; on an open step it closes it. A decision needs no token and takes a
+again on a closed step exits 0 with no change (its close writes came before the receipt); on an open step it closes it. A decision needs no token and takes a
 listed option; it counts from its receipt, even when a foreign child keeps it open.
 
 **Subjects.** The round subject is `mindspec_round.subject`; registration fixes it, and a commit during the round
@@ -216,7 +219,8 @@ recovery; a raw claim (§12 item 3). Flags are computed from current state, neve
 escape hatches, deferrals, `--take`, decision answers. `MINDSPEC_SKIP_PANEL=1` does not open or pass a gate: with no
 passing gate the verb refuses and names it; with a passing gate it is ignored and the verb proceeds (pre-kernel: as
 today). Floor: `FindOrphanedClosedBeads` and the self-orphan handling in `complete`. **Unreceipted close** (no or bad
-receipt): with evidence and a generation §6 accepts, `submit` writes the receipt (no reopen). Else, when the step was leased (generation 1 or more) and its
+receipt): with evidence and a generation §6 accepts, `submit` makes the close writes of its kind and writes the
+receipt (no reopen, §6). Else, when the step was leased (generation 1 or more) and its
 evidence resolves at a commit and fits its kind and current subject (a slot's verdict at its registered path; an
 implement or fix commit past its claim base or its step subject (§6) on the branch the gate names, as §6 checks it; a lens or
 verify record at `<spec dir>/kernel/<step id>.json`; a judgement in a registered panel directory whose new
@@ -224,11 +228,14 @@ subject is the judge's subject), the pass lists `submit <id> --take --actor <act
 --commit) <evidence>` in `run` and creates no retry. That submit needs no token and runs every check of §6 and the
 §13.10 actor refusals on `--actor`. It issues no generation: it appends a take event (`via: "receipt"`, `generation` =
 the step's current generation, and `actor`) and a `mindspec_actors` entry (`via:
-"receipt"`), and writes the receipt (`repaired: true`, `taken: true`, `actor` = `--actor`). Only when the step was never leased, or no evidence
+"receipt"`), makes the close writes of its kind (§6), and then writes the receipt (`repaired: true`, `taken: true`,
+`actor` = `--actor`). Only when the step was never leased, or no evidence
 resolves and fits, does the next pass create `<id>.a<k+1>` with `mindspec_from`. `submit --take` refuses an open step,
 a step that was never leased (so no record written outside a lease passes as a take), a step with a valid receipt and
 evidence that does not resolve or fit, and names the condition. A retry keeps the keys
-of its kind: subject, round, registration and decision, and for a fix `mindspec_reproduced`; the pass points
+of its kind: subject, round, registration and decision, for a fix `mindspec_reproduced`, and for a verify
+`mindspec_findings` and `mindspec_read` (a retry verifies the same findings; a changed verdict file retires a verify
+instead, §13.10); the pass points
 `mindspec_round.lens` or `mindspec_round.verify` at a lens or verify retry. The pass, `panel create` and `submit`
 read the highest attempt not closed `superseded` of a slot or fix step and the attempt that `mindspec_round` names of
 a lens or verify step; the §13.10 independence checks read every attempt.
@@ -361,15 +368,17 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    separate attempt counters, slot ceiling, scope carrier. From the 2026-11-21 amendment: the accepted subject of an
    open gate; a scoped round on the same open gate (no successor); the round number of an open-gate re-panel round
    (§13.7) and the `prior` record that its authorising rule, and `round-open` after a closed fix, write, with
-   `verify` only for a verify closed `passed`, `read` as the sha256 of the files read from disk and `asks` as the
-   rendered asks, in bd metadata and no git object, and a dry pass that writes nothing (§13.7); the slots a scoped round takes, with no or two
+   `verify` only for a verify closed `passed`, `read` and `asks` in bd metadata and no git object, and a dry pass that writes nothing (§13.7); the slots a scoped round takes, with no or two
    adversary slots, and their contiguous ids (§13.11); the review subject, `judged`, and the verify attempt after a
    judgement, so a verify on the old subject is redone (a refutation holds for the subject it read; B5(c)); the key
    `mindspec_round.verify`, the retirement triggers of a verify, and its refutations and deferrals kept as audit
    history only (§13.10); a fresh lens attempt on each authorisation or subject move, and the retired passed attempt (§13.7);
    the judge-termination rule (no judge on a commit that a
    closed judge ruled on), the moved-subject guard and when a tally or verify retally is due (case a); the kernel directory, its tracked location outside `reviews/`, its
-   exemption before the first registration and the lens and verify close that copy the record into bd metadata; the fix check that a record commit cannot meet (§6); the `lens` key
+   exemption before the first registration, the exclusion of all of `<specs>/*/kernel/**` (a file there is not
+   reviewed) and from docsync's documentation files, the finalize export of an uncommitted record, and the lens and verify close that copy the record into bd metadata, before the receipt on every receipt
+   path (§6); the metadata bound and its caps (§13.10); `prior.asks` and `prior.read` from `prior.verify` when set,
+   and `prior.read` as audit history (§13.7); the fix check that a record commit cannot meet (§6); the `lens` key
    (§13.7); the subject that §6's late-submission rule compares; `--actor` on
    every new lease generation, on `next` and on `submit --take`, and `mindspec_actors`; declared actor labels as the B4
    and B7 mechanism, and the exclusion of the reviewed commit's author steps and of the next fix's actors from a verify (§13.10); the generation of a receipt take
@@ -430,11 +439,15 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    (`round-open` after a closed fix, `tally`, `verify-apply` or a passing `panel refute` or `panel defer` retally,
    §13.2) copies the round N record, without its own `prior`, into `prior`; `prior.verify` names round N's current verify
    only when that verify is closed `passed`, so a retally that closes it `superseded` writes no `verify`. The rule also
-   writes, from the files it read on disk (for a tally or retally, the files it tallied), `prior.read`: each round-N
-   verdict file and the `panel.json` of round N's panel directory as repo path -> sha256 of its bytes; and `prior.asks`:
-   the rendered asks (§13.11), each round-N finding (slot, round, finding, `finding_sha256`, text) with its return,
-   ground, reason, evidence or target from the `mindspec_returns` of `prior.verify` when set, and each `panel refute` or `panel
-   defer` record of it with an empty `verify_step` that the §13.10 filter keeps. It writes no git object. Review
+   writes `prior.asks`, the rendered asks (§13.11), and `prior.read`. When `prior.verify` is set, `prior.asks` takes
+   each round-N finding (slot, round, finding, `finding_sha256`) and its text only from that verify's
+   `mindspec_findings`, joined by that identity with its `mindspec_returns` (return, ground, reason, evidence or target)
+   and with each `panel refute` or `panel defer` record with an empty `verify_step` that the §13.10 filter keeps, and
+   `prior.read` is a copy of its `mindspec_read`; the rule reads no verdict file. Else `prior.asks` is each round-N
+   finding that the rule enumerated from the files it read on disk (for a tally or retally, the files it tallied),
+   joined with those verb records, and `prior.read` is each round-N verdict file and the `panel.json` of round N's
+   panel directory as repo path -> sha256 of its bytes. `prior.read` is audit history only: no rule compares it.
+   Stored texts keep the §13.10 bound. It writes no git object. Review
    directories are ignored and local, so `prior` holds what authorised round N+1 in bd metadata, and no rule reads it
    back from a commit. A later rewrite of the round N+1 record and `panel create` keep `prior`. The round N+1 brief
    renders from `prior` alone, and the §13.10 filter reads round N's current verify from `prior`. A pass without
@@ -512,7 +525,14 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     writes nothing and reports an internal error when the enumerator returns no finding. When it creates a verify
     attempt, the pass pins in the step metadata `mindspec_findings`, the enumerated findings with their text, and
     `mindspec_read`, each round-N verdict file it read from disk as repo path -> sha256 of its bytes; the verify brief
-    renders from them. `finding_sha256` is as `panel.Findings` computes it, or for `veto` the sha256 of the verdict file's bytes.
+    renders from them. The pin is made once, at the verify's creation, so a round-N verdict file edited before the
+    verify closes fails the frozen-round retally below until the fix closes. **Metadata bound.** `kernel.Store` gives
+    bd the merged metadata as `--metadata @<file>` (a temporary file outside the repository), never as one argv
+    string, which Linux refuses over 128 KiB; bd reads `@<file>` (`bd update --help` and `bd create --help`, bd 1.3.4).
+    Each finding text the kernel stores (`mindspec_findings`, `prior.asks`) keeps at most its first 2048 bytes, and
+    each stored `reason`, `evidence` and `target` at most 1024 bytes, cut at a UTF-8 boundary; a stored finding keeps
+    the `finding_sha256` of its full text and its verdict path, and a brief names that file for the rest. Before any
+    bd call the store refuses merged metadata over 16 MiB, names the largest key and the size, and writes nothing. `finding_sha256` is as `panel.Findings` computes it, or for `veto` the sha256 of the verdict file's bytes.
     APPROVE verdicts and the `findings` list outside `concrete_changes_required` give no finding. **Record.** The
     artifact `<spec dir>/kernel/<step id>.json` is a verify record: `{"step", "subject", "returns": [{"slot",
     "round", "finding", "finding_sha256", "return", "ground", "ac", "reason", "evidence", "target"}]}`. `submit` checks
@@ -526,7 +546,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     each failed field and each failed deferral check. On the close it records each `ccr` or `slot` return that is
     `refuted` as `panel refute` records a refutation and each `deferred` return as `panel defer` records a deferral
     (`mindspec_deferrals` included), each with `verify_step` (a new field of `panel.Refutation` and `panel.Deferral`)
-    naming the verify step, and writes every return to the step metadata `mindspec_returns`; its receipt records `at`, the close time,
+    naming the verify step, and writes every return to the step metadata `mindspec_returns`; its receipt records `at`, the close time (fixed before the first close write),
     written RFC3339Nano UTC from `kernel.Now`, the clock from which the enrolled `panel refute` and `panel defer` write
     `created_at`; a `veto` return lives in `mindspec_returns` and the verify-returns audit row only. No later rule
     reads the record file. A
@@ -552,7 +572,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     to the head commit. It passes only when `PassRule` passes and round N's current verify covers it: its `mindspec_returns` cover every
     round-N finding that the enumerator lists (slot, round, finding, `finding_sha256`), and the round-N verdict files on
     disk now are the set in that verify step's `mindspec_read`, each with the same sha256 (a changed, added or removed
-    file fails it, committed or not, and the refusal names each path). When it passes, the fix closes
+    file fails it, committed or not, and the refusal names each path, escaped with `termsafe`). When it passes, the fix closes
     `superseded` and the gate closes `passed` on round N's review subject, and §13.2 case (b) then judges the later
     commits; after an open-gate `re-panel` judgement, which came before the verify, it authorises round N+1 instead
     and does not close the gate (§7, §13.7). The refutations and deferrals of a retired verify (their `verify_step` is set and is not the
@@ -565,7 +585,8 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     `PassRule` does not change, before it calls `PassRule` in
     `tally` and `refusedRound` (`reject.go`), `gatePassEvidence` (`reducer.go`), `CheckPassedGate`, and the enrolled
     `panel refute` and `panel defer` retally (`cmd/mindspec/panel_kernel.go`). On an enrolled gate the same-key dedupe
-    (slot, round, finding, `finding_sha256`; for `panel defer` also `SourceVerdict` and `SourceFileSHA256`) of `panel refute`, `panel defer` and the verify close compares only the
+    (slot, round, finding, `finding_sha256`; for `panel defer` also `SourceVerdict` and `SourceFileSHA256`) of `panel refute`, `panel defer` and the verify close,
+    and of the `mindspec_deferrals` history that `panel defer` appends, compares the same key and only the
     records that this filter keeps, with the verify close's own receipt `at` as its cutoff; a record that it discards does not block
     the append.
     **Pass after a verify.** A gate closes `passed` (receipt `retally: "verify"`) when its current verify closed
@@ -619,7 +640,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     are all adversary slots still has a lens step; its record has an empty `lenses` list. `submit` checks shape only:
     it refuses an unknown field, and needs exactly one non-empty lens for each slot of the round except an adversary
     slot, and none for it; it refuses and names each missing, extra or empty entry. The lens close writes the
-    lenses to the gate round record (`mindspec_round` `lenses`). `panel create` refuses while the step that
+    lenses to the gate round record (`mindspec_round` `lenses`) before the receipt (§6). `panel create` refuses while the step that
     `mindspec_round.lens` names is not closed `passed` and names it; it writes each lens from `lenses` to the slot's
     `focus` field of `panel.json` (`RosterSlot`, written
     only by the kernel's `panel create`). `panel prompt` prints a slot's Focus from its `focus` when set, else from the
@@ -627,9 +648,11 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     and the acceptance question); a lens adds focus and replaces neither. The adversary slot has no `focus` and runs
     its configured lens. **Kernel directory.** `<spec dir>/kernel/` holds lens and verify records. It is tracked, outside the
     ignored `reviews/`, and the actor commits the record on the branch the gate names (`bead/<w>`, or the spec branch
-    for `<epic>.final`), as `submit` resolves it at a commit (§6). `panel.Subject` adds the exclusion
-    `<specs>/*/kernel/**`, and the effective subject, the §6 fix check and the change-judge paths leave it out also when
+    for `<epic>.final`), as `submit` resolves it at a commit (§6). `panel.Subject` appends the exclusion
+    `<specs>/*/kernel/**` after the four it has, and the effective subject, the §6 fix check and the change-judge paths leave it out also when
     the gate has no registration. So a commit that changes only kernel records never moves the subject and never meets
-    the §6 fix check. The finalize export accepts `<spec dir>/kernel/*.json`. Every `panel create` that is not the `run` entry of a
+    the §6 fix check. Docsync does not count a kernel record as a documentation file. Committed records merge to the
+    main branch with the spec as audit history; the finalize export commits a record left uncommitted (for example of a
+    retired attempt) with its other artifacts, and no rule reads it. Every `panel create` that is not the `run` entry of a
     kernel gate (a pre-kernel spec, the spec and plan gates, `--gate adhoc` on any spec) keeps the BRIEF stub and
     `--brief-file`.
