@@ -65,7 +65,7 @@ Thesis: beads hold plan, dispatch and kernel records; git holds code and the pan
     A gate closed `passed` is frozen; only a `carry-over` (§13.2) adds to its receipt.
 13. A receipt names its evidence, never the body. For a commit or a verdict file it names path, holding commit and
     blob id, and readers resolve from that commit, not from the branch head. For a lens, verify or judgement record
-    it names `record_sha256`, the sha256 of the bytes that the step's `mindspec_record` holds (§6).
+    it names `record_sha256`, the sha256 of the record bytes that `submit` read and `mindspec_record` holds (§6).
 
 ## 4. `next-action [<spec>] [--apply] [--json]`
 
@@ -114,7 +114,7 @@ after the item is closed and merged and its halt, blocker, and gate checks pass.
 for the item to count as done.
 An epic, work item or gate with status `in_progress` does not hold work. The pass flags `raw-claim` and names the record.
 
-## 6. `submit <step> --lease <t> <evidence>` | `submit <step> --repair --reason <text> <evidence>` | `submit <decision> --answer <opt>`
+## 6. `submit <step> --lease <t> <evidence>` | `submit <step> --repair --reason <text> [<evidence>]` | `submit <decision> --answer <opt>`
 
 `<evidence>` is `--record <path>` for a lens, verify or change-judge step, `--artifact <path>` for a slot and
 `--commit <oid>` for an implement step or a fix. Checks: the generation; the step's subject (**Subjects**); the
@@ -122,10 +122,13 @@ evidence; it fits the kind (a lens record, §13.11; a verdict whose path resolve
 verify record, §13.10; for a fix, a commit on the branch the gate names past the fix step's subject that changes,
 relative to that subject, a path outside the panel directories, so the step's subject itself and any commit that the
 step's subject contains are refused; a commit past the claim base for an implement step; a judgement, §13.2).
-**Record.** `--record <path>` names a file outside the repository; a path in a work tree of the repository refuses.
-`submit` reads the bytes once and checks the shape of the kind. The first close write of a record step stores the
-bytes as the step metadata `mindspec_record` (the metadata route and bound, §13.10). The receipt names
-`record_sha256`, not path, commit and blob id (B13). The actor commits no record. Each reader of a record (the brief
+**Record.** `--record <path>` names a file outside the repository: the path that the step's brief names (§13.11). A
+path in a work tree of the repository refuses, and so does a record that is not valid UTF-8. `submit` reads the bytes
+once and checks the shape of the kind. The first close write of a record step (on a verify, the first after the
+closing pin) stores the bytes as the step metadata `mindspec_record`, a JSON string whose value is those bytes
+exactly (the metadata route and bound, §13.10); a reader decodes the string, then the record. `record_sha256` is the
+sha256 of those bytes on every path: the receipt (B13), the closing pin, `ValidReceipt` and the repair (§9). The
+receipt names no path, commit or blob id. The actor commits no record. Each reader of a record (the brief
 render, the tally, the verify retally, the audit, the closing pin) reads `mindspec_record` and the close writes of
 its kind, never a file. Each `submit` and `panel submit` runs under the phase lock, so no two writes of one step
 interleave. On a step with a valid receipt no submit makes a close write; the closed-step rules below apply. Else, for
@@ -135,8 +138,7 @@ receipt with no reopen and `submit --repair` make the same close writes before t
 after every other check of this section and every record check of §13.10 (`bead.CheckDeferral` included) passes, the
 token and generation included, so a refused token, a foreign slot or a bad record writes nothing. On a step with a
 valid receipt the pin writes nothing. On a step with no valid receipt, the submit builds and size-checks every close write (§13.10 bound) and then,
-when absent, writes the step metadata `mindspec_closing` {`generation`, `record_sha256` (the sha256 of the record
-bytes that `submit` read), `at` (RFC3339Nano UTC from `kernel.Now`)}. A submit whose generation or `record_sha256`
+when absent, writes the step metadata `mindspec_closing` {`generation`, `record_sha256` (**Record**), `at` (RFC3339Nano UTC from `kernel.Now`)}. A submit whose generation or `record_sha256`
 differs refuses, names `mindspec_closing`, and writes only `mindspec_closing.conflict` (its generation and
 `record_sha256`). A take after a pin thus retires the attempt also for the same record bytes. While `conflict` is set, each submit of that attempt refuses and writes
 nothing, and `submit` reads `conflict` again just before the receipt write. The next pass retires the current attempt
@@ -247,10 +249,10 @@ evidence fits its kind and current subject (a slot's verdict at its registered p
 implement or fix commit past its claim base or its step subject (§6) on the branch the gate names, as §6 checks it;
 for a record step, the `mindspec_record` that a submit stored before it stopped, a judgement whose new subject is
 the judge's subject), the pass lists `submit <id> --repair --reason <text> <evidence>` in `run` and creates no
-retry. For a record step `<evidence>` is `--record <path>`, a placeholder for a file with the stored bytes;
-`submit --repair` refuses a record whose sha256 differs from that of `mindspec_record`. That submit needs no token and runs every check of §6. It issues
-no generation: it appends a repair event to `mindspec_takes` (`via: "repair"`, `generation` = the step's current
-generation), makes the close writes of its kind (§6), and then writes the receipt (`repaired: true`, `via:
+retry. A repair of a record step takes no `--record` (a `--record` on it refuses): its evidence is the stored
+`mindspec_record`, and its `run` entry is `submit <id> --repair --reason <text>`. That submit needs no token and runs every check of §6. It issues
+no generation: it appends a repair event to `mindspec_takes` (`via: "repair"`, `reason`, `at`, `generation` = the
+step's current generation, `subject` = the step's subject), makes the close writes of its kind (§6), and then writes the receipt (`repaired: true`, `via:
 "repair"`). Only when the step was never leased, no evidence
 fits (a record step with no `mindspec_record` included), or its `mindspec_closing` has a `conflict` or a `generation` that is not the step's current
 generation (§6), does the next pass create `<id>.a<k+1>` with `mindspec_from`. `submit --repair` refuses an open
@@ -288,7 +290,7 @@ attempts of all gate rounds; one Details entry `<gate> r<N>: <k>` per gate round
 
 Takeover history is stored in `mindspec_takes`: one take event for each `lease --take` (`via: "lease"`) and one repair
 event for each receipt under `submit --repair` (`via: "repair"`). The takeovers row counts every event of both kinds,
-whatever its generation. The unreceipted-closes row counts every receipt with `repaired: true`, so a receipt under
+whatever its generation (ruling E), and its Details are `lease <n>, repair <m>`. The unreceipted-closes row counts every receipt with `repaired: true`, so a receipt under
 `submit --repair` counts in that row, in the takeovers row and in its own row.
 Deferral history is stored in `mindspec_deferrals`, with distinct panel, round, slot, finding and target records. The
 deferrals row counts every record in it: each `panel defer` and each `deferred` verify return (§13.10).
@@ -398,8 +400,10 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    history only (§13.10); a fresh lens attempt on each authorisation or subject move, and the retired passed attempt (§13.7);
    the judge-termination rule (no judge on a commit that a
    closed judge ruled on), the moved-subject guard and when a tally or verify retally is due (case a); records in bd: a
-   `--record` file outside the repository, the store key `mindspec_record` as the first close write, the receipt
-   `record_sha256`, and the repair of a record step only from its stored record (§6, §9); the lens and verify close
+   `--record` file outside the repository at the path the brief names (a reviewer's `panel.scratch-in-slot` does not
+   apply to it), the store key `mindspec_record` as a JSON string of the exact bytes and the first close write, one
+   `record_sha256` on every path, and the repair of a record step from its stored record with no `--record` (§6, §9,
+   §13.11); the lens and verify close
    that copy the record into bd metadata, before the receipt on every receipt
    path (§6); the closing pin `mindspec_closing` on a verify only (a lens has none, as each of its writes is replaced whole,
    so a take after a lens crash needs no retirement), run after the token and shape checks and only on a step with no
@@ -432,7 +436,10 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    `<epic>.final` brief sources (§13.11); the decision answer {`option`, `at`} with no actor and `run[].actor` kept as
    an executor kind (§4, §6); the rule ids `decision.operator-answer`, `loop.stop-on-failed-run` and
    `readiness.not-ready-route` (§13.6); the readiness review and `complete --check` in the implement and fix briefs,
-   and the `Next` block of `panel tally` on a gate that is not a kernel gate (§13.11).
+   and the `Next` block of `panel tally` on a gate that is not a kernel gate, with its gate-specific steps (§13.11); an
+   adapter started for a panel runs `panel tally` first (§13.11); `next <w> --emit-only` runs the readiness check and
+   fails closed on a malformed `mindspec_readiness_attempt` (§13.11); the repair event fields and the takeovers Details
+   split (§9, §11); the lease-recovery line of `ms-bead-cycle` moves into `dispatch.fresh-agent` (`spec.md` R8).
 3. **Implement authorisation (OQ9).** An open work item with all plan upstreams done (B4), no open implement step and
    no gate round authorises `<w>.impl.a1`. Each pass creates it for every such item, in plan order, on the one
    controller host (§8); this is not the deferred parallel waves. `<w>.impl.a<k+1>` comes only from §9.
@@ -574,8 +581,9 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     Recovery: when the oversized text is in the verify record, the actor submits a shorter record; when it is in a
     round-N verdict that no verify has pinned, the operator shortens that
     verdict file; its digest then fails, so the tally does not count it and the pass creates that slot's next attempt
-    (incomplete tally, above); else the operator halts the spec (§13.4). Sizing: 12 slots x 100 findings of 4 KiB, each
-    with a return and two verb records, is about 9 MB (arithmetic, not a measurement). `finding_sha256` is as `panel.Findings` computes it, or for `veto` the sha256 of the verdict file's bytes.
+    (incomplete tally, above); else the operator halts the spec (§13.4). Sizing (arithmetic, not a measurement): 12 slots x 100 findings of 4 KiB
+    give about 4.9 MB of `mindspec_findings`; returns of the same size are held twice, in `mindspec_returns` and, as
+    an escaped string, in `mindspec_record`, so that verify step holds about 15 MB, under the bound. `finding_sha256` is as `panel.Findings` computes it, or for `veto` the sha256 of the verdict file's bytes.
     APPROVE verdicts and the `findings` list outside `concrete_changes_required` give no finding. **Record.** The
     verify record (`--record`, §6) is `{"step", "subject", "returns": [{"slot",
     "round", "finding", "finding_sha256", "return", "ground", "ac", "reason", "evidence", "target"}]}`. `submit` checks
@@ -666,7 +674,9 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
 11. **Briefs and lenses.** The binary renders every brief of an enrolled spec from durable records; no actor writes a
     brief. The `brief` argv of each action: implement, `next <w> --emit-only` (work item, spec, plan; the readiness review
     SR-1..SR-5 with its `NOT READY: <w>` return form; on a work item with `mindspec_readiness_attempt`, each reported
-    reason with its clarification or `(none recorded)`; and the step `complete <w> --check` before the return); review slot,
+    reason with its clarification or `(none recorded)`; and the step `complete <w> --check` before the return; it runs
+    the read-only check of `bead ready-check <w>` and exits non-zero with its report when the item is not ready, and a
+    malformed `mindspec_readiness_attempt` makes it exit non-zero and name the key); review slot,
     `panel prompt` (the managed header, then one generated body for all slots of the round: a summary from the work
     item; the files in scope; the prior round's asks: round N's findings, rendered from `prior.asks` alone (§13.7), each with its text and its
     verify return, evidence or target, or the verb records that the §13.10 filter keeps, so a later edit of the verdict
@@ -680,7 +690,9 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     and the diff of the files in scope at the authorised subject; a verify brief gives round N's findings (slot, finding, text) from `mindspec_findings` and the subject; a fix
     brief gives the findings in `mindspec_reproduced` (with the `ccr` texts of a `veto` verdict), the subject, the
     work-item context and the step `complete <w> --check` before the return; a change-judge brief
-    gives the accepted subject, the new subject, the diff between them and the slot ceiling (§13.2). **Lens step.**
+    gives the accepted subject, the new subject, the diff between them and the slot ceiling (§13.2). The lens, verify
+    and change-judge briefs name the record path, `records/<step>.json` in the kernel temporary directory (§13.10), and
+    the `submit --record` argv. **Lens step.**
     When a round is authorised, the pass creates `<gate>.r<N>.lens` (or a later attempt, §13.7; kind `lens`, child of
     the gate, subject = the authorised subject) before the `panel create` entry, for a scoped round too. The lens record
     (`--record`, §6) is `{"step", "lenses": [{"slot": "R<s>", "lens":
@@ -704,9 +716,12 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     its configured lens. **Non-kernel gates.** Every `panel create` that is not the `run` entry of a kernel gate (a
     pre-kernel spec, the spec and plan gates, `--gate adhoc` on any spec) keeps the BRIEF stub and `--brief-file`. On
     such a gate `panel tally` prints a `Next` block after its decision, with argv and placeholders: on PASS, the gate's
-    verb; on BLOCK, one `panel disposition append` per finding that no verb captured, `panel refute`, `panel defer`
-    (`--to-plan` on `spec_approve`; none on adhoc), and the fix steps (`panel verify`, `panel checkout --fixer`,
-    `rules --scope fixer`, one fixer, `complete <w> --check`, one commit, the next `panel create` round); on a stale or halted panel, the
+    verb (none on adhoc); on BLOCK, one `panel disposition append` per finding that no verb captured, `panel refute`,
+    `panel defer` (`--to-plan` on `spec_approve`; none on adhoc), and the fix steps (`panel verify`, `panel checkout
+    --fixer`, `rules --scope fixer`, one fixer, on a bead gate `complete <w> --check`, one commit, the next `panel
+    create` round with the gate's flags: `--target spec/<id>` on a spec, plan or final gate, no `--spec` on adhoc); on a stale or halted panel, the
     recovery lines (`panel create --round <N+1> --brief-file`, `panel rebind`, `panel abandon`). On a kernel gate
     `panel tally` prints no `Next` block; `next-action` decides. The `next-action` refusal of a pre-kernel spec (§8)
-    names today's cycle in order: `next`, `panel create`, `panel tally`, `complete`, `impl approve`.
+    names today's cycle in order: `next`, `panel create`, `panel tally`, `complete`, `impl approve`. An adapter started
+    for a panel runs `panel tally` first; when it prints a `Next` block, the adapter runs that block and does not run
+    `next-action --apply`. On a `next-action` refusal it runs what the refusal and `instruct` print (`spec.md` R12).

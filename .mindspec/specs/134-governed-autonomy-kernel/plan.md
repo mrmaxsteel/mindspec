@@ -376,7 +376,8 @@ and `final-round`; `supersede` before `round-open`; `judge-supersede` before `ju
 `retry-attempt` before `complete-entry`) and each listed mode.
 
 **Shared files.** `cmd/mindspec` registers each verb in its own file; Bead 1 adds `next_action.go`, `lease.go` and
-`submit.go` with their final flags and the `_HelpFlags` and `HelpGolden` lines, so no later bead edits those pins.
+`submit.go` with their first flags and the `_HelpFlags` and `HelpGolden` lines. Beads 14 and 17 add `--record`,
+`--repair` and `--reason` to `submit`, and Bead 18 adds `brief`; each updates `_HelpFlags` in the same commit.
 Beads 1 and 2 both edit `cmd/mindspec/ceremony_guard_test.go`, in different test functions (`_HelpFlags`,
 `_ConfigKeys`). A domain doc that two beads of one wave edit gets two separate sections; the bead that merges second
 rebases and keeps both.
@@ -499,8 +500,9 @@ record); Bead 15 pins `Verify`; Bead 16 pins `Authorise` on a verify that leaves
   expiry, token hash, claim base), gate round (round, subject, slot ids), take reason, decision answer, defer,
   judgement, and re-panel (slot count, paths). Producers write and the audit reads only through these types. A golden
   JSON test pins each shape. **Receipt validity**, per return kind, has one check, `kernel.ValidReceipt`: a close
-  with an artifact (`submit` or `panel submit` of an implement step, slot, fix or judge) is valid when it names path,
-  holding commit and blob id and they resolve. A valid `submit` of an implement step or fix writes return kind
+  with an artifact (`submit` or `panel submit` of an implement step, slot or fix) is valid when it names path,
+  holding commit and blob id and they resolve; a close of a record step (lens, verify, change judge; Bead 14) is valid
+  when its `record_sha256` equals the sha256 of the bytes that its `mindspec_record` string holds. A valid `submit` of an implement step or fix writes return kind
   `passed`. A close the pass itself writes with no artifact (a slot attempt closed
   `superseded` at the round N+1 authorisation, a step or decision closed `halted`, a fix or limit decision closed `superseded` by a
   passing refute or defer retally, a judge closed `superseded`, a gate closed by the tally) carries a receipt of its
@@ -565,7 +567,7 @@ record); Bead 15 pins `Verify`; Bead 16 pins `Authorise` on a verify that leaves
    decisions, answers and `Halted()`. Add the contracts of "Contracts first": output types, both registries
    (`NewRegistry`, `DefaultRegistry`, `RegisterRule`, `Rules`), `LeaseDeps`, the `Pass` dispatcher in `pass.go`, and the
    entry points in `nextaction.go`, `lease.go` and `submit.go`. Add `cmd/mindspec/next_action.go`, `lease.go` and
-   `submit.go`: each registers its verb with its final flags, resolves the spec, refuses a pre-kernel spec naming
+   `submit.go`: each registers its verb with its first flags, resolves the spec, refuses a pre-kernel spec naming
    today's verbs and calls its entry point. Update `_HelpFlags` and `HelpGolden`.
 6. Export `phase.WithPhaseLock(root, fn)` over `acquirePhaseLock`. Add `kerneltest` (`Enrolled`, `PreKernelSpec`,
    `Snapshot`, `ID`, `SetClock`, fake bd, `NewRepo`, `RequireBD`, `WithRules`, and the seeders `PassGate`, `Authorise`,
@@ -1035,7 +1037,7 @@ rows.*
    child) and `raw-claim` (a bd claim with no lease), each in a `flag` rule. Flags come from current state and are never
    stored. Export the `raw-close` and `forced-close` predicates for `complete`. A `raw-close` or `forced-close` item
    releases no dependent.
-3. Add `audit.go`: count each escape hatch from the journal, and deferrals, `--take`, timed decision answers, raw
+3. Add `audit.go`: count each escape hatch from the journal, and deferrals, `lease --take`, timed decision answers, raw
    claims, repaired unreceipted closes, carry-overs and the slot count of each re-panel from the record types.
 4. In `internal/approve/impl.go`, for an enrolled spec, print the audit table and refuse on an open step, an open
    decision, an unrepaired unreceipted close, `raw-close`, `forced-close` or an open foreign child under the epic.
@@ -1314,7 +1316,7 @@ Bead 8, Bead 9, Bead 10, Bead 11, Bead 12
    `generation`, `superseded_generation`, `via` and `retally: "verify"`, the verify receipt's `at`, `mindspec_closing` (with `conflict`), gate round `lenses`, `lens`, `verify`, `prior` (new; `verify` only for a verify closed `passed`, `read`, path -> sha256, and `asks`, the rendered
    asks) and `judged` (judge, value, new subject), the verify step's `mindspec_findings`, `mindspec_read` and
    `mindspec_returns`, the `slots` field (slot, attempt) of the `mindspec_decision` record (`DecisionRecord`),
-   `mindspec_record` (the record bytes) and the receipt field `record_sha256`. Delete `DecisionAnswer.Actor`
+   `mindspec_record` (a JSON string of the record bytes) and the receipt field `record_sha256`. Delete `DecisionAnswer.Actor`
    (`records.go`), its two producers in `submit.go` and the one in `kerneltest/seed.go`, and update
    `testdata/record-answer.json`, `testdata/seed-Answer.json`, `records_test.go`, `foundation_test.go`, `halt_test.go`
    and `audit_test.go`; `Run.Actor` stays. The lens, verify and judgement record decoders refuse an unknown field. Pin each with a golden JSON file; the `prior`
@@ -1334,18 +1336,28 @@ Bead 8, Bead 9, Bead 10, Bead 11, Bead 12
    metadata over 16 MiB (a kernel limit) before any bd call with `metadata-too-large`, naming the gate, the step, the largest
    key and the size (§13.10). No stored text is cut. Make the fake bd runner in
    `internal/next/kernel/kerneltest/fake.go` (~:99, ~:145) read the metadata from `@<file>` during the call.
-7. Add the `--record <path>` evidence to `submit` and `submit --repair` (`cmd/mindspec/submit.go`, `submit.go`, §6)
-   for the lens, verify and change-judge kinds: refuse a path in a work tree of the repository; read the bytes once;
-   decode and check them by kind; make `mindspec_record` the first close write (through `WriteMetadata`, so the step 6
-   route and bound apply); write the receipt with `record_sha256` and no path, commit or blob. In
-   `kernel.ValidReceipt`, a record kind is valid when `record_sha256` equals the sha256 of its `mindspec_record`.
-   `submit --repair` of a record step refuses bytes whose sha256 differs from the stored record's. `--artifact` of a
-   record kind and `--record` of a slot, implement step or fix refuse. `checkFix` keeps refusing a fix commit that
-   changes only the panel directories.
+7. Add the `--record <path>` evidence to `submit` (`cmd/mindspec/submit.go`, `submit.go`, §6) for the lens, verify
+   and change-judge kinds: refuse a path in a work tree of the repository and bytes that are not valid UTF-8; read
+   the bytes once; decode and check them by kind; make `mindspec_record` the first close write (on a verify, the
+   first after the closing pin), stored as a JSON string whose value is the bytes exactly (through `WriteMetadata`, so
+   the step 6 route and bound apply); write the receipt with `record_sha256` (the sha256 of those bytes) and no path,
+   commit or blob. In `kernel.ValidReceipt`, a record kind is valid when `record_sha256` equals the sha256 of the bytes
+   its `mindspec_record` string holds. `--artifact` of a record kind and `--record` of a slot, implement step or fix
+   refuse. `checkFix` keeps refusing a fix commit that changes only the panel directories. Add `--record` to the
+   `mindspec submit` set of `TestCeremonyNonInflation_HelpFlags` and to the one mutually exclusive evidence group
+   (`--record`, `--artifact`, `--commit`, `--answer`); `TestS134VerbStub_HelpGolden` checks verb names only and
+   stays. Move the whole change-judge evidence to the record in this commit: `readJudgement` and `judgeApply`
+   (`judge.go`) read `mindspec_record`; `validateJudgement` drops the `registeredPanelArtifact` location check;
+   the helpers `judgeArtifact` and `judgeSubmit` (`judge_test.go`) and `judge` (`kernel_e2e_test.go`, which
+   `panel_repanel_later_test.go` uses) write the record to a file outside the repository and submit it with
+   `--record`; `cmd/mindspec/kernel_judge_test.go` submits with `--record`; the `readJudgement` case of
+   `judge_internal_test.go` reads a stored record; `TestS134Judge_OutsidePanelLocation` becomes a test that a judge
+   `--record` path in the work tree exits non-zero and writes nothing.
 8. Add the seeders `Verify` and `Lens`. Update workflow "Kernel store and ids".
 
 **Verification**
-- [ ] `go test ./internal/next/kernel/... -run '^TestS134(IDs|Contract|Records|Output|Reducer|Submit|Store)_' -v` passes and lists the new tests.
+- [ ] `go test ./internal/next/kernel/... -run '^TestS134(IDs|Contract|Records|Output|Reducer|Submit|Store|Judge)_' -v` passes and lists the new tests.
+- [ ] `go test ./cmd/mindspec/... -run '^TestS134(JudgeCmd|PanelRepanel)_|TestCeremonyNonInflation_HelpFlags' -v` passes.
 - [ ] `go test -short ./internal/next/... ./cmd/mindspec/...` passes.
 
 **Acceptance Criteria**
@@ -1370,7 +1382,10 @@ Bead 8, Bead 9, Bead 10, Bead 11, Bead 12
       unchanged, `mindspec_record` holds the bytes and the receipt names their `record_sha256` and no commit; a
       `--record` path in the work tree, a record of an unknown field and `--artifact` to a lens step each exit
       non-zero, step open. `ValidReceipt` refuses a record receipt whose sha256 differs from `mindspec_record`
-      (mutation: it checks only that `record_sha256` is set). The answer golden has no `actor`.
+      (mutation: it checks only that `record_sha256` is set). A record with unsorted keys and extra whitespace keeps
+      its `record_sha256` after a later metadata write of the step, and `ValidReceipt` holds (mutation: store the
+      record as a JSON object fails). A record that is not valid UTF-8 exits non-zero, step open. A judge `submit
+      --record` exits 0 and `judgeApply` reads it from `mindspec_record`. The answer golden has no `actor`.
 - [ ] AC9 (reducer, part): a commit on `bead/2` during round 2: `--apply` closes no slot and authorises no round, and
       each slot's `submit` of a verdict on the round subject exits 0 (`TestS134Submit_`).
 
@@ -1580,9 +1595,8 @@ Bead 14
    record), then apply §13.2, which retires the verify it names and creates one new attempt in the same pass. Bead 19 retires
    its lens attempt and gives the new authorisation a fresh one.
 5. In the judgement check, compute `git diff --name-only` from the old to the new subject without the gate's panel
-   directories, and refuse a `re-panel` that misses a path, naming each. The judgement comes through `submit --record`
-   (Bead 14) and lives in `mindspec_record`; delete the judge artifact path in the panel directory and the rule that a
-   commit of it creates no judge.
+   directories, and refuse a `re-panel` that misses a path, naming each. The judgement is read from `mindspec_record`
+   (Bead 14 moved its evidence, reader and tests).
 6. Update workflow "Change judge". Text cites no internal record number.
 
 **Verification**
@@ -1662,11 +1676,12 @@ Bead 14, Bead 15, Bead 17
    when the step is open and no newer generation has a receipt or (verify) a `mindspec_closing`, write `generation` and `superseded_generation` in the receipt
    and set the current lease `ended: "superseded"`; else refuse naming the condition. A different result for a closed
    step refuses with the step metadata unchanged (no `conflict`).
-3. Add `submit <id> --repair --reason <text> (--record | --artifact | --commit)` for an unreceipted close only: run the §6
-   checks, append a repair event (`mindspec_takes`, `via: "repair"`) with the current generation, issue no generation,
+3. Add `submit <id> --repair --reason <text> [--artifact | --commit]` for an unreceipted close only (a record step
+   takes no evidence flag and uses its stored `mindspec_record`; `--record` with `--repair` refuses): run the §6
+   checks, append a repair event (`mindspec_takes`, `via: "repair"`, `reason`, `at`, `subject`) with the current generation, issue no generation,
    run the kind's close-write hook (Bead 14), then write the receipt `repaired: true`, `via: "repair"`. The §9 receipt with no reopen runs the hook before its receipt too. Refuse it, naming the condition, on an open step, on a step that was never leased (generation 0), on a
-   step with a valid receipt, and on evidence that does not fit its kind and subject (for a record step, bytes whose
-   sha256 differs from `mindspec_record`, or no `mindspec_record`).
+   step with a valid receipt, and on evidence that does not fit its kind and subject (for a record step, no
+   `mindspec_record` or one that does not fit; the pass then opens `.a<k+1>`).
 4. In `closes.go`, before a retry, check the evidence (§9: a verdict at its registered path, a commit, or a stored
    `mindspec_record`); when the step was leased and
    it fits and its `mindspec_closing` has no `conflict` and no `generation` other than the current one, create no
@@ -1674,7 +1689,9 @@ Bead 14, Bead 15, Bead 17
    `mindspec_reproduced` for a fix and `mindspec_findings` and `mindspec_read` for a verify, and point `mindspec_round.lens` or `mindspec_round.verify` at a lens or verify
    retry. The pass, `panel create` and `submit` read the highest attempt not closed `superseded` of a slot or fix and
    the attempt that `mindspec_round` names of a lens or verify.
-5. Update `_HelpFlags` and `HelpGolden`, and workflow "lease and submit".
+5. Add `--repair` and `--reason` to the `mindspec submit` set of `TestCeremonyNonInflation_HelpFlags`: `--repair`
+   needs `--reason` and is exclusive with `--lease`, `--answer` and `--record`; `TestS134VerbStub_HelpGolden` checks
+   verb names only and stays. Update workflow "lease and submit".
 
 **Verification**
 - [ ] `go test ./internal/next/kernel/... -run '^TestS134(Lease|Submit|Closes)_' -v` passes and lists the new tests.
@@ -1697,7 +1714,7 @@ Bead 14, Bead 15, Bead 17
       generation and the lease generation does not change. With no verdict, or a verdict on another subject, `.a2`.
       `submit --repair` on an open step, on a step with a valid receipt, and with a verdict of another subject exits
       non-zero, step unchanged; a leased verify, raw-closed after its submit stored `mindspec_record`, gets its
-      receipt from `submit --repair --record` of those bytes (other bytes exit non-zero), and a seeded lens or verify repair runs the kind's close-write hook before the receipt (a recording hook;
+      receipt from `submit --repair` with no evidence flag, from the stored bytes (with `--record` it exits non-zero), and a seeded lens or verify repair runs the kind's close-write hook before the receipt (a recording hook;
       a mutation in which the repair writes only the receipt fails); a never-leased one gets no `run` entry, `submit
       --repair` exits non-zero and the pass creates `.verify.a2`.
 - [ ] AC10 (retry): on seeded steps (seeders `Lens`, `Verify`), raw-close a lens, a fix and a verify with no fitting
@@ -1716,8 +1733,8 @@ Bead 14
 1. Add `internal/next/kernel/brief.go`: render the lens, verify, fix and change-judge briefs and the review-slot body
    from durable records (§13.11). The verify brief reads round N's findings, `veto` included; the fix brief reads only
    `mindspec_reproduced`, with the `ccr` texts of a reproduced `veto` verdict, and ends with the step `complete <w>
-   --check`; the lens, verify and change-judge briefs say to write the record to a file outside the repository and
-   return it with `submit --record`; the slot body lists the files in scope (§13.11: for round N>1 also the paths changed since
+   --check`; the lens, verify and change-judge briefs name the record path, `records/<step>.json` in the kernel
+   temporary directory (§13.10), and the `submit --record` argv; the slot body lists the files in scope (§13.11: for round N>1 also the paths changed since
    the prior round's subject), the prior round's asks (§13.11, from `mindspec_round.prior`, which every round N+1 authorisation writes): rendered
    from `prior.asks` alone (Bead 16 writes it): each round-N finding with its text and its verify return, or the verb
    refute or defer records with an empty `verify_step` that the §13.10 filter keeps; it reads no verdict file, panel
@@ -1856,14 +1873,21 @@ Bead 15, Bead 17, Bead 19
 2. Move each step that leaves a skill into binary output before the skill text goes. `next <w> --emit-only` (every
    spec) prints the readiness review: SR-1..SR-5, the `NOT READY: <w>` return form, the anti-browbeat and
    re-derivation lines from `ms-bead-impl`, each `mindspec_readiness_attempt` reason with its clarification or `(none
-   recorded)` (`internal/bead/readiness.go`, `clarify.go`), and the step `complete <w> --check` before the return.
-   `panel tally` prints the `Next` block on a gate that is not a kernel gate (contracts §13.11), with the commands of
-   today's `ms-panel-tally` and `ms-bead-fix`. The `next-action` refusal of a pre-kernel spec names today's cycle
+   recorded)` (`internal/bead/readiness.go`, `clarify.go`), and the step `complete <w> --check` before the return. It
+   runs the read-only check of `bead ready-check <w>` and exits non-zero with its report when the item is not ready,
+   and exits non-zero naming a malformed `mindspec_readiness_attempt`. `readinessExitCodeRule` and its pins
+   (`TestMsBeadImplSkill_OverrideCoverage{CheckShipped,MutationProbe,Refresh}`,
+   `TestMsBeadImplSkill_IngressPrecedesPhaseAAndNamesBothPaths`, `mutationProbeOverrideCoveragePresent`) move to that
+   output. `panel tally` prints the `Next` block on a gate that is not a kernel gate (contracts §13.11), with the
+   commands of today's `ms-panel-tally` and `ms-bead-fix`, next to `tallyExitAction` and `tallyExitActionNonBead`
+   (`cmd/mindspec/panel.go`). The `next-action` refusal of a pre-kernel spec names today's cycle
    (§13.11).
 3. Rewrite `ms-bead-cycle`, `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally` under
-   `plugins/mindspec/skills` as harness adapters of at most 50 lines, none longer than at `371dc360` (spec R12): loop
-   on `next-action --apply`; for each actor step, `lease`, then start a fresh agent with the output of the action's
-   `brief` argv; return through `submit` and each `run` entry; on a refusal, run what the binary prints. Each names
+   `plugins/mindspec/skills` as harness adapters of at most 50 lines, none longer than at `371dc360` (spec R12): when
+   started for a panel, run `panel tally` first and, when it prints a `Next` block, run that block and not
+   `next-action --apply`; else loop on `next-action --apply`; for each actor step, `lease`, then start a fresh agent with the output of the action's
+   `brief` argv; return through `submit` and each `run` entry; on a `next-action` refusal, run what the refusal and
+   `instruct` print. Each names
    only the verbs AC15 allows. `ms-bead-impl` keeps its one `sequence.bead-impl-prompt` staged-marker line. Copy each
    to `.claude/skills` byte-equal, and add each old text to `internal/setup/historical_skills` so existing installs
    refresh. In the same commit, handle each pin that the slimming breaks:
@@ -1871,19 +1895,27 @@ Bead 15, Bead 17, Bead 19
      counts in `TestKnownSitesExemptionList_CountSentinel` (`registries_test.go`).
    - `internal/lint/testdata/destructive_seed_manifest.txt`: delete the six `ms-bead-cycle` rows; in
      `internal/lint/destructive_guidance_test.go` delete the `ms-bead-cycle` rows of `backgroundExpectedExemptions`
-     and `backgroundJustifiedWideningExemptions` (`TestBootstrapManifest_ExemptionListIdentity`).
+     and `backgroundJustifiedWideningExemptions` (`TestBootstrapManifest_ExemptionListIdentity`), and lower the want
+     of `TestBackgroundJustifiedWideningExemptions_CountSentinel` from 3 to 1.
    - `internal/setup/skills_kernel_test.go`: rewrite `TestS134Skills_CycleContract` to the adapter contract; add
-     `TestS134Skills_AdapterShape` (lines, base length, verb allowlist, word grep, `cmp`).
+     `TestS134Skills_AdapterShape` (lines, base length, verb allowlist, word grep, `cmp`); delete
+     `TestPanelSkills_AdapterShape` (`panel_adapter_spec131_test.go`), which `TestS134Skills_AdapterShape` replaces;
+     rewrite `TestS134Skills_CycleLeaseRecovery` (`skills_kernel_fix_test.go`), which panics on the new text, to
+     check `dispatch.fresh-agent` in `instruct`.
    - `internal/setup/readiness_skill_pin_test.go` and `review_discipline_test.go`: pin the staged marker alone
      (`readinessStagedRule`, `TestReviewDiscipline_AC10StagedRuleMarkerOnly`); move each SR-1..SR-5 and anti-browbeat
      pin to the `next --emit-only` output. `TestStagedMarker_Parse` (`internal/rules/rules_test.go`) and
      `internal/doctor/staged_markers.go` do not change.
    - `cmd/mindspec/bead_ready_test.go`: `TestReadyCheck_CycleSkillCopiesMatch` reads the new adapter text.
    - Every other `internal/setup/*_test.go` assertion of removed text: delete it, or move it to the binary output that
-     now carries it.
+     now carries it. For each deleted safety pin (`TestS133Guidance_ApprovalContracts`,
+     `TestS133Guidance_ContentCheckOrder`, `TestClaimIDGuidance`,
+     `TestReviewDiscipline_AC1SweepGuardNegativeOrchestratorResiduals` and any other), the commit message names the
+     binary output or `rules.yaml` id that now carries its contract, or says that the contract left with the skill text.
 4. In `internal/rules/rules.yaml`, append in this order, each scope orchestrator, `enforced_by: advisory`:
-   `dispatch.fresh-agent` (prohibition "Do not reuse an agent for a second actor step, or give a verify step to a slot
-   reviewer of its round or an author of its subject, or a fix step to its verifier."; replacement "Start a fresh
+   `dispatch.fresh-agent` (prohibition "Do not reuse an agent for a second actor step, give a verify step to a slot
+   reviewer of its round or an author of its subject, give a fix step to its verifier, or take a lease that a
+   still-running agent of this loop holds."; replacement "Start a fresh
    agent for each actor step and choose a verifier and a fixer that did not do the work they judge."),
    `decision.operator-answer`, `loop.stop-on-failed-run` and `readiness.not-ready-route` (contracts §13.6). State that
    `review.reproduce` applies to a pre-kernel spec and that an enrolled spec runs the verify step. Add the four ids to
@@ -1907,9 +1939,12 @@ Bead 15, Bead 17, Bead 19
       instruct` renders the four new ids in every mode (mutation: one row scoped `reviewer`).
 - [ ] AC15 (pre-kernel): after `mindspec setup`, a `PreKernelSpec` fixture reaches `impl approve` exit 0 through
       only the commands that the refusals, `instruct` and `panel tally` print; the spec and plan gates pass the same
-      way (mutation: `panel tally` prints no `Next` block). `TestS134VerbStub_PreKernelNoWrites` stays green.
+      way (mutation: `panel tally` prints no `Next` block). An adhoc gate on an enrolled fixture passes the same way
+      and writes no kernel step (mutation: the adapter runs `next-action --apply` before `panel tally`).
+      `TestS134VerbStub_PreKernelNoWrites` stays green.
 - [ ] AC15 (readiness): `next <w> --emit-only` prints SR-1..SR-5, `NOT READY: <w>` and `complete <w> --check`; with a
-      seeded `mindspec_readiness_attempt` it prints each reason and its clarification.
+      seeded `mindspec_readiness_attempt` it prints each reason and its clarification; with a malformed one it exits
+      non-zero naming the key (mutation: it prints the brief).
 
 **Depends on**
 Bead 14, Bead 15, Bead 16, Bead 17, Bead 18, Bead 19, Bead 20
