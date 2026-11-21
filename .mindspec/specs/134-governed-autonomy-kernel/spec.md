@@ -321,17 +321,20 @@ blocks Y" = Y waits for X.
   lens or verify records creates no judge, before and after the first registration.
 - [ ] AC21 (R3, R9, §6, §9): generation 1 leased, `lease --take` gives generation 2; `submit` of generation 1 with a
   valid verdict exits 0: the receipt names generation 1, generation 2's lease record ends `superseded`, and a
-  generation-2 `submit` of another verdict exits non-zero. The receipt names generation 1's actor. Fresh fixture, a
+  generation-2 `submit` of another verdict exits non-zero. The receipt names generation 1's actor. After a
+  generation-2 receipt, a generation-1 submit exits non-zero, writes no `mindspec_closing.conflict`, and the next pass
+  creates no `.a2` (mutation: write the conflict on a receipted step). Fresh fixture, a
   lens step: generation 1 leased, `lease --take`, then a commit moves its authorised subject: the pass closes the lens
   step `superseded` and opens `.lens.a2` on the new subject; the generation-1 `submit` exits non-zero; a `submit` to
-  `.a2` and then `panel create` exit 0. Fresh fixture, a verify of findings f and g: a submit of record X (both
+  `.a2` and then `panel create` exit 0. Fresh fixture, a lens submit of L1 killed before the receipt, `lease --take`,
+  then a generation-2 submit of L2 exits 0 and each slot's `focus` is from L2 (a lens has no pin). Fresh fixture, a verify of findings f and g: a submit of record X (both
   `refuted`) killed after its close writes and before the receipt; the same submit then gives one record per finding
   and the receipt `at` of `mindspec_closing`. Fresh fixture, the same kill, then a submit of record Y (g `reproduced`)
   exits non-zero naming `mindspec_closing`; the next pass creates `.verify.a2`, X's records discharge nothing, and after
-  `.a2` closes with Y the fix's `mindspec_reproduced` is [g]. Fresh fixture, generation 1 killed the same way, then
+  `.a2` closes with Y, which refutes f as X did, the fix's `mindspec_reproduced` is [g]. Fresh fixture, generation 1 killed the same way, then
   `lease --take` and a generation-2 submit with f `reproduced`: it exits non-zero, the pass creates `.verify.a2`, and
-  after `.a2` reproduces f, `panel refute --actor X` of g leaves the gate and the fix open (mutations: the rerun keeps
-  the first run's writes; a differing record is accepted).
+  after `.a2` reproduces f, `panel refute --actor X` of g leaves the gate and the fix open (mutations: the rerun stamps
+  a new `at`; a differing record is accepted; the ledger key has no `verify_step`).
 - [ ] AC22 (R12, §13.11): the `panel create 1` entry has no `--brief-file`; after it, `panel prompt` of each slot exits
   0 and prints the managed header, the files in scope and its lens from its `focus` in `panel.json`; the adversary
   slot has no `focus` and prints its configured lens. A 3-slot scoped round on the default roster (adversary fourth)

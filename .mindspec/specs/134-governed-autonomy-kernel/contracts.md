@@ -121,21 +121,29 @@ commit that the step's subject contains are refused; a commit past the claim bas
 for a change judge, §13.2). For a lens or verify step it first makes the close writes of its kind (§13.10, §13.11).
 Then it writes the receipt (with the accepted `generation` and that generation's `actor` from
 `mindspec_actors`), closes, and runs one reducer pass (order: §13.9). The §9 receipt with no reopen and `submit --take`
-make the same close writes before their receipt. **Closing pin.** Before its first close write, a lens or verify
-submit writes the step metadata `mindspec_closing` {`generation`, `actor`, `record_sha256` (the sha256 of the record
-bytes at the resolved commit), `at` (RFC3339Nano UTC from `kernel.Now`)}. A later submit, late submission or take on
-that step whose generation or `record_sha256` differs refuses, names `mindspec_closing`, and writes only
-`mindspec_closing.conflict` (its generation and `record_sha256`). The next pass retires an attempt whose
-`mindspec_closing` has a `conflict`: it closes an open one `superseded` and creates `<id>.a<k+1>` with the keys of its
-kind (§9). A matching rerun reuses `mindspec_closing.at` and makes every close write again from its own record: it
-replaces `mindspec_returns` or `mindspec_round.lenses` whole and removes each refutation, deferral and
-`mindspec_deferrals` entry with this `verify_step` that its record does not give; then it writes the receipt. Refuses: an absent token; a token of no
+make the same close writes before their receipt. **Closing pin** (verify only). On every receipt path the pin runs
+after every other check of this section passes, the token and generation included, so a refused token, a foreign slot
+or a bad record writes nothing. On a step with a valid receipt the closed-step rules below apply and the pin writes
+nothing. On a step with no valid receipt, the submit builds and size-checks every close write (§13.10 bound) and then,
+when absent, writes the step metadata `mindspec_closing` {`generation`, `actor`, `record_sha256` (the sha256 of the
+record bytes at the resolved commit), `at` (RFC3339Nano UTC from `kernel.Now`)}. A submit whose generation, actor or
+`record_sha256` differs refuses, names `mindspec_closing`, and writes only `mindspec_closing.conflict` (its
+generation, actor and `record_sha256`). A take after a pin thus retires the attempt also for the same record bytes,
+as the ledger records name the pinning actor. While `conflict` is set, each submit of that attempt refuses and writes
+nothing, and `submit` reads `conflict` again just before the receipt write. The next pass retires the current attempt
+when it has no valid receipt and its `mindspec_closing` has a `conflict`: it closes it `superseded` when open and
+creates `<id>.a<k+1>` with the keys of its kind (§9, §13.10). A matching rerun (same generation, actor and
+`record_sha256`, no `conflict`) reuses `mindspec_closing.at` and makes each close write again from the same record:
+it writes `mindspec_returns` and the `mindspec_deferrals` entries of this `verify_step` by key, and appends the same
+ledger records (same key, same content, `created_at` = `mindspec_closing.at`), which the ledger keeps once; then it
+writes the receipt. A lens has no pin: its one close write, `mindspec_round.lenses`, is replaced whole on each run,
+so the lenses that stand are those of the submit that wrote the receipt (§13.11). Refuses: an absent token; a token of no
 generation of the step; a stale subject; a foreign slot; a missing artifact; a different result for a closed step (the
 step stays closed and its receipt does not change); a `submit --take` on a step that is open, on a step that was never leased, on a step
 with a valid receipt, or with evidence that does not resolve or fit its kind and subject (§9), each with the step unchanged.
 **Generation rule** (`submit` and `panel submit`, §7): a token of
 the current generation is accepted. A token of a revoked generation (it matches a take event's `revoked_token_hash`) is
-accepted when the step is open and no newer generation has a receipt or (lens or verify) a `mindspec_closing`. An open step keeps the take event's `subject`,
+accepted when the step is open and no newer generation has a receipt or (verify) a `mindspec_closing`. An open step keeps the take event's `subject`,
 because a step's subject never changes: a subject move closes an open lens or judge step `superseded`, and the pass
 closes an open verify `superseded` when it retires it, each with a new attempt (§13.2, §13.7, §13.10). On a late acceptance the current lease ends `superseded` (lease
 record `ended`), and the receipt names the accepted generation, its actor and the superseded generation
@@ -384,10 +392,13 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    closed judge ruled on), the moved-subject guard and when a tally or verify retally is due (case a); the kernel directory, its tracked location outside `reviews/`, its
    exemption before the first registration, the exclusion of all of `<specs>/*/kernel/**` (a file there is not
    reviewed) and from docsync's documentation files, the finalize export of an uncommitted record, and the lens and verify close that copy the record into bd metadata, before the receipt on every receipt
-   path (§6); the closing pin `mindspec_closing`, the refusal and retirement on a `conflict`, the matching rerun that
-   replaces its writes, the late-submission rule that reads it, and no discharge by a verify with no valid receipt (§6,
-   §13.10); the metadata bound: `@<file>` (mode 0600, removed after the call) on every metadata write, `Create`
-   included, full stored texts, and the 16 MiB `metadata-too-large` refusal before the first write and its recovery (§13.10); `prior.asks` and `prior.read` from `prior.verify` when set,
+   path (§6); the closing pin `mindspec_closing` on a verify only (a lens has none, as its one write is replaced whole,
+   so a take after a lens crash needs no retirement), run after the token and shape checks and only on a step with no
+   valid receipt, the refusal and retirement on a `conflict`, the matching rerun that repeats its writes, the
+   late-submission rule that reads it, and no discharge by a verify with no valid receipt (§6, §13.10); `verify_step`
+   in the ledger key of a refutation or deferral (§13.10); the metadata bound: a uniquely named `@<file>` (mode 0600,
+   removed after the call, stale files removed by the next pass) on every metadata write, `Create` included, full
+   stored texts, and the 16 MiB `metadata-too-large` kernel limit, checked before the pin, and its recovery (§13.10); `prior.asks` and `prior.read` from `prior.verify` when set,
    and `prior.read` as audit history (§13.7); the fix check that a record commit cannot meet (§6); the `lens` key
    (§13.7); the subject that §6's late-submission rule compares; `--actor` on
    every new lease generation, on `next` and on `submit --take`, and `mindspec_actors`; declared actor labels as the B4
@@ -539,13 +550,15 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     verify closes fails the frozen-round retally below until the fix closes. **Metadata bound.** Every
     `kernel.Store` call that sends metadata to bd (`Create`, `WriteMetadata`, `SetStatusMetadataIf`) gives bd the
     merged metadata as `--metadata @<file>`, never as one argv string, which Linux refuses over 128 KiB; bd reads
-    `@<file>` on create and update (`bd create --help`, `bd update --help`, bd 1.3.4). The file is a temporary file
-    outside the repository with mode 0600, removed after the bd call returns. The kernel stores each text in full
+    `@<file>` on create and update (`bd create --help`, `bd update --help`, bd 1.3.4). The file has a unique name per call (it
+    names the process id), mode 0600 and a kernel temporary directory outside the repository, and is removed after
+    the bd call returns; each pass removes the files there whose process no longer runs. The kernel stores each text in full
     (finding texts, `reason`, `evidence`, `target`, `ac`, lens texts); no stored field is cut. Before any bd call the
-    store refuses merged metadata over 16 MiB with the error `metadata-too-large`, which names the gate, the step, the
-    largest key and the size, and writes nothing. A close-write hook builds and size-checks each of its writes before
-    its first write, `panel.json` included. The pass reports the error for that gate and acts on no later rule of it.
-    Recovery: when the oversized text is in a round-N verdict that no verify has pinned, the operator shortens that
+    store refuses merged metadata over 16 MiB (a kernel limit, not a bd limit) with the error `metadata-too-large`, which names the gate, the step, the
+    largest key and the size, and writes nothing. A verify submit builds and size-checks each close write, `panel.json`
+    included, before it writes `mindspec_closing` (§6), so an oversized record leaves the step open with no pin. The pass reports the error for that gate and acts on no later rule of it.
+    Recovery: when the oversized text is in the verify record, the actor submits a shorter record; when it is in a
+    round-N verdict that no verify has pinned, the operator shortens that
     verdict file; its digest then fails, so the tally does not count it and the pass creates that slot's next attempt
     (incomplete tally, above); else the operator halts the spec (§13.4). Sizing: 12 slots x 100 findings of 4 KiB, each
     with a return and two verb records, is about 9 MB (arithmetic, not a measurement). `finding_sha256` is as `panel.Findings` computes it, or for `veto` the sha256 of the verdict file's bytes.
@@ -601,11 +614,16 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     its `Refutations` and `Deferrals` slices; the tallied `Panel` is never edited, as `panel refute` writes it back), so
     `PassRule` does not change, before it calls `PassRule` in
     `tally` and `refusedRound` (`reject.go`), `gatePassEvidence` (`reducer.go`), `CheckPassedGate`, and the enrolled
-    `panel refute` and `panel defer` retally (`cmd/mindspec/panel_kernel.go`). On an enrolled gate the same-key dedupe
-    (slot, round, finding, `finding_sha256`; for `panel defer` also `SourceVerdict` and `SourceFileSHA256`) of `panel refute` and `panel defer`,
-    and of the `mindspec_deferrals` history that `panel defer` appends, compares the same key and only the
-    records that this filter keeps; a record that it discards does not block the append. The verify close does not
-    dedupe: it replaces the records with its own `verify_step` (§6).
+    `panel refute` and `panel defer` retally (`cmd/mindspec/panel_kernel.go`). The ledger key of a refutation or deferral (`recordKey`,
+    `internal/panel/disposition_store.go`: slot, round, finding, `finding_sha256`, for a bound deferral also
+    `source_verdict` and `source_file_sha256`) adds `verify_step` when it is non-empty, and `created_at` when the
+    record has the field `verify_step` empty (an enrolled verb writes it empty; a pre-kernel record omits it and keeps
+    today's key). So on an enrolled gate no two verify attempts or verb calls share a key, and a discarded record never blocks
+    an append. On
+    an enrolled gate the same-key dedupe (slot, round, finding, `finding_sha256`; for `panel defer` also
+    `SourceVerdict` and `SourceFileSHA256`) of `panel refute` and `panel defer`, and of the `mindspec_deferrals`
+    history that `panel defer` appends, runs before the append and compares only the records that this filter keeps.
+    The verify close does not dedupe; its matching rerun appends identical records (§6).
     **Pass after a verify.** A gate closes `passed` (receipt `retally: "verify"`) when its current verify closed
     `passed` with a valid receipt, its `mindspec_returns` cover every finding of round N, the `veto` findings included, and no
     return is `reproduced`. So a refuted REJECT passes the gate (ruling B3, B5). `passed()`, `gatePassEvidence` and `CheckPassedGate` accept this receipt;
@@ -658,7 +676,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     it refuses an unknown field, and needs exactly one non-empty lens for each slot of the round except an adversary
     slot, and none for it; it refuses and names each missing, extra or empty entry. The lens close writes the
     lenses to the gate round record before the receipt (§6): its one write key is `mindspec_round.lenses`, which each
-    run replaces whole, so a lens retry writes its own lenses. `panel create` refuses while the step that
+    run replaces whole, so a lens retry writes its own lenses and a lens has no closing pin (§6). `panel create` refuses while the step that
     `mindspec_round.lens` names is not closed `passed` and names it; it writes each lens from `lenses` to the slot's
     `focus` field of `panel.json` (`RosterSlot`, written
     only by the kernel's `panel create`). `panel prompt` prints a slot's Focus from its `focus` when set, else from the
