@@ -4,11 +4,28 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/setup"
 	"github.com/spf13/cobra"
 )
 
 var setupCmd = &cobra.Command{
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if !bead.HasBeadsDir(root) {
+			return cmd.Help()
+		}
+		result, err := bead.EnsureBeadsConfig(root, false)
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(cmd.OutOrStdout(), result.FormatSummary())
+		return nil
+	},
 	Use:   "setup",
 	Short: "Bootstrap agent-specific configuration",
 	Long: `Sets up agent-specific configuration files (hooks, slash commands,

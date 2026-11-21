@@ -48,6 +48,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/approve"
 	"github.com/mrmaxsteel/mindspec/internal/complete"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/spf13/cobra"
@@ -126,6 +128,11 @@ var mutatingVerbAliases = map[string]string{
 // epic's mindspec_phase cache) — every entry here either mutates nothing
 // or mutates something else entirely.
 var nonMutatingAllowlist = map[string]string{
+	"mindspec next-action": "reads or creates kernel steps; no lifecycle-phase state",
+	"mindspec lease":       "leases a kernel step; no lifecycle-phase state",
+	"mindspec submit":      "records kernel evidence or an answer; no lifecycle-phase state",
+	"mindspec setup":       "adds required project configuration; no lifecycle-phase state",
+
 	"mindspec panel launch":   "runs a reviewer and records its verdict; no lifecycle-phase state",
 	"mindspec panel recover":  "records a verdict from saved reviewer output; no lifecycle-phase state",
 	"mindspec config resolve": "read-only: previews resolved panel slots and their config sources",
@@ -427,6 +434,7 @@ func verbOutputTestRepo(t *testing.T) string {
 			t.Fatalf("mkdir %s: %v", d, err)
 		}
 	}
+	writeVerbFixtureFile(t, root, ".beads/config.yaml", "types.custom: gate,step\n")
 	writeVerbFixtureFile(t, root, ".mindspec/config.yaml", `protected_branches: [main]
 worktree_root: .worktrees
 enforcement:
@@ -498,82 +506,68 @@ func validVerbFixturePlanMD(specID string) string {
 // `--type=epic` list) is served from that SAME registry — so a spec this
 // test approved earlier (spec approve) is genuinely findable by a later
 // call (plan approve), exactly like a real bd epic would be.
-func stubApproveBeadsForVerbTest(t *testing.T) {
+func stubApproveBeadsForVerbTest(t *testing.T) *kerneltest.FakeBD {
 	t.Helper()
-	t.Cleanup(approve.SetLifecycleMergeMetadataForTest(func(string, map[string]interface{}) error { return nil }))
-
+	fake := kerneltest.NewFakeBD()
 	var mu sync.Mutex
-	var epics []map[string]interface{}
-	epicByID := map[string]map[string]interface{}{}
-
-	bdFn := func(args ...string) ([]byte, error) {
+	run := func(args ...string) ([]byte, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		if len(args) > 0 && args[0] == "create" {
-			isEpic := false
-			var title, metadataRaw string
-			for i, a := range args {
-				if a == "--title" && i+1 < len(args) {
-					title = args[i+1]
-				}
-				if a == "--metadata" && i+1 < len(args) {
-					metadataRaw = args[i+1]
-				}
-				if a == "--type=epic" {
-					isEpic = true
-				}
-			}
-			if isEpic {
-				id := fmt.Sprintf("fake-epic-%d", len(epics)+1)
-				var metadata map[string]interface{}
-				_ = json.Unmarshal([]byte(metadataRaw), &metadata)
-				epic := map[string]interface{}{
-					"id": id, "title": title, "status": "open",
-					"issue_type": "epic", "metadata": metadata,
-				}
-				epics = append(epics, epic)
-				epicByID[id] = epic
-				out, _ := json.Marshal(map[string]string{"id": id})
-				return out, nil
+		normalized := []string{}
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "--type=") {
+				normalized = append(normalized, "--type", strings.TrimPrefix(arg, "--type="))
+			} else {
+				normalized = append(normalized, arg)
 			}
 		}
-		return []byte(`{"id":"fake-test-bead"}`), nil
+		return fake.Run(normalized...)
 	}
-	t.Cleanup(approve.SetSpecRunBDForTest(bdFn))
-	t.Cleanup(approve.SetPlanRunBDForTest(bdFn))
-	t.Cleanup(approve.SetPlanRunBDCombinedForTest(bdFn))
-	t.Cleanup(approve.SetPlanListJSONForTest(func(args ...string) ([]byte, error) {
-		return []byte(`[]`), nil
-	}))
-	t.Cleanup(phase.SetMergeMetadataForTest(func(string, map[string]interface{}) error { return nil }))
-	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+	merge := func(id string, updates map[string]interface{}) error {
 		mu.Lock()
 		defer mu.Unlock()
-		for _, a := range args {
-			if a == "--type=epic" {
-				out, err := json.Marshal(epics)
-				if err != nil {
-					return nil, err
-				}
-				return out, nil
-			}
+		r, ok := fake.Records[id]
+		if !ok {
+			return fmt.Errorf("unknown fixture item %q", id)
 		}
-		return []byte(`[]`), nil
-	}))
-	t.Cleanup(phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
+		if r.Metadata == nil {
+			r.Metadata = map[string]any{}
+		}
+		for key, value := range updates {
+			r.Metadata[key] = value
+		}
+		fake.Records[id] = r
+		return nil
+	}
+	list := func(args ...string) ([]byte, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		if len(args) >= 2 && args[0] == "show" {
-			if epic, ok := epicByID[args[1]]; ok {
-				out, err := json.Marshal([]map[string]interface{}{epic})
-				if err != nil {
-					return nil, err
-				}
-				return out, nil
+		typ, parent := "", ""
+		for i, arg := range args {
+			if strings.HasPrefix(arg, "--type=") {
+				typ = strings.TrimPrefix(arg, "--type=")
+			}
+			if arg == "--parent" && i+1 < len(args) {
+				parent = args[i+1]
 			}
 		}
-		return []byte(`[]`), nil
-	}))
+		rows := []kernel.Record{}
+		for _, r := range fake.Records {
+			if (typ == "" || typ == r.Type) && (parent == "" || parent == r.Parent) {
+				rows = append(rows, r)
+			}
+		}
+		return json.Marshal(rows)
+	}
+	t.Cleanup(approve.SetSpecRunBDForTest(run))
+	t.Cleanup(approve.SetPlanRunBDForTest(run))
+	t.Cleanup(approve.SetPlanRunBDCombinedForTest(run))
+	t.Cleanup(approve.SetPlanListJSONForTest(list))
+	t.Cleanup(approve.SetLifecycleMergeMetadataForTest(merge))
+	t.Cleanup(phase.SetListJSONForTest(list))
+	t.Cleanup(phase.SetRunBDForTest(run))
+	t.Cleanup(phase.SetMergeMetadataForTest(merge))
+	return fake
 }
 
 // TestVerbOutput_SpecCreate drives specCreateCmd.RunE for real (a mocked
@@ -637,7 +631,7 @@ func TestVerbOutput_PlanApprove(t *testing.T) {
 	runGitInDir(t, root, "add", "-A")
 	runGitInDir(t, root, "commit", "-m", "spec-init "+specID)
 
-	stubApproveBeadsForVerbTest(t)
+	fake := stubApproveBeadsForVerbTest(t)
 	withMockNewExecutor(t, &executor.MockExecutor{})
 
 	if _, err := approve.ApproveSpec(root, specID, "test-user", &executor.MockExecutor{}); err != nil {
@@ -654,6 +648,15 @@ func TestVerbOutput_PlanApprove(t *testing.T) {
 		t.Fatalf("plan approve: %v\noutput:\n%s", err, out)
 	}
 	resultBeforeGuidance(t, "plan approve", out, "approved", mindspecGuidanceMarkers...)
+	found := false
+	for _, r := range fake.Records {
+		if r.Type == "epic" {
+			_, found = r.Metadata[kernel.KeyRun]
+		}
+	}
+	if !found {
+		t.Fatal("plan output reported success without enrolment")
+	}
 }
 
 // TestVerbOutput_Complete drives the REAL production completeTail with a
@@ -794,7 +797,7 @@ func TestVerbOutput_Next(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("# Spec\n\n## Requirements\n\n1. R1\n"), 0o644); err != nil {
 		t.Fatalf("write spec.md: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte("---\nstatus: Approved\nwork_chunks:\n  - id: 1\n---\n\n# Plan\n\n## Bead 1: Fixture\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(specDir, "plan.md"), []byte("---\nstatus: Approved\nbead_ids: ["+beadID+"]\nwork_chunks:\n  - id: 1\n---\n\n# Plan\n\n## Bead 1: Fixture\n"), 0o644); err != nil {
 		t.Fatalf("write plan.md: %v", err)
 	}
 	runGitInDir(t, root, "add", "-A")

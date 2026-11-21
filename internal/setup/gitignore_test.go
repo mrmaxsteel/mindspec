@@ -44,7 +44,7 @@ func TestSetupVerbs_EnsureGitignoreRuntimeEntries(t *testing.T) {
 				t.Fatalf("%s: reading .gitignore: %v", v.name, err)
 			}
 			content := string(data)
-			for _, entry := range []string{".mindspec/session.json", ".mindspec/focus"} {
+			for _, entry := range []string{".mindspec/session.json", ".mindspec/focus", ".mindspec-scratch", ".mindspec/config.local.yaml"} {
 				if !strings.Contains(content, entry) {
 					t.Errorf("%s: .gitignore missing %q; got:\n%s", v.name, entry, content)
 				}
@@ -81,6 +81,40 @@ func TestSetupVerbs_CheckModeWritesNoGitignore(t *testing.T) {
 				t.Errorf("%s: --check mode wrote .gitignore", v.name)
 			} else if !os.IsNotExist(err) {
 				t.Fatalf("%s: stat .gitignore: %v", v.name, err)
+			}
+		})
+	}
+}
+
+func TestS134SetupClaude_BadConfigUsesDefaultIgnore(t *testing.T) {
+	for _, body := range []string{"panel: [\n", "runner: typoo\n"} {
+		t.Run(body, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, ".mindspec/config.yaml"), []byte(body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			result, err := RunClaude(root, false)
+			if err != nil {
+				t.Fatalf("irrelevant config prevents setup: %v", err)
+			}
+			if !strings.Contains(strings.Join(result.Warnings, "\n"), "warning: cannot load config") {
+				t.Fatal("missing config warning", result.Warnings)
+			}
+			summary := result.FormatSummary()
+			if !strings.Contains(summary, "Warnings:\n  ! warning: cannot load config") || strings.Contains(summary, "Notices (user-modified, left in place):") {
+				t.Fatalf("wrong config warning heading: %s", summary)
+			}
+			data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range []string{".mindspec-scratch", ".mindspec/config.local.yaml"} {
+				if !strings.Contains(string(data), entry) {
+					t.Fatalf("missing default ignore %s: %s", entry, data)
+				}
 			}
 		})
 	}

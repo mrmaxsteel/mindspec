@@ -1,0 +1,44 @@
+{
+  "id": "test-1.1.review.decide.reject.r1",
+  "parent": "test-1.1.review",
+  "title": "[mindspec] decision: halt stops the spec and every work item",
+  "issue_type": "decision",
+  "status": "closed",
+  "labels": [
+    "mindspec"
+  ],
+  "metadata": {
+    "mindspec_key": "test-1.1.review.decide.reject.r1",
+    "mindspec_tuple": {
+      "epic": "test-1",
+      "kind": "decision",
+      "attempt": 1,
+      "work_item": "test-1.1",
+      "gate": "test-1.1.review",
+      "round": 1,
+      "cause": "reject"
+    },
+    "mindspec_decision": {
+      "options": [
+        "fix",
+        "halt"
+      ],
+      "cause": "reject",
+      "gate": "test-1.1.review"
+    },
+    "mindspec_answer": {
+      "option": "halt",
+      "at": "2026-01-02T03:04:05Z",
+      "actor": "operator"
+    },
+    "mindspec_close": {
+      "kind": "halted",
+      "halt_answer": "test-1.1.review.decide.reject.r1",
+      "answer": {
+        "option": "halt",
+        "at": "2026-01-02T03:04:05Z",
+        "actor": "operator"
+      }
+    }
+  }
+}

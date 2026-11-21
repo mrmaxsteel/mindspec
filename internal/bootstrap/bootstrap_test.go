@@ -414,7 +414,7 @@ func TestRun_BeadsConfigIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	ready := `issue-prefix: "proj"
-types.custom: "gate"
+types.custom: "gate,step"
 status.custom: "resolved"
 export.git-add: false
 `

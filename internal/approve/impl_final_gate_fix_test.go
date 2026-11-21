@@ -22,9 +22,9 @@ func (e *finalGateFixExecutor) Status(path string) (string, error) {
 	return e.Executor.Status(path)
 }
 
-func (e *finalGateFixExecutor) FinalizeEpic(epicID, specID, branch string, allow []string, reason string, resolve, remote bool) (executor.FinalizeResult, error) {
+func (e *finalGateFixExecutor) FinalizeEpic(epicID, specID, branch string, allow []string, reason string, resolve, remote bool, policies ...executor.FinalizeArtifactPolicy) (executor.FinalizeResult, error) {
 	e.finalizeCalls++
-	return e.Executor.FinalizeEpic(epicID, specID, branch, allow, reason, resolve, remote)
+	return e.Executor.FinalizeEpic(epicID, specID, branch, allow, reason, resolve, remote, policies...)
 }
 
 func TestS133FinalGate_MissingWorktreeRefusesUnpublishedSubject(t *testing.T) {

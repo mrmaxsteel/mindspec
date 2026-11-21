@@ -89,7 +89,7 @@ Use `/spec-init` or create manually:
 
 A subagent return whose first line is `NOT READY: <bead-id>` is a
 pre-damage refusal, not an implementation failure: no panel round is
-consumed, it does not count toward `max_consecutive_impl_failures`, it
+consumed. It does not add an implementation failure. It
 never routes to `/ms-bead-fix`, and the worktree is intact (zero
 commits). Choose exactly one disposition:
 
@@ -453,3 +453,56 @@ For a conflict, resolve and stage the files. Re-enter with
 merge-only call stays merge-only on a plain retry. After it records the
 merge, run complete again to close. To abandon pending mode before its
 merge, unset the `mindspec_merge_only` metadata key.
+
+
+## Kernel loop
+
+Run the full lifecycle tests with `go test ./cmd/mindspec/... -run '^TestS134E2E_' -count=1 -v -timeout 90m`.
+The group is sensitive to host load. Its long lifecycle tests skip in `-short` mode.
+The test deadline bounds each binary command and leaves time to report a timeout.
+
+Approve a new plan to enrol its work items and pin its policy.
+Run the loop from the spec worktree.
+Panel creation resolves work-item and final-review targets from its approved plan.
+Run `mindspec next-action <spec> --apply --json` to create authorised steps.
+Lease each returned actor step with `mindspec lease <step>`.
+Keep the printed token for its evidence submission.
+Use `mindspec next <work-item>` to lease its current implementation step.
+The command prints the lease generation and token.
+The first implementation lease advances the phase to implementation.
+A phase-cache warning preserves the token.
+Use the printed repair command before continuing.
+A live lease requires `mindspec lease --take` with a reason.
+An automatic selection skips halted specs.
+An older approved plan selects only its recorded work items.
+
+Submit the implementation commit with its lease token.
+Run each command in the returned `run` list.
+Run apply again to obtain the review slots after panel creation.
+A separate evidence worktree is useful for keeping review files together.
+You can also commit evidence on the subject branch. A commit that changes only
+directories registered to that gate does not move the review subject.
+Submit its artifact path with the slot lease token.
+The submission publishes the committed verdict before it closes the slot.
+Answer an open decision before leasing its fix.
+Submit the fix commit before opening the next round.
+Repeat apply, lease, submission, and the returned commands until the status is `done`.
+After all work items merge and the final gate passes, apply returns implementation approval.
+Open children and blockers hold that command.
+The final approval prints durable audit counts and exports the tracker state.
+An approval retry preserves those counts.
+Complete a work item after its highest review attempt passes.
+Close every child first.
+Completion checks the accepted subject from the gate receipt and panel ledger.
+A carry-over or a successful rebind can extend that subject.
+A commit that changes only a registered panel directory needs no new judgement.
+An open judge and an unaccepted head both appear in the refusal.
+The final review uses the same subject checks.
+A panel skip setting cannot pass an enrolled gate.
+
+Completion merges a raw-closed item only when its gate passed.
+Reopen a force-closed item before finishing its gate.
+A completion retry of a merged item writes nothing.
+The pass after a merge creates each newly authorised implementation step.
+Foreign items and links stay unchanged.
+Remove a foreign cycle link with the tracker before retrying apply.

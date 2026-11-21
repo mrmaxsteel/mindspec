@@ -18,6 +18,10 @@ import (
 var panelDeferCmd = &cobra.Command{Use: "defer <slug>", Short: "Defer a latest-round finding to the plan or an open follow-up bead", Args: cobra.ExactArgs(1), SilenceUsage: true, RunE: runPanelDefer}
 
 func runPanelDefer(cmd *cobra.Command, args []string) error {
+	return withKernelPanelVerb(cmd, args[0], false, func() error { return runPanelDeferBody(cmd, args) })
+}
+
+func runPanelDeferBody(cmd *cobra.Command, args []string) error {
 	_, reg, err := resolvePanelVerb(cmd, args[0])
 	if err != nil {
 		return panelVerbFailure(err)

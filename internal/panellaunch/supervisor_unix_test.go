@@ -29,7 +29,9 @@ func TestLaunchActor(t *testing.T) {
 			return err
 		}
 		if os.Getenv("PANEL_LAUNCH_PAUSE") == "1" {
-			_ = syscall.Kill(os.Getpid(), syscall.SIGSTOP)
+			// Keep the start callback blocked until the parent kills this actor.
+			// A process-directed stop signal can be delivered on another thread.
+			select {}
 		}
 		return nil
 	}}

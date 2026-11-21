@@ -1,0 +1,10 @@
+package workspace
+
+import "os"
+
+func enumerate(root string) {
+ specsRoot := SpecsDir(root)
+ _, _ = os.ReadDir(specsRoot)
+ _, _ = os.ReadDir(DefaultWorktreesDir(root))
+ _, _ = os.ReadDir(WorktreesDir(root, nil))
+}

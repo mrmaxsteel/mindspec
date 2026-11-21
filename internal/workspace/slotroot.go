@@ -27,6 +27,7 @@ func slotRootComponent(s string) bool {
 
 // FindSlotRoot finds the nearest ancestor with both markers and verifies its
 // full path against the main root's current isolation configuration.
+// It accepts only the slot directory and its checkout, and stops at other workspaces.
 func FindSlotRoot(cwd string, isolationRoot func(string) (string, error)) (SlotRoot, bool, error) {
 	var slot SlotRoot
 	dir, err := filepath.Abs(cwd)
@@ -37,12 +38,42 @@ func FindSlotRoot(cwd string, isolationRoot func(string) (string, error)) (SlotR
 	if real, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = real
 	}
+	start := dir
 	for {
+		// Only the slot checkout may cross a workspace boundary.
+		if marked, err := HasRootMarker(dir); err != nil {
+			return SlotRoot{}, false, err
+		} else if marked {
+			parent := filepath.Dir(dir)
+			if dir != filepath.Join(parent, "tree") {
+				return SlotRoot{}, false, nil
+			}
+			info, err := os.Lstat(dir)
+			if err != nil {
+				return SlotRoot{}, false, err
+			}
+			if !info.IsDir() {
+				return SlotRoot{}, false, nil
+			}
+			if _, err := os.Lstat(filepath.Join(filepath.Dir(dir), "slot.json")); err != nil {
+				if !os.IsNotExist(err) {
+					return SlotRoot{}, false, err
+				}
+				return SlotRoot{}, false, nil
+			}
+		}
 		metadata := filepath.Join(dir, "slot.json")
 		tree := filepath.Join(dir, "tree")
 		_, metaErr := os.Lstat(metadata)
 		treeInfo, treeErr := os.Stat(tree)
 		if metaErr == nil && treeErr == nil && treeInfo.IsDir() {
+			rel, err := filepath.Rel(tree, start)
+			if err != nil {
+				return SlotRoot{}, false, err
+			}
+			if start != dir && (rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+				return SlotRoot{}, false, nil
+			}
 			refuse := func() (SlotRoot, bool, error) {
 				return SlotRoot{}, true, termsafe.NewFailure(fmt.Sprintf("invalid slot directory %s", dir), "use mindspec panel checkout to create the slot directory")
 			}

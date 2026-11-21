@@ -1,0 +1,9 @@
+{
+  "slug": "panel",
+  "round": 2,
+  "subject": "subject",
+  "slots": [
+    "R1",
+    "R2"
+  ]
+}

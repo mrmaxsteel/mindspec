@@ -51,6 +51,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install pinned bd
+        run: |
+          scripts/ci-install-bd.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
       # HC-1 keystone (spec 094): the adversarial redaction golden-corpus
       # gate, ALSO run inline here (in addition to the dedicated
       # redaction-gate job above and `./...` below) so a redaction leak

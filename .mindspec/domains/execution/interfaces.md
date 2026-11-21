@@ -461,3 +461,34 @@ error refuse with a completion retry command. A worktree list read error also
 refuses before the executor can remove a checkout by name. The pending file, worktree, and
 branch remain. A removal error also refuses. A retry finishes the remaining work. `MockExecutor` exposes the
 same methods and records calls.
+
+## bd types and sandbox
+
+`bead.EnsureBeadsConfig` adds `gate` and `step` to `types.custom`.
+It keeps all existing type members, including when force is set.
+It leaves keys outside the required set unchanged.
+`bead.CustomTypes` reads the configured members.
+Doctor reports each missing required member.
+Plain `mindspec setup` adds missing members in an existing Beads repository.
+The harness applies these settings after sandbox initialization.
+`bead.RunBDAt` runs a command in the specified repository without a process directory change.
+
+
+## Sandbox tracker records
+
+Lifecycle scenarios use a local tracker fake with complete records.
+The fake keeps metadata, child links, blocking links, and status changes.
+A plan approval test checks the pinned enrolment marker.
+Sandbox configuration includes the required step type.
+
+### Remaining artifact commits
+
+The workflow passes `FinalizeArtifactPolicy` for an enrolled spec, with its spec directory, accepted subject, and recorded panel directories.
+Before any finalization write, the executor checks pending paths in the spec and lifecycle bead worktrees.
+It repeats the check before each artifact commit. Allowed paths are the spec's own directory,
+repository-relative panel directories recorded for this spec's bead and final gates, and `.beads/issues.jsonl`.
+Other pending paths refuse with a recovery to commit through the normal workflow and run a new review round,
+or move the changes out. Before publication, the executor checks that the tree differs from the accepted subject
+only in allowed paths. A pre-kernel spec keeps the existing whole-worktree artifact commit behavior.
+Before the spec artifact export or staging, all specs refuse a pending file with a symlink component.
+The refusal preserves pending files, index and branch tips, and requires committing or moving the symlink before retrying.

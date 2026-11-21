@@ -769,7 +769,7 @@ func (g *MindspecExecutor) PushProbe(branch string) error {
 // (ADR-0041 §1) with no existing seam separating its internal steps;
 // finalizeStepHook is invoked at five stages so each can be individually
 // fault-injected (finalize_fault_test.go).
-func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (result FinalizeResult, err error) {
+func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool, policies ...FinalizeArtifactPolicy) (result FinalizeResult, err error) {
 	stage := "export"
 	defer func() {
 		if err != nil {
@@ -803,6 +803,30 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	for _, e := range candidates {
 		if _, err := g.checkFinalizeBeadMerge(epicID, specID, specBranch, e); err != nil {
 			return result, err
+		}
+	}
+
+	// Read every pending path before checkpoint, export, commit, or merge writes.
+	cfg, cfgErr := config.Load(g.Root)
+	if cfgErr != nil {
+		cfg = config.DefaultConfig()
+	}
+	specWtPath, _ := workspace.SpecWorktreePath(g.Root, cfg, specID)
+	var policy *FinalizeArtifactPolicy
+	if len(policies) > 0 {
+		policy = &policies[0]
+		if err := g.checkFinalizeTree(*policy, specBranch); err != nil {
+			return result, err
+		}
+		for _, dir := range append([]string{specWtPath}, finalizeCandidatePaths(candidates)...) {
+			if _, err := os.Stat(dir); os.IsNotExist(err) {
+				continue
+			} else if err != nil {
+				return result, err
+			}
+			if err := CheckFinalizeArtifacts(g, dir, policy.SpecDir, policy.PanelDirs...); err != nil {
+				return result, err
+			}
 		}
 	}
 
@@ -841,16 +865,18 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	}
 
 	// Auto-commit any remaining spec artifacts.
-	cfg, cfgErr := config.Load(g.Root)
-	if cfgErr != nil {
-		cfg = config.DefaultConfig()
-	}
-	// specID already validated above; err is impossible here.
-	specWtPath, _ := workspace.SpecWorktreePath(g.Root, cfg, specID)
 	savedTip, _ := meta["mindspec_finalize_tip"].(string)
 	currentTip, _ := gitutil.RevParseRef(g.Root, specBranch)
 	status, statusErr := gitutil.Status(specWtPath)
 	if _, statErr := os.Stat(specWtPath); !os.IsNotExist(statErr) && (savedTip == "" || savedTip != currentTip || statusErr != nil || strings.TrimSpace(status) != "") {
+		if err := checkArtifactSymlinks(specWtPath); err != nil {
+			return result, guard.NewFailure(termsafe.Escape(err.Error()), fmt.Sprintf("commit or move the named symlink, then run mindspec impl approve %s", idrender.Spec(specID)))
+		}
+		if policy != nil {
+			if err := CheckFinalizeArtifacts(g, specWtPath, policy.SpecDir, policy.PanelDirs...); err != nil {
+				return result, err
+			}
+		}
 		if err := g.commitWithExport(specWtPath, "chore: commit remaining spec artifacts"); err != nil {
 			// A failed export or commit must preserve pending work. A
 			// preserved merge keeps its specific resolution recovery.
@@ -888,6 +914,11 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 		}
 		if e.Path != "" && !alreadyMerged {
 			if _, statErr := os.Stat(e.Path); !os.IsNotExist(statErr) {
+				if policy != nil {
+					if err := CheckFinalizeArtifacts(g, e.Path, policy.SpecDir, policy.PanelDirs...); err != nil {
+						return result, err
+					}
+				}
 				if err := g.commitWithExport(e.Path, "chore: commit remaining bead artifacts"); err != nil {
 					// Stop before merge, publication, or cleanup on every failure.
 					if isPreservedMergeError(err) {
@@ -1019,6 +1050,12 @@ func (g *MindspecExecutor) FinalizeEpic(epicID, specID, specBranch string, lifec
 	// auto-merge above has already landed for real by this point.
 	if err := finalizeStepHook("auto_merge"); err != nil {
 		return result, err
+	}
+
+	if policy != nil {
+		if err := g.checkFinalizeTree(*policy, specBranch); err != nil {
+			return result, err
+		}
 	}
 
 	// Gather stats (after bead merges so counts are accurate).
@@ -2830,4 +2867,14 @@ func (g *MindspecExecutor) PublishBeadClose(workdir string, paths []string) erro
 		return err
 	}
 	return gitutil.CommitPaths(workdir, "chore: publish bead close", paths)
+}
+
+func finalizeCandidatePaths(entries []bead.WorktreeListEntry) []string {
+	paths := []string{}
+	for _, e := range entries {
+		if e.Path != "" {
+			paths = append(paths, e.Path)
+		}
+	}
+	return paths
 }

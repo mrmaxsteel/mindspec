@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 )
@@ -17,6 +18,10 @@ import (
 func promptFixture(t *testing.T, schema int, cfg string) (string, paneltest.Fixture) {
 	t.Helper()
 	root := mkPanelTestRoot(t, cfg)
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	subjectCLIWrite(t, root, ".mindspec/specs/test/spec.md", "# Spec\n")
 	withTestChdir(t, root)
 	config.ResetCache()
@@ -297,5 +302,24 @@ func TestPanelPrompt_FromSlotTree(t *testing.T) {
 	out := promptRun(t, root, "R1")
 	if !strings.Contains(out, "Review this fixture.") || !strings.Contains(out, filepath.Join(layout.Dir, "attempt-2/verdict.json")) {
 		t.Fatalf("slot root was not resolved:\n%s", out)
+	}
+}
+
+func TestPanelPrompt_UnfilledBriefRecovery(t *testing.T) {
+	_, f := promptFixture(t, 2, "")
+	subjectCLIWrite(t, f.Dir, "BRIEF.md", "<!-- TODO(skill): fill this brief -->\n")
+	_, err := runPanelVerbCmd("prompt", "p", "--slot", "R1")
+	if err == nil {
+		t.Fatal("unfilled brief was accepted")
+	}
+	message := err.Error()
+	for _, text := range []string{"fill " + shellQuoteTarget(filepath.Join(f.Dir, "BRIEF.md")), "mindspec panel prompt " + shellQuoteTarget("p") + " --slot " + shellQuoteTarget("R1") + " --spec " + shellQuoteTarget("test")} {
+		if !strings.Contains(message, text) {
+			t.Fatalf("unfilled brief has no working recovery: %s", message)
+		}
+	}
+	recovery := message[strings.LastIndex(message, "recovery: ")+len("recovery: "):]
+	if matches := guard.FindFloorMatches(recovery); len(matches) != 0 {
+		t.Fatalf("brief recovery crossed the command floor: %+v", matches)
 	}
 }

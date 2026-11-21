@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,6 +112,9 @@ func NewSandbox(t *testing.T) *Sandbox {
 	mustRun(t, root, "git", "add", ".gitignore")
 	mustRun(t, root, "git", "commit", "-m", "add gitignore")
 	initBeads(t, root)
+	if _, err := bead.EnsureBeadsConfig(root, false); err != nil {
+		t.Fatalf("configure Beads: %v", err)
+	}
 
 	// Set up recording shims — temporarily extend PATH so mindspec shim is created
 	shimDir := filepath.Join(root, ".harness", "bin")

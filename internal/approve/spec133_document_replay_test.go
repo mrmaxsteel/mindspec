@@ -83,15 +83,23 @@ func TestS133DocGate_PlanFaultReplay(t *testing.T) {
 				if _, err := f.approve("plan_approve"); err == nil {
 					t.Fatal("fault did not fire")
 				}
-				if !strings.Contains(f.read("plan.md"), "status: Approved") {
-					t.Fatal("fault did not follow frontmatter write")
+				if fault == "frontmatter" && strings.Contains(f.read("plan.md"), "status: Approved") {
+					t.Fatal("creation fault approved the plan")
+				}
+				if fault == "commit" && !strings.Contains(f.read("plan.md"), "status: Approved") {
+					t.Fatal("commit fault lost the approval")
 				}
 				if _, err := runLifecycleGate(f.root, s133DocID, "plan_approve", f.root, nil); err != nil {
 					t.Fatal(err)
 				}
 				f.failCreate = false
 				f.exec.failCommit = 0
-				if _, err := f.approve("plan_approve"); err != nil {
+				_, err := f.approve("plan_approve")
+				if fault == "commit" {
+					if err == nil || !strings.Contains(err.Error(), "enrolment") {
+						t.Fatalf("enrolled retry: %v", err)
+					}
+				} else if err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -337,8 +345,8 @@ func TestS133DocGate_CRLFPlanOwnWrites(t *testing.T) {
 				t.Fatalf("initial approval: %v", err)
 			}
 			f.verifyDocument("plan_approve")
-			if _, err := f.approve("plan_approve"); err != nil {
-				t.Fatalf("own-write replay refused: %v", err)
+			if _, err := f.approve("plan_approve"); err == nil || !strings.Contains(err.Error(), "enrolment") {
+				t.Fatalf("enrolled replay: %v", err)
 			}
 		})
 	}

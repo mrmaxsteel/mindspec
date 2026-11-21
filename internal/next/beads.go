@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/validate"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -114,7 +116,7 @@ var findEpicForBeadFn = phase.FindEpicLineageWithCache
 // BuildReadySet classifies one uncapped global ready set with the same lineage
 // resolver and positional plan mapping that readiness uses.
 func BuildReadySet(root, specFlag string) (ReadySet, error) {
-	rs := ReadySet{SpecFlag: specFlag, Cache: phase.NewCache()}
+	rs := ReadySet{SpecFlag: specFlag, Cache: phase.NewCache().WithRoot(root)}
 	if specFlag != "" {
 		epic, err := rs.Cache.FindEpicBySpecID(specFlag)
 		if err != nil || epic == "" {
@@ -174,6 +176,16 @@ func BuildReadySet(root, specFlag string) (ReadySet, error) {
 					info.why = "no plan.md exists yet for " + idrender.Spec(specFlag)
 				} else {
 					info.mapped, info.why = readiness.PlanMapsBead(plan, n)
+					fm, parseErr := validate.ParsePlanFrontmatter(plan)
+					if parseErr != nil {
+						return rs, parseErr
+					}
+					if strings.EqualFold(fm.Status, "Approved") && !slices.Contains(fm.BeadIDs, item.ID) {
+						info.mapped, info.why = false, "not a recorded work item of the approved plan"
+						if len(fm.BeadIDs) == 0 {
+							info.why = "the approved plan has no bead_ids; record the ids of its approved work items in plan.md, then run mindspec next --spec " + idrender.Spec(specFlag)
+						}
+					}
 				}
 			}
 			if isReadyPlanMember(item, rs.EpicID, info) {
@@ -240,7 +252,7 @@ func scopeResolutionRefusal(root, specFlag string, epicErr error) error {
 	// carry wrapBDError'd raw bd stderr (AllEpics / draft discovery /
 	// FindEpicBySpecID) — wrap each in bdRenderedError so the rendered
 	// text is per-line escaped while errors.Is/As still reach the chain.
-	c := phase.NewCache()
+	c := phase.NewCache().WithRoot(root)
 	if _, allErr := c.AllEpics(); allErr != nil {
 		return fmt.Errorf("resolving --spec %s: querying epics failed: %w", idrender.Spec(specFlag), &bdRenderedError{err: allErr})
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/safefile"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -27,6 +28,10 @@ import (
 // implFinalReviewGate runs on every pre-close pass while the spec branch exists.
 // A published spec without its worktree can only replay the same subject.
 func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec executor.Executor, placeholder implPlaceholderWrite) (Outcome, bool, error) {
+	s, kernelErr := implKernelStateFn(root, specID)
+	if kernelErr != nil {
+		return Outcome{}, false, kernelErr
+	}
 	cfg, err := config.Load(root)
 	if err != nil {
 		return Outcome{}, false, err
@@ -52,6 +57,12 @@ func implFinalReviewGate(root, specID, epicID, storedPhase, specDir string, exec
 	if os.IsNotExist(statErr) {
 		return Outcome{Gate: "final_review"}, false, guard.NewFailure("gate final_review: spec worktree is absent",
 			fmt.Sprintf("re-create the spec worktree at spec/%s, then run a final-review panel", idrender.Spec(specID)))
+	}
+	if s != nil {
+		if err := implKernelArtifactPreflight(root, *s, exec); err != nil {
+			return Outcome{}, false, err
+		}
+		return Outcome{Gate: "final_review"}, false, kernel.CheckPassedGate(*s, s.Epic+".final")
 	}
 	o, err := runLifecycleGate(root, specID, "final_review", wt, warnWriter)
 	if err != nil || !cfg.Enforcement.PanelGate || os.Getenv(panel.SkipPanelEnv) == "1" {
@@ -432,6 +443,44 @@ func implPlaceholderPreflight(exec executor.Executor, worktree, specDir, head st
 	if len(paths) > 0 {
 		sort.Strings(paths)
 		return refuse("placeholder changes are outside this approval's write set:\n" + strings.Join(paths, "\n"))
+	}
+	return nil
+}
+
+// implKernelArtifactPreflight checks every worktree before approval writes.
+func implKernelArtifactPreflight(root string, s kernel.State, exec executor.Executor) error {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	wt, err := workspace.SpecWorktreePath(root, cfg, s.SpecID)
+	if err != nil {
+		return err
+	}
+	paths := []string{wt}
+	entries, err := implWorktreeListFn()
+	if err != nil {
+		return err
+	}
+	allowed := map[string]bool{}
+	for _, id := range s.Items {
+		allowed[id] = true
+	}
+	for _, e := range entries {
+		if id, ok := strings.CutPrefix(e.Branch, workspace.BeadBranchPrefix); ok && allowed[id] && e.Path != "" {
+			paths = append(paths, e.Path)
+		}
+	}
+	panelDirs := kernel.FinalizePanelPaths(s)
+	for _, dir := range paths {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := executor.CheckFinalizeArtifacts(exec, dir, s.SpecDir, panelDirs...); err != nil {
+			return err
+		}
 	}
 	return nil
 }

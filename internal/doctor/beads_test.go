@@ -97,7 +97,7 @@ func TestCheckBeadsConfigDrift_AllCorrect(t *testing.T) {
 	root := beadsRoot(t, false)
 	writeFile(t, filepath.Join(root, ".beads", "config.yaml"),
 		"issue-prefix: \"proj\"\n"+
-			"types.custom: \"gate\"\n"+
+			"types.custom: \"gate,step\"\n"+
 			"status.custom: \"resolved\"\n"+
 			"export.git-add: false\n")
 
@@ -138,7 +138,7 @@ func TestCheckBeadsConfigDrift_UserAuthoredDrift(t *testing.T) {
 	// User flipped export.git-add to true on purpose.
 	writeFile(t, filepath.Join(root, ".beads", "config.yaml"),
 		"issue-prefix: \"proj\"\n"+
-			"types.custom: \"gate\"\n"+
+			"types.custom: \"gate,step\"\n"+
 			"status.custom: \"resolved\"\n"+
 			"export.git-add: true\n")
 
@@ -162,7 +162,7 @@ func TestCheckBeadsConfigDrift_FixForceReplacesUserAuthored(t *testing.T) {
 	cfgPath := filepath.Join(root, ".beads", "config.yaml")
 	writeFile(t, cfgPath,
 		"issue-prefix: \"proj\"\n"+
-			"types.custom: \"gate\"\n"+
+			"types.custom: \"gate,step\"\n"+
 			"status.custom: \"resolved\"\n"+
 			"export.git-add: true\n")
 
@@ -1048,5 +1048,24 @@ func TestCheckMultipleBdOnPath_SymlinkDedup(t *testing.T) {
 	}
 	if !strings.Contains(c.Message, "exactly one `bd` on PATH") {
 		t.Errorf("want the single-bd OK message; got %q", c.Message)
+	}
+}
+
+func TestS134Doctor_MissingStep(t *testing.T) {
+	root := beadsRoot(t, false)
+	writeFile(t, filepath.Join(root, ".beads", "config.yaml"), "issue-prefix: project\ntypes.custom: gate,spike2\nstatus.custom: resolved\nexport.git-add: false\n")
+	report := &Report{}
+	checkBeadsConfigDrift(report, root, false)
+	check := findCheck(report, "Beads config drift")
+	if check == nil || check.Status != Warn || !strings.Contains(check.Message, "step") {
+		t.Fatalf("missing step not reported: %+v", check)
+	}
+	if err := check.FixFunc(); err != nil {
+		t.Fatal(err)
+	}
+	report = &Report{}
+	checkBeadsConfigDrift(report, root, false)
+	if check = findCheck(report, "Beads config drift"); check == nil || check.Status != OK {
+		t.Fatalf("fixed types not accepted: %+v", check)
 	}
 }

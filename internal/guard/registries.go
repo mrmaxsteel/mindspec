@@ -155,6 +155,28 @@ type OpaqueOperandEntry struct {
 // matches; only once bead 4 makes it evidence-derived and sometimes
 // destructive does that call site become interesting to this scan).
 var OpaqueOperandRegistry = []OpaqueOperandEntry{
+	{File: "internal/executor/finalize_artifacts.go", Func: "finalizeArtifactRefusal", Detail: "arg2:unprovable",
+		Rationale:  "The recovery uses next-action or implementation approval with the validated spec directory basename rendered by idrender.Spec. It executes no command.",
+		Obligation: "internal/approve TestS134ImplApprove_PendingSourceBeforeMutation checks the concrete commands against the destructive floor and verifies refusal before state writes."},
+	{File: "cmd/mindspec/panel_prompt.go", Func: "resolvePanelPrompt", Detail: "arg1:unprovable", Rationale: "The recovery names the existing brief to fill, then retries the prompt command. Its path, registration identifiers and roster slot are shell quoted. It executes no command.", Obligation: "TestPanelPrompt_UnfilledBriefRecovery checks the actual path and prompt command and rejects destructive recovery text."},
+	{File: "cmd/mindspec/panel_kernel.go", Func: "panelKernelGuard", Detail: "arg1:unprovable", Rationale: "The recovery answers the computed gate decision with a listed option. It executes no command.", Obligation: "TestS134PanelCreate_LocalDecisionAndLease pins the decision and runnable answer before the fix can be leased."},
+	{File: "cmd/mindspec/panel_kernel.go", Func: "tryKernelPanelCreate", Detail: "arg1:unprovable", Rationale: "The recovery launches the recorded panel slot. The slug and spec are shell quoted; the slot is computed from the tuple.", Obligation: "TestS134PanelCreate_CollisionHaltAndOpenSlot pins the runnable slot command and unchanged snapshot."},
+	{File: "cmd/mindspec/panel_submit.go", Func: "runPanelSubmit", Detail: "arg1:unprovable", Rationale: "The recovery requests a lease for the slot computed from the active gate, round and roster position. Membership and canonical slot identity are checked first. It executes no command.", Obligation: "TestS134PanelSubmit_OffRosterRecovery rejects caller slots before kernel state is read; TestS134PanelSubmit_LeaseReceiptAndForeignSnapshot pins the computed lease command and unchanged slot."},
+	{File: "internal/approve/impl_kernel.go", Func: "implKernelPreflight", Detail: "arg1:unprovable",
+		Rationale:  "The recovery asks to resolve the listed records and retry implementation approval. Its ID operand uses idrender.Spec. The scan cannot fold this runtime operand to a literal.",
+		Obligation: "internal/approve TestS134ImplApprove_RefusalTable checks the actual recovery text against the destructive floor and checks that refusal preserves state."},
+	{File: "internal/approve/enrol.go", Func: "approveEnrolment", Detail: "arg1:unprovable",
+		Rationale:  "The retry uses mindspec next-action with --apply and an idrender.Spec operand.",
+		Obligation: "TestOpaqueOperandRegistry_EnrolmentRecoveries checks each real command template, its ID renderers and its rendered values against the destructive floor."},
+	{File: "internal/approve/enrol.go", Func: "enrolEdit", Detail: "arg1:unprovable",
+		Rationale:  "The retry uses mindspec plan approve with an idrender.Spec operand.",
+		Obligation: "TestOpaqueOperandRegistry_EnrolmentRecoveries checks each real command template, its ID renderers and its rendered values against the destructive floor."},
+	{File: "internal/approve/enrol.go", Func: "enrolWaits.check", Detail: "arg1:unprovable",
+		Rationale:  "The recovery removes one dependency link with bd dep remove. Both link operands use idrender.Bead; this command does not match a destructive floor family.",
+		Obligation: "TestOpaqueOperandRegistry_EnrolmentRecoveries checks each real command template, its ID renderers and its rendered values against the destructive floor."},
+	{File: "internal/approve/enrol.go", Func: "enrolAddLink", Detail: "arg1:unprovable",
+		Rationale:  "The recovery reads dependencies with bd dep list and --json. The item operand uses idrender.Bead.",
+		Obligation: "TestOpaqueOperandRegistry_EnrolmentRecoveries checks each real command template, its ID renderers and its rendered values against the destructive floor."},
 	{File: "internal/approve/doc_declarations.go", Func: "implDocGate", Detail: "arg1:unprovable", Rationale: "Recovery uses the owning lifecycle verb. ID operands use idrender and flag values use shell quoting.", Obligation: "TestS133DocOwner_ImplOpenResolvedTransferredAndOverride checks the real recovery against the destructive floor and preserves the required flags."},
 	{File: "internal/approve/doc_declarations.go", Func: "implDocGate", Detail: "arg2:unprovable", Rationale: "Recovery uses the owning lifecycle verb. ID operands use idrender and flag values use shell quoting.", Obligation: "TestS133DocOwner_ImplOpenResolvedTransferredAndOverride checks the real recovery against the destructive floor and preserves the required flags."},
 	{File: "internal/complete/check.go", Func: "reportContentGates", Detail: "arg2:unprovable", Rationale: "Recovery uses the owning lifecycle verb. ID operands use idrender and flag values use shell quoting.", Obligation: "TestS133DocOwner_RecoveryKeepsOwnerAndDeclarations checks the real recovery against the destructive floor and preserves the required flags."},
@@ -174,7 +196,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	{File: "internal/complete/check.go", Func: "reportContentGates", Detail: "arg1:unprovable",
 		Rationale:  "Recovery asks for domain docs, then retries completion with an ID-rendered bead. It offers a reasoned doc deferral and executes no command.",
 		Obligation: "internal/complete TestS133CompleteCheck_ReportParity pins every content refusal and state preservation. TestS133CompleteCheck_RecoveryOperands checks the real recovery against the destructive floor."},
-	{File: "cmd/mindspec/panel_defer.go", Func: "runPanelDefer", Detail: "arg1:unprovable", Rationale: "CheckDeferral builds a non-destructive dependency command from validated IDs; no destructive constructor applies.", Obligation: "TestPanelDefer_RefusalListsEveryMissingRequirement pins the dependency command and finding text."},
+	{File: "cmd/mindspec/panel_defer.go", Func: "runPanelDeferBody", Detail: "arg1:unprovable", Rationale: "CheckDeferral builds a non-destructive dependency command from validated IDs; no destructive constructor applies.", Obligation: "TestPanelDefer_RefusalListsEveryMissingRequirement pins the dependency command and finding text."},
 	{File: "cmd/mindspec/reattest.go", Func: "reattestRefusalFailure", Detail: "variadic-spread:recovery", Rationale: "The ancestor reader renders each dependent ID with idrender.Bead. The default recovery inspects first-parent merges for no-owned and unknown-base refusals or runs doctor for other diagnoses.", Obligation: mindspecVerbTemplateObligation},
 	{File: "internal/executor/mindspec_executor.go", Func: "MindspecExecutor.finalizeBeadWorktrees", Detail: "arg1:unprovable",
 		Rationale:  "The recovery substitutes idrender.Spec(specID). Both callers validate specID before this helper runs. The command repeats implementation approval and does not remove work.",
@@ -426,7 +448,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "cmd/mindspec/panel.go",
 		Func:       "tallyExitAction",
 		Detail:     "arg1:unprovable",
-		Rationale:  "disclosed-residual: `fmt.Sprintf(\"re-run the panel (%s), then mindspec complete %s\", recreate, safeBeadID)`, where recreate is this function's own `mindspec panel create %s --bead %s --round %d` template plus optional `--spec %s`/`--target %s`/`--gate %s` fragments (spec 127 final review, mindspec-tyi3: the recovery now carries the matched registration's binding instead of a static placeholder argv) — a mindspec verb, never git/bd/rm-led. The ID-typed operands are idrender-rendered (idrender.Bead/idrender.Spec: a validated ID renders byte-identically, a malformed one is forced through strconv.Quote, which this floor's quote-aware tokenizer reads as one inert token) and target/gate go through escapeConfigValue + shellQuoteTarget, so the sole residual is the slug-typed one: same as panelCreateCmd above (validatePanelSlug does not close whitespace/printable content).",
+		Rationale:  "Recovery uses mindspec panel create, complete, or next-action templates. Spec and bead operands use idrender; dynamic slug, target, and gate operands use shell quoting.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{
@@ -1013,7 +1035,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	// entries below, found by running the scan.
 	{
 		Surface:    ".claude/skills/ms-bead-cycle/SKILL.md",
-		Text:       "3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).",
+		Text:       "Never merge a bead branch with raw `git merge bead/<id>`.",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "documented guidance PROHIBITING raw merge and directing the reader to `mindspec complete` instead — reviewed at spec time (R5a's Background inventory) as a known instance of the design principle that a guard on destructive guidance must not penalize the text that warns against the destructive act.",
@@ -1021,7 +1043,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    ".claude/skills/ms-bead-cycle/SKILL.md",
-		Text:       "**Partial-failure rule (verbatim):** \"Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first.\" Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.",
+		Text:       "If a check stopped between bd-close and the actual git merge, recover it before another dispatch.",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "documented guidance DESCRIBING the partial-failure recovery path (mentions 'the actual git merge' in the course of explaining when to stop, never instructing a raw merge) — reviewed at spec time as a known descriptive instance.",
@@ -1029,7 +1051,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    "plugins/mindspec/skills/ms-bead-cycle/SKILL.md",
-		Text:       "3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).",
+		Text:       "Never merge a bead branch with raw `git merge bead/<id>`.",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "the plugin-mirror copy of the tracked ms-bead-cycle SKILL.md prohibition above — same reviewed text, a distinct swept surface (plugins/*/skills/**).",
@@ -1037,7 +1059,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    "plugins/mindspec/skills/ms-bead-cycle/SKILL.md",
-		Text:       "**Partial-failure rule (verbatim):** \"Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first.\" Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.",
+		Text:       "If a check stopped between bd-close and the actual git merge, recover it before another dispatch.",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "the plugin-mirror copy of the tracked ms-bead-cycle SKILL.md partial-failure description above — same reviewed text, a distinct swept surface.",
@@ -1061,7 +1083,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    "ms-bead-cycle",
-		Text:       "3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).",
+		Text:       "Never merge a bead branch with raw `git merge bead/<id>`.",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "one of the TWO entries this spec's own Background inventory missed (found by RUNNING the scan, not recall, H-r6-4's own lesson recurring): the canonical skill-map builder key \"ms-bead-cycle\" is NOT one of the four inlined lifecycle-gate skills in claude.go, so its setup.CanonicalGuidanceSurfaces() entry comes purely from the go:embed'd plugin source and mirrors plugins/mindspec/skills/ms-bead-cycle/SKILL.md byte-for-byte — but R5(c)'s canonical-surface leg sweeps skillFiles()'s FULL returned map, not only the four inlined entries, so this surface key needs its own entry.",
@@ -1069,7 +1091,7 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	},
 	{
 		Surface:    "ms-bead-cycle",
-		Text:       "**Partial-failure rule (verbatim):** \"Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first.\" Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.",
+		Text:       "If a check stopped between bd-close and the actual git merge, recover it before another dispatch.",
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "the second of the two scan-found \"ms-bead-cycle\" skill-map entries above — same reasoning, the partial-failure description mirrored through the canonical builder.",

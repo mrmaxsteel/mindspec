@@ -47,6 +47,7 @@ var escapeHatchFlags = map[string]string{
 	"allow-doc-skew":     "allow-doc-skew",
 	"supersede-adr":      "supersede-adr",
 	"allow-net-deletion": "allow-net-deletion",
+	"allow-not-ready":    "allow-not-ready",
 }
 
 // detectFriction inspects a SUCCEEDING leaf command and returns the bound
@@ -54,16 +55,10 @@ var escapeHatchFlags = map[string]string{
 // ("", false). It reads leaf-local override flags via cmd.Flags().Changed
 // and recognizes a completed `repair phase` by command path.
 //
-// Only the FIRST bound escape-hatch flag (in a deterministic order) is
-// reported — the fingerprint is keyed on a single which-escape-hatch
-// token, and an entry records one admission. Order: override-adr,
-// allow-doc-skew, supersede-adr, allow-net-deletion (stable,
-// deterministic — spec 127 S3-r2-7 requires this position be STATED IN
-// CODE, not merely documented in prose elsewhere: allow-net-deletion is
-// appended LAST, after the three pre-existing hatches, so an invocation
-// that somehow binds it alongside an older hatch still records the
-// older hatch's token — this file is the single place that order is
-// decided, and this comment is that statement).
+// Only the first changed escape-hatch flag is reported. Detection checks
+// override-adr, allow-doc-skew, supersede-adr, allow-net-deletion, then
+// allow-not-ready. A new token follows the existing tokens so combined
+// admissions retain their previous identity.
 func detectFriction(cmd *cobra.Command) (escapeHatch string, ok bool) {
 	// A completed `repair phase` (`mindspec repair phase <spec-id>`) is a
 	// friction admission in its own right (the lifecycle needed manual
@@ -74,7 +69,7 @@ func detectFriction(cmd *cobra.Command) (escapeHatch string, ok bool) {
 
 	// Leaf-local override flags. Deterministic order so a multi-flag
 	// invocation (unusual) records a stable single token.
-	for _, name := range []string{"override-adr", "allow-doc-skew", "supersede-adr", "allow-net-deletion"} {
+	for _, name := range []string{"override-adr", "allow-doc-skew", "supersede-adr", "allow-net-deletion", "allow-not-ready"} {
 		if f := cmd.Flags().Lookup(name); f != nil && cmd.Flags().Changed(name) {
 			return escapeHatchFlags[name], true
 		}

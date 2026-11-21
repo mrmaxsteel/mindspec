@@ -29,6 +29,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // FileName is the registration file's basename inside a panel
@@ -51,12 +53,15 @@ const FileName = "panel.json"
 // Round/verdict-filename disagreement as a writer error to report
 // (see Result.RoundMismatch), never as something to silently repair.
 type Panel struct {
-	VerdictSchema     int     `json:"verdict_schema,omitempty"`
-	BeadID            *string `json:"bead_id"`
-	Spec              string  `json:"spec"`
-	Target            string  `json:"target"`
-	Round             int     `json:"round"`
-	ExpectedReviewers int     `json:"expected_reviewers"`
+	Orchestrated      bool     `json:"orchestrated,omitempty"`
+	KernelGate        string   `json:"kernel_gate,omitempty"`
+	Scope             []string `json:"scope,omitempty"`
+	VerdictSchema     int      `json:"verdict_schema,omitempty"`
+	BeadID            *string  `json:"bead_id"`
+	Spec              string   `json:"spec"`
+	Target            string   `json:"target"`
+	Round             int      `json:"round"`
+	ExpectedReviewers int      `json:"expected_reviewers"`
 	// ReviewerCountSource is default or explicit; absent legacy values mean default.
 	ReviewerCountSource string `json:"reviewer_count_source,omitempty"`
 	ReviewedHeadSHA     string `json:"reviewed_head_sha"`
@@ -353,6 +358,11 @@ func ForBead(regs []Registration, beadID string) []Registration {
 	return out
 }
 
+// ReadRegistration reads one panel directory without scanning adjacent panels.
+func ReadRegistration(dir string) Registration {
+	return load(dir)
+}
+
 // load reads and parses dir/panel.json into a Registration.
 func load(dir string) Registration {
 	abs, err := filepath.Abs(dir)
@@ -366,7 +376,7 @@ func load(dir string) Registration {
 		return reg
 	}
 	if err := json.Unmarshal(data, &reg.Panel); err != nil {
-		reg.Err = fmt.Errorf("parse %s: %w", FileName, err)
+		reg.Err = fmt.Errorf("parse %s in %s: %w", FileName, termsafe.Escape(abs), err)
 		reg.Panel = Panel{}
 		return reg
 	}

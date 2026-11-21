@@ -1,0 +1,24 @@
+{
+  "id": "test-1.1.impl.a1",
+  "parent": "test-1.1",
+  "title": "[mindspec] implement",
+  "issue_type": "step",
+  "status": "open",
+  "labels": [
+    "mindspec"
+  ],
+  "metadata": {
+    "mindspec_key": "test-1.1.impl.a1",
+    "mindspec_tuple": {
+      "epic": "test-1",
+      "kind": "implement",
+      "attempt": 1,
+      "work_item": "test-1.1"
+    },
+    "mindspec_close": {
+      "kind": "superseded",
+      "subject": "new",
+      "repaired": true
+    }
+  }
+}

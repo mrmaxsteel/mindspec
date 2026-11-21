@@ -1,0 +1,189 @@
+{
+  "test-1": {
+    "id": "test-1",
+    "title": "[mindspec] [SPEC 001-x] kernel fixture",
+    "issue_type": "epic",
+    "status": "open",
+    "labels": [
+      "mindspec"
+    ],
+    "metadata": {
+      "spec_id": "001-x",
+      "mindspec_phase": "plan",
+      "mindspec_links": [
+        {
+          "id": "test-1.1",
+          "upstream": []
+        },
+        {
+          "id": "test-1.2",
+          "upstream": [
+            "test-1.1"
+          ]
+        },
+        {
+          "id": "test-1.3",
+          "upstream": [
+            "test-1.1"
+          ]
+        }
+      ],
+      "mindspec_run": {
+        "round_limit": 5,
+        "lease_ttl": "2h",
+        "rules": "kernel-1"
+      },
+      "plan_approved": true
+    }
+  },
+  "test-1.1": {
+    "id": "test-1.1",
+    "parent": "test-1",
+    "title": "[mindspec] [001-x] Bead 1: Item 1",
+    "issue_type": "task",
+    "status": "open",
+    "labels": [
+      "mindspec"
+    ],
+    "description": "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./...`\n\n**Acceptance Criteria**\n- The item works.",
+    "metadata": {
+      "spec_id": "001-x",
+      "file_paths": null
+    }
+  },
+  "test-1.1.review": {
+    "id": "test-1.1.review",
+    "parent": "test-1.1",
+    "title": "[mindspec] bead-gate",
+    "issue_type": "step",
+    "status": "open",
+    "labels": [
+      "mindspec"
+    ],
+    "metadata": {
+      "mindspec_key": "test-1.1.review",
+      "mindspec_tuple": {
+        "epic": "test-1",
+        "kind": "bead-gate",
+        "attempt": 1,
+        "work_item": "test-1.1",
+        "gate": "test-1.1.review"
+      }
+    }
+  },
+  "test-1.2": {
+    "id": "test-1.2",
+    "parent": "test-1",
+    "title": "[mindspec] [001-x] Bead 2: Item 2",
+    "issue_type": "task",
+    "status": "open",
+    "labels": [
+      "mindspec"
+    ],
+    "dependencies": [
+      {
+        "id": "test-1.1",
+        "type": "blocks"
+      }
+    ],
+    "description": "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./...`\n\n**Acceptance Criteria**\n- The item works.",
+    "metadata": {
+      "spec_id": "001-x",
+      "file_paths": null
+    }
+  },
+  "test-1.2.review": {
+    "id": "test-1.2.review",
+    "parent": "test-1.2",
+    "title": "[mindspec] bead-gate",
+    "issue_type": "step",
+    "status": "open",
+    "labels": [
+      "mindspec"
+    ],
+    "metadata": {
+      "mindspec_key": "test-1.2.review",
+      "mindspec_tuple": {
+        "epic": "test-1",
+        "kind": "bead-gate",
+        "attempt": 1,
+        "work_item": "test-1.2",
+        "gate": "test-1.2.review"
+      }
+    }
+  },
+  "test-1.3": {
+    "id": "test-1.3",
+    "parent": "test-1",
+    "title": "[mindspec] [001-x] Bead 3: Item 3",
+    "issue_type": "task",
+    "status": "open",
+    "labels": [
+      "mindspec"
+    ],
+    "dependencies": [
+      {
+        "id": "test-1.1",
+        "type": "blocks"
+      }
+    ],
+    "description": "**Steps**\n1. Build the item.\n\n**Verification**\n- [ ] `go test ./...`\n\n**Acceptance Criteria**\n- The item works.",
+    "metadata": {
+      "spec_id": "001-x",
+      "file_paths": null
+    }
+  },
+  "test-1.3.review": {
+    "id": "test-1.3.review",
+    "parent": "test-1.3",
+    "title": "[mindspec] bead-gate",
+    "issue_type": "step",
+    "status": "open",
+    "labels": [
+      "mindspec"
+    ],
+    "metadata": {
+      "mindspec_key": "test-1.3.review",
+      "mindspec_tuple": {
+        "epic": "test-1",
+        "kind": "bead-gate",
+        "attempt": 1,
+        "work_item": "test-1.3",
+        "gate": "test-1.3.review"
+      }
+    }
+  },
+  "test-1.final": {
+    "id": "test-1.final",
+    "parent": "test-1",
+    "title": "[mindspec] final-gate",
+    "issue_type": "step",
+    "status": "open",
+    "labels": [
+      "mindspec"
+    ],
+    "metadata": {
+      "mindspec_key": "test-1.final",
+      "mindspec_tuple": {
+        "epic": "test-1",
+        "kind": "final-gate",
+        "attempt": 1,
+        "gate": "test-1.final"
+      }
+    },
+    "dependencies": [
+      {
+        "id": "test-1.1",
+        "type": "blocks"
+      },
+      {
+        "id": "test-1.2",
+        "type": "blocks"
+      },
+      {
+        "id": "test-1.3",
+        "type": "blocks"
+      }
+    ]
+  }
+}

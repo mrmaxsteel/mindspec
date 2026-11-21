@@ -57,7 +57,7 @@ The `doctor` command validates:
   write lock, backward-move comparator, and sanctioned sync" section and
   `interfaces.md` for the exported surface; the consuming verbs
   (`repair phase`, `plan approve`, `spec
-  approve`, `next` (the claim-time advance), `complete`, `release`,
+  approve`, `next` (the claim-time advance), implementation leases, `complete`, `release`,
   `impl approve`/`adopt`) live in the
   workflow domain.
 - **2026-07-02 (spec 107 wave 1):** `internal/phase` gained the exported

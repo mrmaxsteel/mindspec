@@ -69,7 +69,10 @@ func RunWithOptions(ctx context.Context, cwd, format, specFlag string, out io.Wr
 		return err
 	}
 	// mainRoot resolves worktrees back to the main repo (for guard, spec lookup).
-	mainRoot, _ := workspace.FindRoot(cwd)
+	mainRoot, err := workspace.FindRoot(cwd)
+	if err != nil {
+		return err
+	}
 	if mainRoot == "" {
 		mainRoot = localRoot
 	}
