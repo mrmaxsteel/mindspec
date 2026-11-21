@@ -64,11 +64,12 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
    new slug restarts at round 1 (`mindspec-ztax`).
 8. **Local decisions and cascades.** A REJECT that the verify reproduces adds a `fix`/`halt` decision for that gate
    only (§13.8); a refuted veto passes; `halt` stops the spec (B11, §13.4). A complete, refused round gets a verify;
-   only its reproduced findings go to the fix, and no approval count resolves a finding. Verifier and fixer
-   independence (rulings B4, B7) is a dispatch rule: each actor step gets a fresh agent, a verifier is not a slot
-   reviewer of its round or an author of its subject, and a fixer is not its verifier. The kernel does not check it;
-   rule `dispatch.fresh-agent` in `internal/rules/rules.yaml` states it. Failure: `Load` forces
-   `on_reject: halt`; the `review.reproduce` rule is advisory.
+   only its reproduced findings go to the fix, and no approval count resolves a finding. Three dispatch rules in
+   `internal/rules/rules.yaml`, which `instruct` renders, hold what the kernel does not check:
+   `dispatch.fresh-agent` (each actor step gets a fresh agent; a verifier is not a slot reviewer of its round or an
+   author of its subject; a fixer is not its verifier), `decision.operator-answer` and `loop.stop-on-failed-run`
+   (§13.6). Failure: `Load` forces `on_reject: halt`; only the advisory `review.reproduce` rule asks for a
+   reproduction.
 9. **Unreceipted closes and audit.** §9 and §11: a close whose evidence still fits gets its receipt under `submit
    --repair`, with no retry; `--allow-not-ready` joins `escapeHatchFlags` and
    `EscapeHatchTokens`. Failure: closes not persisted (`mindspec-2u0u`); `--allow-not-ready` is in no registry.
@@ -79,10 +80,12 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
     counts as lifecycle work (`classifyChild`); bd has no default view filter; the finalizer once merged another
     spec's bead (`77daf455`); risk: a concurrent bd write loses or doubles a step.
 12. **Skills, docs and setup.** The binary owns sequence and rules; a skill keeps only harness mechanics. Both copies
-    of `ms-bead-cycle`, `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally` are adapters of
-    about 50 lines or fewer: loop on `next-action --apply`, `lease`, a fresh agent per actor step with the brief the
-    binary prints, `submit` and each `run` entry. They hold no other command sequence, pick order, round cap, halt
-    table, rule or rationale. Docs drop deleted keys and spec-wide halt rows (§13.6); `setup` adds `step` and keeps
+    of `ms-bead-cycle`, `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally` are adapters of at
+    most 50 lines, none longer than at the spec base: loop on `next-action --apply`, `lease`, a fresh agent per actor
+    step with the brief the binary prints, `submit` and each `run` entry. On a `next-action` refusal (a pre-kernel
+    spec; a spec, plan or adhoc gate) an adapter runs what the binary prints: the refusal, `instruct` and the `Next`
+    block of `panel tally` (§13.11). They hold no other command sequence, pick order, round cap, halt table, rule or
+    rationale. Each rule or step that leaves a skill becomes a rule id or binary output (§13.6, §13.11). Docs drop deleted keys and spec-wide halt rows (§13.6); `setup` adds `step` and keeps
     other `types.custom` entries. Each brief comes from the binary (§13.11): `panel prompt` for a slot, `brief <step>`
     for a lens, verify, fix or change judge; a lens step supplies slot lenses. Failure: skills name default-3 rounds
     and carry rules the binary does not enforce; `setup --force` replaces `types.custom`; the `panel create` entry
@@ -94,7 +97,9 @@ files) cites no ADR, spec, requirement, bead or issue number. No new use of the 
 ## Migration
 
 A spec past `plan approve` at release has no witness: it is pre-kernel and keeps today's rules; a `plan approve` rerun
-on it does not enrol and selects by recorded `bead_ids`, not `--parent`. Without `step`, `plan approve` refuses (§2).
+on it does not enrol and selects by recorded `bead_ids`, not `--parent`. Without `step`, `plan approve` refuses (§2). After a
+skill refresh, the adapters of a pre-kernel spec run the commands that its `next-action` refusal, `instruct` and
+`panel tally` print (§13.11).
 
 ## Scope
 
@@ -135,8 +140,9 @@ blocks Y" = Y waits for X.
   `lease <1>.impl.a1` exits non-zero naming `lease --take`; after the TTL, `lease` prints generation 2. A foreign bug
   blocking item 1: `lease <1>.review.r1.R1` exits non-zero naming it. `panel submit` without `--lease` exits
   non-zero; the slot stays open.
-- [ ] AC4 (R3, B5, B13): each exits non-zero, step open: an old subject, another slot, a changed blob, a verdict to a fix, an implement commit not past the claim base. A valid `submit`
-  writes `mindspec_close` = path, commit, blob id; a rerun exits 0 and another artifact exits non-zero, each with
+- [ ] AC4 (R3, B5, B13): each exits non-zero, step open: an old subject, another slot, a changed blob, a verdict to a fix, an implement commit not past the claim base, a `--record` path in the work tree. A valid `submit`
+  of a verdict writes `mindspec_close` = path, commit, blob id, and of a lens record `record_sha256` with the bytes in
+  `mindspec_record`, `git status --porcelain` unchanged; a rerun exits 0 and another artifact exits non-zero, each with
   `bd show --json` unchanged. After `lease --take` and a generation-2 `submit`, a generation-1 `submit` of a different
   verdict exits non-zero, the step closed and its receipt unchanged; the same through `panel submit`. Killed between
   receipt and close: step open with its receipt; a rerun closes it.
@@ -167,11 +173,11 @@ blocks Y" = Y waits for X.
   --repair --reason`; that submit exits 0 with a receipt `via: "repair"` and one repair event (`mindspec_takes`, `via:
   "repair"`) with the step's current generation, and the lease generation does not change. `submit --repair` exits
   non-zero, step unchanged, on an open step, on a step with a valid receipt and with a verdict of another subject; a
-  leased, raw-closed verify with an all-`refuted` record at `<spec dir>/kernel/<step id>.json` gets a receipt from
-  `submit --repair`, its refutation records and a gate closed `passed` (`retally: "verify"`), and no `.verify.a2`; a
-  leased, raw-closed lens step with a fitting record gets a receipt from `submit --repair`, and `panel create` gives each
+  leased verify, raw-closed after its submit stored an all-`refuted` `mindspec_record`, gets a receipt from
+  `submit --repair` of those bytes (other bytes exit non-zero), its refutation records and a gate closed `passed` (`retally: "verify"`), and no `.verify.a2`; a
+  leased lens step, raw-closed after its submit stored a fitting record, gets a receipt from `submit --repair`, and `panel create` gives each
   slot its drafted `focus` (mutation: the repair writes only the receipt). A
-  never-leased verify, raw-closed with a fitting record: `run` lists no `submit --repair`, `submit --repair` exits
+  never-leased verify, raw-closed: `run` lists no `submit --repair`, `submit --repair` exits
   non-zero, and the pass creates `.verify.a2`. Raw-closed
   with no fitting evidence: a lens retry is the step `mindspec_round.lens` names, a fix retry keeps
   `mindspec_reproduced`, a verify retry is the step `mindspec_round.verify` names and keeps `mindspec_findings` and `mindspec_read` (mutation:
@@ -210,15 +216,22 @@ blocks Y" = Y waits for X.
   max-rounds|One halted bead|keep going after a halt|default .?3" -- .claude/skills plugins/mindspec/skills
   plugins/mindspec/README.md README.md project-docs/user/guides` and `git grep -n -E "$K|on_reject|type Loop struct"
   -- .mindspec/domains` each exit 1 (`historical_skills` keeps old text). For S = both copies of `ms-bead-cycle`,
-  `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally`: each file has at most 50 lines and names
-  `next-action` and `submit`; `git grep -n -i -w -E "must|never|only after" -- S` exits 1; `cmp` of each skill pair
-  exits 0. With `types.custom: gate,spike2`, `plan
+  `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally`: each file has at most 50 lines, no more
+  than at `371dc360`, and names `next-action`, `lease` and `submit`; each `mindspec` verb it names is one of
+  `next-action`, `lease`, `submit`, `brief`, `panel prompt`, `panel tally`, `instruct`; `git grep -n -i -w -E
+  "must|never|only after|round|pick|order|halt|first|before" -- S` exits 1; `cmp` of each skill pair exits 0 (mutation:
+  a 7-line adapter that names `complete` or a pick order fails). `mindspec instruct` prints
+  `dispatch.fresh-agent`, `decision.operator-answer`, `loop.stop-on-failed-run` and `readiness.not-ready-route` in
+  each mode (mutation: one row scoped `reviewer`). After `mindspec setup` refreshes the skills, a pre-kernel fixture
+  spec reaches `impl approve` exit 0 through only the commands that the refusals, `instruct` and `panel tally` print;
+  each spec and plan gate passes the same way (mutation: `panel tally` prints no `Next` block). The implement brief
+  prints SR-1..SR-5 and `complete <w> --check`, and on a re-dispatch each `mindspec_readiness_attempt` reason. With `types.custom: gate,spike2`, `plan
   approve` exits non-zero naming `mindspec setup`; after plain `mindspec setup` (an old install), it holds
   `gate,spike2,step` and each installed skill copy matches its source.
 - [ ] AC16 (constraints): added non-test Go lines under `cmd/`, `internal/` and skill lines hold no ADR, spec,
   requirement, bead or issue number and do not touch `.beads/issues.jsonl`. Against the spec base `371dc360`, `git
   diff --numstat` of each `SKILL.md` under `.claude/skills` and `plugins/mindspec/skills` shows no more added lines
-  than deleted lines.
+  than deleted lines (so `ms-bead-fix` and `ms-panel-tally` do not grow; AC15 applies the same cap).
 - [ ] AC17 (R1-R4, B8): only `next-action --apply`, `lease`, `submit` and each `run` entry reach `impl approve` exit 0
   and `"status":"done"`. After `submit <1>.impl.a1`, `--apply` creates `<1>.review.r1.lens`
   and `run` has no `panel create 1`; after the lens `submit`, `run` lists `panel create 1`; after it, `--apply` lists slots
@@ -227,8 +240,8 @@ blocks Y" = Y waits for X.
   refuses): `--apply` creates exactly `<1>.review.judge.a1` and no round; `complete 1` and `impl approve` exit
   non-zero naming it. A second commit before its submit: the next pass closes a1 `superseded` and creates
   `<1>.review.judge.a2` on the newest commit; `submit` to a1 exits non-zero. (a) `submit` to a2 of `carry-over` with a
-  reason: the gate stays `passed`, its receipt names the old and new subject and the judge receipt. A commit of the
-  judgement file: the next pass creates no judge. `complete 1` exits 0 and creates `<2>.impl.a1`; `impl approve` names
+  reason: the gate stays `passed`, its receipt names the old and new subject and the judge receipt. The judge `submit`
+  leaves `git status --porcelain` unchanged and the next pass creates no judge. `complete 1` exits 0 and creates `<2>.impl.a1`; `impl approve` names
   neither the gate nor a judge; a pass after each of `complete 1` and `impl approve` creates no judge. (b) Fresh
   fixture, `re-panel` with 2 slots and paths: `<1>.review.a2` (`mindspec_from` set) gets one 2-slot round on the new
   subject, and the `run` entry for `panel create 1` names the paths; after its pass, `complete 1` exits 0. (c) Fresh
@@ -303,7 +316,7 @@ blocks Y" = Y waits for X.
   (iii), but the removal is not committed; (v) as (iii), but R9 is never committed and is then moved off disk. In
   each `panel refute` exits 0 and the gate and the fix stay open. (i) fails on its digest with or without the coverage
   check; (ii) kills a retally with no digest check; (iii) kills a check that compares only the files present; (iv)
-  kills a set check over the HEAD tree; (v) kills a check against the verify record's commit. Fresh fixture, at the
+  kills a set check over the HEAD tree; (v) kills a check against any commit tree instead of `mindspec_read`. Fresh fixture, at the
   allowance under `re-panel` 2, the verify reproduces f (`decide.limit.r<N>`), then `panel refute` of f:
   `decide.limit.r<N>.a2`, and `continue:1` creates round N+1's lens step and no fix (mutations: the decision id is
   reused; `continue` creates a fix). Fresh fixture, open gate, round 1
@@ -319,8 +332,8 @@ blocks Y" = Y waits for X.
   after it, `re-panel` 2, then a commit replaces that round-1 verdict with APPROVE before `panel create 2`: the round-2
   slot body shows the round-1 finding with its refutation (mutations: the brief reads only `prior.verify`; it reads the
   panel directory at the head when `panel create` renders; it reads `panel.json` at the pre-refutation HEAD). After `git gc --prune=now` and an edit of each round-1 verdict
-  file on disk, the round-2 slot body is unchanged (mutation: it reads the panel directory at render). A commit of only
-  lens or verify records creates no judge, before and after the first registration.
+  file on disk, the round-2 slot body is unchanged (mutation: it reads the panel directory at render). Lens and verify `submit`
+  leave `git status --porcelain` and the subject digest unchanged.
 - [ ] AC21 (R3, R9, §6, §9): generation 1 leased, `lease --take` gives generation 2; `submit` of generation 1 with a
   valid verdict exits 0: the receipt names generation 1, generation 2's lease record ends `superseded`, and a
   generation-2 `submit` of another verdict exits non-zero. On a seeded verify,
