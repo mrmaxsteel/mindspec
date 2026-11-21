@@ -42,7 +42,9 @@ Thesis: beads hold plan and dispatch; git holds evidence; the binary holds rules
 4. The store knows "closed"; the reducer knows "how". The reducer decides what runs. It counts a work item done only
    when its bead gate closed `passed` and `complete` merged its branch; any other close releases no dependent.
 5. Every kernel close writes a receipt (metadata `mindspec_close`) with a return kind (`passed`, `refused`,
-   `superseded`, `halted`) BEFORE the bd close. A retry with the same receipt completes it.
+   `superseded`, `halted`) BEFORE the bd close. A retry with the same receipt completes it. A valid receipt is a
+   `mindspec_close` of any return kind, `superseded` included, that parses and whose evidence resolves (item 13); none, or
+   any other, is an unreceipted close (§9).
 6. Lineage is metadata `mindspec_from`. Blocks links exist only in plan order and from each work item to
    `<epic>.final` (a `step`, so bd's epic rule does not apply), never to an already-released item.
 7. Check both kinds for cycles before each mindspec link write (§8; bd's refusal is the backstop). No blocks between
@@ -118,13 +120,15 @@ artifact fits the kind (a lens record for a lens step, §13.11; a verdict for a 
 §13.10; for a fix, a commit on the branch the gate names past the fix step's subject that changes, relative to that
 subject, a path outside the panel directories and the kernel directory, §13.11, so the step's subject itself and any
 commit that the step's subject contains are refused; a commit past the claim base for an implement step; a judgement
-for a change judge, §13.2). For a lens or verify step it first makes the close writes of its kind (§13.10, §13.11).
+for a change judge, §13.2). Each `submit` and `panel submit` runs under the phase lock, so no two writes of one step
+interleave. On a step with a valid receipt no submit makes a close write; the closed-step rules below apply. Else, for
+a lens or verify step, it first makes the close writes of its kind (§13.10, §13.11).
 Then it writes the receipt (with the accepted `generation` and that generation's `actor` from
 `mindspec_actors`), closes, and runs one reducer pass (order: §13.9). The §9 receipt with no reopen and `submit --take`
 make the same close writes before their receipt. **Closing pin** (verify only). On every receipt path the pin runs
-after every other check of this section passes, the token and generation included, so a refused token, a foreign slot
-or a bad record writes nothing. On a step with a valid receipt the closed-step rules below apply and the pin writes
-nothing. On a step with no valid receipt, the submit builds and size-checks every close write (§13.10 bound) and then,
+after every other check of this section and every record check of §13.10 (`bead.CheckDeferral` included) passes, the
+token and generation included, so a refused token, a foreign slot or a bad record writes nothing. On a step with a
+valid receipt the pin writes nothing. On a step with no valid receipt, the submit builds and size-checks every close write (§13.10 bound) and then,
 when absent, writes the step metadata `mindspec_closing` {`generation`, `actor`, `record_sha256` (the sha256 of the
 record bytes at the resolved commit), `at` (RFC3339Nano UTC from `kernel.Now`)}. A submit whose generation, actor or
 `record_sha256` differs refuses, names `mindspec_closing`, and writes only `mindspec_closing.conflict` (its
@@ -240,7 +244,7 @@ evidence resolves at a commit and fits its kind and current subject (a slot's ve
 implement or fix commit past its claim base or its step subject (§6) on the branch the gate names, as §6 checks it; a lens or
 verify record at `<spec dir>/kernel/<step id>.json`; a judgement in a registered panel directory whose new
 subject is the judge's subject), the pass lists `submit <id> --take --actor <actor> --reason <text> (--artifact |
---commit) <evidence>` in `run` and creates no retry. That submit needs no token and runs every check of §6 and the
+--commit) <evidence>` in `run` and creates no retry; `<actor>` is `mindspec_closing.actor` when the step has one (§6). That submit needs no token and runs every check of §6 and the
 §13.10 actor refusals on `--actor`. It issues no generation: it appends a take event (`via: "receipt"`, `generation` =
 the step's current generation, and `actor`) and a `mindspec_actors` entry (`via:
 "receipt"`), makes the close writes of its kind (§6), and then writes the receipt (`repaired: true`, `taken: true`,
@@ -396,7 +400,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    so a take after a lens crash needs no retirement), run after the token and shape checks and only on a step with no
    valid receipt, the refusal and retirement on a `conflict`, the matching rerun that repeats its writes, the
    late-submission rule that reads it, and no discharge by a verify with no valid receipt (§6, §13.10); `verify_step`
-   in the ledger key of a refutation or deferral (§13.10); the metadata bound: a uniquely named `@<file>` (mode 0600,
+   or `created_at` (`enrolled`) in the ledger key of a refutation or deferral and in the id of its disposition row (§13.10); the metadata bound: a uniquely named `@<file>` (mode 0600,
    removed after the call, stale files removed by the next pass) on every metadata write, `Create` included, full
    stored texts, and the 16 MiB `metadata-too-large` kernel limit, checked before the pin, and its recovery (§13.10); `prior.asks` and `prior.read` from `prior.verify` when set,
    and `prior.read` as audit history (§13.7); the fix check that a record commit cannot meet (§6); the `lens` key
@@ -415,7 +419,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    authorises past the allowance, its attempt id and its `continue:<n>` that creates that round's lens step (§13.8); one new verify attempt
    when a withdrawal and a judgement retire it in one pass (§13.7); a reproduced off-roster veto as a code
    finding (§13.8); a veto verdict that gives no `ccr` finding; the verify record fields for a refutation or deferral,
-   the `verify_step` field and the deferral check before the receipt; `--actor` and the independence check on `panel
+   the `verify_step` and `enrolled` fields and the deferral check before the pin; `--actor` and the independence check on `panel
    refute` and `panel defer` of an enrolled gate, which refuses every actor that the verify of that round refuses, as a
    verb refutation discharges a finding as a verify return does (§7, §13.10); the new verb
    `brief <step>` (§7); the `--brief-file` scope (§7); `<actor>` and `<text>` in `run`
@@ -571,7 +575,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     `out_of_acceptance_scope`, the last with `ac`), a non-empty `reason` and `evidence` that resolves to a commit, a
     repo path or an https URL, as `panel refute` checks them; its `by` is the receipt's `actor`. A `deferred` return
     carries a `target` bead id and a non-empty `reason`; `submit` runs the `bead.CheckDeferral` checks on it before the
-    receipt. It refuses with the step open and names each missing, repeated or unknown finding, each unlisted return,
+    pin (§6). It refuses with the step open and names each missing, repeated or unknown finding, each unlisted return,
     each failed field and each failed deferral check. On the close it records each `ccr` or `slot` return that is
     `refuted` as `panel refute` records a refutation and each `deferred` return as `panel defer` records a deferral
     (`mindspec_deferrals` included), each with `verify_step` (a new field of `panel.Refutation`, `panel.Deferral` and the `mindspec_deferrals` entry)
@@ -616,10 +620,17 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     `tally` and `refusedRound` (`reject.go`), `gatePassEvidence` (`reducer.go`), `CheckPassedGate`, and the enrolled
     `panel refute` and `panel defer` retally (`cmd/mindspec/panel_kernel.go`). The ledger key of a refutation or deferral (`recordKey`,
     `internal/panel/disposition_store.go`: slot, round, finding, `finding_sha256`, for a bound deferral also
-    `source_verdict` and `source_file_sha256`) adds `verify_step` when it is non-empty, and `created_at` when the
-    record has the field `verify_step` empty (an enrolled verb writes it empty; a pre-kernel record omits it and keeps
-    today's key). So on an enrolled gate no two verify attempts or verb calls share a key, and a discarded record never blocks
-    an append. On
+    `source_verdict` and `source_file_sha256`) adds `verify_step` when it is non-empty, else `created_at` when the
+    record has `enrolled: true`. The verify close and an enrolled verb write `enrolled: true`. `enrolled` (a `bool`) and
+    `verify_step` (a `string`) are fields of `panel.Refutation` and `panel.Deferral`, each omitted when zero, with no
+    custom JSON encoding, so both types stay comparable with `==`. A pre-kernel record has neither field and keeps
+    today's key. The disposition row that `panel refute` or `panel defer` appends with its record in one batch (`id`
+    `<panel>:<slot>:r<N>:<finding>:<sha12>:refutation`, or `DeferralRowID`) takes the same suffix: `:<verify_step>`
+    when non-empty, else `:<created_at>` when `enrolled`, and the verify close appends that row too. `DeferralRowID`
+    reads the suffix from the deferral, so a row stays linked to its event; a pre-kernel row keeps today's id. So on an
+    enrolled gate no two verify attempts or verb calls share the key of a record or of its row, and a discarded record
+    never blocks an append. A verb rerun after a crash between its append and its `panel.json` write appends a second
+    record and row under a new `created_at`; this duplicate is audit history and does not change the tally. On
     an enrolled gate the same-key dedupe (slot, round, finding, `finding_sha256`; for `panel defer` also
     `SourceVerdict` and `SourceFileSHA256`) of `panel refute` and `panel defer`, and of the `mindspec_deferrals`
     history that `panel defer` appends, runs before the append and compares only the records that this filter keeps.
