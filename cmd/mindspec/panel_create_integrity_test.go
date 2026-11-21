@@ -469,3 +469,27 @@ func TestPanelVerify_AdhocMissingRefRecoveryNoSpec(t *testing.T) {
 		})
 	}
 }
+
+func TestS134Final_WorktreePanelSlugOwner(t *testing.T) {
+	root := setupCreateIntegrity(t)
+	slug := "custom-panel"
+	wt := filepath.Join(root, ".worktrees", "worktree-spec-901-other")
+	dir := writePanelFixture(t, wt, slug, panel.Panel{Spec: "901-other", Gate: "final_review", Round: 1})
+	destination := filepath.Join(root, ".worktrees", "worktree-spec-900-demo", "review", slug)
+	if err := checkPanelSlugOwner(root, slug, "900-demo", "final_review", destination); err == nil || !strings.Contains(err.Error(), dir) {
+		t.Fatalf("cross-spec worktree slug reuse not refused: %v", err)
+	}
+	if err := checkPanelSlugOwner(root, slug, "901-other", "final_review", dir); err != nil {
+		t.Fatalf("same owner refused: %v", err)
+	}
+	local := writePanelFixture(t, root, slug, panel.Panel{Spec: "900-demo", Gate: "final_review", Round: 1})
+	if _, err := findPanelRegistration(root, slug); err == nil || !strings.Contains(err.Error(), "ambiguous panel slug") {
+		t.Fatalf("worktree ambiguity not retained: %v", err)
+	}
+	for spec, want := range map[string]string{"900-demo": local, "901-other": dir} {
+		reg, err := findPanelRegistration(root, slug, spec)
+		if err != nil || reg.Dir != want {
+			t.Fatalf("spec %s selected %s, want %s: %v", spec, reg.Dir, want, err)
+		}
+	}
+}

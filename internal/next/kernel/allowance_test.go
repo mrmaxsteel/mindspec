@@ -99,3 +99,19 @@ func TestS134Allowance_AcrossRegistrations(t *testing.T) {
 		t.Fatal(fmt.Sprintf("cross-registration count=%d", n))
 	}
 }
+
+func TestS134Allowance_WorktreeRootLedger(t *testing.T) {
+	for _, segment := range []string{"review", ".mindspec/reviews"} {
+		t.Run(segment, func(t *testing.T) {
+			f := reducerFixture(t)
+			gate := f.Items[0] + ".review"
+			wt := filepath.Join(f.Root, ".worktrees", "worktree-spec-"+f.SpecID)
+			dir := filepath.Join(wt, filepath.FromSlash(segment), "ledger-only")
+			put(t, filepath.Join(dir, "dispositions.jsonl"), "{not json\n")
+			_, err := kernel.ReadState(f.Store, f.SpecID, f.SpecDir)
+			if err == nil || !strings.Contains(err.Error(), dir) {
+				t.Fatalf("worktree ledger not read for %s: %v", gate, err)
+			}
+		})
+	}
+}

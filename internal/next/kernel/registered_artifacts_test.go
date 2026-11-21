@@ -11,7 +11,7 @@ import (
 )
 
 func TestS134Submit_RecordedPanelDirectory(t *testing.T) {
-	for _, mode := range []string{"recorded-root", "recorded-flat", "old-flat", "unrecorded-root", "unrecorded-flat"} {
+	for _, mode := range []string{"recorded-root", "recorded-flat", "old-flat", "unrecorded-root", "unrecorded-flat", "unrecorded-prefix-sibling"} {
 		t.Run(mode, func(t *testing.T) {
 			f, id, lease, subject := slotFixture(t)
 			gate := f.Items[0] + ".review"
@@ -28,6 +28,8 @@ func TestS134Submit_RecordedPanelDirectory(t *testing.T) {
 				reg.Directories = nil
 			case "unrecorded-root":
 				dir = "review/other"
+			case "unrecorded-prefix-sibling":
+				dir = "review/panelx"
 			case "unrecorded-flat":
 				dir = filepath.ToSlash(flat)
 			}
@@ -54,7 +56,7 @@ func TestS134Submit_RecordedPanelDirectory(t *testing.T) {
 }
 
 func TestS134Judge_RecordedPanelDirectory(t *testing.T) {
-	for _, mode := range []string{"recorded-root", "unrecorded-root", "unrecorded-flat"} {
+	for _, mode := range []string{"recorded-root", "unrecorded-root", "unrecorded-flat", "unrecorded-prefix-sibling"} {
 		t.Run(mode, func(t *testing.T) {
 			f, gate, old := judgeFixture(t)
 			reg, _, err := kernel.Decode[kernel.RegistrationRecord](actorRecord(t, f, gate).Metadata, kernel.KeyRegistration)
@@ -72,6 +74,9 @@ func TestS134Judge_RecordedPanelDirectory(t *testing.T) {
 			path := "review/panel/judgement.json"
 			if mode == "unrecorded-root" {
 				path = "review/other/judgement.json"
+			}
+			if mode == "unrecorded-prefix-sibling" {
+				path = "review/panelx/judgement.json"
 			}
 			if mode == "unrecorded-flat" {
 				rel, e := filepath.Rel(f.Root, filepath.Join(f.SpecDir, "reviews", reg.Slug, "judgement.json"))

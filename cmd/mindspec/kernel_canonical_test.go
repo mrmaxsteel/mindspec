@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
@@ -30,6 +31,7 @@ func TestS134Final_CanonicalLayout(t *testing.T) {
 	}
 	e.write(e.cwd, ".mindspec/docs/domains/workflow/OWNERSHIP.yaml", "paths:\n  - internal/widget/**\n")
 	e.write(e.cwd, ".mindspec/docs/domains/workflow/architecture.md", "Workflow documentation.\n")
+	e.write(f.Root, ".git/info/exclude", ".mindspec-scratch\n")
 	e.git(e.cwd, "add", ".")
 	e.git(e.cwd, "commit", "-qm", "context")
 	item := f.Items[0]
@@ -51,16 +53,35 @@ func TestS134Final_CanonicalLayout(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(f.Root, dir)); !os.IsNotExist(err) {
 			t.Fatalf("panel created in main checkout: %v", err)
 		}
+		e.write(e.cwd, filepath.Join(dir, "BRIEF.md"), "Review the implementation against the approved spec.\n")
 		out := e.apply()
 		count := 0
 		for _, a := range out.Actions {
 			if a.Kind != "review-slot" {
 				continue
 			}
+			if len(a.Brief) < 2 || a.Brief[0] != "mindspec" {
+				t.Fatalf("invalid review brief argv: %v", a.Brief)
+			}
+			for _, cwd := range []string{e.cwd, f.Root} {
+				original := e.cwd
+				e.cwd = cwd
+				prompt := e.ok(a.Brief[1:]...)
+				if !strings.Contains(prompt, "Review the implementation against the approved spec.") {
+					t.Fatalf("review brief missing from prompt: %s", prompt)
+				}
+				e.cwd = original
+			}
+			slot := fmt.Sprintf("R%d", count+1)
+			e.ok("panel", "checkout", reg.Slug, "--spec", f.SpecID, "--slot", slot, "--dispatch")
 			token := e.lease(a.Step)
 			tuple, _, err := e.row(a.Step).Tuple()
 			e.must(err)
-			v := paneltest.Verdict("APPROVE")
+			word := "APPROVE"
+			if count == 0 {
+				word = "REQUEST_CHANGES"
+			}
+			v := paneltest.Verdict(word)
 			v.Slot = fmt.Sprintf("R%d", tuple.Slot)
 			v.Round = a.Round
 			v.ReviewedSHA = a.Subject.Commit
@@ -73,7 +94,17 @@ func TestS134Final_CanonicalLayout(t *testing.T) {
 			if !ok || receipt.Commit != holding || receipt.Path != filepath.ToSlash(path) || kernel.ValidReceipt(f.Root, receipt) != nil {
 				t.Fatalf("holding commit not retained: %+v", receipt)
 			}
+			if count == 0 {
+				e.ok("panel", "refute", reg.Slug, "--spec", f.SpecID, "--slot", v.Slot, "--round", fmt.Sprint(a.Round), "--by", "operator", "--ground", "disproven", "--reason", "The implementation covers the finding.", "--evidence", a.Subject.Commit)
+			}
 			count++
+		}
+		for _, cwd := range []string{e.cwd, f.Root} {
+			original := e.cwd
+			e.cwd = cwd
+			e.ok("panel", "verify", reg.Slug, "--spec", f.SpecID)
+			e.ok("panel", "tally", reg.Slug, "--spec", f.SpecID)
+			e.cwd = original
 		}
 		if count != 3 {
 			t.Fatalf("reviewed %d slots", count)

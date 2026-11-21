@@ -513,73 +513,7 @@ func reviewerCountNotesFor(cfg *config.Config, root string) string {
 	return b.String()
 }
 
-// configShowReviewRoots returns the roots `config show` scans for
-// registered panels: the repo root itself (the legacy/canonical root
-// `review/` convention) plus every spec's own directory (the co-located
-// `<spec-dir>/reviews/` convention, spec 106) plus the workspace dir
-// (`.mindspec`, spec 123 R8c — the ad-hoc `.mindspec/reviews/<slug>`
-// convention `panel create --gate adhoc` now produces). panel.Scan
-// already globs both the `review/` and `reviews/` segments under each
-// given root, so this list is the set of DIRECTORIES to check, not the
-// segment names. Unlike internal/complete's panelGateRoots (which is
-// NEVER extended to `.mindspec` — ad-hoc panels stay outside every
-// lifecycle gate, ADR-0037), this is not layout-aware or bead-scoped —
-// `config show` (and `panel tally`/`panel verify` via
-// findPanelRegistration, panel.go) has no bead/spec context, so it
-// checks every convention that might hold a registered panel.
-// Best-effort: an unreadable MAIN specs directory still falls through to
-// the repo root, the workspace dir, and the worktree spec dirs (below).
-//
-// GH #222: the list ALSO enumerates spec dirs inside existing worktrees
-// under the default worktrees root — pre-epic, a spec_approve/
-// plan_approve panel is created via panelDirFor → workspace.SpecDir,
-// which is worktree-aware (tier 1/2: the spec dir exists ONLY on the
-// spec branch's worktree until the spec lands on main), so `panel
-// create` writes <worktree>/<spec-dir>/reviews/<slug>/panel.json.
-// Without the worktree tier here, `panel verify`/`panel tally` (via
-// findPanelRegistration) could not resolve the panel `panel create`
-// just registered. Like SpecDir, this deliberately scans the default
-// ".worktrees" root rather than honoring cfg.WorktreeRoot — it must
-// locate existing on-disk worktrees, which may have been created with
-// a different config at the time. panel.Scan dedupes overlapping roots
-// by symlink-resolved absolute path, so a spec dir reachable both ways
-// yields one registration.
+// configShowReviewRoots uses the same panel locations as the kernel state reader.
 func configShowReviewRoots(root string) []string {
-	roots := []string{root, workspace.MindspecDir(root)}
-	specsDir := workspace.SpecsDir(root)
-	entries, err := os.ReadDir(specsDir)
-	if err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				roots = append(roots, filepath.Join(specsDir, e.Name()))
-			}
-		}
-	}
-	wtEntries, err := os.ReadDir(workspace.DefaultWorktreesDir(root))
-	if err != nil {
-		return roots
-	}
-	for _, wt := range wtEntries {
-		if !wt.IsDir() {
-			continue
-		}
-		wtRoot := filepath.Join(workspace.DefaultWorktreesDir(root), wt.Name())
-		// Mirror SpecDir's worktree tiers: flat (.mindspec/specs/<id>)
-		// and canonical (.mindspec/docs/specs/<id>).
-		for _, specsParent := range []string{
-			filepath.Join(wtRoot, ".mindspec", "specs"),
-			filepath.Join(wtRoot, ".mindspec", "docs", "specs"),
-		} {
-			specEntries, err := os.ReadDir(specsParent)
-			if err != nil {
-				continue
-			}
-			for _, se := range specEntries {
-				if se.IsDir() {
-					roots = append(roots, filepath.Join(specsParent, se.Name()))
-				}
-			}
-		}
-	}
-	return roots
+	return workspace.PanelReviewRoots(root)
 }

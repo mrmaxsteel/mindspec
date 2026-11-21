@@ -57,10 +57,7 @@ func RoundsForGate(s State, gate string) (int, error) {
 }
 
 func panelDirectories(root, specDir string) ([]panel.Registration, error) {
-	roots := []string{root, filepath.Join(root, ".mindspec"), specDir}
-	if specRoot := workspace.TreeRootForSpecDir(specDir); specRoot != "" && specRoot != root {
-		roots = append(roots, specRoot, filepath.Join(specRoot, ".mindspec"))
-	}
+	roots := workspace.PanelReviewRoots(root, specDir)
 	regs := panel.Scan(roots...)
 	seen := map[string]bool{}
 	for _, r := range regs {
