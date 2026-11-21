@@ -260,8 +260,10 @@ blocks Y" = Y waits for X.
   original left on disk: `--apply` creates no
   `.verify.a2` and no slot attempt, the fix keeps its `mindspec_reproduced`, after the fix closes `panel create 2`
   exits 0 (mutation: the changed-finding trigger acts on round 1), and the round-2 slot brief shows the round-1
-  findings and returns that the verify record names and no text from the edit or from `R9-round-1.json` (mutations: the
-  brief reads the verdict files at the branch head; `round-open` enumerates the files on disk when the fix closes). No public event leases a verify after its fix exists, so the
+  findings and returns that the verify record names and no text from the edit or from `R9-round-1.json`; f's text is
+  4096 bytes with a requirement after byte 2048, and the body shows that requirement (mutations: the brief reads the
+  verdict files at the branch head; `round-open` enumerates the files on disk when the fix closes; the store cuts the
+  text at 2048 bytes). No public event leases a verify after its fix exists, so the
   fixture seeds `.verify.a2`: its lease with `--actor F` exits non-zero naming the fix step, and another actor's lease
   exits 0. After round 2 is refused, a
   `<2>.review.r2.verify` lease with the actor of `<2>.review.r2.fix` exits non-zero.
@@ -322,7 +324,14 @@ blocks Y" = Y waits for X.
   generation-2 `submit` of another verdict exits non-zero. The receipt names generation 1's actor. Fresh fixture, a
   lens step: generation 1 leased, `lease --take`, then a commit moves its authorised subject: the pass closes the lens
   step `superseded` and opens `.lens.a2` on the new subject; the generation-1 `submit` exits non-zero; a `submit` to
-  `.a2` and then `panel create` exit 0.
+  `.a2` and then `panel create` exit 0. Fresh fixture, a verify of findings f and g: a submit of record X (both
+  `refuted`) killed after its close writes and before the receipt; the same submit then gives one record per finding
+  and the receipt `at` of `mindspec_closing`. Fresh fixture, the same kill, then a submit of record Y (g `reproduced`)
+  exits non-zero naming `mindspec_closing`; the next pass creates `.verify.a2`, X's records discharge nothing, and after
+  `.a2` closes with Y the fix's `mindspec_reproduced` is [g]. Fresh fixture, generation 1 killed the same way, then
+  `lease --take` and a generation-2 submit with f `reproduced`: it exits non-zero, the pass creates `.verify.a2`, and
+  after `.a2` reproduces f, `panel refute --actor X` of g leaves the gate and the fix open (mutations: the rerun keeps
+  the first run's writes; a differing record is accepted).
 - [ ] AC22 (R12, §13.11): the `panel create 1` entry has no `--brief-file`; after it, `panel prompt` of each slot exits
   0 and prints the managed header, the files in scope and its lens from its `focus` in `panel.json`; the adversary
   slot has no `focus` and prints its configured lens. A 3-slot scoped round on the default roster (adversary fourth)
