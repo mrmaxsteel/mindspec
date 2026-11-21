@@ -182,6 +182,20 @@ func TestS134Rounds_CheckoutCopies(t *testing.T) {
 					t.Fatalf("copied rounds=%d, %v; want 3", n, err)
 				}
 			}
+			// A stale checkout must not hide a later round on the same subject.
+			lines, err := ReadLedger(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(copyDir, dispositionsFileName), append(lines[0], '\n'), 0644); err != nil {
+				t.Fatal(err)
+			}
+			for _, regs := range [][]Registration{{{Dir: copyDir}, {Dir: source}}, {{Dir: source}, {Dir: copyDir}}} {
+				n, err := RoundsForGate(regs, "x", gate, bead)
+				if err != nil || n != 2 {
+					t.Fatalf("stale copy rounds=%d, %v; want 2", n, err)
+				}
+			}
 			if err := os.WriteFile(filepath.Join(copyDir, dispositionsFileName), []byte("{bad\n"), 0644); err != nil {
 				t.Fatal(err)
 			}

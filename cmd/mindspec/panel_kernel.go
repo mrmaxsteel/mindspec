@@ -137,7 +137,7 @@ func panelKernelGuard(s kernel.State, gate string, limit bool) error {
 	if s.Halted() {
 		for id, a := range s.Answers() {
 			if a.Option == "halt" {
-				return panelVerbFailure(fmt.Errorf("spec is halted by %s", id))
+				return guard.NewFailure(fmt.Sprintf("spec is halted by %s", termsafe.Escape(id)), "mindspec next-action")
 			}
 		}
 	}

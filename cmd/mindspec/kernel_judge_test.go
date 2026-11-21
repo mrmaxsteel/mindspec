@@ -60,11 +60,15 @@ func judgeCmdLease(t *testing.T, f *kerneltest.Fixture, bin, id string) string {
 	}
 	return fields[2]
 }
-func judgeCmdArtifact(t *testing.T, f *kerneltest.Fixture, j kernel.Judgement) string {
+func judgeCmdArtifact(t *testing.T, f *kerneltest.Fixture, j kernel.Judgement, slugs ...string) string {
 	t.Helper()
 	data, err := json.Marshal(j)
 	f.Must(err)
-	path := filepath.Join(".mindspec", "specs", f.SpecID, "reviews", "panel", "judgement.json")
+	slug := "panel"
+	if len(slugs) > 0 {
+		slug = slugs[0]
+	}
+	path := filepath.Join(".mindspec", "specs", f.SpecID, "reviews", slug, "judgement.json")
 	judgeCmdCommit(t, f, path, string(data))
 	return filepath.Join(f.Root, path)
 }
@@ -156,6 +160,73 @@ func TestS134JudgeCmd_InvalidThenRepanel(t *testing.T) {
 			f.Must(err)
 			if string(from) != gate || round.Round != 2 || round.Subject != newest || round.SlotCount != n || !reflect.DeepEqual(round.Paths, paths) || len(out.Run) != 1 || !reflect.DeepEqual(out.Run[0].Paths, paths) || !reflect.DeepEqual(out.Run[0].Argv, []string{"mindspec", "panel", "create", f.Items[0]}) {
 				t.Fatalf("wrong re-panel authorisation: %+v %+v", row, out)
+			}
+		})
+	}
+}
+
+func TestS134JudgeCmd_RepanelCreateSlots(t *testing.T) {
+	bin := buildMindspecBinary(t)
+	for _, kind := range []string{"bead", "final"} {
+		t.Run(kind, func(t *testing.T) {
+			f, gate, old, newest := judgeCmdFixture(t)
+			target := f.Items[0]
+			slug := "panel"
+			if kind == "final" {
+				actorCmdGit(t, f, "switch", "spec/"+f.SpecID)
+				old = judgeCmdCommit(t, f, ".mindspec/config.yaml", "panel:\n  reviewers:\n    - family: harness\n      count: 3\n")
+				for _, item := range f.Items {
+					kerneltest.PassGate(f, item+".review", old)
+					f.Must(f.Store.SetStatusIf(item, "open", "closed"))
+					f.Must(f.Store.WriteMetadata(item, map[string]any{kernel.KeyCompletion: old}))
+					actorCmdGit(t, f, "update-ref", "refs/heads/bead/"+item, old)
+				}
+				gate, target = f.Epic+".final", f.SpecID
+				slug = "final-panel"
+				kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: slug, Round: 1, Subject: old, Slots: []string{"R1", "R2", "R3"}})
+				kerneltest.PassGate(f, gate, old)
+				newest = judgeCmdCommit(t, f, "final.go", "package final\n")
+			}
+			store := actorCmdStore(t, f)
+			out := judgeCmdApply(t, f, bin)
+			id := gate + ".judge.a1"
+			if len(out.Actions) != 1 || out.Actions[0].Step != id {
+				t.Fatalf("missing real change judge: %+v", out)
+			}
+			token := judgeCmdLease(t, f, bin, id)
+			artifact := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}}, slug)
+			raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--artifact", artifact)
+			if code != 0 {
+				t.Fatalf("re-panel: %d %s", code, raw)
+			}
+			raw, code = actorCmdRun(t, f, bin, "panel", "create", target)
+			if code != 0 {
+				t.Fatalf("create re-panel: %d %s", code, raw)
+			}
+			data, err := os.ReadFile(store)
+			f.Must(err)
+			var rows map[string]kernel.Record
+			f.Must(json.Unmarshal(data, &rows))
+			for _, row := range rows {
+				tuple, _, _ := row.Tuple()
+				if tuple.Kind == "change-judge" && tuple.Gate == gate && row.Key() != id {
+					t.Errorf("open successor gate created an extra judge: %s", row.Key())
+				}
+			}
+			raw, code = actorCmdRun(t, f, bin, "next-action", f.SpecID, "--json")
+			if code != 0 {
+				t.Fatalf("read after create: %d %s", code, raw)
+			}
+			f.Must(json.Unmarshal([]byte(raw), &out))
+			var actions []string
+			for _, action := range out.Actions {
+				actions = append(actions, action.Step)
+				if action.Kind != "review-slot" || action.Round != 2 || !action.Exists {
+					t.Errorf("unexpected re-panel action: %+v", action)
+				}
+			}
+			if !reflect.DeepEqual(actions, []string{gate + ".r2.R1", gate + ".r2.R2"}) || len(out.Waiting)+len(out.Decisions)+len(out.Run) != 0 {
+				t.Fatalf("expected only round-2 slots: %+v", out)
 			}
 		})
 	}

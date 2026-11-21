@@ -725,7 +725,11 @@ func checkPanelSlugOwner(root, slug, specID, gate, dir string) error {
 		if sameDir && (reg.Err != nil || (gate == "adhoc" && reg.Panel.Gate == "adhoc")) {
 			continue
 		}
-		if reg.Err != nil || gate == "adhoc" || reg.Panel.Gate == "adhoc" || reg.Panel.Spec != specID {
+		if reg.Err != nil {
+			return guard.NewFailure(fmt.Sprintf("panel copy is damaged in %s: %s", termsafe.Escape(reg.Dir), termsafe.Escape(reg.Err.Error())),
+				"repair panel.json in that directory or move the damaged panel out of the review root, then retry")
+		}
+		if gate == "adhoc" || reg.Panel.Gate == "adhoc" || reg.Panel.Spec != specID {
 			return guard.NewFailure(fmt.Sprintf("panel slug %q is already registered in %s (spec %s)", slug, termsafe.Escape(reg.Dir), termsafe.Escape(reg.Panel.Spec)),
 				"mindspec panel create <new-slug> --target <ref>"+panelCreateScope(specID, gate))
 		}

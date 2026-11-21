@@ -9,6 +9,7 @@ An enrolled spec uses its active gate to authorise each review round.
 It refuses a `--target` other than the gate branch.
 It selects the highest gate attempt.
 A re-panel keeps its required slot count and changed paths as the round scope.
+An open successor gate cannot create a change judge for an older passed attempt.
 The registration and round ledger retain that scope.
 A closed gate, an open slot, an unanswered decision, a collision, or a halted spec blocks creation.
 A round must equal the total registered rounds plus one.
@@ -38,6 +39,7 @@ In a spec worktree root or its `.mindspec` directory, lookup reads only the requ
 slug and requires the panel to name that worktree's spec. Checkout copies of shared
 panels do not gain another owner. Copies of the same ledger round count once.
 A slug owned by another spec is refused during creation.
+A damaged checkout copy refuses creation, names its directory, and gives a repair step.
 Use `--spec` to select a spec when a slug has more than one owner.
 
 ### Surface scan
@@ -1489,6 +1491,8 @@ The answer remains effective if an open child prevents the close.
 A halt prevents further claims and submissions.
 A retry of the same halt answer can finish the halt.
 The command exits with code 4 when its pass reports a halted spec.
+An accepted halt answer reports the halt without an error label.
+Panel creation on a halted spec directs the operator to `mindspec next-action`.
 
 ## next-action
 
@@ -1621,6 +1625,8 @@ Name a legacy work item or use `next --spec <spec>` to select legacy work in a m
 A successful rerun for a pre-kernel spec directs the operator to `mindspec next`.
 
 A refused submit leaves its pre-pass writes in place. The next pass covers the named step.
+An excluded gate remains visible for attempt selection and evidence reads.
+The pass omits it from gate target lists and writes nothing to it.
 A pass closes open slots from older rounds, including retries, with a `superseded` receipt.
 A raw close of a slot from an older round gets that receipt and creates no retry.
 A current-round raw close requires a retry even when its subject metadata differs.

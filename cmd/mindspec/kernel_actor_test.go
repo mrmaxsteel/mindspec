@@ -178,8 +178,8 @@ func TestS134SubmitCmd_ImplementAndHalt(t *testing.T) {
 		store := actorCmdStore(t, f)
 		for i := 0; i < 2; i++ {
 			out, code := actorCmdRun(t, f, bin, "submit", d, "--answer", "halt")
-			if strings.Contains(out, "Usage:") {
-				t.Fatalf("halt printed usage: %s", out)
+			if strings.Contains(out, "Usage:") || strings.Contains(out, "Error:") {
+				t.Errorf("halt printed a failure: %s", out)
 			}
 			if code != 4 || !strings.Contains(out, `"status":"halted"`) || !strings.Contains(out, "spec is halted by "+d) {
 				t.Fatalf("halt exit: %d %s", code, out)
@@ -190,6 +190,10 @@ func TestS134SubmitCmd_ImplementAndHalt(t *testing.T) {
 			if row.Status != "closed" || receipt.Answer == nil || receipt.Answer.Option != "halt" {
 				t.Fatalf("halt receipt/close missing: %+v", row)
 			}
+		}
+		out, code := actorCmdRun(t, f, bin, "panel", "create", f.Items[0])
+		if code == 0 || !strings.Contains(out, "spec is halted by "+d) || !strings.Contains(out, "recovery: mindspec next-action") || strings.Contains(out, "correct the panel arguments") {
+			t.Fatalf("halted panel recovery: %d %s", code, out)
 		}
 	})
 }

@@ -12,7 +12,7 @@ func Pass(reg *Registry, state State, apply bool) (PassResult, error) {
 	return passExcept(reg, state, apply, "")
 }
 
-// passExcept keeps the named step out of rule inputs and writes.
+// passExcept omits the named step from target lists and blocks writes to it.
 func passExcept(reg *Registry, state State, apply bool, step string) (PassResult, error) {
 	var result PassResult
 	if !state.Enrolled {
@@ -64,7 +64,10 @@ func reduce(reg *Registry, state State, apply bool, step string) (PassResult, er
 				excluded[key], excluded[record.ID] = true, true
 				excludedRecord := record
 				input.ExcludedStep = &excludedRecord
-				delete(input.Records, key)
+				tuple, has, err := record.Tuple()
+				if err != nil || !has || (tuple.Kind != "bead-gate" && tuple.Kind != "final-gate") {
+					delete(input.Records, key)
+				}
 				break
 			}
 		}

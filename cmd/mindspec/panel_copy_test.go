@@ -4,6 +4,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
@@ -33,6 +34,15 @@ func TestS134PanelCreate_AdhocCheckoutCopy(t *testing.T) {
 			wt := filepath.Join(f.Root, ".worktrees", "worktree-spec-001-x")
 			e.git(f.Root, "worktree", "add", "-b", "spec/001-x", wt)
 			e.ok("panel", "create", "demo", "--gate", "adhoc", "--round", "2", "--target", "main")
+			copyDir := filepath.Join(wt, "review", "demo")
+			if layout == "flat" {
+				copyDir = filepath.Join(wt, ".mindspec", "reviews", "demo")
+			}
+			f.Must(os.WriteFile(filepath.Join(copyDir, panel.FileName), []byte("{bad"), 0644))
+			out, code := e.run("panel", "create", "demo", "--gate", "adhoc", "--round", "3", "--target", "main")
+			if code == 0 || !strings.Contains(out, "damaged") || !strings.Contains(out, copyDir) || !strings.Contains(out, "repair panel.json") || strings.Contains(out, "already registered") {
+				t.Fatalf("damaged copy recovery: %d %s", code, out)
+			}
 		})
 	}
 }

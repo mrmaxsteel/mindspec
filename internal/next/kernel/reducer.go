@@ -57,7 +57,7 @@ func passed(s State, r Record) bool {
 }
 func activeGate(s State, base string) string {
 	best, attempt := base, 0
-	for _, id := range s.Gates {
+	for _, id := range s.gateAttempts() {
 		t, _, _ := s.Records[id].Tuple()
 		if t.Gate == base && t.Attempt > attempt {
 			best, attempt = id, t.Attempt

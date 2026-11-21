@@ -251,7 +251,7 @@ func RegisteredPanelPaths(s State, gate string) []string {
 	if err != nil {
 		return paths
 	}
-	for _, id := range s.Gates {
+	for _, id := range s.gateAttempts() {
 		t, err := kernelid.Parse(id)
 		if err != nil || t.Gate != wanted.Gate {
 			continue
@@ -301,7 +301,7 @@ func FinalizePanelPaths(s State) []string {
 		allowed[GateBase(item)] = true
 	}
 	paths := map[string]bool{}
-	for _, gate := range s.Gates {
+	for _, gate := range s.gateAttempts() {
 		t, err := kernelid.Parse(gate)
 		if err != nil || !allowed[t.Gate] || !owned(s, gate) {
 			continue
@@ -581,7 +581,7 @@ func judgeApply(s State) (Changes, error) {
 		if saved, ok, _ := Decode[Judgement](r.Metadata, KeyJudgement); ok && reflect.DeepEqual(saved, j) {
 			continue
 		}
-		for _, candidate := range s.Gates {
+		for _, candidate := range s.gateAttempts() {
 			record := s.Records[candidate]
 			prior, _, _ := Decode[Receipt](record.Metadata, KeyClose)
 			for _, carry := range prior.CarryOvers {

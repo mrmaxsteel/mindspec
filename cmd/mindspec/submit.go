@@ -16,6 +16,7 @@ import (
 var submitCommandStateFn = kernelCommandState
 
 var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decision>", Short: "Submit evidence or answer a kernel decision", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd.SilenceErrors = false
 	state, err := submitCommandStateFn("", args[0])
 	if err != nil {
 		return err
@@ -58,10 +59,13 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 			}
 		}
 		sort.Strings(halts)
-		if len(halts) == 0 {
-			return exitErr(4, fmt.Errorf("spec is halted\nrecovery: mindspec next-action"))
+		message := "spec is halted"
+		if len(halts) > 0 {
+			message += " by " + termsafe.Escape(halts[0])
 		}
-		return exitErr(4, fmt.Errorf("spec is halted by %s\nrecovery: mindspec next-action", termsafe.Escape(halts[0])))
+		fmt.Fprintln(cmd.ErrOrStderr(), message+"\nrecovery: mindspec next-action")
+		cmd.SilenceErrors = true
+		return exitErr(4, fmt.Errorf("%s", message))
 	}
 	return nil
 }}

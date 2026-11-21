@@ -18,7 +18,7 @@ import (
 // State is a fresh read of one epic's recorded work and evidence.
 type State struct {
 	Store *Store `json:"-"`
-	// ExcludedStep preserves holds while a verb omits its own step.
+	// ExcludedStep preserves holds and gate attempts while a verb omits its own target.
 	ExcludedStep  *Record `json:"-"`
 	Root          string
 	SpecID        string
@@ -236,7 +236,9 @@ func (s *State) classify() {
 			continue
 		}
 		if t.Kind == "bead-gate" || t.Kind == "final-gate" {
-			s.Gates = append(s.Gates, key)
+			if s.ExcludedStep == nil || s.ExcludedStep.Key() != key {
+				s.Gates = append(s.Gates, key)
+			}
 		} else {
 			s.Steps = append(s.Steps, key)
 		}
@@ -245,6 +247,18 @@ func (s *State) classify() {
 	sort.Strings(s.Steps)
 	sort.Strings(s.Foreign)
 	sort.Strings(s.Collisions)
+}
+
+// gateAttempts includes an omitted gate for selection and evidence reads.
+// Gates lists only the targets that rules may process.
+func (s State) gateAttempts() []string {
+	if r := s.ExcludedStep; r != nil {
+		t, has, err := r.Tuple()
+		if err == nil && has && (t.Kind == "bead-gate" || t.Kind == "final-gate") {
+			return append(append([]string{}, s.Gates...), r.Key())
+		}
+	}
+	return s.Gates
 }
 func (s State) OpenDecisions() []Record {
 	var result []Record
