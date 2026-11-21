@@ -76,7 +76,7 @@ or starts an actor.
 {"schema":"mindspec.next-action/v2","status":"work","applied":true,"revision":"sha256:..","retry_at":"<t>",
  "policy":{"round_limit":5,"lease_ttl":"2h"},
  "actions":[{"step":"<w>.review.r2.R3","kind":"review-slot","exists":true,"round":2,"subject":{"commit":"<oid>"},
-   "claim":["mindspec","lease","<step>","--actor","<actor>"],"brief":[".."],"submit":[".."]}],
+   "claim":["mindspec","lease","<step>"],"brief":[".."],"submit":[".."]}],
  "waiting":[{"step":"<w>.impl.a1","lease":{"generation":1,"expires":"<t>"}}],
  "decisions":[{"step":"<w>.review.decide.limit.r5","options":["continue:<n>","halt"],"submit":[".."]}],
  "run":[{"actor":"binary","argv":["mindspec","complete","<w>"]}],"flags":[{"code":"unreceipted-close","repair":[".."]}]}
@@ -84,26 +84,22 @@ or starts an actor.
 
 - `status` `work` / `wait` / `halted` / `done` / `indeterminate` exits 0 / 3 / 4 / 5 / 1. `indeterminate` means no
   actions. `kind` is `implement`, `lens`, `review-slot`, `verify`, `fix` or `change-judge`; the kind order is that
-  list, then `decision` (the `decisions` array). Commands are argv arrays; `<actor>` and `<text>` are placeholders
-  that the orchestrator fills, in `actions` and in `run` entries. Order: plan, kind, slot. Text goes through `termsafe`.
+  list, then `decision` (the `decisions` array). Commands are argv arrays; `<text>` is a placeholder that the
+  orchestrator fills. Order: plan, kind, slot. Text goes through `termsafe`.
 - Inputs: the epic subtree, the git refs it names, the panel ledger and verdicts, the pinned policy, the clock against
   expiries. `revision` digests them (no display times, no free text). Same inputs give the same bytes. An expiry
   changes the output (`retry_at`). A no-change `--apply` writes nothing. A removed field, a new `kind` or a new
   `status` raises `schema`.
 - Refuses: no approved plan; a pre-kernel spec (§8); `--apply` with bd silent or no `step`.
 
-## 5. `lease <step> --actor <id> [--renew <t> | --release <t> | --take --reason <text>]`
+## 5. `lease <step> [--renew <t> | --release <t> | --take --reason <text>]`
 
 bd's lease cannot serve: its holder is the bd actor (one per clone) and its TTL is in minutes. Under the phase lock,
 `lease` writes `in_progress`, a monotonic `generation`, the expiry and a token hash with bd `--if-status`
-compare-and-set. It prints the token once. `lease <w>.impl.a<k> --actor <id>` and `next <w> --actor <id>` are the same
-claim. Refuses: a foreign bead, a gate, a decision; a held or blocked ancestor or upstream (B1, B2; an open epic, work
-item or gate does not hold); a live lease; a halted spec; an unanswered decision (§13.8); a new generation with no
-`--actor`; an actor that §13.10 excludes. `--actor` names the holder, a label the orchestrator assigns; `--renew` and
-`--release` keep it. Each new generation (first lease, replacement of an expired lease, or `--take`) stores the actor in
-the lease record (`actor`) and appends `{"generation", "actor", "via"}` to `mindspec_actors` (`via`: `lease`,
-`take`, or `receipt` for `submit --take`, §9); earlier entries stay. `--take` revokes, issues generation N+1 and appends a take event to `mindspec_takes`:
-`via: "lease"`, reason, time, the new generation, the new holder's `actor`, `revoked_actor`, the revoked generation's
+compare-and-set. It prints the token once. `lease <w>.impl.a<k>` and `next <w>` are the same claim. Refuses: a
+foreign bead, a gate, a decision; a held or blocked ancestor or upstream (B1, B2; an open epic, work item or gate does
+not hold); a live lease; a halted spec; an unanswered decision (§13.8). `--take` revokes, issues generation N+1 and
+appends a take event to `mindspec_takes`: `via: "lease"`, reason, time, the new generation, the revoked generation's
 token hash (`revoked_token_hash`) and the step's subject at the take (`subject`, §6). `panel.lease_ttl` defaults to
 `2h` and is renewable.
 The metadata key `mindspec_raw_claims` holds an array of raw-claim records: `[{"at":"<RFC3339 time>"}]`.
@@ -114,7 +110,7 @@ after the item is closed and merged and its halt, blocker, and gate checks pass.
 for the item to count as done.
 An epic, work item or gate with status `in_progress` does not hold work. The pass flags `raw-claim` and names the record.
 
-## 6. `submit <step> --lease <t> (--artifact <path> | --commit <oid>)` | `submit <step> --take --actor <id> --reason <text> (--artifact <path> | --commit <oid>)` | `submit <decision> --answer <opt>`
+## 6. `submit <step> --lease <t> (--artifact <path> | --commit <oid>)` | `submit <step> --repair --reason <text> (--artifact <path> | --commit <oid>)` | `submit <decision> --answer <opt>`
 
 Checks: the generation; the step's subject (**Subjects**); the artifact resolves at a commit and the blob matches; the
 artifact fits the kind (a lens record for a lens step, §13.11; a verdict for a slot; a verify record for a verify step,
@@ -124,34 +120,32 @@ commit that the step's subject contains are refused; a commit past the claim bas
 for a change judge, §13.2). Each `submit` and `panel submit` runs under the phase lock, so no two writes of one step
 interleave. On a step with a valid receipt no submit makes a close write; the closed-step rules below apply. Else, for
 a lens or verify step, it first makes the close writes of its kind (§13.10, §13.11).
-Then it writes the receipt (with the accepted `generation` and that generation's `actor` from
-`mindspec_actors`), closes, and runs one reducer pass (order: §13.9). The §9 receipt with no reopen and `submit --take`
-make the same close writes before their receipt. **Closing pin** (verify only). On every receipt path the pin runs
+Then it writes the receipt (with the accepted `generation`), closes, and runs one reducer pass (order: §13.9). The §9
+receipt with no reopen and `submit --repair` make the same close writes before their receipt. **Closing pin** (verify only). On every receipt path the pin runs
 after every other check of this section and every record check of §13.10 (`bead.CheckDeferral` included) passes, the
 token and generation included, so a refused token, a foreign slot or a bad record writes nothing. On a step with a
 valid receipt the pin writes nothing. On a step with no valid receipt, the submit builds and size-checks every close write (§13.10 bound) and then,
-when absent, writes the step metadata `mindspec_closing` {`generation`, `actor`, `record_sha256` (the sha256 of the
-record bytes at the resolved commit), `at` (RFC3339Nano UTC from `kernel.Now`)}. A submit whose generation, actor or
-`record_sha256` differs refuses, names `mindspec_closing`, and writes only `mindspec_closing.conflict` (its
-generation, actor and `record_sha256`). A take after a pin thus retires the attempt also for the same record bytes,
-as the ledger records name the pinning actor. While `conflict` is set, each submit of that attempt refuses and writes
+when absent, writes the step metadata `mindspec_closing` {`generation`, `record_sha256` (the sha256 of the record
+bytes at the resolved commit), `at` (RFC3339Nano UTC from `kernel.Now`)}. A submit whose generation or `record_sha256`
+differs refuses, names `mindspec_closing`, and writes only `mindspec_closing.conflict` (its generation and
+`record_sha256`). A take after a pin thus retires the attempt also for the same record bytes. While `conflict` is set, each submit of that attempt refuses and writes
 nothing, and `submit` reads `conflict` again just before the receipt write. The next pass retires the current attempt
 when it has no valid receipt and its `mindspec_closing` has a `conflict`: it closes it `superseded` when open and
-creates `<id>.a<k+1>` with the keys of its kind (§9, §13.10). A matching rerun (same generation, actor and
+creates `<id>.a<k+1>` with the keys of its kind (§9, §13.10). A matching rerun (same generation and
 `record_sha256`, no `conflict`) reuses `mindspec_closing.at` and makes each close write again from the same record:
 it writes `mindspec_returns` and the `mindspec_deferrals` entries of this `verify_step` by key, and appends the same
 ledger records and rows (same key, same content, `created_at` = `mindspec_closing.at`), which the ledger keeps once; then it
 writes the receipt. A lens has no pin: its one close write, `mindspec_round.lenses`, is replaced whole on each run,
 so the lenses that stand are those of the submit that wrote the receipt (§13.11). Refuses: an absent token; a token of no
 generation of the step; a stale subject; a foreign slot; a missing artifact; a different result for a closed step (the
-step stays closed and its receipt does not change); a `submit --take` on a step that is open, on a step that was never leased, on a step
+step stays closed and its receipt does not change); a `submit --repair` on a step that is open, on a step that was never leased, on a step
 with a valid receipt, or with evidence that does not resolve or fit its kind and subject (§9), each with the step unchanged.
 **Generation rule** (`submit` and `panel submit`, §7): a token of
 the current generation is accepted. A token of a revoked generation (it matches a take event's `revoked_token_hash`) is
 accepted when the step is open and no newer generation has a receipt or (verify) a `mindspec_closing`. An open step keeps the take event's `subject`,
 because a step's subject never changes: a subject move closes an open lens or judge step `superseded`, and the pass
 closes an open verify `superseded` when it retires it, each with a new attempt (§13.2, §13.7, §13.10). On a late acceptance the current lease ends `superseded` (lease
-record `ended`), and the receipt names the accepted generation, its actor and the superseded generation
+record `ended`), and the receipt names the accepted generation and the superseded generation
 (`superseded_generation`). Else it refuses and names the condition. The same receipt
 again on a closed step exits 0 with no change (its close writes came before the receipt); on an open step it closes it. A decision needs no token and takes a
 listed option; it counts from its receipt, even when a foreign child keeps it open.
@@ -176,7 +170,7 @@ no child, judge, or blocker is open, the epic is open, and the spec is not halte
 The existing verbs stay. `run` lists them; each closes the kernel step it names, runs one reducer pass (order:
 §13.9) and keeps today's refusals. `plan approve` enrols the spec (§8) and runs no reducer pass.
 
-- `next <w> --actor <id>`: takes the lease of `<w>.impl.a<k>` exactly as `lease` does and prints the token. With a live
+- `next <w>`: takes the lease of `<w>.impl.a<k>` exactly as `lease` does and prints the token. With a live
   lease it refuses and names `lease --take`. It selects only approved work items, by computed id.
 - `panel create`: the one writer of a round registration (§13.7). As the `run` entry of a kernel gate (the bead or
   final gate of an enrolled spec) it takes the subject from the gate, reads the round's lens step from the gate round
@@ -184,10 +178,7 @@ The existing verbs stay. `run` lists them; each closes the kernel step it names,
   a lens step not closed `passed`, and `--brief-file`. Every other `panel create` keeps `--brief-file` (§13.11).
 - `panel submit`: closes the matching slot as `submit` does; it needs `--lease`, and §6's generation rule decides which
   generation it accepts.
-- `panel refute` / `panel defer`: on an enrolled gate each needs `--actor <id>`, writes it as the record's `by` and
-  in `mindspec_actors`, and refuses an actor that §13.10 refuses for the verify of that round and an actor recorded
-  on any attempt of `<gate>.r<N+1>.fix`. The moved-subject guard
-  (§13.2) holds its retally, except while the fix of a frozen round is open (§13.10). A passing retally closes the open verify or
+- `panel refute` / `panel defer`: on an enrolled gate the moved-subject guard (§13.2) holds its retally, except while the fix of a frozen round is open (§13.10). A passing retally closes the open verify or
   fix `superseded` and closes the gate `passed` with the review subject. After an open-gate `re-panel` judgement (§13.2),
   it does not close the gate: it authorises round N+1 of n slots as a passing tally does.
 - `brief <step>` (new): prints the brief of an actor step of an enrolled spec (§13.11) and writes nothing. It refuses
@@ -236,7 +227,7 @@ forge an answer. One controller host.
 In an enrolled spec, the verbs refuse what §7 lists. Flagged: a raw close of a kernel step (not evidence); a raw close
 of a work item (`raw-close`) and a `--force` close over an open child (`forced-close`), each with a §7 `complete`
 recovery; a raw claim (§12 item 3). Flags are computed from current state, never stored. Counted, never blocked:
-escape hatches, deferrals, `--take`, decision answers. `MINDSPEC_SKIP_PANEL=1` does not open or pass a gate: with no
+escape hatches, deferrals, `lease --take`, `submit --repair`, decision answers. `MINDSPEC_SKIP_PANEL=1` does not open or pass a gate: with no
 passing gate the verb refuses and names it; with a passing gate it is ignored and the verb proceeds (pre-kernel: as
 today). Floor: `FindOrphanedClosedBeads` and the self-orphan handling in `complete`. **Unreceipted close** (no or bad
 receipt): with evidence and a generation §6 accepts, `submit` makes the close writes of its kind and writes the
@@ -244,22 +235,21 @@ receipt (no reopen, §6). Else, when the step was leased (generation 1 or more) 
 evidence resolves at a commit and fits its kind and current subject (a slot's verdict at its registered path; an
 implement or fix commit past its claim base or its step subject (§6) on the branch the gate names, as §6 checks it; a lens or
 verify record at `<spec dir>/kernel/<step id>.json`; a judgement in a registered panel directory whose new
-subject is the judge's subject), the pass lists `submit <id> --take --actor <actor> --reason <text> (--artifact |
---commit) <evidence>` in `run` and creates no retry; `<actor>` is `mindspec_closing.actor` when the step has one (§6). That submit needs no token and runs every check of §6 and the
-§13.10 actor refusals on `--actor`. It issues no generation: it appends a take event (`via: "receipt"`, `generation` =
-the step's current generation, and `actor`) and a `mindspec_actors` entry (`via:
-"receipt"`), makes the close writes of its kind (§6), and then writes the receipt (`repaired: true`, `taken: true`,
-`actor` = `--actor`). Only when the step was never leased, no evidence
+subject is the judge's subject), the pass lists `submit <id> --repair --reason <text> (--artifact |
+--commit) <evidence>` in `run` and creates no retry. That submit needs no token and runs every check of §6. It issues
+no generation: it appends a repair event to `mindspec_takes` (`via: "repair"`, `generation` = the step's current
+generation), makes the close writes of its kind (§6), and then writes the receipt (`repaired: true`, `via:
+"repair"`). Only when the step was never leased, no evidence
 resolves and fits, or its `mindspec_closing` has a `conflict` or a `generation` that is not the step's current
-generation (§6), does the next pass create `<id>.a<k+1>` with `mindspec_from`. `submit --take` refuses an open step,
-a step that was never leased (so no record written outside a lease passes as a take), a step with a valid receipt and
+generation (§6), does the next pass create `<id>.a<k+1>` with `mindspec_from`. `submit --repair` refuses an open
+step, a step that was never leased (so no record written outside a lease passes as a repair), a step with a valid receipt and
 evidence that does not resolve or fit, and names the condition. A retry keeps the keys
 of its kind: subject, round, registration and decision, for a fix `mindspec_reproduced`, and for a verify
 `mindspec_findings` and `mindspec_read` (a retry verifies the same findings; a changed verdict file retires a verify
 instead, §13.10); the pass points
 `mindspec_round.lens` or `mindspec_round.verify` at a lens or verify retry. The pass, `panel create` and `submit`
 read the highest attempt not closed `superseded` of a slot or fix step and the attempt that `mindspec_round` names of
-a lens or verify step; the §13.10 independence checks read every attempt.
+a lens or verify step.
 
 ## 10. Rounds and decisions
 
@@ -280,13 +270,13 @@ claims, unreceipted closes, carry-overs, the slot count of each re-panel, and si
 `--allow-not-ready` joins both friction registries. Each row is `Event | Count | Details`, and Count is the number of
 records the row names. The new rows: `verify-reproduced`, `verify-refuted` and `verify-deferred` (one row per return
 type; Count = returns of that type in the `mindspec_returns` of every verify attempt); `late-submissions` (receipts
-with `superseded_generation`, §6); `take-receipts` (receipts with `taken: true`, §9); `lens-steps` (Count = lens
+with `superseded_generation`, §6); `repair-receipts` (receipts with `via: "repair"`, §9); `lens-steps` (Count = lens
 attempts of all gate rounds; one Details entry `<gate> r<N>: <k>` per gate round with k attempts).
 
-Takeover history is stored in `mindspec_takes`: one event for each `lease --take` (`via: "lease"`) and for each receipt
-under `submit --take` (`via: "receipt"`). The takeovers row counts every event of both kinds, whatever its generation.
-The unreceipted-closes row counts every receipt with `repaired: true`, so a receipt under `submit --take` counts in
-that row, in the takeovers row and in its own row. Actor history is stored in `mindspec_actors` (§5).
+Takeover history is stored in `mindspec_takes`: one take event for each `lease --take` (`via: "lease"`) and one repair
+event for each receipt under `submit --repair` (`via: "repair"`). The takeovers row counts every event of both kinds,
+whatever its generation. The unreceipted-closes row counts every receipt with `repaired: true`, so a receipt under
+`submit --repair` counts in that row, in the takeovers row and in its own row.
 Deferral history is stored in `mindspec_deferrals`, with distinct panel, round, slot, finding and target records. The
 deferrals row counts every record in it: each `panel defer` and each `deferred` verify return (§13.10).
 The latest `mindspec_take` and `mindspec_defer` records remain readable.
@@ -406,10 +396,8 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    removed after the call, stale files removed by the next pass) on every metadata write, `Create` included, full
    stored texts, and the 16 MiB `metadata-too-large` kernel limit, checked before the pin, and its recovery (§13.10); `prior.asks` and `prior.read` from `prior.verify` when set,
    and `prior.read` as audit history (§13.7); the fix check that a record commit cannot meet (§6); the `lens` key
-   (§13.7); the subject that §6's late-submission rule compares; `--actor` on
-   every new lease generation, on `next` and on `submit --take`, and `mindspec_actors`; declared actor labels as the B4
-   and B7 mechanism, and the exclusion of the reviewed commit's author steps and of the next fix's actors from a verify (§13.10); the generation of a receipt take
-   event and the audit row counts (§9, §11); the `veto` finding, its returns with no `deferred`, and the gate pass after
+   (§13.7); the subject that §6's late-submission rule compares; the generation of a repair event and the audit row
+   counts (§9, §11); the `veto` finding, its returns with no `deferred`, and the gate pass after
    a verify (§13.10); a veto finding for each off-roster REJECT, `hard_block` or INVALID file; no verify on an incomplete tally, and the next slot
    attempt for an uncounted roster verdict, its cap of 3 uncounted attempts and the one `uncounted` decision that lists
    every capped slot with its highest attempt, and the lease hold it shares with §13.8 (§13.10); the applied verify, a decision counted as its outcome, and the frozen round after it,
@@ -421,12 +409,10 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    authorises past the allowance, its attempt id and its `continue:<n>` that creates that round's lens step (§13.8); one new verify attempt
    when a withdrawal and a judgement retire it in one pass (§13.7); a reproduced off-roster veto as a code
    finding (§13.8); a veto verdict that gives no `ccr` finding; the verify record fields for a refutation or deferral,
-   the `verify_step` and `enrolled` fields and the deferral check before the pin; `--actor` and the independence check on `panel
-   refute` and `panel defer` of an enrolled gate, which refuses every actor that the verify of that round refuses, as a
-   verb refutation discharges a finding as a verify return does (§7, §13.10); the new verb
-   `brief <step>` (§7); the `--brief-file` scope (§7); `<actor>` and `<text>` in `run`
-   entries (§4); the `submit --take` refusals and the keys a retry keeps (§6, §9); the
-   never-leased step refused by `submit --take` and retried, a narrowing of ruling E to leased steps (§9); the audit row names (§11);
+   the `verify_step` and `enrolled` fields and the deferral check before the pin; the new verb
+   `brief <step>` (§7); the `--brief-file` scope (§7); `<text>` in `run`
+   entries (§4); the `submit --repair` refusals and the keys a retry keeps (§6, §9); the
+   never-leased step refused by `submit --repair` and retried, a narrowing of ruling E to leased steps (§9); the audit row names (§11);
    `panel tally` advisory on an enrolled gate; the adversary slot found by its roster lens; the lens step of a round
    with no lens slot; unknown fields refused in lens and verify records; the slot `focus` carrier and its precedence
    (§13.11); files in scope, the prior-round asks rendered from `prior.asks` alone, and the
@@ -575,7 +561,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     `finding_sha256`, and the list is not empty; `return` is `reproduced`, `refuted` or `deferred` (`veto`: `reproduced`
     or `refuted` only). A `refuted` return carries `ground` (`disproven`, `not-load-bearing` or
     `out_of_acceptance_scope`, the last with `ac`), a non-empty `reason` and `evidence` that resolves to a commit, a
-    repo path or an https URL, as `panel refute` checks them; its `by` is the receipt's `actor`. A `deferred` return
+    repo path or an https URL, as `panel refute` checks them; its `by` is the verify step's id. A `deferred` return
     carries a `target` bead id and a non-empty `reason`; `submit` runs the `bead.CheckDeferral` checks on it before the
     pin (§6). It refuses with the step open and names each missing, repeated or unknown finding, each unlisted return,
     each failed field and each failed deferral check. On the close it records each `ccr` or `slot` return that is
@@ -652,18 +638,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     Else B9 and §13.8 apply, and the fix's metadata `mindspec_reproduced` lists the reproduced findings (slot, round,
     finding, `finding_sha256`) as its scope. A passing `panel refute` or `panel defer` retally (§7) closes an open verify
     `superseded`. The enumerator lists every finding, those that a `panel refute` or `panel defer` already resolved
-    included; the verifier returns them again. **Independence** is a shape check on the declared actors in `mindspec_actors` (§5, §9): `lease` of a
-    verify, and `submit --take` of a verify, refuse an actor recorded on any slot of round N, an actor recorded on any
-    attempt of `<gate>.r<N+1>.fix`, and an actor recorded on a step that authored round N's subject (round 1: every `<w>.impl.a<k>`; round N>1 after a fix: every attempt of
-    `<gate>.r<N>.fix`; a scoped round: none, as no kernel step authored its subject; for `<epic>.final` round 1, the fix
-    and implement steps of the spec's work items). The `--actor` of `submit --take` is the step's actor for this check;
-    the run entry carries `<actor>` for the orchestrator to fill with a label that passes it. A review-slot lease does
-    not refuse the subject's author: the rulings name no such check, and the managed header is the slot's floor.
-    `lease` and `submit --take` of the fix `<gate>.r<N+1>.fix` refuse an actor recorded on any attempt of
-    `<gate>.r<N>.verify`, and the enrolled `panel refute` and `panel defer` refuse every actor that a verify of
-    round N refuses (§7). Each refusal
-    names the step that holds the actor. The binary compares labels; it authenticates neither labels nor evidence
-    authorship (§8, threat model). An approval count never resolves a finding: each finding is fixed, refuted or
+    included; the verifier returns them again. An approval count never resolves a finding: each finding is fixed, refuted or
     deferred.
 11. **Briefs and lenses.** The binary renders every brief of an enrolled spec from durable records; no actor writes a
     brief. The `brief` argv of each action: implement, `next <w> --emit-only` (work item, spec, plan); review slot,
