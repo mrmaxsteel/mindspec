@@ -79,8 +79,15 @@ func OutputForPass(result PassResult, input State, apply bool) Output {
 	for _, item := range input.Items {
 		done = done && itemDone(effective, item)
 	}
-	for _, gate := range effective.Gates {
-		done = done && passed(effective, effective.Records[gate])
+	for _, gate := range effective.gateAttempts() {
+		t, _, _ := effective.Records[gate].Tuple()
+		if gate == activeGate(effective, t.Gate) {
+			done = done && CheckPassedGate(effective, t.Gate) == nil
+		}
+	}
+	if done {
+		blockers, err := ApprovalBlockers(effective)
+		done = err == nil && len(blockers) == 0
 	}
 	if done {
 		out.Status = "done"

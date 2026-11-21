@@ -8,7 +8,10 @@ An enrolled spec uses its active gate to authorise each review round.
 `panel create` takes the subject and reviewer count from that authorisation.
 It refuses a `--target` other than the gate branch.
 It selects the highest gate attempt.
-A re-panel keeps its required slot count and changed paths as the round scope.
+A re-panel uses the slot count and changed paths from the gate round record.
+A later non-panel commit before registration restores the full roster and removes the path limit.
+A round after a refused re-panel also uses the full roster with no path limit.
+The re-panel judgment record retains what the judge authorized; it does not override a later round.
 An open successor gate cannot create a change judge for an older passed attempt.
 The registration and round ledger retain that scope.
 A closed gate, an open slot, an unanswered decision, a collision, or a halted spec blocks creation.
@@ -1513,7 +1516,8 @@ A removed branch uses its recorded landed merge and verified second parent.
 Only a passed close with a valid receipt can authorise a round.
 The gate must remain open.
 A registered round creates slots only when its round and subject match the authorisation.
-A subject change before registration changes only the authorised subject.
+A subject change before registration changes the authorized subject.
+For a scoped re-panel, it also restores the full roster and removes the path limit.
 The panel tally closes a passing gate after every child has closed.
 An open change judge holds the completion command.
 
@@ -1546,6 +1550,9 @@ Terminal text is escaped.
 A live lease sets a waiting entry and the earliest retry time.
 Statuses `work`, `wait`, `halted`, `done` and `indeterminate` exit 0, 3, 4, 5 and 1.
 An empty result on unfinished work is indeterminate.
+After the epic closes, done requires each recorded work item to be done and each highest gate attempt to pass.
+The active gates must have valid evidence and no approval blocker may remain.
+A historical gate close repaired by a completed retry does not prevent done.
 The command refuses an unapproved plan.
 Apply also requires the custom step type and a readable store.
 

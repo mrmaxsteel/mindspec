@@ -354,15 +354,7 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 				return guard.NewFailure(fmt.Sprintf("slot %s is open", id), fmt.Sprintf("mindspec panel launch %s R%d --spec %s", shellQuoteTarget(slug), t.Slot, shellQuoteTarget(idrender.Spec(s.SpecID))))
 			}
 		}
-		repanel, rep, e := kernel.Decode[kernel.RePanel](g.Metadata, kernel.KeyRePanel)
-		if e != nil {
-			return e
-		}
 		size := round.SlotCount
-		if rep {
-			size = repanel.SlotCount
-			round.Paths = repanel.Paths
-		}
 		if requested, _ := cmd.Flags().GetInt("reviewers"); cmd.Flags().Changed("reviewers") && requested != size {
 			return panelVerbFailure(fmt.Errorf("the authorized round requires %d reviewers", size))
 		}

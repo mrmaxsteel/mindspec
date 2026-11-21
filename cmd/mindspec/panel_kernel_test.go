@@ -328,7 +328,7 @@ func TestS134PanelRepanel_ScopeAndCount(t *testing.T) {
 	gate := base + ".a2"
 	f.Create(gate, f.Items[0])
 	f.Must(f.Store.WriteMetadata(gate, map[string]any{kernel.KeyFrom: base, kernel.KeyRePanel: kernel.RePanel{SlotCount: 2, Paths: []string{"source.go"}}}))
-	kernelPanelAuthorise(f, gate, head, 2, 2)
+	kerneltest.Authorise(f, gate, kernel.GateRound{Round: 2, Subject: head, SlotCount: 2, Paths: []string{"source.go"}, Slots: []string{base + ".r2.R1", base + ".r2.R2"}})
 	out, e = kernelPanelCreate(t, f, "1", "--reviewers", "6")
 	kernelPanelRefusal(t, out, e, "requires 2")
 	out, e = kernelPanelCreate(t, f, "1")
