@@ -90,4 +90,20 @@ func TestS134Output_DoneAfterRawGateRepair(t *testing.T) {
 			}
 		})
 	}
+	t.Run("final-subject-moved", func(t *testing.T) {
+		state := f.State()
+		out := kernel.OutputForPass(kernel.PassResult{State: state}, state, false)
+		if out.Status != "done" {
+			t.Fatalf("valid state is not done: %s", out.Status)
+		}
+		moved := beadCommit(t, f, "spec/"+f.SpecID)
+		if moved == tip || reducerGit(t, f, "rev-parse", "spec/"+f.SpecID) != moved {
+			t.Fatal("spec head did not move")
+		}
+		state = f.State()
+		out = kernel.OutputForPass(kernel.PassResult{State: state}, state, false)
+		if out.Status == "done" {
+			t.Fatal("moved final subject accepted as done")
+		}
+	})
 }
