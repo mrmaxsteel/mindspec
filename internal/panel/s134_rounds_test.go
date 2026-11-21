@@ -144,3 +144,50 @@ func TestS134Rounds_DecodeErrorNamesDirectory(t *testing.T) {
 		t.Fatalf("decode error lost its cause: %v", err)
 	}
 }
+
+func TestS134Rounds_CheckoutCopies(t *testing.T) {
+	for _, gate := range []string{"bead", "final_review"} {
+		t.Run(gate, func(t *testing.T) {
+			root := t.TempDir()
+			input := roundCreateInput()
+			input.Spec, input.Target, input.Gate = "x", "spec/x", gate
+			bead := "mindspec-work.1"
+			if gate == "bead" {
+				input.BeadID = &bead
+				input.Target = "bead/" + bead
+			}
+			source := filepath.Join(root, "reviews", "a")
+			for round := 1; round <= 2; round++ {
+				input.Round = round
+				createMust(t, source, input)
+			}
+			ledger, err := os.ReadFile(filepath.Join(source, dispositionsFileName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			copyDir := filepath.Join(root, "copy", "reviews", "a")
+			if err := os.MkdirAll(copyDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(copyDir, dispositionsFileName), ledger, 0644); err != nil {
+				t.Fatal(err)
+			}
+			other := filepath.Join(root, "reviews", "b")
+			input.Round = 1
+			createMust(t, other, input)
+			// Same round and subject on a different slug is still a separate registration.
+			for _, regs := range [][]Registration{{{Dir: source}, {Dir: copyDir}, {Dir: other}}, {{Dir: copyDir}, {Dir: source}, {Dir: other}}} {
+				n, err := RoundsForGate(regs, "x", gate, bead)
+				if err != nil || n != 3 {
+					t.Fatalf("copied rounds=%d, %v; want 3", n, err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(copyDir, dispositionsFileName), []byte("{bad\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := RoundsForGate([]Registration{{Dir: source}, {Dir: copyDir}}, "x", gate, bead); err == nil {
+				t.Fatal("damaged copy was ignored")
+			}
+		})
+	}
+}

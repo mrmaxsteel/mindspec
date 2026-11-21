@@ -513,7 +513,43 @@ func reviewerCountNotesFor(cfg *config.Config, root string) string {
 	return b.String()
 }
 
-// configShowReviewRoots uses the same panel locations as the kernel state reader.
+// configShowReviewRoots lists shared panels and spec-directory panels.
 func configShowReviewRoots(root string) []string {
-	return workspace.PanelReviewRoots(root)
+	roots := []string{root, workspace.MindspecDir(root)}
+	specsDir := workspace.SpecsDir(root)
+	entries, err := os.ReadDir(specsDir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				roots = append(roots, filepath.Join(specsDir, e.Name()))
+			}
+		}
+	}
+	wtEntries, err := os.ReadDir(workspace.DefaultWorktreesDir(root))
+	if err != nil {
+		return roots
+	}
+	for _, wt := range wtEntries {
+		if !wt.IsDir() {
+			continue
+		}
+		wtRoot := filepath.Join(workspace.DefaultWorktreesDir(root), wt.Name())
+		// Mirror SpecDir's worktree tiers: flat (.mindspec/specs/<id>)
+		// and canonical (.mindspec/docs/specs/<id>).
+		for _, specsParent := range []string{
+			filepath.Join(wtRoot, ".mindspec/specs"),
+			filepath.Join(wtRoot, ".mindspec/docs/specs"),
+		} {
+			specEntries, err := os.ReadDir(specsParent)
+			if err != nil {
+				continue
+			}
+			for _, se := range specEntries {
+				if se.IsDir() {
+					roots = append(roots, filepath.Join(specsParent, se.Name()))
+				}
+			}
+		}
+	}
+	return roots
 }

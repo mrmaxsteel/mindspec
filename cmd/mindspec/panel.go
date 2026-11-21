@@ -582,12 +582,70 @@ func panelSlugMatches(root, slug string) []panel.Registration {
 	if isolation != "" {
 		skip = []string{filepath.Join(root, isolation)}
 	}
-	for _, reg := range panel.ScanSkipping(skip, configShowReviewRoots(root)...) {
+	regs := panel.ScanSkipping(skip, configShowReviewRoots(root)...)
+	regs = append(regs, panelWorktreeSlugMatches(root, slug, skip)...)
+	for _, reg := range regs {
 		if reg.Slug() == slug {
 			matches = append(matches, reg)
 		}
 	}
 	return matches
+}
+
+// panelWorktreeSlugMatches reads only the requested slug in spec worktree roots.
+// Spec-directory panels use the normal inventory. Root panels belong to the spec
+// named by the worktree; other panels there are checkout copies.
+func panelWorktreeSlugMatches(root, slug string, skip []string) []panel.Registration {
+	var matches []panel.Registration
+	if validatePanelSlug(slug) != nil {
+		return matches
+	}
+	entries, _ := os.ReadDir(workspace.DefaultWorktreesDir(root))
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), workspace.SpecWorktreePrefix) {
+			continue
+		}
+		specID := strings.TrimPrefix(entry.Name(), workspace.SpecWorktreePrefix)
+		if idvalidate.SpecID(specID) != nil {
+			continue
+		}
+		tree := filepath.Join(workspace.DefaultWorktreesDir(root), entry.Name())
+		for _, base := range workspace.PanelReviewRoots(tree) {
+			for _, segment := range []string{"review", "reviews"} {
+				dir := filepath.Join(base, segment, slug)
+				if panelLookupExcluded(dir, skip) {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join(dir, panel.FileName)); err != nil {
+					continue
+				}
+				reg := panel.ReadRegistration(dir)
+				if reg.Err != nil || reg.Panel.Spec == specID {
+					matches = append(matches, reg)
+				}
+			}
+		}
+	}
+	return matches
+}
+
+// panelLookupExcluded keeps lexical and physical isolation roots out of lookup.
+func panelLookupExcluded(dir string, skip []string) bool {
+	for _, base := range skip {
+		pairs := [][2]string{{base, dir}}
+		resolvedBase, baseErr := filepath.EvalSymlinks(base)
+		resolvedDir, dirErr := filepath.EvalSymlinks(dir)
+		if baseErr == nil && dirErr == nil {
+			pairs = append(pairs, [2]string{resolvedBase, resolvedDir})
+		}
+		for _, pair := range pairs {
+			rel, err := filepath.Rel(pair[0], pair[1])
+			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // findPanelRegistration selects a spec before preferring its checkout copy.

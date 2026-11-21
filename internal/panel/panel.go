@@ -29,6 +29,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // FileName is the registration file's basename inside a panel
@@ -356,6 +358,11 @@ func ForBead(regs []Registration, beadID string) []Registration {
 	return out
 }
 
+// ReadRegistration reads one panel directory without scanning adjacent panels.
+func ReadRegistration(dir string) Registration {
+	return load(dir)
+}
+
 // load reads and parses dir/panel.json into a Registration.
 func load(dir string) Registration {
 	abs, err := filepath.Abs(dir)
@@ -369,7 +376,7 @@ func load(dir string) Registration {
 		return reg
 	}
 	if err := json.Unmarshal(data, &reg.Panel); err != nil {
-		reg.Err = fmt.Errorf("parse %s: %w", FileName, err)
+		reg.Err = fmt.Errorf("parse %s in %s: %w", FileName, termsafe.Escape(abs), err)
 		reg.Panel = Panel{}
 		return reg
 	}

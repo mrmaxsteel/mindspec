@@ -111,7 +111,7 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	}
 	w.Orchestrated, err = kernelid.PanelOrchestrated(specDir)
 	if err != nil {
-		return s, err
+		return s, termsafe.NewWrappedFailure(err, fmt.Sprintf("read panel witnesses in %s: %s", specDir, err), fmt.Sprintf("in %s, repair the named panel.json file, then rerun the command", specDir))
 	}
 	s.Enrolled, s.MarkerMissing = kernelid.Enrolled(w)
 	s.classify()
@@ -124,7 +124,7 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 	}
 	for _, p := range s.Panels {
 		if p.Err != nil {
-			return s, p.Err
+			return s, termsafe.NewWrappedFailure(p.Err, fmt.Sprintf("read panel in %s: %s", p.Dir, p.Err), fmt.Sprintf("in %s, repair panel.json or move the panel out of the review root, then rerun the command", p.Dir))
 		}
 		lines, err := panel.ReadLedger(p.Dir)
 		if err != nil {
@@ -141,7 +141,7 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 		for _, path := range paths {
 			data, err := panel.ReadVerdictFile(path, p.Panel.VerdictSchema)
 			if err != nil {
-				return s, err
+				return s, termsafe.NewWrappedFailure(err, fmt.Sprintf("read verdict in %s: %s", p.Dir, err), fmt.Sprintf("in %s, repair %s, then rerun the command", p.Dir, filepath.Base(path)))
 			}
 			s.Verdicts[path] = data
 		}

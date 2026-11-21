@@ -11,7 +11,8 @@ import (
 // For bead gates, beadID identifies the work item. Other gates use spec.
 // Abandonment and snapshot edits do not erase history. Launch and recovery
 // records do not add rounds. Callers supply all registration directories,
-// including ledger-only directories left by an interrupted create.
+// including ledger-only directories left by an interrupted create. Copies of the
+// same panel round in other directories do not add rounds.
 func RoundsForGate(regs []Registration, spec, gate, beadID string) (int, error) {
 	switch gate {
 	case "bead":
@@ -25,6 +26,11 @@ func RoundsForGate(regs []Registration, spec, gate, beadID string) (int, error) 
 	default:
 		return 0, fmt.Errorf("unknown round-counter gate %q", gate)
 	}
+	type roundIdentity struct {
+		spec, panel, gate, bead, head, digest string
+		round                                 int
+	}
+	rounds := map[roundIdentity]string{}
 	count := 0
 	seen := map[string]bool{}
 	for _, reg := range regs {
@@ -45,6 +51,15 @@ func RoundsForGate(regs []Registration, spec, gate, beadID string) (int, error) 
 			if round.Record != RecordRound {
 				continue
 			}
+			bead := ""
+			if round.BeadID != nil {
+				bead = *round.BeadID
+			}
+			key := roundIdentity{round.Spec, round.Panel, round.Gate, bead, round.ReviewedHeadSHA, round.SubjectDigest, round.Round}
+			if first, ok := rounds[key]; ok && first != dir {
+				continue
+			}
+			rounds[key] = dir
 			if gate == "bead" {
 				if (round.Gate == "bead" || round.Gate == "") && round.BeadID != nil && *round.BeadID == beadID {
 					count++

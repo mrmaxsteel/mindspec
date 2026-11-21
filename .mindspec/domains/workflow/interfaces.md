@@ -29,10 +29,14 @@ A deferral also stores its audit record.
 A successful rebind runs one reducer pass.
 A refused rebind runs no pass.
 Panel commands keep the existing rules for specs without enrollment.
-Slug lookup and kernel state reading share the same panel scan roots.
-They scan the main checkout and its `.mindspec` directory, spec directories,
-and each default worktree root and its `.mindspec` directory and spec directories.
-The state reader also includes the supplied spec directory and its worktree root.
+The kernel reads the main checkout and its `.mindspec` directory, the supplied
+spec directory, and that spec's worktree root and `.mindspec` directory.
+It does not scan other specs or worktrees. A damaged panel in these roots refuses
+the read and names its directory and repair step.
+Slug lookup also searches spec directories in the main checkout and default worktrees.
+In a spec worktree root or its `.mindspec` directory, lookup reads only the requested
+slug and requires the panel to name that worktree's spec. Checkout copies of shared
+panels do not gain another owner. Copies of the same ledger round count once.
 A slug owned by another spec is refused during creation.
 Use `--spec` to select a spec when a slug has more than one owner.
 
