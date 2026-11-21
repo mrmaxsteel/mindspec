@@ -63,8 +63,8 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
    enrolled spec always enforces the panel gate. Failure: `panel_presence` defaults to `warn`; `loop:` is editable.
 7. **Round limit across panels.** A gate counts every registration of its work item or spec (§10, §13.1). Failure: a
    new slug restarts at round 1 (`mindspec-ztax`).
-8. **Local decisions and cascades.** A REJECT adds a `fix`/`halt` decision for that gate only (§13.8); `halt` stops
-   the spec (B11, §13.4), only when the verify reproduces a REJECT veto (§13.10); a refuted veto passes. A refused round gets a verify;
+8. **Local decisions and cascades.** A REJECT that the verify reproduces adds a `fix`/`halt` decision for that gate
+   only (§13.8); a refuted veto passes; `halt` stops the spec (B11, §13.4). A complete, refused round gets a verify;
    only its reproduced findings go to the fix, and no approval count resolves a finding. Failure: `Load` forces
    `on_reject: halt`; the `review.reproduce` rule is advisory.
 9. **Unreceipted closes and audit.** §9 and §11: a close whose evidence still fits gets its receipt under `submit
@@ -161,7 +161,12 @@ blocks Y" = Y waits for X.
   `<slot>.a2`. With a valid verdict and token, `submit` writes the receipt; no `.a2`. With a fitting verdict at the
   slot's registered path and no token: the pass flags `unreceipted-close`, creates no `.a2` and lists `submit <slot>
   --take --actor <actor> --reason`; that submit exits 0 with a receipt `taken: true` and one take event `via:
-  "receipt"` with the step's current generation, and the lease generation does not change. After
+  "receipt"` with the step's current generation, and the lease generation does not change. `submit --take` exits
+  non-zero, step unchanged, on an open step, on a step with a valid receipt and with a verdict of another subject; a
+  raw-closed verify with its record at `reviews/kernel/<step id>.json` gets a receipt from `submit --take`. Raw-closed
+  with no fitting evidence: a lens retry is the step `mindspec_round.lens` names, a fix retry keeps
+  `mindspec_reproduced`, a verify retry is the step `mindspec_round.verify` names; after each retry's `submit`, the
+  next step (`panel create`, the round, the gate pass) proceeds. After
   item 1's gate passes, `bd close <1>` flags `raw-close`: `impl approve` exits non-zero naming it, no `<2>.impl.a1`,
   then `complete 1` exits 0 and clears it. In a fresh fixture, `bd close --force <1>` flags `forced-close`: `complete 1`
   exits non-zero printing `bd reopen <1>`; after `bd reopen <1>` and a gate pass, `complete 1` exits 0 and `impl
@@ -171,7 +176,10 @@ blocks Y" = Y waits for X.
   passing round of at least 3 slots, a late submission on the step that `lease --take` took, a receipt under `submit
   --take`, a verify with one return of each type: `impl approve` and a rerun exit 0 and print takeovers 2 (the lease
   take and the receipt take), unreceipted closes 2 (the repaired close and the `submit --take` receipt), deferrals 2
-  (the `panel defer` and the verify's `deferred` return) and 1 in each other row (the re-panel row also 3 slots; the lens row the lens steps of each gate round);
+  (the `panel defer` and the verify's `deferred` return), `lens-steps` equal to the fixture's gate rounds (one
+  Details entry `<gate> r<N>: 1` each), and 1 in
+  each other row (the re-panel row also 3 slots), `verify-reproduced`, `verify-refuted`, `verify-deferred`,
+  `late-submissions` and `take-receipts` included;
   both registries hold `allow-not-ready`. `MINDSPEC_SKIP_PANEL=1 complete`, no passing gate: non-zero, names it.
 - [ ] AC12 (R10): `loop.gate_authority`, `loop.halt.{on_reject: fix, panel_deadlock_rounds,
   max_consecutive_impl_failures}` load with exit 0, one warning each; `config show` labels them ignored and `runner:`
@@ -216,14 +224,17 @@ blocks Y" = Y waits for X.
   in its pass, its receipt names the rebind; `complete 1` exits 0.
 
 - [ ] AC19 (R8, B9, §13.10): round 1 of item 2 refused on two REQUEST_CHANGES findings: `--apply` creates
-  `<2>.review.r1.verify`, no fix; its brief lists both findings. Fresh fixtures, all slots closed: a stray
-  `R9-round-1.json` in the panel directory, and a VOID verdict: each refused tally creates the verify with a `veto`
-  finding for that file; a `hard_block` REQUEST_CHANGES verdict gives only its `veto` finding. Each exits non-zero, step open: a verify record that
-  omits or repeats a finding or has no returns, a return other than the three, `refuted` with a `ground` outside its
-  three values, no `reason` or evidence that resolves to nothing, `deferred` with no target or a target that fails
-  `bead.CheckDeferral` (no deferral record written), a verify lease with the actor of a round-1 slot or of
-  `<2>.impl.a1`, including that actor's first generation after a later expiry replacement, and `panel refute` with
-  `--actor` of a round-1 slot. One `refuted`, one `reproduced`: a refutation record by the verify,
+  `<2>.review.r1.verify`, no fix; its brief lists both findings. Fresh fixtures, all slots closed: a stray REJECT
+  `R9-round-1.json` in the panel directory gives the verify with a `veto` finding for that file; a VOID verdict, an
+  INVALID verdict, and (all slots APPROVE) a panel-directory commit that edits one verdict file each give no verify and
+  that slot's next attempt `<2>.review.r1.R<s>.a2`, whose APPROVE submit passes the gate; a `hard_block`
+  REQUEST_CHANGES verdict gives only its `veto` finding. Each exits non-zero, step open: a verify record that omits or
+  repeats a finding, has no returns or has an unknown field, a `ccr[0]` return for the `hard_block` slot, a return
+  other than the three, `refuted` with a `ground` outside its three values, no `reason` or evidence that resolves to
+  nothing, `deferred` with no target or a target that fails `bead.CheckDeferral` (no deferral record written), a
+  verify lease with the actor of a round-1 slot or of `<2>.impl.a1`, including that actor's first generation after a
+  later expiry replacement, and `panel refute` with `--actor` of a round-1 slot or (with `<2>.review.r2.fix` leased by
+  F) `--actor F`, naming the fix step. One `refuted`, one `reproduced`: a refutation record by the verify,
   `<2>.review.r2.fix` with `mindspec_reproduced` naming only the second, a fix lease with the verify's actor exits
   non-zero, and the fix brief names only the second. The round-2 slot brief shows both findings with their returns.
   After round 2 is refused, a `<2>.review.r2.verify` lease with the actor of `<2>.review.r2.fix` exits non-zero.
@@ -235,7 +246,12 @@ blocks Y" = Y waits for X.
   it; with all paths: round 2 of 2 slots on the gate, scoped to the paths. Fresh fixture, round refused, `carry-over`:
   the verify subject is the new subject; after a `reproduced` return, the fix `submit --commit J` (J = the new subject) exits non-zero, and a commit
   past J exits 0. Fresh fixture, verify open, a commit and a `carry-over`: the verify closes `superseded`,
-  `<2>.review.r1.verify.a2` opens on the new subject, and a receipt of a1 does not pass the gate. After a passed-gate `re-panel` and before `panel create`, an ordinary commit:
+  `<2>.review.r1.verify.a2` opens on the new subject, and a receipt of a1 does not pass the gate. Fresh fixture, a1
+  refutes a finding and closes, then a commit and a `carry-over`: `mindspec_round.verify` names a2; a2 reproduces it:
+  a1's refutation discharges nothing, the gate stays open and the fix is created. Fresh fixture, open gate, `re-panel`
+  2 on J, a verify with no reproduced return authorises round 2 (record `prior` = round 1), then a commit S before
+  `panel create`: the judge's old subject is J and its paths start at J; its `re-panel` withdraws round 2 (`prior`
+  restored), retires the verify, opens `.verify.a2` on S, and an all-`refuted` a2 passes the gate. After a passed-gate `re-panel` and before `panel create`, an ordinary commit:
   the pass closes `<2>.review.a2` and its lens step `superseded` and creates a judge on the newest commit whose brief
   diff starts at the accepted subject; no full round is authorised; its `re-panel` creates `<2>.review.a3` and the lens
   step `.a2`, which `mindspec_round.lens` names. When the lens step of `<2>.review.a2` had closed `passed`, it keeps
@@ -254,13 +270,15 @@ blocks Y" = Y waits for X.
 - [ ] AC22 (R12, §13.11): the `panel create 1` entry has no `--brief-file`; after it, `panel prompt` of each slot exits
   0 and prints the managed header, the files in scope and its lens from its `focus` in `panel.json`; the adversary
   slot has no `focus` and prints its configured lens. A 3-slot scoped round on the default roster (adversary fourth)
-  takes R1, R2 and R4; its lens record names R1 and R2 only. A round-2 slot prompt lists the paths changed since round 1's
+  has roster R1, R2, R3 (R3 = configured slot 4, lens `adversarial`); its lens record names R1 and R2 only; `panel
+  create`, the slot steps, each `submit`, the tally, `CheckPassedGate` and `complete` exit 0 on it (mutation: take the
+  first n configured slots). With two adversary slots and n=2, the lens record has an empty `lenses` list. A round-2 slot prompt lists the paths changed since round 1's
   subject and the line about refuted or deferred findings. At `<epic>.final`, the prompt's summary is from the spec
   and its files in scope are the diff from the final base. Each
   lens `submit` exits non-zero, step open: a lens for the adversary slot, a missing slot, an empty lens. `panel create
   1` before the lens close exits non-zero naming the lens step; with `--brief-file`, non-zero. `brief` of the verify,
-  fix and change judge prints the items §13.11 lists. On a pre-kernel spec, `panel create` with a filled
-  `--brief-file` still exits 0.
+  fix and change judge prints the items §13.11 lists. On a pre-kernel spec, and with `--gate adhoc` on the enrolled
+  spec, `panel create` with a filled `--brief-file` exits 0; `panel create kernel` exits non-zero.
 
 ## Validation Proofs
 The scratch-repo tests for AC1-AC22 each pass and fail on a named mutation; `make test` exits 0.
