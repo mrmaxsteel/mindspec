@@ -151,7 +151,7 @@ blocks Y" = Y waits for X.
   REJECT verdict's `veto` finding. A `deferred` return for the veto exits non-zero, step open. A verify that returns
   `reproduced` for the veto: a decision under item 2 (text: `halt` stops the spec), an action for item 3. Before the answer, `lease` on the fix and `panel create 2` exit non-zero; after `--answer fix`, `lease` exits 0.
   Fresh fixture, the veto `refuted` and no other finding reproduced: the gate closes `passed`, receipt `retally:
-  "verify"`, no fix or decision; `complete 2` exits 0.
+  "verify"`, no fix or decision; `complete 2` exits 0 and `mindspec instruct` reports no halt for it.
 - [ ] AC9 (R8): a commit on `bead/2` in round 2: no slot closes `superseded` and no round is authorised; each slot's
   `submit` exits 0. A foreign child under `<2>.review`, a second REJECT on item 2, answer
   `halt`: other open steps are `halted`, `<2>.review` stays open flagged `foreign-child-open`; `next-action x` exits 4
@@ -163,7 +163,7 @@ blocks Y" = Y waits for X.
   --take --actor <actor> --reason`; that submit exits 0 with a receipt `taken: true` and one take event `via:
   "receipt"` with the step's current generation, and the lease generation does not change. `submit --take` exits
   non-zero, step unchanged, on an open step, on a step with a valid receipt and with a verdict of another subject; a
-  leased, raw-closed verify with its record at `reviews/kernel/<step id>.json` gets a receipt from `submit --take`. A
+  leased, raw-closed verify with its record at `<spec dir>/kernel/<step id>.json` gets a receipt from `submit --take`. A
   never-leased verify, raw-closed with a fitting record: `run` lists no `submit --take`, `submit --take` exits
   non-zero, and the pass creates `.verify.a2`. Raw-closed
   with no fitting evidence: a lens retry is the step `mindspec_round.lens` names, a fix retry keeps
@@ -287,13 +287,17 @@ blocks Y" = Y waits for X.
   With `<2>.review.r2.fix` open after an applied verify, a fix commit, then `panel refute --actor X` of the
   reproduced finding: no open-gate judge and no `.verify.a2`; the gate closes `passed` on round 1's review subject, the
   fix closes `superseded`, and the next pass opens `<2>.review.judge.a1` under case (b) (mutation: judge case (a) acts
-  on a frozen round). Three fresh fixtures, each with that fix open, then `panel refute --actor X` of f: (i) the verify
+  on a frozen round). Five fresh fixtures, each with that fix open, then `panel refute --actor X` of f: (i) the verify
   reproduced only f (R5's `ccr[0]`, every other slot APPROVE) and a commit edits R2's round-1 verdict; (ii) the same
   verify and a commit adds an APPROVE `R9-round-1.json`; (iii) the verify reproduced f and the `veto` of an off-roster
   INVALID `R9-round-1.json` (the fix, no decision), and a commit removes that file, so `PassRule` sees only f; (iv) as
-  (iii), but the removal is not committed. In each `panel refute` exits 0 and the gate and the fix stay open. (i)
-  fails on its digest with or without the coverage check; (ii) kills a retally with no blob check; (iii) kills a check
-  that compares only the files present; (iv) kills a set check over the HEAD tree. Fresh fixture, open gate, round 1
+  (iii), but the removal is not committed; (v) as (iii), but R9 is never committed and is then moved off disk. In
+  each `panel refute` exits 0 and the gate and the fix stay open. (i) fails on its digest with or without the coverage
+  check; (ii) kills a retally with no digest check; (iii) kills a check that compares only the files present; (iv)
+  kills a set check over the HEAD tree; (v) kills a check against the verify record's commit. Fresh fixture, at the
+  allowance under `re-panel` 2, the verify reproduces f (`decide.limit.r<N>`), then `panel refute --actor X` of f:
+  `decide.limit.r<N>.a2`, and `continue:1` creates round N+1's lens step and no fix (mutations: the decision id is
+  reused; `continue` creates a fix). Fresh fixture, open gate, round 1
   refused on a moved subject, `re-panel` 2, the verify open on the new subject, then `panel refute --actor X` of each
   finding: the verify closes `superseded`, round 2 of 2 slots is authorised with `prior` = round 1 and no
   `prior.verify`, the gate stays open, and the round-2 slot body lists each round-1 finding with its refutation
@@ -305,8 +309,9 @@ blocks Y" = Y waits for X.
   open gate, round 1 refused on a moved subject, `panel refute` of its finding while the judge is open and no commit
   after it, `re-panel` 2, then a commit replaces that round-1 verdict with APPROVE before `panel create 2`: the round-2
   slot body shows the round-1 finding with its refutation (mutations: the brief reads only `prior.verify`; it reads the
-  panel directory at the head when `panel create` renders; it reads `panel.json` at the pre-refutation HEAD). A commit of only lens or verify records creates no judge, before and after the first
-  registration.
+  panel directory at the head when `panel create` renders; it reads `panel.json` at the pre-refutation HEAD). After `git gc --prune=now` and an edit of each round-1 verdict
+  file on disk, the round-2 slot body is unchanged (mutation: it reads the panel directory at render). A commit of only
+  lens or verify records creates no judge, before and after the first registration.
 - [ ] AC21 (R3, R9, §6, §9): generation 1 leased, `lease --take` gives generation 2; `submit` of generation 1 with a
   valid verdict exits 0: the receipt names generation 1, generation 2's lease record ends `superseded`, and a
   generation-2 `submit` of another verdict exits non-zero. The receipt names generation 1's actor. Fresh fixture, a
@@ -324,7 +329,7 @@ blocks Y" = Y waits for X.
   lens `submit` exits non-zero, step open: a lens for the adversary slot, a missing slot, an empty lens. `panel create
   1` before the lens close exits non-zero naming the lens step; with `--brief-file`, non-zero. `brief` of the verify,
   fix and change judge prints the items §13.11 lists. On a pre-kernel spec, and with `--gate adhoc` on the enrolled
-  spec, `panel create` with a filled `--brief-file` exits 0; `panel create kernel` exits non-zero.
+  spec, `panel create` with a filled `--brief-file` exits 0.
 
 ## Validation Proofs
 The scratch-repo tests for AC1-AC22 each pass and fail on a named mutation; `make test` exits 0.
