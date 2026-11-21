@@ -137,7 +137,7 @@ blocks Y" = Y waits for X.
   verdict exits non-zero, the step closed and its receipt unchanged; the same through `panel submit`. Killed between
   receipt and close: step open with its receipt; a rerun closes it.
 - [ ] AC5 (R5, B12): `bd close <w>` exits non-zero (open child). After a pass, `panel create <w>` exits non-zero. With
-  `r1.verify`, `r2.fix` or a limit decision open, `panel refute` of the only blocking finding closes the gate `passed` and the verify,
+  `r1.verify`, `r2.fix` or a limit decision open, `panel refute --actor` of the only blocking finding closes the gate `passed` and the verify,
   fix or decision `superseded`.
 - [ ] AC6 (R6): `panel_presence: warn`; each kernel step closed by `bd close --force` and retyped `chore`; no
   `mindspec_run` or `panel.json`: `complete` with no passing panel exits non-zero (closed ids witness); `next-action`
@@ -170,8 +170,8 @@ blocks Y" = Y waits for X.
   --take`, `panel defer`, a decision answer, a repaired unreceipted close, a `carry-over`, a 3-slot `re-panel` after a
   passing round of at least 3 slots, a late submission on the step that `lease --take` took, a receipt under `submit
   --take`, a verify with one return of each type: `impl approve` and a rerun exit 0 and print takeovers 2 (the lease
-  take and the receipt take), unreceipted closes 2 (the repaired close and the `submit --take` receipt) and 1 in each
-  other row (the re-panel row also 3 slots; the lens row the lens steps of each gate round);
+  take and the receipt take), unreceipted closes 2 (the repaired close and the `submit --take` receipt), deferrals 2
+  (the `panel defer` and the verify's `deferred` return) and 1 in each other row (the re-panel row also 3 slots; the lens row the lens steps of each gate round);
   both registries hold `allow-not-ready`. `MINDSPEC_SKIP_PANEL=1 complete`, no passing gate: non-zero, names it.
 - [ ] AC12 (R10): `loop.gate_authority`, `loop.halt.{on_reject: fix, panel_deadlock_rounds,
   max_consecutive_impl_failures}` load with exit 0, one warning each; `config show` labels them ignored and `runner:`
@@ -216,11 +216,14 @@ blocks Y" = Y waits for X.
   in its pass, its receipt names the rebind; `complete 1` exits 0.
 
 - [ ] AC19 (R8, B9, §13.10): round 1 of item 2 refused on two REQUEST_CHANGES findings: `--apply` creates
-  `<2>.review.r1.verify`, no fix; its brief lists both findings. Each exits non-zero, step open: a verify record that
+  `<2>.review.r1.verify`, no fix; its brief lists both findings. Fresh fixtures, all slots closed: a stray
+  `R9-round-1.json` in the panel directory, and a VOID verdict: each refused tally creates the verify with a `veto`
+  finding for that file; a `hard_block` REQUEST_CHANGES verdict gives only its `veto` finding. Each exits non-zero, step open: a verify record that
   omits or repeats a finding or has no returns, a return other than the three, `refuted` with a `ground` outside its
   three values, no `reason` or evidence that resolves to nothing, `deferred` with no target or a target that fails
   `bead.CheckDeferral` (no deferral record written), a verify lease with the actor of a round-1 slot or of
-  `<2>.impl.a1`, including that actor's first generation after a later expiry replacement. One `refuted`, one `reproduced`: a refutation record by the verify,
+  `<2>.impl.a1`, including that actor's first generation after a later expiry replacement, and `panel refute` with
+  `--actor` of a round-1 slot. One `refuted`, one `reproduced`: a refutation record by the verify,
   `<2>.review.r2.fix` with `mindspec_reproduced` naming only the second, a fix lease with the verify's actor exits
   non-zero, and the fix brief names only the second. The round-2 slot brief shows both findings with their returns.
   After round 2 is refused, a `<2>.review.r2.verify` lease with the actor of `<2>.review.r2.fix` exits non-zero.
@@ -228,12 +231,16 @@ blocks Y" = Y waits for X.
   `<epic>.final`. At the limit, a `reproduced` return: only the limit decision.
 - [ ] AC20 (R5, B10, §13.2, §13.7): a commit on `bead/2` during round 1, then the last verdict: `--apply` creates
   `<2>.review.judge.a1` (old subject = the round subject) and the gate stays open. `carry-over`: a passing tally closes
-  the gate `passed` on the new subject. Fresh fixture, `re-panel` 2 whose paths omit one changed path: non-zero naming
+  the gate `passed` on the new subject and `complete 2` exits 0. Fresh fixture, `re-panel` 2 whose paths omit one changed path: non-zero naming
   it; with all paths: round 2 of 2 slots on the gate, scoped to the paths. Fresh fixture, round refused, `carry-over`:
-  the verify subject is the new subject. After a passed-gate `re-panel` and before `panel create`, an ordinary commit:
+  the verify subject is the new subject; after a `reproduced` return, the fix `submit --commit J` (J = the new subject) exits non-zero, and a commit
+  past J exits 0. Fresh fixture, verify open, a commit and a `carry-over`: the verify closes `superseded`,
+  `<2>.review.r1.verify.a2` opens on the new subject, and a receipt of a1 does not pass the gate. After a passed-gate `re-panel` and before `panel create`, an ordinary commit:
   the pass closes `<2>.review.a2` and its lens step `superseded` and creates a judge on the newest commit whose brief
   diff starts at the accepted subject; no full round is authorised; its `re-panel` creates `<2>.review.a3` and the lens
-  step `.a2`, which `mindspec_round.lens` names. No judge follows a closed judgement, on each loop path: after a
+  step `.a2`, which `mindspec_round.lens` names. When the lens step of `<2>.review.a2` had closed `passed`, it keeps
+  its receipt and is retired the same way; a `re-panel` with another slot count gives a lens attempt with that count's
+  entries. No judge follows a closed judgement, on each loop path: after a
   passed-gate `re-panel`, the scoped round's authorisation, its passing tally and `complete 2` create no judge; on an
   open gate, a refused tally on a moved subject creates the judge and no verify until it closes; after its `re-panel`,
   the verify retally with no reproduced return, the scoped round 2's authorisation and its tally create no judge.
@@ -241,11 +248,13 @@ blocks Y" = Y waits for X.
 - [ ] AC21 (R3, R9, §6, §9): generation 1 leased, `lease --take` gives generation 2; `submit` of generation 1 with a
   valid verdict exits 0: the receipt names generation 1, generation 2's lease record ends `superseded`, and a
   generation-2 `submit` of another verdict exits non-zero. The receipt names generation 1's actor. Fresh fixture, a
-  lens step: generation 1 leased, `lease --take`, then a commit moves its authorised subject: the generation-1 `submit`
-  exits non-zero naming the subject.
+  lens step: generation 1 leased, `lease --take`, then a commit moves its authorised subject: the pass closes the lens
+  step `superseded` and opens `.lens.a2` on the new subject; the generation-1 `submit` exits non-zero; a `submit` to
+  `.a2` and then `panel create` exit 0.
 - [ ] AC22 (R12, §13.11): the `panel create 1` entry has no `--brief-file`; after it, `panel prompt` of each slot exits
   0 and prints the managed header, the files in scope and its lens from its `focus` in `panel.json`; the adversary
-  slot has no `focus` and prints its configured lens. A round-2 slot prompt lists the paths changed since round 1's
+  slot has no `focus` and prints its configured lens. A 3-slot scoped round on the default roster (adversary fourth)
+  takes R1, R2 and R4; its lens record names R1 and R2 only. A round-2 slot prompt lists the paths changed since round 1's
   subject and the line about refuted or deferred findings. At `<epic>.final`, the prompt's summary is from the spec
   and its files in scope are the diff from the final base. Each
   lens `submit` exits non-zero, step open: a lens for the adversary slot, a missing slot, an empty lens. `panel create
