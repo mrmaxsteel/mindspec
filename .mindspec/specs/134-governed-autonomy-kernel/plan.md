@@ -1394,15 +1394,17 @@ Bead 13
    and the `bead.CheckDeferral` checks on each `deferred` target, all before the pin. In the verify close-write
    hook (Bead 14; it runs before the receipt on every receipt path), write each `ccr` or `slot` return that is `refuted`
    as `panel refute` writes a refutation and each `deferred` return as `panel defer` writes a deferral, each with its
-   disposition row, with the new fields `verify_step` (`string`) and `enrolled` (`bool`) of `panel.Refutation` and
-   `panel.Deferral` (`internal/panel/panel.go`; each `omitempty`, no custom JSON encoding, so `==` in
+   disposition row (a deferral bound to the slot's verdict file by `source_verdict` and `source_file_sha256`, as
+   `panel defer` binds it), with `verify_step` = the step and `enrolled: true`, the new fields `verify_step` (`string`)
+   and `enrolled` (`bool`) of `panel.Refutation` and `panel.Deferral` (`internal/panel/panel.go`; each `omitempty`, no custom JSON encoding, so `==` in
    `checkCompletenessAt` still works; a pre-kernel record has neither), and write every return to `mindspec_returns`. The hook builds and
    size-checks every write before the pin (Bead 14, §13.10). A matching rerun writes `mindspec_returns` and the
-   `mindspec_deferrals` entries again by key and appends identical ledger records (`created_at` =
+   `mindspec_deferrals` entries again by key and appends identical ledger records and rows (`created_at` =
    `mindspec_closing.at`), which the ledger keeps once (§6). In `recordKey` (`internal/panel/disposition_store.go`)
-   add `verify_step` to the refutation and deferral key when it is non-empty, else `created_at` when `enrolled`; add
-   the same suffix (`:<verify_step>`, else `:<created_at>`) to the disposition row id in the shared row builder and
-   `DeferralRowID`; a record without the fields keeps today's key and row id (§13.10). No later rule reads the record file.
+   add `verify_step` to the refutation and deferral key when it is non-empty, else `created_at` when `enrolled`; append
+   the same suffix (`:<verify_step>`, else `:<created_at>`) after the final `:refutation` or `:deferral` segment of the
+   disposition row id in the shared row builder and both `DeferralRowID` shapes; a row's `created_at` equals its
+   event's; a record without the fields keeps today's key and row id (§13.10). No later rule reads the record file.
 3. Fill `verify-apply`: with no `reproduced` return, close the gate `passed` (receipt `retally: "verify"`), a refuted
    REJECT included (Bead 16 adds the branch under a `re-panel` judgement). Make `passed()` and
    `gatePassEvidence` (`reducer.go`) and `CheckPassedGate` (`gate_check.go`) accept that receipt on the §13.10
@@ -1502,13 +1504,13 @@ Bead 13
       refutation and row of each attempt. Fresh fixture, generation 1 killed the same way, `lease --take`, a generation-2 submit with f
       `reproduced`: it exits non-zero, the pass creates `.verify.a2`, and after `.a2` reproduces f, `panel refute
       --actor X` of g leaves the gate and the fix open. Mutations fail in which the rerun stamps a new `at` (the
-      receipt `at` or a record's `created_at` differs from `mindspec_closing.at`), a differing record is accepted, or
+      receipt `at` or a record's or row's `created_at` differs from `mindspec_closing.at`), a differing record is accepted, or
       the ledger key or row id has no `verify_step` (the `.a2` close is refused) or no `created_at` for an enrolled
       verb (AC19 (outcomes): the `panel refute --actor X` append is refused).
 - [ ] Encoding: golden ledger lines of a verify-close record (`"verify_step":"<step>"`, `"enrolled":true`), an
       enrolled verb record (`"enrolled":true`, no `verify_step`) and a pre-kernel record (neither), each with `record`,
-      `spec` and `panel`, and their row ids (`:<verify_step>`, `:<created_at>`, today's id). An enrolled bound deferral
-      keeps its slot covered in `checkCompletenessAt`. Mutations fail: a custom `MarshalJSON` on `Refutation` or
+      `spec` and `panel`, and their row ids (`:<verify_step>`, `:<created_at>`, today's id). A verify-close (bound)
+      deferral, with a non-empty `verify_step`, keeps its slot covered in `checkCompletenessAt`. Mutations fail: a custom `MarshalJSON` on `Refutation` or
       `Deferral` (`record` dropped), and a `*string` `verify_step` (the slot uncovered).
 - [ ] Bound: a round of 9 slots with 100 `ccr` items of 4096 bytes each gives the verify with each stored text in full
       (4096 bytes), and its all-`refuted` close writes `mindspec_returns`; a mutation that truncates the texts fails.
@@ -1658,8 +1660,8 @@ Bead 14, Bead 15, Bead 17
    `repaired: true`, `taken: true`, `actor`. The §9 receipt with no reopen runs the hook before its receipt too. Refuse it, naming the condition, on an open step, on a step that was never leased (generation 0), on a
    step with a valid receipt, and on evidence that does not resolve or fit its kind and subject.
 4. In `closes.go`, before a retry, check the evidence at the step's fixed location (§9); when the step was leased and
-   it fits and its `mindspec_closing` has no `conflict`, create no
-   `.a<k+1>` and list the `submit --take` entry in `run`, with `--actor` = `mindspec_closing.actor` when set (§9). In `retryAttempts`, copy the keys of the kind (§9): add
+   it fits and its `mindspec_closing` has no `conflict` and no `generation` other than the current one, create no
+   `.a<k+1>` and add a new `submit --take` run entry (none exists today), with `--actor` = `mindspec_closing.actor` when set (§9). In `retryAttempts`, copy the keys of the kind (§9): add
    `mindspec_reproduced` for a fix and `mindspec_findings` and `mindspec_read` for a verify, and point `mindspec_round.lens` or `mindspec_round.verify` at a lens or verify
    retry. The pass, `panel create` and `submit` read the highest attempt not closed `superseded` of a slot or fix and
    the attempt that `mindspec_round` names of a lens or verify; the independence checks read every attempt.

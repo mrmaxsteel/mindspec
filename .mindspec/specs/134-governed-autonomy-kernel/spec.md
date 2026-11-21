@@ -254,7 +254,7 @@ blocks Y" = Y waits for X.
   writes no `prior`, and the brief shows no returns). Fresh fixture, findings f and g: `panel refute --actor Y` of g while
   `<2>.review.r1.verify` is open, then the verify refutes f and reproduces g: the gate stays open and the fix's
   `mindspec_reproduced` names g (mutation: the filter keeps a verb refutation made before the verify closed); then
-  `panel refute --actor X` of g with evidence other than Y's appends a record and the retally closes the gate `passed`
+  `panel refute --actor X` of g with evidence other than Y's appends a record and its row and the retally closes the gate `passed`
   (mutations: the verbs' dedupe compares all records; the row id has no `created_at`). Fresh fixture, the fix created and leased by F, then a commit
   that replaces f's round-1 verdict file with APPROVE and one that adds a stray `R9-round-1.json`, with no copy of the
   original left on disk: `--apply` creates no

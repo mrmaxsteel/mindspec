@@ -43,8 +43,9 @@ Thesis: beads hold plan and dispatch; git holds evidence; the binary holds rules
    when its bead gate closed `passed` and `complete` merged its branch; any other close releases no dependent.
 5. Every kernel close writes a receipt (metadata `mindspec_close`) with a return kind (`passed`, `refused`,
    `superseded`, `halted`) BEFORE the bd close. A retry with the same receipt completes it. A valid receipt is a
-   `mindspec_close` of any return kind, `superseded` included, that parses and whose evidence resolves (item 13); none, or
-   any other, is an unreceipted close (§9).
+   `mindspec_close` of any return kind, `superseded` and `halted` included, that parses and whose evidence, when it names
+   any, resolves (item 13); a receipt that names no evidence carries its reducer reason. None, or any other, is an
+   unreceipted close (§9).
 6. Lineage is metadata `mindspec_from`. Blocks links exist only in plan order and from each work item to
    `<epic>.final` (a `step`, so bd's epic rule does not apply), never to an already-released item.
 7. Check both kinds for cycles before each mindspec link write (§8; bd's refusal is the backstop). No blocks between
@@ -139,7 +140,7 @@ when it has no valid receipt and its `mindspec_closing` has a `conflict`: it clo
 creates `<id>.a<k+1>` with the keys of its kind (§9, §13.10). A matching rerun (same generation, actor and
 `record_sha256`, no `conflict`) reuses `mindspec_closing.at` and makes each close write again from the same record:
 it writes `mindspec_returns` and the `mindspec_deferrals` entries of this `verify_step` by key, and appends the same
-ledger records (same key, same content, `created_at` = `mindspec_closing.at`), which the ledger keeps once; then it
+ledger records and rows (same key, same content, `created_at` = `mindspec_closing.at`), which the ledger keeps once; then it
 writes the receipt. A lens has no pin: its one close write, `mindspec_round.lenses`, is replaced whole on each run,
 so the lenses that stand are those of the submit that wrote the receipt (§13.11). Refuses: an absent token; a token of no
 generation of the step; a stale subject; a foreign slot; a missing artifact; a different result for a closed step (the
@@ -249,7 +250,8 @@ subject is the judge's subject), the pass lists `submit <id> --take --actor <act
 the step's current generation, and `actor`) and a `mindspec_actors` entry (`via:
 "receipt"`), makes the close writes of its kind (§6), and then writes the receipt (`repaired: true`, `taken: true`,
 `actor` = `--actor`). Only when the step was never leased, no evidence
-resolves and fits, or its `mindspec_closing` has a `conflict` (§6), does the next pass create `<id>.a<k+1>` with `mindspec_from`. `submit --take` refuses an open step,
+resolves and fits, or its `mindspec_closing` has a `conflict` or a `generation` that is not the step's current
+generation (§6), does the next pass create `<id>.a<k+1>` with `mindspec_from`. `submit --take` refuses an open step,
 a step that was never leased (so no record written outside a lease passes as a take), a step with a valid receipt and
 evidence that does not resolve or fit, and names the condition. A retry keeps the keys
 of its kind: subject, round, registration and decision, for a fix `mindspec_reproduced`, and for a verify
@@ -578,8 +580,9 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     pin (§6). It refuses with the step open and names each missing, repeated or unknown finding, each unlisted return,
     each failed field and each failed deferral check. On the close it records each `ccr` or `slot` return that is
     `refuted` as `panel refute` records a refutation and each `deferred` return as `panel defer` records a deferral
-    (`mindspec_deferrals` included), each with `verify_step` (a new field of `panel.Refutation`, `panel.Deferral` and the `mindspec_deferrals` entry)
-    naming the verify step, and writes every return to the step metadata `mindspec_returns`; its receipt records `at`, the close time (`mindspec_closing.at`, §6),
+    (`mindspec_deferrals` included; bound, as `panel defer` binds it, to the slot's round verdict file by `source_verdict`
+    and `source_file_sha256`), each with `verify_step` (a new field of `panel.Refutation`, `panel.Deferral` and the `mindspec_deferrals` entry)
+    naming the verify step and `enrolled: true`, and writes every return to the step metadata `mindspec_returns`; its receipt records `at`, the close time (`mindspec_closing.at`, §6),
     written RFC3339Nano UTC from `kernel.Now`, the clock from which the enrolled `panel refute` and `panel defer` write
     `created_at`; a `veto` return lives in `mindspec_returns` and the verify-returns audit row only. No later rule
     reads the record file. A
@@ -625,12 +628,17 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     `verify_step` (a `string`) are fields of `panel.Refutation` and `panel.Deferral`, each omitted when zero, with no
     custom JSON encoding, so both types stay comparable with `==`. A pre-kernel record has neither field and keeps
     today's key. The disposition row that `panel refute` or `panel defer` appends with its record in one batch (`id`
-    `<panel>:<slot>:r<N>:<finding>:<sha12>:refutation`, or `DeferralRowID`) takes the same suffix: `:<verify_step>`
-    when non-empty, else `:<created_at>` when `enrolled`, and the verify close appends that row too. `DeferralRowID`
-    reads the suffix from the deferral, so a row stays linked to its event; a pre-kernel row keeps today's id. So on an
+    `<panel>:<slot>:r<N>:<finding>:<sha12>:refutation`, or `DeferralRowID`) takes the same suffix after its final
+    `:refutation` or `:deferral` segment (both `DeferralRowID` shapes): `:<verify_step>` when non-empty, else
+    `:<created_at>` when `enrolled`; the verify close appends that row too. A row's `created_at` equals its event's
+    (a verify close, its matching rerun included: `mindspec_closing.at`). `DeferralRowID` reads the suffix from the
+    deferral, so a row stays linked to its event; a pre-kernel row keeps today's id. No reader parses a row id, so the
+    colons of an RFC3339Nano suffix are safe. So on an
     enrolled gate no two verify attempts or verb calls share the key of a record or of its row, and a discarded record
     never blocks an append. A verb rerun after a crash between its append and its `panel.json` write appends a second
-    record and row under a new `created_at`; this duplicate is audit history and does not change the tally. On
+    record and row under a new `created_at`; this duplicate is audit history and does not change the tally. A row of a discarded or retired verify
+    attempt, or of a discarded verb call, is audit history too: it can still cover its slot at the completeness floor
+    (`checkCompletenessAt`), as a verb row does today, and the filtered `PassRule` decides the gate. On
     an enrolled gate the same-key dedupe (slot, round, finding, `finding_sha256`; for `panel defer` also
     `SourceVerdict` and `SourceFileSHA256`) of `panel refute` and `panel defer`, and of the `mindspec_deferrals`
     history that `panel defer` appends, runs before the append and compares only the records that this filter keeps.
