@@ -451,6 +451,12 @@ The workflow layer selects the naming merge and decides whether to close.
 
 `PublishBeadClose` exports the tracker in the spec worktree and commits
 only the paths it is given. The caller includes the export path.
+It exports only when the paths include the export, and empty paths commit
+nothing. `BeadsExportPublished` tells the caller whether the checkout
+publishes the export: a tracked export, or an untracked export that is not
+ignored, is published. An untracked, ignored export is not; the beads
+database is the store of record, so the close commits only the panel
+ledgers, and the other export-and-commit steps skip the export.
 `CleanupBead` checks ancestry and reads bead user changes immediately before
 forced removal. `CompleteBead` uses the same check after its commits and merge
 hooks. Tool artifacts stay exempt. The exemption preserves decoded filename

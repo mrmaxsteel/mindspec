@@ -471,13 +471,23 @@ func adoptFinalize(root string, exec executor.Executor, specID, epicID, reason s
 // run whose export+commit already landed on a PRIOR partial run (one that
 // failed only at the metadata-mark-complete write below) commits nothing
 // new and simply marks completion.
+//
+// A repo that ignores and does not track the export keeps the beads
+// database as the store of record: there is nothing to refresh or commit,
+// so the stage only records completion.
 func adoptFinalizeExportStage(root string, exec executor.Executor, specID, epicID string) error {
-	if err := adoptExportBeadsFn(root); err != nil {
-		return fmt.Errorf("refreshing .beads/issues.jsonl for spec %s: %w", idrender.Spec(specID), err)
+	published, err := exec.BeadsExportPublished(root)
+	if err != nil {
+		return fmt.Errorf("checking whether .beads/issues.jsonl is published for spec %s: %w", idrender.Spec(specID), err)
 	}
-	commitMsg := fmt.Sprintf("chore(beads): adopt epic %s for spec %s (mindspec impl adopt)", idrender.Bead(epicID), idrender.Spec(specID))
-	if err := exec.CommitPaths(root, commitMsg, []string{".beads/issues.jsonl"}); err != nil {
-		return fmt.Errorf("writing finalize export for spec %s: %w", idrender.Spec(specID), err)
+	if published {
+		if err := adoptExportBeadsFn(root); err != nil {
+			return fmt.Errorf("refreshing .beads/issues.jsonl for spec %s: %w", idrender.Spec(specID), err)
+		}
+		commitMsg := fmt.Sprintf("chore(beads): adopt epic %s for spec %s (mindspec impl adopt)", idrender.Bead(epicID), idrender.Spec(specID))
+		if err := exec.CommitPaths(root, commitMsg, []string{".beads/issues.jsonl"}); err != nil {
+			return fmt.Errorf("writing finalize export for spec %s: %w", idrender.Spec(specID), err)
+		}
 	}
 	if err := adoptMergeMetadataFn(epicID, map[string]interface{}{adoptExportCommittedMetaKey: true}); err != nil {
 		return fmt.Errorf("recording adopt export-committed marker on epic %s: %w", idrender.Bead(epicID), err)

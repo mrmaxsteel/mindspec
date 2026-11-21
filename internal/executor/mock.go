@@ -22,6 +22,9 @@ type MockExecutor struct {
 	FirstParentMergesFn func(ref string) ([]MergeIdentity, error)
 	CompletionStateFn   func(workdir, base, head string) (CompletionState, error)
 	PublishBeadCloseFn  func(workdir string, paths []string) error
+	// BeadsExportPublishedFn overrides BeadsExportPublished. When nil the
+	// mock reports a publishing repo (the tracked-export default).
+	BeadsExportPublishedFn func(workdir string) (bool, error)
 
 	mu    sync.Mutex
 	Calls []MockCall
@@ -560,6 +563,13 @@ func (m *MockExecutor) CompletionState(workdir, base, head string) (CompletionSt
 		return m.CompletionStateFn(workdir, base, head)
 	}
 	return CompletionState{}, nil
+}
+func (m *MockExecutor) BeadsExportPublished(workdir string) (bool, error) {
+	m.record("BeadsExportPublished", workdir)
+	if m.BeadsExportPublishedFn != nil {
+		return m.BeadsExportPublishedFn(workdir)
+	}
+	return true, nil
 }
 func (m *MockExecutor) PublishBeadClose(workdir string, paths []string) error {
 	m.record("PublishBeadClose", workdir, paths)
