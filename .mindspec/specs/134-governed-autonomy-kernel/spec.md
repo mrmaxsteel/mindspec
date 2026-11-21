@@ -285,12 +285,19 @@ blocks Y" = Y waits for X.
   With `<2>.review.r2.fix` open after an applied verify, a fix commit, then `panel refute --actor X` of the
   reproduced finding: no open-gate judge and no `.verify.a2`; the gate closes `passed` on round 1's review subject, the
   fix closes `superseded`, and the next pass opens `<2>.review.judge.a1` under case (b) (mutation: judge case (a) acts
-  on a frozen round). With that fix open after a verify that reproduced f and g, a commit that edits R2's round-1
-  verdict (g) to APPROVE, and in a fresh fixture a commit that adds an APPROVE `R9-round-1.json`, then `panel refute
-  --actor X` of f: the gate and the fix stay open (mutation: a frozen retally with no coverage check passes on the
-  stray file). Fresh fixture,
-  open gate, round 1 refused on a moved subject, `panel refute` of its finding while the judge is open, `re-panel` 2:
-  the round-2 slot body shows the round-1 finding with its refutation (mutation: the brief reads only `prior.verify`). A commit of only lens or verify records creates no judge, before and after the first
+  on a frozen round). Three fresh fixtures, each with that fix open, then `panel refute --actor X` of f: (i) the verify
+  reproduced only f (R5's `ccr[0]`, every other slot APPROVE) and a commit edits R2's round-1 verdict; (ii) the same
+  verify and a commit adds an APPROVE `R9-round-1.json`; (iii) the verify reproduced f and the `veto` of an off-roster
+  REJECT `R9-round-1.json`, and a commit removes that file, so `PassRule` sees only f. In each the gate and the fix
+  stay open. (i) fails on its digest with or without the coverage check; (ii) kills a retally with no blob check;
+  (iii) kills a check that compares only the files at the head. Fresh fixture, open gate, round 1 refused on a moved
+  subject, `re-panel` 2, the verify open on the new subject, then `panel refute --actor X` of each finding: the verify
+  closes `superseded`, round 2 of 2 slots is authorised with `prior` = round 1 and the gate stays open (mutation: the
+  retally closes the gate `passed`). Fresh fixture,
+  open gate, round 1 refused on a moved subject, `panel refute` of its finding while the judge is open, `re-panel` 2,
+  then a commit replaces that round-1 verdict with APPROVE before `panel create 2`: the round-2 slot body shows the
+  round-1 finding with its refutation (mutations: the brief reads only `prior.verify`; it reads the panel directory at
+  the head when `panel create` renders). A commit of only lens or verify records creates no judge, before and after the first
   registration.
 - [ ] AC21 (R3, R9, §6, §9): generation 1 leased, `lease --take` gives generation 2; `submit` of generation 1 with a
   valid verdict exits 0: the receipt names generation 1, generation 2's lease record ends `superseded`, and a
