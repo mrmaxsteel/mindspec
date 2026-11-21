@@ -348,7 +348,8 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
      A passing tally (`tally`), a verify that leaves no reproduced finding (`verify-apply`), or a passing `panel refute`
      or `panel defer` retally (§7) authorises round N+1 of n slots on the new subject on the same gate, with the paths
      as its scope, and does not close the gate: that rule writes the round N+1 record (§13.7 `prior`), not `round-open`. A verify that leaves a reproduced finding creates the fix, and the
-     round after the fix is a full round.
+     round after the fix is a full round, unless a passing `panel refute` or `panel defer` retally closes that fix
+     `superseded` and authorises round N+1 of n slots (§13.10).
    - Passed gate, `carry-over`: the gate stays `passed`; its receipt adds the old subject, the new subject and the
      judge's receipt, and verbs accept the new subject.
    - Passed gate, `re-panel`: the pass creates the successor `<gate>.a<k+1>` (same parent, `mindspec_from` = the
@@ -360,7 +361,8 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    precedence, rebind's pass, the panel-directory exemption, the end state, judge parent and id, supersede of a judge,
    separate attempt counters, slot ceiling, scope carrier. From the 2026-11-21 amendment: the accepted subject of an
    open gate; a scoped round on the same open gate (no successor); the round number of an open-gate re-panel round
-   (§13.7) and the `prior` record that its authorising rule, and `round-open` after a closed fix, write; the slots a scoped round takes, with no or two
+   (§13.7) and the `prior` record that its authorising rule, and `round-open` after a closed fix, write, with
+   `verify` only for a verify closed `passed` and `asks` as blobs of the files read from disk; the slots a scoped round takes, with no or two
    adversary slots, and their contiguous ids (§13.11); the review subject, `judged`, and the verify attempt after a
    judgement, so a verify on the old subject is redone (a refutation holds for the subject it read; B5(c)); the key
    `mindspec_round.verify`, the retirement triggers of a verify, and its refutations and deferrals kept as audit
@@ -375,8 +377,10 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    a verify (§13.10); a veto finding for each off-roster REJECT, `hard_block` or INVALID file; no verify on an incomplete tally, and the next slot
    attempt for an uncounted roster verdict, its cap of 3 uncounted attempts and the one `uncounted` decision that lists
    every capped slot with its highest attempt, and the lease hold it shares with §13.8 (§13.10); the applied verify, a decision counted as its outcome, and the frozen round after it,
-   which case (a) does not judge and whose retally is bound to round N's review subject and covered by its verify
-   record (§13.10); the verify receipt time that ends earlier verb refutations and deferrals (§13.10); one new verify attempt
+   which case (a) does not judge and whose retally binds the panel to round N's round subject, closes on its review
+   subject, is covered by its verify record and compares the verdict files it read from disk (§13.10); the verify
+   receipt time that ends earlier verb refutations and deferrals, and a same-key dedupe against kept records only
+   (§13.10); a new limit decision for a round that a retally authorises past the allowance (§13.8); one new verify attempt
    when a withdrawal and a judgement retire it in one pass (§13.7); a reproduced off-roster veto as a code
    finding (§13.8); a veto verdict that gives no `ccr` finding; the verify record fields for a refutation or deferral,
    the `verify_step` field and the deferral check before the receipt; `--actor` and the independence check on `panel
@@ -386,8 +390,8 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    never-leased step refused by `submit --take` and retried, a narrowing of ruling E to leased steps (§9); the audit row names (§11);
    `panel tally` advisory on an enrolled gate; the adversary slot found by its roster lens; the lens step of a round
    with no lens slot; unknown fields refused in lens and verify records; the slot `focus` carrier and its precedence
-   (§13.11); files in scope, the prior-round asks read from round N's current verify record at its commit, or with no verify from the
-   records that discharged round N's findings at `prior.asks_at`, and the
+   (§13.11); files in scope, the prior-round asks read from round N's current verify record at its commit and from the
+   blobs in `prior.asks`, and the
    `<epic>.final` brief sources (§13.11).
 3. **Implement authorisation (OQ9).** An open work item with all plan upstreams done (B4), no open implement step and
    no gate round authorises `<w>.impl.a1`. Each pass creates it for every such item, in plan order, on the one
@@ -416,16 +420,21 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
 7. **Round opening (OQ10, OQ12).** `panel create` is the one writer of a round record (the registration and its ledger
    `round` line, which `ForBead` and §10 count). These outcomes authorise round N on a subject commit: a closed
    implement step (round 1); a closed fix `<gate>.r<N>.fix` (round N); a `re-panel` judgement, or under it a verify
-   that leaves no reproduced finding (§13.2: n slots, on the successor of a passed gate or on the open gate); for
+   that leaves no reproduced finding or a passing `panel refute` or `panel defer` retally (§13.2: n slots, on the successor of a passed gate or on the open gate); for
    `<epic>.final`, the last work item done (B4; round 1, the spec branch head). On an open gate a scoped round is
    round N+1, where N is the gate's last registered round. The rule that authorises a round writes the gate round
    record (`mindspec_round`: round, authorised subject, slot count, scope, `lens`, `verify`, `judged`) and creates the
    lens step `<gate>.r<N>.lens` (§13.11), for a scoped round too. Each rule that authorises round N+1 on an open gate
    (`round-open` after a closed fix, `tally`, `verify-apply` or a passing `panel refute` or `panel defer` retally,
-   §13.2) copies the round N record, without its own `prior`, into `prior`, and sets `prior.asks_at` to the branch head
-   commit at which it read round N's panel directory; a later rewrite of the round N+1 record and `panel create` keep
-   it. `prior` holds round N's review subject, current verify and `asks_at`; the round N+1 brief reads round N's verify returns from it, and the §13.10
-   filter reads round N's current verify from it. At the round N+1 authorisation the pass closes each open slot
+   §13.2) copies the round N record, without its own `prior`, into `prior`; `prior.verify` names round N's current verify
+   only when that verify is closed `passed`, so a retally that closes it `superseded` writes no `verify`. The rule also
+   writes `prior.asks`: each round-N verdict file and the `panel.json` of round N's panel directory, as the rule read
+   them from disk (for a tally or retally, the files it tallied), as repo path -> blob id (40 hex, written with `git
+   hash-object -w`). So `prior` holds the records that authorised round N+1 also when no commit holds them, as the
+   panel verbs write `panel.json` and commit nothing. A later rewrite of the round N+1 record and `panel create` keep
+   `prior`. `prior` holds round N's review subject, `verify` and `asks`; the round N+1 brief reads them (§13.11), and
+   the §13.10 filter reads round N's current verify from `prior`. A brief refuses and names a `prior` with no `asks`
+   or a blob that does not resolve. At the round N+1 authorisation the pass closes each open slot
    attempt of round N `superseded`. Each later
    authorisation of round N (a new slot count or subject included) and each move of its authorised subject before
    `panel create` creates `<gate>.r<N>.lens.a<k+1>` on the current authorised subject (`mindspec_from` = the prior
@@ -454,7 +463,8 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    decision is unanswered, a verb that would claim or close another child of that gate, open a round on it, or close or
    merge what it decides refuses and names it; `next-action` lists the decision, not the fix, until `--answer fix`
    releases the fix. A limit decision holds only a verb that opens a round or claims or closes a fix; a passing `panel
-   refute` or `panel defer` retally acts as §7 says and closes the limit decision `superseded`. The answer adds no
+   refute` or `panel defer` retally acts as §7 says and closes the limit decision `superseded`; a round N+1 that it
+   authorises past the allowance gives a new limit decision (§13.7). The answer adds no
    round. At the limit, a verify that leaves a reproduced finding creates only the limit decision, and `continue:<n>`
    raises the allowance and creates the fix.
 9. **Pass order (OQ12).** A verb runs its pass first (leaving out the step it names), then its refusal checks, then
@@ -508,8 +518,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     each failed field and each failed deferral check. On the close it records each `ccr` or `slot` return that is
     `refuted` as `panel refute` records a refutation and each `deferred` return as `panel defer` records a deferral
     (`mindspec_deferrals` included), each with `verify_step` (a new field of `panel.Refutation` and `panel.Deferral`)
-    naming the verify step, also when a record with the same slot, round, finding and `finding_sha256` and an empty
-    `verify_step` exists (the verbs' same-key dedupe does not apply to it); its receipt records `at`, the close time,
+    naming the verify step; its receipt records `at`, the close time,
     written RFC3339Nano UTC from `kernel.Now`, the clock from which the enrolled `panel refute` and `panel defer` write
     `created_at`; a `veto` return lives in the verify receipt only and in the verify-returns audit row. A
     `veto` takes no `deferred`: `panel defer` refuses a REJECT or `hard_block` verdict, and a deferred veto would pass a
@@ -529,13 +538,15 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     finding authorises no round. The verify attempt after that withdrawal enumerates round N's verdict files as
     they are then. An open fix of
     round N+1 ends only by its own close or by a passing `panel refute` or `panel defer` retally (§7). While that fix is
-    open, the moved-subject guard does not hold that retally. It reads round N's verdict files in the panel directory at
-    the branch head and binds the tally to round N's review subject (the panel's subject must equal it), not to the head
-    commit. It passes only when `PassRule` passes and round N's current verify record covers it: the record covers every
+    open, the moved-subject guard does not hold that retally. It reads round N's verdict files in the panel directory on
+    disk, as every tally does, and binds the tally to round N's round subject (the panel's subject must equal it), not
+    to the head commit. It passes only when `PassRule` passes and round N's current verify record covers it: the record covers every
     round-N finding that the enumerator lists (slot, round, finding, `finding_sha256`), and the round-N verdict files
-    at the branch head are the same set, each with the same blob, as at the commit that holds the record (a changed,
-    added or removed file fails it). When it passes, the fix closes `superseded` and the gate closes `passed` on round
-    N's review subject, and §13.2 case (b) then judges the later commits (after an open-gate `re-panel` judgement: §7). The refutations and deferrals of a retired verify (their `verify_step` is set and is not the
+    that it read from disk are the same set, each with the same blob (`git hash-object`), as at the commit that holds
+    the record (a changed, added or removed file fails it, committed or not). When it passes, the fix closes
+    `superseded` and the gate closes `passed` on round N's review subject, and §13.2 case (b) then judges the later
+    commits; after an open-gate `re-panel` judgement, which came before the verify, it authorises round N+1 instead
+    and does not close the gate (§7, §13.7). The refutations and deferrals of a retired verify (their `verify_step` is set and is not the
     current verify of their round: the `verify` key of round M's record when `mindspec_round` or its `prior` is round
     M, else the highest attempt of `<gate>.r<M>.verify`, which no rule retires once round M+1 is authorised), and, once
     a verify attempt of round M is closed `passed`, each refutation or deferral of a round-M finding with an empty
@@ -544,7 +555,10 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     its `Refutations` and `Deferrals` slices; the tallied `Panel` is never edited, as `panel refute` writes it back), so
     `PassRule` does not change, before it calls `PassRule` in
     `tally` and `refusedRound` (`reject.go`), `gatePassEvidence` (`reducer.go`), `CheckPassedGate`, and the enrolled
-    `panel refute` and `panel defer` retally (`cmd/mindspec/panel_kernel.go`).
+    `panel refute` and `panel defer` retally (`cmd/mindspec/panel_kernel.go`). On an enrolled gate the same-key dedupe
+    (slot, round, finding, `finding_sha256`) of `panel refute`, `panel defer` and the verify close compares only the
+    records that this filter keeps, with the verify close's own receipt `at` as its cutoff; a record that it discards does not block
+    the append.
     **Pass after a verify.** A gate closes `passed` (receipt `retally: "verify"`) when its current verify closed
     `passed` with a valid receipt, its record covers every finding of round N, the `veto` findings included, and no
     return is `reproduced`. So a refuted REJECT passes the gate (ruling B3, B5). `passed()`, `gatePassEvidence` and `CheckPassedGate` accept this receipt;
@@ -570,11 +584,13 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
 11. **Briefs and lenses.** The binary renders every brief of an enrolled spec from durable records; no actor writes a
     brief. The `brief` argv of each action: implement, `next <w> --emit-only` (work item, spec, plan); review slot,
     `panel prompt` (the managed header, then one generated body for all slots of the round: a summary from the work
-    item; the files in scope; the prior round's asks: the findings that round N's current verify record (from `prior`) lists, each with its
-    text read from round N's verdict files at the commit that holds that record and its return, evidence or target, so
-    a verdict change after round N is frozen does not change them (§13.10); when `prior` names no verify (round N passed
-    by its tally, §13.2), round N's findings (§13.10) read from its verdict files at the commit that `prior.asks_at`
-    names, each with the `panel refute` or `panel defer` record in `panel.json` at that commit that discharged it; and the line "Do not raise a refuted or deferred finding again without new evidence"; then the slot's
+    item; the files in scope; the prior round's asks: round N's findings (§13.10). When `prior` names a verify, they are the findings that its
+    record lists, each with its text read from round N's verdict files at the commit that holds that record and its
+    return, evidence or target, so a verdict change after round N is frozen does not change them (§13.10). When
+    `prior` names no verify (round N passed by its tally, §13.2, or by a retally that closed the verify `superseded`,
+    §13.7), their text is read from the verdict blobs in `prior.asks`. Each finding also shows each `panel refute` or
+    `panel defer` record with an empty `verify_step` in the `panel.json` blob of `prior.asks` that the §13.10 filter
+    keeps; and the line "Do not raise a refuted or deferred finding again without new evidence"; then the slot's
     Focus); lens, verify, fix and change judge, `brief <step>`. **Files in scope:** for a scoped round, the round paths;
     for a full round, `git diff --name-only` from the claim base to the round subject (G1), and for round N>1 also the
     paths changed since the prior round's subject, marked as such. The claim base is the passed implement step's claim

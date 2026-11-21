@@ -1076,7 +1076,8 @@ spec; Bead 19 adds the lens refusal to step 1.*
    print one warning naming the count and proceed (count and warn, no refusal).
 4. Make `panel submit` require `--lease` of the current generation and close the slot as `submit` does. Update
    `_HelpFlags`. Make a passing `panel refute` or `panel defer` retally close the gate `passed` and its open fix or
-   limit decision `superseded`; `panel defer` writes the defer record.
+   limit decision `superseded` (Bead 16: after an open-gate `re-panel` judgement it authorises round N+1 instead);
+   `panel defer` writes the defer record.
 5. Keep every refusal of today. A pre-kernel spec keeps today's panel rules. Update workflow "Panel verbs".
 6. Each test seeds the full state the producers leave (fix, decision, answer, authorised round), and every seeded
    close carries its receipt, so the passes write nothing whether Beads 8, 9 and 11 are merged or not.
@@ -1291,7 +1292,7 @@ Bead 8, Bead 9, Bead 10, Bead 11, Bead 12
    and the records: verify record and its returns (`ground`, `ac`, `reason`, `evidence`, `target`), lens record,
    `mindspec_reproduced`, `mindspec_actors`, lease `actor` and `ended`, take event `via`, `generation`, `actor`,
    `revoked_actor`, `revoked_token_hash` and `subject`, receipt `generation`, `superseded_generation`, `taken`, `actor`
-   and `retally: "verify"`, the verify receipt's `at`, gate round `lenses`, `lens`, `verify`, `prior` (with `asks_at`) and `judged` (judge,
+   and `retally: "verify"`, the verify receipt's `at`, gate round `lenses`, `lens`, `verify`, `prior` (new; `verify` only for a verify closed `passed`, and `asks`, path -> blob id) and `judged` (judge,
    value, new subject), and the `slots` field (slot, attempt) of the `mindspec_decision` record (`DecisionRecord`).
    The lens and verify record decoders refuse an unknown field. Pin each with a golden JSON file.
 3. Raise the `next-action` schema to `mindspec.next-action/v2` in `pass.go` and in `actorOutput` (`submit.go`); set the
@@ -1366,13 +1367,15 @@ Bead 13
    before `PassRule` in `tally`, `refusedRound`, `gatePassEvidence`, `CheckPassedGate` and the
    `panel refute` and `panel defer` retally (`cmd/mindspec/panel_kernel.go`). The verify close writes `at`
    RFC3339Nano UTC from `kernel.Now`; `panel_refute.go` and `panel_defer.go` write `created_at` from `kernel.Now`
-   (today `time.Now`). A golden test pins a same-second pair (`...:05Z` before `...:05.5Z`) and an equal pair (not
+   (today `time.Now`; production `kernel.Now` is `time.Now` and the verbs keep `.UTC().Format(time.RFC3339Nano)`, so
+   `created_at` bytes do not change on a pre-kernel spec). A golden test pins a same-second pair (`...:05Z` before `...:05.5Z`) and an equal pair (not
    after). Before the verify is applied, retire it when its
    record no longer covers round N's findings, and open `.verify.a<k+1>` (on an incomplete tally, clear
    `mindspec_round.verify`; `refused-round` opens the attempt when the tally is complete and refused again). The refutation and deferral writers
    (`cmd/mindspec/panel_refute.go`, `panel_defer.go`, or a helper they share with the verify close) carry
-   `verify_step`: empty for the verbs, the verify step for a verify close. The verify close appends its record also
-   when a verb record with the same key and an empty `verify_step` exists.
+   `verify_step`: empty for the verbs, the verify step for a verify close. On an enrolled gate the same-key dedupe of
+   the verbs (the `found` loop in `panel_refute.go` and `panel_defer.go`) and of the verify close compares only records
+   that the filter keeps, with the verify close's own receipt `at` as its cutoff (§13.10).
 5. Update workflow "Verify step" and "Rounds, decisions and halt". Text cites no internal record number.
 
 **Verification**
@@ -1409,7 +1412,8 @@ Bead 13
       refuted REJECT included; one reproduced REQUEST_CHANGES finding creates only the fix; one reproduced REJECT
       finding creates the fix and the reject decision. The same three at `<epic>.final`. `panel refute --actor Y` of g
       while the verify is open, then the verify refutes f and reproduces g: the gate stays open and the fix's
-      `mindspec_reproduced` is [g]; a mutation that keeps Y's refutation fails. At the allowance, a
+      `mindspec_reproduced` is [g]; a mutation that keeps Y's refutation fails. Then `panel refute --actor X` of g
+      appends a record and the retally closes the gate `passed`; a mutation that dedupes against all records fails. At the allowance, a
       reproduced return creates only the limit decision, and `continue:1` creates the fix.
 - [ ] AC8 (reducer): REJECT on item 2, `--apply`: the verify, whose findings include the `veto`, and no decision; a
       `deferred` veto return exits non-zero; after a verify that reproduces the veto, the decision whose `halt` text
@@ -1433,11 +1437,13 @@ Bead 14
    round gives no case (a) judge. Add the moved-subject guard: `tally`, `refused-round`, `verify-apply` and the
    `panel refute` and `panel defer` retally (`cmd/mindspec`) do not act on a gate while a judge is open or due;
    `judge-create` creates the judge (old subject = the accepted subject). While the fix of a frozen round is open, the
-   guard does not hold the retally: it reads the verdict files at the branch head and binds the tally to round N's
-   review subject; it passes only when `PassRule` passes, round N's current verify record covers every finding the
-   enumerator lists, and the round-N verdict files at the branch head are the same set, each with the same blob, as at the record's
-   commit (a changed, added or removed file fails it; §13.10); when it passes,
-   the gate closes `passed` on that subject, the fix closes `superseded`, and case (b) judges the later commits.
+   guard does not hold the retally: it reads the verdict files on disk and binds the panel to round N's round
+   subject; it passes only when `PassRule` passes, round N's current verify record covers every finding the
+   enumerator lists, and the round-N verdict files it read from disk are the same set, each with the same blob (`git
+   hash-object`), as at the record's commit (a changed, added or removed file fails it, committed or not; §13.10);
+   when it passes, the gate closes `passed` on round N's review subject, the fix closes `superseded`, and case (b)
+   judges the later commits (after an open-gate `re-panel` judgement it authorises round N+1 and does not close the
+   gate, step 3).
 2. Apply the §6 subject model: add the review subject (`mindspec_round.judged` new subject, else `subject`); stamp it
    as `mindspec_subject` where the verify (`refusedRound`) and the fix (`fixWrite`, `reject.go`) are created; in
    `activeActorRound` (`submit.go`) compare a slot with the round subject, a verify or fix with the review subject and
@@ -1450,11 +1456,13 @@ Bead 14
    verify that is not applied (§13.10) for `<gate>.r<N>.verify.a<k+1>` on the review subject; `carry-over` applies the held tally to the
    review subject; `re-panel` records the re-panel on the gate; a passing tally (`tally`), or a verify that leaves no
    reproduced finding (`verify-apply`), writes the round N+1 record itself (N+1 = the last registered round + 1; for a
-   scoped round `roundOpen` skips the registered round N), copying the round N record into `prior` with `asks_at`; a passing `panel refute` or `panel defer` retally
-   (`cmd/mindspec/panel_kernel.go`) does the same and does not close the gate; a refused tally creates the verify on
+   scoped round `roundOpen` skips the registered round N), copying the round N record into `prior` (§13.7: `verify` only for a verify closed `passed`) with `asks`, each
+   round-N verdict file and `panel.json` as the rule read them from disk, path -> blob id written with `git
+   hash-object -w`; a passing `panel refute` or `panel defer` retally (`cmd/mindspec/panel_kernel.go`) does the same,
+   with the `panel.json` the verb wrote, and does not close the gate; when it closes the verify `superseded`, `prior`
+   has no `verify`; a refused tally creates the verify on
    the new subject. In `roundOpen`, when a closed fix authorises round N+1 over the round N
-   record, copy that record, without its own `prior`, into `prior` with `asks_at` (the branch head commit at which the rule
-   read round N's panel directory), and keep `prior` on each later rewrite.
+   record, copy that record, without its own `prior`, into `prior` with `asks`, and keep `prior` on each later rewrite.
 4. Replace the full-round restore after a `re-panel` (§13.7): a non-panel commit before `panel create` makes
    `judge-create` open a judge on the newest commit, old subject = the accepted subject; on its submit, close the
    unregistered successor `superseded` (open gate: withdraw the authorised round, restore `prior` as the gate round
@@ -1484,16 +1492,20 @@ Bead 14
       case (a) acts on a frozen round fails. Three fresh fixtures with that fix open, then `panel refute --actor X` of
       f: (i) the verify reproduced only f (R5's `ccr[0]`, other slots APPROVE), a commit edits R2's round-1 verdict;
       (ii) the same verify, a commit adds an APPROVE `R9-round-1.json`; (iii) the verify reproduced f and the `veto` of
-      an off-roster REJECT `R9-round-1.json`, a commit removes it. Each leaves the gate and the fix open. (i) fails on
-      its digest whatever the coverage check does; a retally with no blob check fails (ii); a check over the head
-      files only fails (iii).
+      an off-roster INVALID `R9-round-1.json` (fix, no decision), a commit removes it; (iv) as (iii), but the removal
+      is not committed. In each `panel refute` exits 0 and the gate and the fix stay open. (i) fails on its digest
+      whatever the coverage check does; a retally with no blob check fails (ii); a check over the files present only
+      fails (iii); a set check over the HEAD tree fails (iv). Open gate, round 1 refused on a moved subject, `re-panel`
+      2, the verify on the new subject reproduces f, the fix open, then `panel refute --actor X` of f: the fix closes
+      `superseded`, round 2 of 2 slots is authorised, `prior.verify` names the verify and the gate stays open. A
+      mutation that compares the panel's subject with the review subject fails.
 - [ ] AC20 (outcomes): `carry-over` with a passing tally closes the gate `passed` on the new subject, `passed()` and
       `CheckPassedGate` accept it and `complete` exits 0; with a refused tally, the verify subject is the new subject
       J, and after a `reproduced` return a fix `submit --commit J` exits non-zero and a commit past J exits 0.
       `re-panel` 2 with all paths and a passing tally: round 2 of 2 slots on the gate, scoped to the paths; the same
       after a verify with no reproduced return, and after a refused tally and `panel refute --actor X` of each finding
-      while the verify is open (the verify closes `superseded`, the gate stays open; a mutation in which the retally
-      closes the gate fails).
+      while the verify is open (the verify closes `superseded`, `prior` has no `verify`, the gate stays open; a mutation
+      in which the retally closes the gate fails).
 - [ ] AC20 (verify across a judge): a verify open, then a commit and a `carry-over`: the verify closes `superseded`,
       `.verify.a2` opens on the new subject, `mindspec_round.verify` names it, and a receipt of a1 neither passes the
       gate nor creates a fix; with a1 receipted before the judgement, a1 keeps its receipt and is retired.
@@ -1587,11 +1599,11 @@ Bead 14
 1. Add `internal/next/kernel/brief.go`: render the lens, verify, fix and change-judge briefs and the review-slot body
    from durable records (§13.11). The verify brief reads round N's findings, `veto` included; the fix brief reads only
    `mindspec_reproduced`, with the `ccr` texts of a reproduced `veto` verdict; the slot body lists the files in scope (§13.11: for round N>1 also the paths changed since
-   the prior round's subject), the prior round's asks: the findings that round N's current verify record lists (§13.10,
-   from `mindspec_round.prior`, which every round N+1 authorisation writes), each with its return and its text read
-   from round N's verdict files at the commit that holds that record, not at the branch head; when `prior` names no
-   verify, round N's findings and the refute or defer records that discharged them, read from the verdict files and
-   `panel.json` at the commit that `prior.asks_at` names; and the line on refuted or deferred findings. For `<epic>.final`, read the summary from the spec, the context from the epic's work items and
+   the prior round's subject), the prior round's asks (§13.11, from `mindspec_round.prior`, which every round N+1 authorisation writes): with
+   `prior.verify`, the findings that its record lists, each with its return and its text read from round N's verdict
+   files at the commit that holds that record, not at the branch head; with no `verify`, round N's findings with their
+   text read from the verdict blobs in `prior.asks`; each with the verb refute or defer records in the `panel.json`
+   blob of `prior.asks` that the §13.10 filter keeps; and the line on refuted or deferred findings. For `<epic>.final`, read the summary from the spec, the context from the epic's work items and
    the diff from the final base.
 2. Add the read-only verb `mindspec brief <step>` (`cmd/mindspec/brief.go`); it refuses a step that is not an actor
    step of an enrolled spec.
@@ -1618,9 +1630,12 @@ Bead 14
       record names and no text from the edit or the stray file. A mutation that reads the verdict files at the branch
       head fails.
 - [ ] AC20 (passed prior): open gate, round 1 refused on a moved subject, `panel refute` of its finding while the
-      judge is open, `re-panel` 2, then a commit replaces that round-1 verdict with APPROVE before `panel create 2`: the round-2
-      slot body shows the round-1 finding with its refutation. Mutations that read the asks only from `prior.verify`,
-      or read the panel directory at the head when `panel create` renders, fail.
+      judge is open and no commit after it, `re-panel` 2, then a commit replaces that round-1 verdict with APPROVE
+      before `panel create 2`: the round-2 slot body shows the round-1 finding with its refutation. Mutations that read
+      the asks only from `prior.verify`, read the panel directory at the head when `panel create` renders, or read
+      `panel.json` at the pre-refutation HEAD, fail. After a refuted-each-finding retally with the verify open
+      (Bead 16), the round-2 body lists each round-1 finding with its refutation; after the frozen retally under a
+      `re-panel` (Bead 16), it shows f with its return `reproduced` and the later refutation.
 - [ ] AC22 (final): at `<epic>.final`, the slot body's summary is from the spec and its files in scope are the diff
       from the final base.
 - [ ] On a pre-kernel spec, and with `--gate adhoc` on the enrolled spec, `panel create` with a filled `--brief-file`
