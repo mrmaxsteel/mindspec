@@ -230,10 +230,13 @@ blocks Y" = Y waits for X.
   `R9-round-1.json` in the panel directory gives the verify with a `veto` finding for that file; a VOID verdict, an
   INVALID verdict, and (all other slots APPROVE) a panel-directory commit that edits one closed slot's verdict file
   before the last slot submits each give no verify and that slot's next attempt `<2>.review.r1.R<s>.a2`, whose APPROVE
-  submit passes the gate; slots R2 and R5 VOID on `.a1`, `.a2` and `.a3` and R3 VOID on `.a1` give no slot attempt and one decision
-  `<2>.review.decide.uncounted.r1` whose `mindspec_slots` lists R2 and R5; `redispatch` creates `.a4` of R2 and R5 and
-  no R3 attempt, and VOID on both `.a4` then gives `.a5` of R2 and R5 and R3 `.a2`, not a decision (mutations: a fourth attempt with no
-  decision; `redispatch` serves one listed slot or R3; the answer leaves R2's count at 3); a `hard_block`
+  submit passes the gate; slots R2 and R5 VOID on `.a1`, `.a2` and `.a3` and R3 APPROVE on `.a1` give no slot attempt and one decision
+  `<2>.review.decide.uncounted.r1` whose `slots` lists R2 and R5 with attempt 3; while it is open, a panel-directory
+  commit edits R3's closed verdict file: no R3 attempt; `redispatch` creates `.a4` of R2 and R5 and no R3 attempt, and
+  VOID on both `.a4` then gives `.a5` of R2 and R5 and R3 `.a2`, not a decision (mutations: a fourth attempt with no
+  decision; `redispatch` serves one listed slot or R3; the answer leaves R2's count at 3). Fresh fixture, the same
+  decision open, then a commit S: `--apply` creates no judge; after `redispatch` and APPROVE on both `.a4`, the pass
+  creates `<2>.review.judge.a1` and does not close the gate (mutation: judge case (a) acts while the decision is open); a `hard_block`
   REQUEST_CHANGES verdict gives only its `veto` finding. Each exits non-zero, step open: a verify record that omits or
   repeats a finding, has no returns or has an unknown field, a `ccr[0]` return for the `hard_block` slot, a return
   other than the three, `refuted` with a `ground` outside its three values, no `reason` or evidence that resolves to
@@ -244,7 +247,9 @@ blocks Y" = Y waits for X.
   `<2>.review.r2.fix` with `mindspec_reproduced` naming only the second, a fix lease with the verify's actor exits
   non-zero, and the fix brief names only the second. After the fix closes, `mindspec_round.prior.verify` names
   `<2>.review.r1.verify` and the round-2 slot brief shows both findings with their returns (mutation: `round-open`
-  writes no `prior`, and the brief shows no returns). Fresh fixture, the fix created and leased by F, then a commit
+  writes no `prior`, and the brief shows no returns). Fresh fixture, findings f and g: `panel refute --actor Y` of g while
+  `<2>.review.r1.verify` is open, then the verify refutes f and reproduces g: the gate stays open and the fix's
+  `mindspec_reproduced` names g (mutation: the filter keeps a verb refutation made before the verify closed). Fresh fixture, the fix created and leased by F, then a commit
   that edits a closed round-1 slot's verdict file and one that adds a stray `R9-round-1.json`: `--apply` creates no
   `.verify.a2` and no slot attempt, the fix keeps its `mindspec_reproduced`, after the fix closes `panel create 2`
   exits 0 (mutation: the changed-finding trigger acts on round 1), and the round-2 slot brief shows the round-1
@@ -280,7 +285,12 @@ blocks Y" = Y waits for X.
   With `<2>.review.r2.fix` open after an applied verify, a fix commit, then `panel refute --actor X` of the
   reproduced finding: no open-gate judge and no `.verify.a2`; the gate closes `passed` on round 1's review subject, the
   fix closes `superseded`, and the next pass opens `<2>.review.judge.a1` under case (b) (mutation: judge case (a) acts
-  on a frozen round). A commit of only lens or verify records creates no judge, before and after the first
+  on a frozen round). With that fix open after a verify that reproduced f and g, a commit that edits R2's round-1
+  verdict (g) to APPROVE, and in a fresh fixture a commit that adds an APPROVE `R9-round-1.json`, then `panel refute
+  --actor X` of f: the gate and the fix stay open (mutation: a frozen retally with no coverage check passes on the
+  stray file). Fresh fixture,
+  open gate, round 1 refused on a moved subject, `panel refute` of its finding while the judge is open, `re-panel` 2:
+  the round-2 slot body shows the round-1 finding with its refutation (mutation: the brief reads only `prior.verify`). A commit of only lens or verify records creates no judge, before and after the first
   registration.
 - [ ] AC21 (R3, R9, §6, §9): generation 1 leased, `lease --take` gives generation 2; `submit` of generation 1 with a
   valid verdict exits 0: the receipt names generation 1, generation 2's lease record ends `superseded`, and a
