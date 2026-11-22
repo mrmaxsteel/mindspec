@@ -1575,7 +1575,8 @@ Display time does not change the revision.
 Actions use plan order, kind order and numeric slot order.
 Commands use argument arrays.
 Implement and fix actions submit with `--commit <commit>`.
-Review slots and change judges submit with `--artifact <path>`.
+Review slots submit with `--artifact <path>`.
+Lens, verify, and change-judge steps submit with `--record <path>` outside the repository.
 A successful actor submit returns the current action document, including step existence and revision.
 The revision uses a fresh read after the writes, including assigned store ids.
 An exact retry returns the current read-only document.

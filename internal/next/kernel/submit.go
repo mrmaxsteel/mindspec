@@ -68,8 +68,12 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 	err := withActorLock(state, func(s State) error {
 		var record string
 		if options.Record != "" {
+			recordStep := options.Step
+			if r, _, err := actorRecord(s, recordStep, false); err == nil {
+				recordStep = r.Key()
+			}
 			var err error
-			record, err = readRecordFile(s, options.Record)
+			record, err = readRecordFile(s, recordStep, options.Record)
 			if err != nil {
 				return err
 			}

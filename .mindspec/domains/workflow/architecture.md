@@ -1720,7 +1720,8 @@ Its receipt identifies the rebind.
 Merged work items and closed epics create no judges.
 
 Lease the judge before submission.
-Commit its judgement file in the registered panel directory.
+Write its judgment to a file outside the repository and submit it with `--record <path>`.
+Do not commit the record.
 Use `carry-over` with a reason to retain the passing gate.
 The gate receipt records both subjects and the judge receipt.
 The carry-over also records the current rebind identity.

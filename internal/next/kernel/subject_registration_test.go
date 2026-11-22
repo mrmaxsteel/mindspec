@@ -120,6 +120,10 @@ func TestS134Subject_RegistrationBoundary(t *testing.T) {
 						if next.Round != old.Round || next.Subject != old.Subject {
 							t.Fatalf("tracked panel-only commit moved subject: %+v", next)
 						}
+						kerneltest.PassGate(f, gate, old.Subject)
+						if err := kernel.CheckPassedGate(f.State(), gate); err != nil {
+							t.Fatalf("tracked panel-only commit moved effective subject: %v", err)
+						}
 					} else {
 						if next.Round != old.Round || next.Subject != old.Subject {
 							t.Fatalf("unreviewed commit replaced the frozen round: %+v", next)

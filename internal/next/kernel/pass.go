@@ -22,9 +22,8 @@ func passExcept(reg *Registry, state State, apply bool, step string) (PassResult
 		return result, fmt.Errorf("apply needs a store")
 	}
 	if apply {
-		if err := SweepMetadata(state.Root); err != nil {
-			return result, err
-		}
+		// Cleanup is best effort. Each metadata write checks its directory again.
+		_ = SweepMetadata(state.Root)
 	}
 	err := WithCASRetry(func() error {
 		var err error

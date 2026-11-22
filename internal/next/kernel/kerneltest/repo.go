@@ -59,6 +59,11 @@ func commandIn(t testing.TB, root, dir string, limit time.Duration, combined boo
 	}
 	cmd.Env = append(cmd.Env, "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, "config"), "XDG_DATA_HOME="+filepath.Join(home, "data"), "XDG_CACHE_HOME="+filepath.Join(home, "cache"))
 	if root != "" {
+		tmp := filepath.Join(filepath.Dir(root), ".kernel-tmp")
+		if err := os.MkdirAll(tmp, 0700); err != nil {
+			t.Fatal(err)
+		}
+		cmd.Env = append(cmd.Env, "TMPDIR="+tmp)
 		cmd.Env = append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(root), "BEADS_DIR="+filepath.Join(root, ".beads"))
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
@@ -101,6 +106,17 @@ func gitRepo(t testing.TB) string {
 	if err := os.Mkdir(root, 0755); err != nil {
 		t.Fatal(err)
 	}
+	// In-process writes use the caller's TMPDIR. Clean up this root's directory
+	// without changing the process environment, so parallel callers stay safe.
+	dir, err := kernel.KernelTempDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("clean fixture kernel directory: %v", err)
+		}
+	})
 	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "--allow-empty", "-qm", "initial"}} {
 		if out, err := command(t, root, "git", args...); err != nil {
 			t.Fatalf("git %v: %v %s", args, err, out)

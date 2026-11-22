@@ -265,7 +265,11 @@ func TestS134Store_MetadataBound(t *testing.T) {
 			}
 			raw, marshalErr := json.Marshal(sized)
 			f.Must(marshalErr)
-			if !strings.Contains(err.Error(), fmt.Sprintf("size %d bytes", len(raw))) {
+			sizeKind := "size"
+			if mode != "create" {
+				sizeKind = "update size"
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf("%s %d bytes", sizeKind, len(raw))) {
 				t.Fatalf("wrong size in refusal: %v", err)
 			}
 			if len(f.Fake.Calls) != calls {

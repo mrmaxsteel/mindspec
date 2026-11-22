@@ -3,16 +3,19 @@ package kernel
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 )
 
 // CloseWriteHook builds the writes of a validated record before any close write.
@@ -59,11 +62,15 @@ func strictRecord[T any](data []byte) (T, error) {
 	return value, nil
 }
 
-func readRecordFile(s State, name string) (string, error) {
+func readRecordFile(s State, step, name string) (string, error) {
 	if !filepath.IsAbs(name) {
-		name = filepath.Join(s.Root, name)
+		name = s.Root + string(filepath.Separator) + name
 	}
-	name, err := filepath.EvalSymlinks(name)
+	supplied, err := absoluteSuppliedPath(name)
+	if err != nil {
+		return "", err
+	}
+	name, err = filepath.EvalSymlinks(supplied)
 	if err != nil {
 		return "", actorFailure("record must be a regular file outside this repository")
 	}
@@ -75,21 +82,56 @@ func readRecordFile(s State, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	roots := []string{s.Root}
 	for _, field := range bytes.Split(data, []byte{0}) {
 		if !bytes.HasPrefix(field, []byte("worktree ")) {
 			continue
 		}
-		root, err := filepath.EvalSymlinks(strings.TrimPrefix(string(field), "worktree "))
+		root := strings.TrimPrefix(string(field), "worktree ")
+		_, err := os.Stat(root)
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
 		if err != nil {
 			return "", err
 		}
-		if insidePath(root, name) {
-			return "", actorFailure("record path must be outside every worktree of this repository")
+		roots = append(roots, root)
+	}
+	for _, root := range roots {
+		for _, path := range []string{supplied, name} {
+			inside, err := insidePath(root, path)
+			if err != nil {
+				return "", err
+			}
+			if inside {
+				return "", actorFailure("record path must be outside every worktree of this repository")
+			}
 		}
 	}
-	data, err = os.ReadFile(name)
+	if info.Size() > MetadataLimit {
+		return "", recordSizeFailure(step, info.Size())
+	}
+	f, err := os.Open(name)
 	if err != nil {
 		return "", err
+	}
+	defer f.Close()
+	return readRecordBytes(step, f)
+}
+
+func recordSizeFailure(step string, size int64) error {
+	tuple, _ := kernelid.Parse(step)
+	return metadataSizeFailure(tuple.Gate, step, KeyRecord, size, "record size")
+}
+
+// readRecordBytes also bounds a file that grows after the size check.
+func readRecordBytes(step string, reader io.Reader) (string, error) {
+	data, err := io.ReadAll(io.LimitReader(reader, MetadataLimit+1))
+	if err != nil {
+		return "", err
+	}
+	if len(data) > MetadataLimit {
+		return "", recordSizeFailure(step, int64(len(data)))
 	}
 	if !utf8.Valid(data) {
 		return "", actorFailure("record must be valid UTF-8")
@@ -246,17 +288,21 @@ func recordEvidenceResolves(root, evidence string) bool {
 	}
 	name := evidence
 	if !filepath.IsAbs(name) {
-		name = filepath.Join(root, name)
+		name = root + string(filepath.Separator) + name
+	}
+	name, err := absoluteSuppliedPath(name)
+	if err != nil {
+		return false
 	}
 	if physical, err := filepath.EvalSymlinks(name); err == nil {
-		if physicalRoot, err := filepath.EvalSymlinks(root); err == nil && insidePath(physicalRoot, physical) {
+		if inside, err := insidePath(root, physical); err == nil && inside {
 			return true
 		}
 	}
 	if !objectID(evidence) {
 		return false
 	}
-	_, err := actorGit(root, "rev-parse", "--verify", evidence+"^{commit}")
+	_, err = actorGit(root, "rev-parse", "--verify", evidence+"^{commit}")
 	return err == nil
 }
 

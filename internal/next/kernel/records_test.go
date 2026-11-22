@@ -90,7 +90,7 @@ func TestS134Records_AmendmentRoundTrips(t *testing.T) {
 	prior := minimal
 	prior.Verify = "verify"
 	prior.Read = map[string]string{"verdict.json": "digest"}
-	prior.Asks = []kernel.PriorAsk{{Finding: finding, Returns: []kernel.VerifyReturn{ret}}}
+	prior.Asks = []kernel.PriorAsk{{Finding: finding, Returns: []kernel.VerifyReturn{ret}}, {Finding: finding}}
 	cases := map[string]any{
 		"lens":     kernel.LensRecord{Step: "lens", Lenses: []kernel.SlotLens{{Slot: "R1", Lens: "inspect paths"}}},
 		"verify":   kernel.VerifyRecord{Step: "verify", Subject: "subject", Returns: []kernel.VerifyReturn{ret}},

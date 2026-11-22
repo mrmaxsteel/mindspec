@@ -4,8 +4,12 @@ package kernel
 
 import (
 	"math"
+	"os"
 	"syscall"
 )
+
+// Windows directories inherit access controls; Unix permission bits do not apply.
+func privateTempDir(_ os.FileInfo) bool { return true }
 
 func processRunning(pid int) bool {
 	if pid < 1 || uint64(pid) > math.MaxUint32 {

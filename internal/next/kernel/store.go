@@ -121,7 +121,7 @@ func (s *Store) SetStatusIf(key, from, to string) error {
 
 // SetStatusMetadataIf commits a status and its lease metadata in one guarded write.
 func (s *Store) SetStatusMetadataIf(key, from, to string, updates map[string]any) error {
-	if _, err := CheckMetadataSize(key, updates); err != nil {
+	if _, err := checkMetadataSize(key, updates, "update size"); err != nil {
 		return err
 	}
 	r, err := s.owned(key)
@@ -207,7 +207,7 @@ func (s *Store) owned(key string) (*Record, error) {
 
 // WriteMetadata merges named records without replacing unrelated metadata.
 func (s *Store) WriteMetadata(key string, updates map[string]any) error {
-	if _, err := CheckMetadataSize(key, updates); err != nil {
+	if _, err := checkMetadataSize(key, updates, "update size"); err != nil {
 		return err
 	}
 	r, err := s.owned(key)

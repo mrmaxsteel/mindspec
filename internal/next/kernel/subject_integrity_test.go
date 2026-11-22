@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
@@ -87,6 +88,14 @@ func TestS134Subject_PanelCommitsOnSubjectBranch(t *testing.T) {
 				f.Must(err)
 				if record(t, f, slot).Status != "closed" {
 					t.Fatal("panel evidence did not submit")
+				}
+				kerneltest.PassGate(f, gate, old.Subject)
+				err = kernel.CheckPassedGate(f.State(), gate)
+				if moved := err != nil && strings.Contains(err.Error(), "differs from accepted subject"); moved != mixed {
+					t.Fatalf("subject exemption %s: moved=%v want %v: %v", mode, moved, mixed, err)
+				}
+				if !mixed {
+					f.Must(err)
 				}
 			})
 		}

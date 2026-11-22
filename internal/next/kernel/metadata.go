@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,10 @@ const MetadataLimit = 16 << 20
 
 // CheckMetadataSize checks the complete metadata before a write is attempted.
 func CheckMetadataSize(key string, metadata map[string]any) ([]byte, error) {
+	return checkMetadataSize(key, metadata, "size")
+}
+
+func checkMetadataSize(key string, metadata map[string]any, sizeKind string) ([]byte, error) {
 	data, err := json.Marshal(metadata)
 	if err != nil {
 		return nil, err
@@ -39,12 +44,16 @@ func CheckMetadataSize(key string, metadata map[string]any) ([]byte, error) {
 	if tuple.Gate == "" {
 		tuple, _ = kernelid.Parse(key)
 	}
-	return nil, actorFailure(fmt.Sprintf("metadata-too-large: gate %s step %s key %s size %d bytes exceeds %d bytes", termsafe.Escape(tuple.Gate), termsafe.Escape(key), termsafe.Escape(largest), len(data), MetadataLimit))
+	return nil, metadataSizeFailure(tuple.Gate, key, largest, int64(len(data)), sizeKind)
+}
+
+func metadataSizeFailure(gate, step, key string, size int64, sizeKind string) error {
+	return actorFailure(fmt.Sprintf("metadata-too-large: gate %s step %s key %s %s %d bytes exceeds %d bytes", termsafe.Escape(gate), termsafe.Escape(step), termsafe.Escape(key), sizeKind, size, MetadataLimit))
 }
 
 // KernelTempDir returns the external directory for metadata files and actor records.
 func KernelTempDir(root string) (string, error) {
-	root, err := filepath.Abs(root)
+	root, err := absoluteSuppliedPath(root)
 	if err != nil {
 		return "", err
 	}
@@ -52,29 +61,93 @@ func KernelTempDir(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	base, err := filepath.EvalSymlinks(os.TempDir())
+	supplied, err := absoluteSuppliedPath(os.TempDir())
 	if err != nil {
 		return "", err
 	}
-	if insidePath(root, base) {
-		return "", actorFailure("kernel temporary directory must be outside this repository")
+	base, err := filepath.EvalSymlinks(supplied)
+	if err != nil {
+		return "", err
+	}
+	for _, name := range []string{supplied, base} {
+		inside, err := insidePath(root, name)
+		if err != nil {
+			return "", err
+		}
+		if inside {
+			return "", fmt.Errorf("kernel temporary directory must be outside this repository\nrecovery: set TMPDIR to a directory outside the repository")
+		}
 	}
 	sum := sha256.Sum256([]byte(root))
 	dir := filepath.Join(base, "mindspec-kernel-"+hex.EncodeToString(sum[:12]))
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", err
+		return "", tempDirFailure(err)
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return "", tempDirFailure(err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !privateTempDir(info) {
+		return "", tempDirFailure(fmt.Errorf("kernel temporary directory must be a private directory owned by the current user"))
 	}
 	return dir, nil
 }
 
-func insidePath(root, name string) bool {
-	rel, err := filepath.Rel(root, name)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+func tempDirFailure(err error) error {
+	return fmt.Errorf("%w\nrecovery: set TMPDIR to a private directory outside the repository", err)
+}
+
+// absoluteSuppliedPath retains dot segments until symlinks have been resolved.
+func absoluteSuppliedPath(name string) (string, error) {
+	if filepath.IsAbs(name) {
+		return name, nil
+	}
+	base, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return base + string(filepath.Separator) + name, nil
+}
+
+// insidePath compares file identities so filesystem aliases keep their containment.
+// Callers check both the supplied path and its resolved target when links are allowed.
+func insidePath(root, name string) (bool, error) {
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return false, err
+	}
+	for {
+		info, err := os.Stat(name)
+		if err != nil {
+			return false, err
+		}
+		if os.SameFile(rootInfo, info) {
+			return true, nil
+		}
+		// Split keeps the supplied ancestor spelling, including symlink/.. paths.
+		parent, _ := filepath.Split(name)
+		separators := string(filepath.Separator)
+		if filepath.Separator == '\\' {
+			separators += "/"
+		}
+		trimmed := strings.TrimRight(parent, separators)
+		if trimmed != "" && trimmed != filepath.VolumeName(parent) {
+			parent = trimmed
+		}
+		if parent == "" || parent == name {
+			return false, nil
+		}
+		name = parent
+	}
 }
 
 // SweepMetadata removes only metadata files owned by processes that no longer exist.
 // Actor records in the records subdirectory are never swept.
 func SweepMetadata(root string) error {
+	return sweepMetadata(root, os.Remove)
+}
+
+func sweepMetadata(root string, remove func(string) error) error {
 	dir, err := KernelTempDir(root)
 	if err != nil {
 		return err
@@ -83,6 +156,7 @@ func SweepMetadata(root string) error {
 	if err != nil {
 		return err
 	}
+	var failures error
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "metadata-") {
 			continue
@@ -98,11 +172,11 @@ func SweepMetadata(root string) error {
 		if processRunning(pid) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
-			return err
+		if err := remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+			failures = errors.Join(failures, err)
 		}
 	}
-	return nil
+	return failures
 }
 
 func (s *Store) metadataArg(key string, metadata map[string]any) (string, func(), error) {
