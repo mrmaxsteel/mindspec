@@ -40,11 +40,18 @@ type windowExecutor struct {
 	f          *windowFixture
 	publishErr error
 	cleanupErr error
+	// realPublish routes PublishBeadClose to the production executor.
+	realPublish  bool
+	publishCalls [][]string
 }
 
 func (e *windowExecutor) PublishBeadClose(wt string, paths []string) error {
+	e.publishCalls = append(e.publishCalls, append([]string(nil), paths...))
 	if e.publishErr != nil {
 		return e.publishErr
+	}
+	if e.realPublish {
+		return e.MindspecExecutor.PublishBeadClose(wt, paths)
 	}
 	data, _ := json.Marshal(map[string]interface{}{"id": closingBead, "status": map[bool]string{true: "closed", false: "in_progress"}[e.f.closed]})
 	writeFile(e.f.t, wt, ".beads/issues.jsonl", string(data)+"\n")
@@ -79,6 +86,13 @@ func newWindowFixture(t *testing.T) *windowFixture {
 
 func newWindowFixtureLayout(t *testing.T, flat bool) *windowFixture {
 	t.Helper()
+	return newWindowFixtureExport(t, flat, false)
+}
+
+// newWindowFixtureExport with ignoreExport models a repo that git-ignores
+// .beads/issues.jsonl and never tracks it.
+func newWindowFixtureExport(t *testing.T, flat, ignoreExport bool) *windowFixture {
+	t.Helper()
 	saveAndRestore(t)
 	fakeBdOnPath(t)
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -93,7 +107,11 @@ func newWindowFixtureLayout(t *testing.T, flat bool) *windowFixture {
 		specs = ".mindspec/docs/specs/"
 	}
 	writeFile(t, f.root, specs+closingSpec+"/spec.md", "# Spec\n\n## Impacted Domains\n\n- widget\n")
-	writeFile(t, f.root, ".gitignore", ".worktrees/\n")
+	if ignoreExport {
+		writeFile(t, f.root, ".gitignore", ".worktrees/\n.beads/issues.jsonl\n")
+	} else {
+		writeFile(t, f.root, ".gitignore", ".worktrees/\n")
+	}
 	writeFile(t, f.root, "README.md", "before\n")
 	writeFile(t, f.root, ".beads/issues.jsonl", "{\"id\":\"window-1\",\"status\":\"in_progress\"}\n")
 	gitRun(t, f.root, "init", "-q", "-b", "main")

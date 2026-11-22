@@ -2382,8 +2382,17 @@ func (g *MindspecExecutor) commitWithExport(path, msg string) error {
 	if err := checkNoPreservedMerge(exportDir, mergeReentryHint(exportDir)); err != nil {
 		return err
 	}
-	if err := execBeadExportFn(exportDir); err != nil {
-		return fmt.Errorf("refreshing .beads/issues.jsonl: %w", err)
+	// A repo that ignores the export and does not track it keeps the beads
+	// database as the store of record. Do not refresh the file there; the
+	// commit below is still made.
+	published, err := gitutil.BeadsExportPublished(exportDir)
+	if err != nil {
+		return fmt.Errorf("checking whether .beads/issues.jsonl is published: %w", err)
+	}
+	if published {
+		if err := execBeadExportFn(exportDir); err != nil {
+			return fmt.Errorf("refreshing .beads/issues.jsonl: %w", err)
+		}
 	}
 	return gitutil.CommitAll(path, msg)
 }
@@ -2862,9 +2871,20 @@ func (g *MindspecExecutor) CleanupBead(beadID, specBranch string) error {
 }
 
 // PublishBeadClose publishes the close before any evidence is removed.
+// It refreshes the tracker export only when the caller includes the export
+// path: a repo that ignores the export does not publish it. Empty paths are
+// a no-op, because CommitPaths with no paths would commit the whole index.
 func (g *MindspecExecutor) PublishBeadClose(workdir string, paths []string) error {
-	if err := execBeadExportFn(workdir); err != nil {
-		return err
+	if len(paths) == 0 {
+		return nil
+	}
+	for _, p := range paths {
+		if p == beadsExportPath {
+			if err := execBeadExportFn(workdir); err != nil {
+				return err
+			}
+			break
+		}
 	}
 	return gitutil.CommitPaths(workdir, "chore: publish bead close", paths)
 }
@@ -2878,3 +2898,11 @@ func finalizeCandidatePaths(entries []bead.WorktreeListEntry) []string {
 	}
 	return paths
 }
+
+// BeadsExportPublished is a thin pass-through to gitutil.
+func (g *MindspecExecutor) BeadsExportPublished(workdir string) (bool, error) {
+	return gitutil.BeadsExportPublished(workdir)
+}
+
+// beadsExportPath is the repo-relative tracker export.
+const beadsExportPath = ".beads/issues.jsonl"
