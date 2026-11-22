@@ -673,7 +673,8 @@ func TestS134Submit_HaltedNoWrites(t *testing.T) {
 				} else {
 					_, err = kernel.Submit(f.State(), o)
 				}
-				if err == nil || !strings.Contains(err.Error(), "spec is halted by "+d) {
+				want := fmt.Sprintf("spec is halted by %s (%s)\nrecovery: mindspec next-action %s", d, f.SpecID, f.SpecID)
+				if err == nil || err.Error() != want {
 					t.Errorf("halt refusal: %v", err)
 				}
 				if count != 0 {

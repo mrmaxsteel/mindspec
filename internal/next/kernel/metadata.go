@@ -48,7 +48,14 @@ func checkMetadataSize(key string, metadata map[string]any, sizeKind string) ([]
 }
 
 func metadataSizeFailure(gate, step, key string, size int64, sizeKind string) error {
-	return termsafe.NewFailure(fmt.Sprintf("metadata-too-large: gate %s step %s key %s %s %d bytes exceeds %d bytes", gate, step, key, sizeKind, size, MetadataLimit), "submit a shorter record; shorten an unpinned verdict for a new review attempt, or halt the spec")
+	recovery := "halt the spec"
+	switch key {
+	case KeyRecord, KeyReturns:
+		recovery = "submit a shorter record"
+	case KeyFindings:
+		recovery = "shorten an unpinned verdict for a new review attempt, or halt the spec"
+	}
+	return termsafe.NewFailure(fmt.Sprintf("metadata-too-large: gate %s step %s key %s %s %d bytes exceeds %d bytes", gate, step, key, sizeKind, size, MetadataLimit), recovery)
 }
 
 // KernelTempDir returns the external directory for metadata files and actor records.

@@ -264,7 +264,7 @@ func RequireStepType(root string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("custom issue type step is missing\nrecovery: mindspec setup")
+	return termsafe.NewFailure("custom issue type step is missing", "mindspec setup")
 }
 
 func markedTitle(title string) string {

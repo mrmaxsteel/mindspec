@@ -38,10 +38,13 @@ func TestS134Store_MergedMetadataBound(t *testing.T) {
 			} else {
 				err = f.Store.WriteMetadata(id, updates)
 			}
-			for _, word := range []string{"metadata-too-large", gate, id, "first", fmt.Sprintf("size %d bytes", len(raw)), "recovery: submit a shorter record"} {
+			for _, word := range []string{"metadata-too-large", gate, id, "first", fmt.Sprintf("size %d bytes", len(raw)), "\nrecovery: halt the spec"} {
 				if err == nil || !strings.Contains(err.Error(), word) {
 					t.Fatalf("merged bound missing %q: %v", word, err)
 				}
+			}
+			if !strings.HasSuffix(err.Error(), "\nrecovery: halt the spec") || strings.Count(err.Error(), "recovery:") != 1 {
+				t.Fatalf("wrong recovery for stored metadata: %v", err)
 			}
 			for _, args := range f.Fake.Calls[calls:] {
 				if args[0] != "list" {

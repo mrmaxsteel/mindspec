@@ -108,5 +108,22 @@ func pathFailure(err error, prefix, recovery string) error {
 	if errors.As(err, &failure) {
 		return termsafe.PrefixFailure(err, prefix)
 	}
+	var recoveryFailure termsafe.RecoveryFailure
+	if errors.As(err, &recoveryFailure) {
+		return &preservedRecovery{cause: err, text: termsafe.EscapeRecovery(prefix) + recoveryFailure.Error()}
+	}
+	if errors.Is(err, ErrPreKernel) {
+		return &preservedRecovery{cause: err, text: termsafe.EscapeRecovery(prefix) + ErrPreKernel.Error()}
+	}
 	return termsafe.NewWrappedFailure(err, prefix+err.Error(), recovery)
 }
+
+// preservedRecovery retains producer-formatted lines and the original cause.
+type preservedRecovery struct {
+	cause error
+	text  string
+}
+
+func (e *preservedRecovery) Error() string    { return e.text }
+func (e *preservedRecovery) Unwrap() error    { return e.cause }
+func (e *preservedRecovery) TrustedRecovery() {}

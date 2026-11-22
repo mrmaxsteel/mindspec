@@ -3,6 +3,7 @@ package kernel
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // CloseWriteHook builds the writes of a validated record before any close write.
@@ -103,7 +105,7 @@ func readCheckedRecord(step, name string, checked os.FileInfo) (string, error) {
 		return "", recordPathFailure(fmt.Errorf("opened record is not a regular file"))
 	}
 	if !os.SameFile(checked, opened) {
-		return "", recordPathFailure(fmt.Errorf("record changed after its path was checked"))
+		return "", termsafe.NewFailure("record changed after its path was checked", "rerun the submit with a record file that is not being changed")
 	}
 	return readRecordBytes(step, f)
 }
@@ -260,6 +262,16 @@ func checkVerify(s State, r Record, _ Receipt) error {
 			}
 			t, _, _ := r.Tuple()
 			if err := bead.CheckDeferral(ret.Target, s.Epic, t.WorkItem, []string{finding.Text}, func(text string) string { return text }); err != nil {
+				var requirements *bead.DeferralRequirementsError
+				if errors.As(err, &requirements) {
+					// Escape the finding before preserving the list's own line breaks.
+					message := strings.ReplaceAll(requirements.Error(), finding.Text, termsafe.EscapeRecovery(finding.Text))
+					lines := strings.Split(message, "\n")
+					for i := range lines {
+						lines[i] = termsafe.EscapeRecovery(lines[i])
+					}
+					return &preservedRecovery{cause: err, text: strings.Join(lines, "\n") + "\nrecovery: " + termsafe.EscapeRecovery(requirements.Recovery)}
+				}
 				return pathFailure(err, "", "mindspec next-action")
 			}
 		default:

@@ -145,6 +145,12 @@ func TestS134Submit_OpenedRecordIdentity(t *testing.T) {
 			} else if err == nil || !strings.Contains(err.Error(), want) || text != "" {
 				t.Fatalf("opened file check failed: %q %v", text, err)
 			}
+			if mode == "replaced" {
+				want := "record changed after its path was checked\nrecovery: rerun the submit with a record file that is not being changed"
+				if err.Error() != want {
+					t.Fatalf("changed record recovery: got %q want %q", err.Error(), want)
+				}
+			}
 		})
 	}
 }

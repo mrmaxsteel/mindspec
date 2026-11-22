@@ -241,6 +241,18 @@ func actorGitBytes(root string, args ...string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = root
+	if (len(args) >= 2 && args[0] == "worktree" && args[1] == "list") ||
+		(len(args) == 2 && args[0] == "rev-parse" && args[1] == "--show-toplevel") {
+		cmd.Env = []string{}
+		for _, entry := range os.Environ() {
+			key, _, _ := strings.Cut(entry, "=")
+			switch key {
+			case "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE":
+				continue
+			}
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
 	data, err := cmd.Output()
 	if err != nil {
 		message := "cannot resolve committed evidence: "
