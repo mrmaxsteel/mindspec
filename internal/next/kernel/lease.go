@@ -192,7 +192,7 @@ func matchesToken(lease LeaseRecord, token string) bool {
 	return token != "" && lease.Generation > 0 && lease.TokenHash != "" && tokenHash(token) == lease.TokenHash
 }
 func actorFailure(message string) error {
-	return fmt.Errorf("%s\nrecovery: mindspec next-action", termsafe.Escape(message))
+	return termsafe.NewFailure(message, "mindspec next-action")
 }
 func refuseHalt(s State) error {
 	ids := []string{}

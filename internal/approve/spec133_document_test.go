@@ -59,6 +59,7 @@ type s133DocumentFixture struct {
 
 func s133Document(t *testing.T, policy, gate, state string) *s133DocumentFixture {
 	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
 	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/usr/bin/false", panel.SkipPanelEnv: ""} {
 		t.Setenv(k, v)
 	}

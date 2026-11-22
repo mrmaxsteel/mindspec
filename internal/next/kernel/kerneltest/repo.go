@@ -66,6 +66,8 @@ func commandIn(t testing.TB, root, dir string, limit time.Duration, combined boo
 		cmd.Env = append(cmd.Env, "TMPDIR="+tmp)
 		cmd.Env = append(cmd.Env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(root), "BEADS_DIR="+filepath.Join(root, ".beads"))
 	}
+	// Keep bd from starting a metrics or event-flush child after the command exits.
+	cmd.Env = append(cmd.Env, "BD_DISABLE_METRICS=1", "BD_DISABLE_EVENT_FLUSH=1")
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false")
 	var out []byte
 	var err error
@@ -106,8 +108,19 @@ func gitRepo(t testing.TB) string {
 	if err := os.Mkdir(root, 0755); err != nil {
 		t.Fatal(err)
 	}
-	// In-process writes use the caller's TMPDIR. Clean up this root's directory
-	// without changing the process environment, so parallel callers stay safe.
+	CleanupTemp(t, root)
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "--allow-empty", "-qm", "initial"}} {
+		if out, err := command(t, root, "git", args...); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	return root
+}
+
+// CleanupTemp removes a fixture root's kernel directory at the end of the test.
+// It keeps the process environment unchanged for parallel callers.
+func CleanupTemp(t testing.TB, root string) {
+	t.Helper()
 	dir, err := kernel.KernelTempDir(root)
 	if err != nil {
 		t.Fatal(err)
@@ -117,12 +130,6 @@ func gitRepo(t testing.TB) string {
 			t.Errorf("clean fixture kernel directory: %v", err)
 		}
 	})
-	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "--allow-empty", "-qm", "initial"}} {
-		if out, err := command(t, root, "git", args...); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
-	return root
 }
 
 // NewRepo creates a private git repository and a real sandbox bd store.

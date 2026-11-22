@@ -139,6 +139,7 @@ func testRepo(t *testing.T) string {
 
 	root := filepath.Join(t.TempDir(), "repo")
 	must(t, os.MkdirAll(root, 0o755))
+	kerneltest.CleanupTemp(t, root)
 
 	gitRun(t, root, "init")
 	gitRun(t, root, "config", "user.email", "test@mindspec.dev")
@@ -738,5 +739,21 @@ func TestScenario_SpecApprovalCommitFailureIsHardError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "auto-commit spec approval failed") {
 		t.Errorf("error should explain the commit failure, got: %v", err)
+	}
+}
+
+func TestScenario_KernelTempCleanup(t *testing.T) {
+	caller := t.TempDir()
+	t.Setenv("TMPDIR", caller)
+	t.Run("fixture", func(t *testing.T) {
+		root := testRepo(t)
+		dir, err := kernel.KernelTempDir(root)
+		must(t, err)
+		must(t, os.WriteFile(filepath.Join(dir, "record.json"), []byte("record"), 0600))
+	})
+	entries, err := os.ReadDir(caller)
+	must(t, err)
+	if len(entries) != 0 {
+		t.Fatalf("harness fixture leaked into caller TMPDIR: %v", entries)
 	}
 }

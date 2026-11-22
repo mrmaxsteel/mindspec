@@ -3,14 +3,11 @@ package kernel
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"unicode/utf8"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
@@ -54,7 +51,7 @@ func strictRecord[T any](data []byte) (T, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&value); err != nil {
-		return value, actorFailure("invalid record: " + err.Error())
+		return value, pathFailure(err, "invalid record: ", "mindspec next-action")
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return value, actorFailure("invalid record: expected one JSON value")
@@ -63,61 +60,59 @@ func strictRecord[T any](data []byte) (T, error) {
 }
 
 func readRecordFile(s State, step, name string) (string, error) {
-	if !filepath.IsAbs(name) {
-		name = s.Root + string(filepath.Separator) + name
-	}
-	supplied, err := absoluteSuppliedPath(name)
+	checked, err := checkSuppliedPath(s.Root, name, recordPathRecovery)
 	if err != nil {
-		return "", err
+		return "", recordPathFailure(err)
 	}
-	name, err = filepath.EvalSymlinks(supplied)
+	info := checked.info
+	if !info.Mode().IsRegular() {
+		return "", recordPathFailure(fmt.Errorf("record is not a regular file"))
+	}
+	roots, err := repositoryRoots(s.Root)
 	if err != nil {
-		return "", actorFailure("record must be a regular file outside this repository")
-	}
-	info, err := os.Stat(name)
-	if err != nil || !info.Mode().IsRegular() {
-		return "", actorFailure("record must be a regular file outside this repository")
-	}
-	data, err := actorGitBytes(s.Root, "worktree", "list", "--porcelain", "-z")
-	if err != nil {
-		return "", err
-	}
-	roots := []string{s.Root}
-	for _, field := range bytes.Split(data, []byte{0}) {
-		if !bytes.HasPrefix(field, []byte("worktree ")) {
-			continue
-		}
-		root := strings.TrimPrefix(string(field), "worktree ")
-		_, err := os.Stat(root)
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-			continue
-		}
-		if err != nil {
-			return "", err
-		}
-		roots = append(roots, root)
+		return "", recordPathFailure(err)
 	}
 	for _, root := range roots {
-		for _, path := range []string{supplied, name} {
+		for _, path := range []string{checked.clean, checked.resolved} {
 			inside, err := insidePath(root, path)
 			if err != nil {
-				return "", err
+				return "", recordPathFailure(err)
 			}
 			if inside {
-				return "", actorFailure("record path must be outside every worktree of this repository")
+				return "", recordPathFailure(fmt.Errorf("record path must be outside every worktree of this repository"))
 			}
 		}
 	}
 	if info.Size() > MetadataLimit {
 		return "", recordSizeFailure(step, info.Size())
 	}
-	f, err := os.Open(name)
+	return readCheckedRecord(step, checked.resolved, info)
+}
+
+func readCheckedRecord(step, name string, checked os.FileInfo) (string, error) {
+	f, err := openRecord(name)
 	if err != nil {
-		return "", err
+		return "", recordPathFailure(fmt.Errorf("record is unreadable: %w", err))
 	}
 	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return "", recordPathFailure(err)
+	}
+	if !opened.Mode().IsRegular() {
+		return "", recordPathFailure(fmt.Errorf("opened record is not a regular file"))
+	}
+	if !os.SameFile(checked, opened) {
+		return "", recordPathFailure(fmt.Errorf("record changed after its path was checked"))
+	}
 	return readRecordBytes(step, f)
 }
+
+func recordPathFailure(err error) error {
+	return pathFailure(err, "", recordPathRecovery)
+}
+
+const recordPathRecovery = "give --record an existing readable regular file outside every worktree of this repository without .. segments"
 
 func recordSizeFailure(step string, size int64) error {
 	tuple, _ := kernelid.Parse(step)
@@ -128,7 +123,7 @@ func recordSizeFailure(step string, size int64) error {
 func readRecordBytes(step string, reader io.Reader) (string, error) {
 	data, err := io.ReadAll(io.LimitReader(reader, MetadataLimit+1))
 	if err != nil {
-		return "", err
+		return "", recordPathFailure(err)
 	}
 	if len(data) > MetadataLimit {
 		return "", recordSizeFailure(step, int64(len(data)))
@@ -265,7 +260,7 @@ func checkVerify(s State, r Record, _ Receipt) error {
 			}
 			t, _, _ := r.Tuple()
 			if err := bead.CheckDeferral(ret.Target, s.Epic, t.WorkItem, []string{finding.Text}, func(text string) string { return text }); err != nil {
-				return actorFailure(err.Error())
+				return pathFailure(err, "", "mindspec next-action")
 			}
 		default:
 			return actorFailure("verify return must be reproduced, refuted or deferred")
@@ -286,23 +281,15 @@ func recordEvidenceResolves(root, evidence string) bool {
 	if evidence == "" {
 		return false
 	}
-	name := evidence
-	if !filepath.IsAbs(name) {
-		name = root + string(filepath.Separator) + name
-	}
-	name, err := absoluteSuppliedPath(name)
-	if err != nil {
-		return false
-	}
-	if physical, err := filepath.EvalSymlinks(name); err == nil {
-		if inside, err := insidePath(root, physical); err == nil && inside {
+	if checked, err := checkSuppliedPath(root, evidence, "give an existing readable evidence path without .. segments"); err == nil {
+		if inside, err := insidePath(root, checked.resolved); err == nil && inside {
 			return true
 		}
 	}
 	if !objectID(evidence) {
 		return false
 	}
-	_, err = actorGit(root, "rev-parse", "--verify", evidence+"^{commit}")
+	_, err := actorGit(root, "rev-parse", "--verify", evidence+"^{commit}")
 	return err == nil
 }
 

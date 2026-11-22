@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -24,17 +25,15 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 	options := kernel.SubmitOptions{Step: args[0]}
 	options.Lease, _ = cmd.Flags().GetString("lease")
 	options.Record, _ = cmd.Flags().GetString("record")
-	if options.Record != "" {
-		options.Record, err = filepath.Abs(options.Record)
-		if err != nil {
-			return err
-		}
-	}
 	options.Artifact, _ = cmd.Flags().GetString("artifact")
-	if options.Artifact != "" {
-		options.Artifact, err = filepath.Abs(options.Artifact)
-		if err != nil {
-			return err
+	for _, path := range []*string{&options.Record, &options.Artifact} {
+		if *path != "" && !filepath.IsAbs(*path) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			// The kernel checks the supplied spelling before it cleans the path.
+			*path = cwd + string(filepath.Separator) + *path
 		}
 	}
 	options.Commit, _ = cmd.Flags().GetString("commit")

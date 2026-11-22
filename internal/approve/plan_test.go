@@ -15,6 +15,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
@@ -46,7 +48,7 @@ func TestBeadCreateFailure_EmitsBdDeleteForceLine(t *testing.T) {
 }
 
 func TestUpdatePlanApproval_UpdatesFrontmatter(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	planContent := `---
 status: Draft
 spec_id: test
@@ -104,7 +106,7 @@ Details here.
 }
 
 func TestUpdatePlanApproval_NoFrontmatter(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	planPath := filepath.Join(tmp, "plan.md")
 	os.WriteFile(planPath, []byte("# No frontmatter\n"), 0644)
 
@@ -115,7 +117,7 @@ func TestUpdatePlanApproval_NoFrontmatter(t *testing.T) {
 }
 
 func TestUpdatePlanApproval_PreservesGeneratedBlock(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	planContent := `---
 status: Draft
 spec_id: test
@@ -160,7 +162,7 @@ work_chunks:
 }
 
 func TestCreateImplementationBeads_CreatesAndWiresDeps(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	// Dependencies are declared in structured `work_chunks` frontmatter (spec
 	// 097 R3): chunk id N maps to bead_ids[N-1]; depends_on [M] wires
 	// bead_ids[N-1] → bead_ids[M-1]. The prose "Depends on" lines below are
@@ -281,7 +283,7 @@ Bead 1, Bead 2
 // Bead 1" lines but NO `work_chunks` frontmatter wires ZERO dependencies.
 // RED on revert: the retired prose path would emit `bd dep add` calls.
 func TestCreateImplementationBeads_ProseDepsWireNothing(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	planContent := `---
 status: Approved
 spec_id: "042-test"
@@ -358,7 +360,7 @@ Bead 1
 // `## Bead N` sections, returning a clear error instead of mis-wiring or
 // panicking. Here 3 chunks are declared against 2 bead sections.
 func TestCreateImplementationBeads_MisalignedWorkChunks(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	planContent := `---
 status: Approved
 spec_id: "042-test"
@@ -425,7 +427,7 @@ Bead 1
 }
 
 func TestCreateImplementationBeads_NoSections(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	planContent := `---
 status: Approved
 spec_id: "042-test"
@@ -447,7 +449,7 @@ version: "1.0"
 }
 
 func TestCreateImplementationBeads_TitleIncludesSpecID(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	planContent := `---
 status: Approved
 spec_id: "042-test"
@@ -495,7 +497,7 @@ None
 }
 
 func TestCreateImplementationBeads_BDCreateFails(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	planContent := `---
 status: Approved
 spec_id: "042-test"
@@ -534,7 +536,7 @@ None
 }
 
 func TestCreateImplementationBeads_PopulatesFields(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 
 	// Create spec.md with Requirements, Acceptance Criteria, and ADR Touchpoints
 	specContent := `---
@@ -699,7 +701,7 @@ None
 // contextpack.RenderBeadContext, while a path mentioned ONLY in the work-chunk
 // prose is NOT scraped. RED on revert to ExtractFilePathsFromText's prefix scan.
 func TestCreateImplementationBeads_KeyFilePathsReachSurface(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 
 	os.WriteFile(filepath.Join(tmp, "spec.md"), []byte(`---
 status: Approved
@@ -789,7 +791,7 @@ None
 }
 
 func TestCreateImplementationBeads_PerBeadAcceptanceCriteria(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 
 	specContent := `---
 status: Approved
@@ -900,7 +902,7 @@ Bead 1
 }
 
 func TestCreateImplementationBeads_FallsBackToSpecAC(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 
 	specContent := `---
 status: Approved
@@ -1039,7 +1041,7 @@ func TestBuildBeadMetadata(t *testing.T) {
 }
 
 func TestWriteBeadIDsToFrontmatter(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := planFixtureRoot(t)
 	planContent := `---
 status: Approved
 spec_id: test
@@ -1308,7 +1310,7 @@ func TestPlanApprove_BeadsCarrySpecID(t *testing.T) {
 	}
 	content := "## Bead 1: First\n\n**Steps**\n1. First\n\n## Bead 2: Second\n\n**Steps**\n1. Second\n"
 	sections := validate.ParseBeadSections(content)
-	ids, _, err := createBeadsFromParsed(t.TempDir(), specID, "epic-129", content, sections, []validate.WorkChunk{{ID: 1}, {ID: 2}})
+	ids, _, err := createBeadsFromParsed(planFixtureRoot(t), specID, "epic-129", content, sections, []validate.WorkChunk{{ID: 1}, {ID: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1355,5 +1357,34 @@ func TestApprovePlan_EnrolmentRecordsPhase(t *testing.T) {
 	f.Must(err)
 	if !strings.Contains(string(data), `"to":"plan-approved"`) {
 		t.Fatalf("missing phase marker: %s", data)
+	}
+}
+
+func planFixtureRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	kerneltest.CleanupTemp(t, root)
+	return root
+}
+
+func TestPlanFixture_KernelTempCleanup(t *testing.T) {
+	caller := t.TempDir()
+	t.Setenv("TMPDIR", caller)
+	t.Run("fixture", func(t *testing.T) {
+		root := planFixtureRoot(t)
+		dir, err := kernel.KernelTempDir(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "record.json"), []byte("record"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	entries, err := os.ReadDir(caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("plan fixture leaked into caller TMPDIR: %v", entries)
 	}
 }

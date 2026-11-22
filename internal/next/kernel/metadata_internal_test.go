@@ -108,3 +108,43 @@ func TestS134Submit_EvidenceIdentity(t *testing.T) {
 		t.Fatal("cleaned symlink parent accepted external evidence")
 	}
 }
+
+func TestS134Submit_OpenedRecordIdentity(t *testing.T) {
+	for _, mode := range []string{"same", "replaced", "directory"} {
+		t.Run(mode, func(t *testing.T) {
+			name := filepath.Join(t.TempDir(), "record.json")
+			if err := os.WriteFile(name, []byte("record bytes"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			checked, err := os.Stat(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "changed after its path was checked"
+			switch mode {
+			case "replaced":
+				if err := os.Rename(name, name+"-checked"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(name, []byte("other record"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "directory":
+				name = filepath.Dir(name)
+				checked, err = os.Stat(name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = "opened record is not a regular file"
+			}
+			text, err := readCheckedRecord("test-1.1.review.r1.lens", name, checked)
+			if mode == "same" {
+				if err != nil || text != "record bytes" {
+					t.Fatalf("same opened file failed: %q %v", text, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), want) || text != "" {
+				t.Fatalf("opened file check failed: %q %v", text, err)
+			}
+		})
+	}
+}

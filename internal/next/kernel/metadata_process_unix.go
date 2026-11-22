@@ -13,3 +13,8 @@ func privateTempDir(info os.FileInfo) bool {
 }
 
 func processRunning(pid int) bool { return syscall.Kill(pid, 0) != syscall.ESRCH }
+
+// Nonblocking open lets the handle check refuse a file replaced with a FIFO.
+func openRecord(name string) (*os.File, error) {
+	return os.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+}

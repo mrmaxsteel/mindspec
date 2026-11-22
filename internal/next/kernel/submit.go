@@ -219,7 +219,7 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 		output = OutputForPass(result, committed, true)
 		return nil
 	})
-	return output, err
+	return output, pathFailure(err, "", "mindspec next-action")
 }
 
 func actorOutput(s State) Output {
@@ -243,7 +243,22 @@ func actorGitBytes(root string, args ...string) ([]byte, error) {
 	cmd.Dir = root
 	data, err := cmd.Output()
 	if err != nil {
-		return nil, actorFailure("cannot resolve committed evidence")
+		message := "cannot resolve committed evidence: "
+		recovery := "restore access to the repository and evidence, then run mindspec next-action"
+		if len(args) >= 2 && args[0] == "worktree" && args[1] == "list" {
+			message = "cannot list repository worktrees: "
+			recovery = "restore access to the repository and repair its Git worktree registration"
+		} else if len(args) == 2 && args[0] == "rev-parse" && args[1] == "--show-toplevel" {
+			message = "cannot find repository worktree top: "
+			recovery = "restore access to the repository and repair its Git worktree registration"
+		}
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			err = fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, exit.Stderr)
+		} else {
+			err = fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
+		return nil, pathFailure(err, message, recovery)
 	}
 	return data, nil
 }
@@ -286,25 +301,25 @@ func resolveArtifact(s State, o SubmitOptions) (Receipt, error) {
 			return receipt, actorFailure("commit needs a durable artifact blob")
 		}
 	} else {
-		path := o.Artifact
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(s.Root, path)
+		checked, err := checkSuppliedPath(s.Root, o.Artifact, artifactPathRecovery)
+		if err != nil {
+			return receipt, pathFailure(err, "artifact must be a regular committed file: ", artifactPathRecovery)
 		}
-		info, err := os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() {
+		info, err := os.Lstat(checked.clean)
+		if err != nil {
+			return receipt, pathFailure(err, "cannot inspect artifact: ", artifactPathRecovery)
+		}
+		if !info.Mode().IsRegular() {
 			return receipt, actorFailure("artifact must be a regular committed file")
 		}
-		path, err = filepath.EvalSymlinks(path)
-		if err != nil {
-			return receipt, err
-		}
+		path := checked.resolved
 		evidenceRoot, err = actorGit(filepath.Dir(path), "rev-parse", "--show-toplevel")
 		if err != nil {
-			return receipt, actorFailure("artifact must be a committed file in a worktree of this repository")
+			return receipt, pathFailure(err, "artifact must be a committed file in a worktree of this repository: ", artifactPathRecovery)
 		}
 		common, err := actorGit(s.Root, "rev-parse", "--path-format=absolute", "--git-common-dir")
 		if err != nil {
-			return receipt, err
+			return receipt, pathFailure(err, "cannot inspect repository Git directory: ", artifactPathRecovery)
 		}
 		evidenceCommon, err := actorGit(evidenceRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
 		if err != nil {
@@ -312,20 +327,29 @@ func resolveArtifact(s State, o SubmitOptions) (Receipt, error) {
 		}
 		commonInfo, err := os.Stat(common)
 		if err != nil {
-			return receipt, err
+			return receipt, pathFailure(err, "cannot inspect repository Git directory: ", artifactPathRecovery)
 		}
 		evidenceInfo, err := os.Stat(evidenceCommon)
-		if err != nil || !os.SameFile(commonInfo, evidenceInfo) {
+		if err != nil {
+			return receipt, pathFailure(err, "cannot inspect artifact Git directory: ", artifactPathRecovery)
+		}
+		if !os.SameFile(commonInfo, evidenceInfo) {
 			return receipt, actorFailure("artifact must belong to this repository")
 		}
 		path, err = filepath.Rel(evidenceRoot, path)
-		if err != nil || path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) {
+		if err != nil {
+			return receipt, pathFailure(err, "cannot locate artifact in its worktree: ", artifactPathRecovery)
+		}
+		if path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) {
 			return receipt, actorFailure("artifact must be inside its worktree")
 		}
 		path = filepath.ToSlash(path)
 		receipt.Path = path
 		receipt.Commit, err = actorGit(evidenceRoot, "log", "-1", "--format=%H", "HEAD", "--", path)
-		if err != nil || receipt.Commit == "" {
+		if err != nil {
+			return receipt, pathFailure(err, "artifact has no holding commit: ", artifactPathRecovery)
+		}
+		if receipt.Commit == "" {
 			return receipt, actorFailure("artifact has no holding commit")
 		}
 	}
@@ -335,16 +359,22 @@ func resolveArtifact(s State, o SubmitOptions) (Receipt, error) {
 		return receipt, err
 	}
 	if err = ValidReceipt(s.Root, receipt, nil); err != nil {
-		return receipt, actorFailure(err.Error())
+		return receipt, pathFailure(err, "", artifactPathRecovery)
 	}
 	if o.Artifact != "" {
 		actual, err := actorGit(evidenceRoot, "hash-object", "--", receipt.Path)
-		if err != nil || actual != receipt.Blob {
+		if err != nil {
+			return receipt, pathFailure(err, "cannot read artifact blob: ", artifactPathRecovery)
+		}
+		if actual != receipt.Blob {
 			return receipt, actorFailure("artifact blob differs from its holding commit")
 		}
 	}
 	return receipt, nil
 }
+
+const artifactPathRecovery = "give --artifact an existing committed file without .. segments"
+
 func commitPast(s State, receipt Receipt, base, branch string) error {
 	if !objectID(base) || receipt.Commit == base {
 		return actorFailure("commit is not past the claim base or round subject")

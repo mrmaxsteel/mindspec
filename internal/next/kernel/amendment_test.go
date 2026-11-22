@@ -363,12 +363,20 @@ func TestS134Submit_ClosingPin(t *testing.T) {
 				opts.Lease = "bad-token"
 			}
 			if mode == "oversized-record" {
-				opts.Record = recordFile(t, strings.Replace(data, `"return":"reproduced"`, `"return":"reproduced","reason":"`+strings.Repeat("x", 17<<20)+`"`, 1))
+				f.Must(f.Store.WriteMetadata(id, map[string]any{"stored": strings.Repeat("y", 9<<20)}))
+				body := strings.Replace(data, `"return":"reproduced"`, `"return":"reproduced","reason":"`+strings.Repeat("x", 9<<20)+`"`, 1)
+				if len(body) >= kernel.MetadataLimit {
+					t.Fatal("oversized metadata fixture does not pass record read bound")
+				}
+				opts.Record = recordFile(t, body)
 			}
 			if strings.HasPrefix(mode, "bad-") || strings.HasPrefix(mode, "oversized-") {
 				_, err := kernel.Submit(f.State(), opts)
 				if err == nil {
 					t.Fatal("bad submit accepted")
+				}
+				if strings.HasPrefix(mode, "oversized-") && !strings.Contains(err.Error(), "metadata-too-large") {
+					t.Fatalf("wrong oversized metadata refusal: %v", err)
 				}
 				if _, ok := actorRecord(t, f, id).Metadata[kernel.KeyClosing]; ok {
 					t.Fatal("refused submit wrote mindspec_closing")

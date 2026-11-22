@@ -79,7 +79,7 @@ func setupPreflightPlan(t *testing.T, specID, planContent string) (root, planPat
 	// seams), exactly like EnsureMigrated's own tests already stub this
 	// same seam for its (rarer) migration write.
 	noopStubPhaseMergeMetadataForTest(t)
-	root = t.TempDir()
+	root = planFixtureRoot(t)
 	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
 		t.Fatalf("mkdir .mindspec: %v", err)
 	}

@@ -38,7 +38,7 @@ func TestS134Store_MergedMetadataBound(t *testing.T) {
 			} else {
 				err = f.Store.WriteMetadata(id, updates)
 			}
-			for _, word := range []string{"metadata-too-large", gate, id, "first", fmt.Sprintf("size %d bytes", len(raw))} {
+			for _, word := range []string{"metadata-too-large", gate, id, "first", fmt.Sprintf("size %d bytes", len(raw)), "recovery: submit a shorter record"} {
 				if err == nil || !strings.Contains(err.Error(), word) {
 					t.Fatalf("merged bound missing %q: %v", word, err)
 				}
@@ -56,7 +56,7 @@ func TestS134Store_MergedMetadataBound(t *testing.T) {
 }
 
 func TestS134Store_TempDirectory(t *testing.T) {
-	for _, mode := range []string{"symlink", "permissions", "file", "inside", "case-alias", "data-volume", "link-in-tree", "link-parent-spelling"} {
+	for _, mode := range []string{"symlink", "permissions", "file", "inside", "case-alias", "data-volume", "link-in-tree", "link-parent-spelling", "link-target", "missing"} {
 		t.Run(mode, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), "repo")
 			if err := os.Mkdir(root, 0700); err != nil {
@@ -88,7 +88,9 @@ func TestS134Store_TempDirectory(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-			case "inside", "case-alias", "data-volume", "link-in-tree", "link-parent-spelling":
+			case "missing":
+				t.Setenv("TMPDIR", filepath.Join(base, "missing"))
+			case "inside", "case-alias", "data-volume", "link-in-tree", "link-parent-spelling", "link-target":
 				inside := filepath.Join(root, "temp")
 				if err := os.Mkdir(inside, 0700); err != nil {
 					t.Fatal(err)
@@ -106,6 +108,12 @@ func TestS134Store_TempDirectory(t *testing.T) {
 						t.Fatal(err)
 					}
 					supplied = "/System/Volumes/Data" + physical
+				}
+				if mode == "link-target" {
+					supplied = filepath.Join(base, "alias")
+					if err := os.Symlink(inside, supplied); err != nil {
+						t.Fatal(err)
+					}
 				}
 				if mode == "link-in-tree" {
 					supplied = filepath.Join(root, "external-temp")
@@ -130,6 +138,9 @@ func TestS134Store_TempDirectory(t *testing.T) {
 				t.Setenv("TMPDIR", supplied)
 			}
 			_, err = kernel.KernelTempDir(root)
+			if mode == "missing" && (err == nil || !strings.Contains(err.Error(), "missing or unreadable")) {
+				t.Fatalf("missing TMPDIR cause: %v", err)
+			}
 			if err == nil || !strings.Contains(err.Error(), "recovery: set TMPDIR to") || strings.Contains(err.Error(), "mindspec next-action") {
 				t.Fatalf("unsafe temporary directory accepted or unusable recovery: %v", err)
 			}

@@ -24,3 +24,5 @@ func processRunning(pid int) bool {
 	status, err := syscall.WaitForSingleObject(process, 0)
 	return err != nil || status == syscall.WAIT_TIMEOUT
 }
+
+func openRecord(name string) (*os.File, error) { return os.Open(name) }

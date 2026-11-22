@@ -73,6 +73,9 @@ func TestS134Fixture_KernelTempCleanup(t *testing.T) {
 	t.Setenv("TMPDIR", caller)
 	var dirs []string
 	t.Run("fixtures", func(t *testing.T) {
+		if _, err := command(t, "", "sh", "-c", `test "$BD_DISABLE_METRICS" = 1 && test "$BD_DISABLE_EVENT_FLUSH" = 1`); err != nil {
+			t.Fatalf("rootless fixture can start a late metrics or event writer: %v", err)
+		}
 		for _, f := range []*Fixture{Enrolled(t, WithFake(false)), EmptyRepo(t)} {
 			out, err := f.BinaryCommand("sh", "-c", `printf %s "$TMPDIR"`)
 			f.Must(err)
@@ -105,10 +108,8 @@ func TestS134Fixture_KernelTempCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "mindspec-kernel-") {
-			t.Fatalf("fixture leaked into caller TMPDIR: %s", entry.Name())
-		}
+	if len(entries) != 0 {
+		t.Fatalf("fixture leaked into caller TMPDIR: %v", entries)
 	}
 }
 

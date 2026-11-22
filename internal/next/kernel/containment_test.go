@@ -13,7 +13,7 @@ import (
 )
 
 func TestS134Submit_RecordContainment(t *testing.T) {
-	for _, mode := range []string{"moved", "locked-absent", "not-directory", "loop-error", "link-in-tree", "link-parent-target", "link-parent-spelling", "relative-link-parent", "case-alias", "data-volume", "separate-git-dir", "name-prefix"} {
+	for _, mode := range []string{"moved", "locked-absent", "not-directory", "loop-error", "link-in-tree", "link-parent-target", "link-parent-hardlink", "link-parent-spelling", "relative-link-parent", "case-alias", "data-volume", "separate-git-dir", "name-prefix", "absolute-up", "relative-up"} {
 		t.Run(mode, func(t *testing.T) {
 			f, id, lease, data := recordFixture(t, "lens")
 			path := recordFile(t, data)
@@ -41,10 +41,15 @@ func TestS134Submit_RecordContainment(t *testing.T) {
 				f.Must(os.Symlink(path, alias))
 				path = alias
 				refuse = true
-			case "link-parent-target":
+			case "link-parent-target", "link-parent-hardlink":
 				child := filepath.Join(f.Root, "child")
 				f.Must(os.Mkdir(child, 0700))
-				f.Must(os.WriteFile(filepath.Join(f.Root, "record.json"), []byte(data), 0600))
+				inside := filepath.Join(f.Root, "record.json")
+				f.Must(os.WriteFile(inside, []byte(data), 0600))
+				if mode == "link-parent-hardlink" {
+					f.Must(os.Rename(path, path+"-previous"))
+					f.Must(os.Link(inside, path))
+				}
 				outside := filepath.Dir(path)
 				alias := filepath.Join(outside, "alias")
 				f.Must(os.Symlink(child, alias))
@@ -91,6 +96,12 @@ func TestS134Submit_RecordContainment(t *testing.T) {
 					}
 					path = alias
 				}
+			case "absolute-up", "relative-up":
+				f.Must(os.WriteFile(filepath.Join(filepath.Dir(f.Root), "record.json"), []byte(data), 0600))
+				path = f.Root + "/../record.json"
+				if mode == "relative-up" {
+					path = "../record.json"
+				}
 			case "name-prefix":
 				dir := f.Root + "-outside"
 				f.Must(os.Mkdir(dir, 0700))
@@ -104,7 +115,14 @@ func TestS134Submit_RecordContainment(t *testing.T) {
 				if err == nil || after.Status == "closed" || !jsonEqual(before, after) {
 					t.Fatalf("contained or unreadable record accepted or wrote the step: %v", err)
 				}
-				if mode != "loop-error" && !strings.Contains(err.Error(), "outside every worktree") {
+				want := "outside every worktree"
+				switch mode {
+				case "loop-error":
+					want = "listed worktree"
+				case "link-parent-target", "link-parent-spelling", "relative-link-parent":
+					want = "two different files"
+				}
+				if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "recovery: give --record") && mode != "loop-error" {
 					t.Fatalf("wrong containment refusal: %v", err)
 				}
 			} else {

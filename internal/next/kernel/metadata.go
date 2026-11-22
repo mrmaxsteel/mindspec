@@ -25,7 +25,7 @@ func CheckMetadataSize(key string, metadata map[string]any) ([]byte, error) {
 func checkMetadataSize(key string, metadata map[string]any, sizeKind string) ([]byte, error) {
 	data, err := json.Marshal(metadata)
 	if err != nil {
-		return nil, err
+		return nil, pathFailure(err, "cannot encode metadata: ", "submit metadata that can be encoded as JSON")
 	}
 	if len(data) <= MetadataLimit {
 		return data, nil
@@ -34,7 +34,7 @@ func checkMetadataSize(key string, metadata map[string]any, sizeKind string) ([]
 	for k, v := range metadata {
 		value, err := json.Marshal(v)
 		if err != nil {
-			return nil, err
+			return nil, pathFailure(err, "cannot encode metadata: ", "submit metadata that can be encoded as JSON")
 		}
 		if len(value) > size || (len(value) == size && k < largest) {
 			largest, size = k, len(value)
@@ -48,36 +48,42 @@ func checkMetadataSize(key string, metadata map[string]any, sizeKind string) ([]
 }
 
 func metadataSizeFailure(gate, step, key string, size int64, sizeKind string) error {
-	return actorFailure(fmt.Sprintf("metadata-too-large: gate %s step %s key %s %s %d bytes exceeds %d bytes", termsafe.Escape(gate), termsafe.Escape(step), termsafe.Escape(key), sizeKind, size, MetadataLimit))
+	return termsafe.NewFailure(fmt.Sprintf("metadata-too-large: gate %s step %s key %s %s %d bytes exceeds %d bytes", gate, step, key, sizeKind, size, MetadataLimit), "submit a shorter record; shorten an unpinned verdict for a new review attempt, or halt the spec")
 }
 
 // KernelTempDir returns the external directory for metadata files and actor records.
 func KernelTempDir(root string) (string, error) {
 	root, err := absoluteSuppliedPath(root)
 	if err != nil {
-		return "", err
+		return "", pathFailure(err, "cannot resolve project root: ", "restore access to the project root, then retry")
 	}
 	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", err
+		return "", pathFailure(err, "cannot resolve project root: ", "restore access to the project root, then retry")
 	}
-	supplied, err := absoluteSuppliedPath(os.TempDir())
+	checked, err := checkSuppliedPath("", os.TempDir(), tempPathRecovery)
 	if err != nil {
-		return "", err
+		return "", tempDirFailure(err)
 	}
-	base, err := filepath.EvalSymlinks(supplied)
+	if !checked.info.IsDir() {
+		return "", tempDirFailure(fmt.Errorf("temporary path is not a directory"))
+	}
+	roots, err := temporaryRoots(root)
 	if err != nil {
-		return "", err
+		return "", tempDirFailure(err)
 	}
-	for _, name := range []string{supplied, base} {
-		inside, err := insidePath(root, name)
-		if err != nil {
-			return "", err
-		}
-		if inside {
-			return "", fmt.Errorf("kernel temporary directory must be outside this repository\nrecovery: set TMPDIR to a directory outside the repository")
+	for _, worktree := range roots {
+		for _, name := range []string{checked.clean, checked.resolved} {
+			inside, err := insidePath(worktree, name)
+			if err != nil {
+				return "", tempDirFailure(err)
+			}
+			if inside {
+				return "", tempDirFailure(fmt.Errorf("kernel temporary directory must be outside every worktree of this repository"))
+			}
 		}
 	}
+	base := checked.resolved
 	sum := sha256.Sum256([]byte(root))
 	dir := filepath.Join(base, "mindspec-kernel-"+hex.EncodeToString(sum[:12]))
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -94,8 +100,10 @@ func KernelTempDir(root string) (string, error) {
 }
 
 func tempDirFailure(err error) error {
-	return fmt.Errorf("%w\nrecovery: set TMPDIR to a private directory outside the repository", err)
+	return pathFailure(err, "", tempPathRecovery)
 }
+
+const tempPathRecovery = "set TMPDIR to a private directory outside every worktree of the repository; use an existing path without .. segments"
 
 // absoluteSuppliedPath retains dot segments until symlinks have been resolved.
 func absoluteSuppliedPath(name string) (string, error) {
@@ -110,31 +118,22 @@ func absoluteSuppliedPath(name string) (string, error) {
 }
 
 // insidePath compares file identities so filesystem aliases keep their containment.
-// Callers check both the supplied path and its resolved target when links are allowed.
+// Callers first check path spelling, then test the cleaned path and resolved target.
 func insidePath(root, name string) (bool, error) {
 	rootInfo, err := os.Stat(root)
 	if err != nil {
-		return false, err
+		return false, pathFailure(err, "cannot inspect containment root: ", "restore access to the path and repository worktrees")
 	}
 	for {
 		info, err := os.Stat(name)
 		if err != nil {
-			return false, err
+			return false, pathFailure(err, "cannot inspect path ancestor: ", "restore access to the path and repository worktrees")
 		}
 		if os.SameFile(rootInfo, info) {
 			return true, nil
 		}
-		// Split keeps the supplied ancestor spelling, including symlink/.. paths.
-		parent, _ := filepath.Split(name)
-		separators := string(filepath.Separator)
-		if filepath.Separator == '\\' {
-			separators += "/"
-		}
-		trimmed := strings.TrimRight(parent, separators)
-		if trimmed != "" && trimmed != filepath.VolumeName(parent) {
-			parent = trimmed
-		}
-		if parent == "" || parent == name {
+		parent := filepath.Dir(name)
+		if parent == name {
 			return false, nil
 		}
 		name = parent
@@ -150,13 +149,13 @@ func SweepMetadata(root string) error {
 func sweepMetadata(root string, remove func(string) error) error {
 	dir, err := KernelTempDir(root)
 	if err != nil {
-		return err
+		return tempDirFailure(err)
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		return tempDirFailure(err)
 	}
-	var failures error
+	var failures []error
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "metadata-") {
 			continue
@@ -173,10 +172,13 @@ func sweepMetadata(root string, remove func(string) error) error {
 			continue
 		}
 		if err := remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
-			failures = errors.Join(failures, err)
+			failures = append(failures, err)
 		}
 	}
-	return failures
+	if len(failures) > 0 {
+		return tempDirFailure(errors.Join(failures...))
+	}
+	return nil
 }
 
 func (s *Store) metadataArg(key string, metadata map[string]any) (string, func(), error) {
@@ -186,11 +188,11 @@ func (s *Store) metadataArg(key string, metadata map[string]any) (string, func()
 	}
 	dir, err := KernelTempDir(s.Root)
 	if err != nil {
-		return "", nil, err
+		return "", nil, tempDirFailure(err)
 	}
 	f, err := os.CreateTemp(dir, fmt.Sprintf("metadata-%d-", os.Getpid()))
 	if err != nil {
-		return "", nil, err
+		return "", nil, tempDirFailure(err)
 	}
 	cleanup := func() { _ = os.Remove(f.Name()) }
 	if err = f.Chmod(0600); err == nil {
@@ -202,7 +204,7 @@ func (s *Store) metadataArg(key string, metadata map[string]any) (string, func()
 	}
 	if err != nil {
 		cleanup()
-		return "", nil, err
+		return "", nil, tempDirFailure(err)
 	}
 	return "@" + f.Name(), cleanup, nil
 }
