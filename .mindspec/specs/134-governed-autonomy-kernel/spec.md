@@ -64,13 +64,13 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
    new slug restarts at round 1 (`mindspec-ztax`).
 8. **Local decisions and cascades.** A REJECT that the verify reproduces adds a `fix`/`halt` decision for that gate
    only (§13.8); a refuted veto passes; `halt` stops the spec (B11, §13.4). A complete, refused round gets a verify;
-   only its reproduced findings go to the fix, and no approval count resolves a finding. Four orchestrator rules in
+   only its reproduced findings go to the fix, and no approval count resolves a finding. Five orchestrator rules in
    `internal/rules/rules.yaml`, which `instruct` renders, hold what the kernel does not check:
    `dispatch.fresh-agent` (each actor step gets a fresh agent; a verifier is not a slot reviewer of its round or an
    author of its subject; a fixer is not its verifier; no agent takes a lease that a still-running agent of the loop
-   holds), `decision.operator-answer`, `loop.stop-on-failed-run` and
-   `readiness.not-ready-route` (§13.6). Failure: `Load` forces `on_reject: halt`; only the advisory `review.reproduce` rule asks for a
-   reproduction.
+   holds), `decision.operator-answer`, `loop.stop-on-failed-run`, `readiness.not-ready-route` and
+   `panel.no-self-skip` (§13.6). Failure: `Load` forces `on_reject: halt`; only the advisory `review.reproduce` rule
+   asks for a reproduction.
 9. **Unreceipted closes and audit.** §9 and §11: a close whose evidence still fits gets its receipt under `submit
    --repair`, with no retry; `--allow-not-ready` joins `escapeHatchFlags` and
    `EscapeHatchTokens`. Failure: closes not persisted (`mindspec-2u0u`); `--allow-not-ready` is in no registry.
@@ -84,7 +84,8 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
     of `ms-bead-cycle`, `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally` are adapters of at
     most 50 lines, none longer than at the spec base: loop on `next-action --apply`, `lease`, a fresh agent per actor
     step with the brief the binary prints, `submit` and each `run` entry. An adapter started for a panel runs
-    `panel tally`; when that prints a `Next` block (a gate that is not a kernel gate, §13.11), it
+    `panel tally`; when that fails with no decision, it stops and reports the error; when that prints a `Next` block
+    (a gate that is not a kernel gate, §13.11), it
     runs that block and does not run `next-action --apply`; otherwise it runs the loop. On a `next-action` refusal (a
     pre-kernel spec, or no
     approved plan) it runs what the refusal and `instruct` print. They hold no other command sequence, pick order, round cap, halt table, rule or
@@ -226,8 +227,9 @@ blocks Y" = Y waits for X.
   `next-action`, `lease`, `submit`, `brief`, `panel prompt`, `panel tally`, `instruct`; `git grep -n -i -w -E
   "must|never|only after|round|pick|order|halt|first|before" -- S` exits 1; `cmp` of each skill pair exits 0 (mutation:
   a 7-line adapter that names `complete` or a pick order fails). `mindspec instruct` prints
-  `dispatch.fresh-agent`, `decision.operator-answer`, `loop.stop-on-failed-run` and `readiness.not-ready-route` in
-  each mode (mutation: one row scoped `reviewer`). After `mindspec setup` refreshes the skills, a pre-kernel fixture
+  `dispatch.fresh-agent`, `decision.operator-answer`, `loop.stop-on-failed-run`, `readiness.not-ready-route` and
+  `panel.no-self-skip` in each mode (mutation: one row scoped `reviewer`). After `mindspec setup` refreshes the skills,
+  a pre-kernel fixture
   spec reaches `impl approve` exit 0 through only the commands that the refusals, `instruct` and `panel tally` print;
   each spec and plan gate passes the same way (mutation: `panel tally` prints no `Next` block); an incomplete round
   prints no fix step and names each missing slot; a REJECT, a `hard_block` and a missing measurement artifact each
@@ -248,7 +250,8 @@ blocks Y" = Y waits for X.
 - [ ] AC17 (R1-R4, B8): only `next-action --apply`, `lease`, `submit` and each `run` entry reach `impl approve` exit 0
   and `"status":"done"`. After `submit <1>.impl.a1`, `--apply` creates `<1>.review.r1.lens`
   and `run` has no `panel create 1`; after the lens `submit`, `run` lists `panel create 1`; after it, `--apply` lists slots
-  `<1>.review.r1.R<s>`, `ForBead` counts 1 round, a rerun of `panel create 1` exits non-zero; the finalize export runs.
+  `<1>.review.r1.R<s>`, `ForBead` counts 1 round, a rerun of `panel create 1` exits non-zero; the finalize export runs
+  (the fixture tracks the export).
 - [ ] AC18 (R5, B12): after item 1's gate passes on 3 slots, a `.mindspec/config.yaml` commit on `bead/1` (rebind
   refuses): `--apply` creates exactly `<1>.review.judge.a1` and no round; `complete 1` and `impl approve` exit
   non-zero naming it. A second commit before its submit: the next pass closes a1 `superseded` and creates

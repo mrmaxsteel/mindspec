@@ -1279,7 +1279,8 @@ Bead 5, Bead 6, Bead 7, Bead 8, Bead 9, Bead 10, Bead 11
 **Acceptance Criteria**
 - [ ] AC17: only `next-action --apply`, `lease`, `submit` and `run` entries reach `impl approve` exit 0 and
       `"status":"done"`. After `submit <1>.impl.a1`, `run` lists `panel create 1`; after it, `--apply` lists slots
-      `<1>.review.r1.R<s>`, `ForBead` counts 1 round, a rerun of `panel create 1` exits non-zero; the export runs.
+      `<1>.review.r1.R<s>`, `ForBead` counts 1 round, a rerun of `panel create 1` exits non-zero; the export runs
+      (the fixture tracks the export).
 - [ ] AC13: every listed snapshot diff changes only computed ids and links between them. `bd ready` titles each
       mindspec bead, decisions included, `[mindspec]`; `bd ready --exclude-label mindspec` shows the foreign beads and
       no epic, work item or kernel bead.
@@ -1347,8 +1348,10 @@ Bead 8, Bead 9, Bead 10, Bead 11, Bead 12
    commit or blob. Change `kernel.ValidReceipt` to `ValidReceipt(root string, r Receipt, metadata map[string]any)
    error`: a receipt of a record kind is valid when `mindspec_record` is present in `metadata` and `record_sha256`
    equals the sha256 of the bytes its string holds; absent, it is invalid. Update each caller to pass the step's
-   metadata, merged with the write for a receipt not yet stored (`nil` only for a path and commit receipt): `audit.go`,
-   `closes.go`, `pass.go`, `reducer.go`, `state.go`, `submit.go` (four calls), and the tests `halt_test.go`,
+   metadata, merged with the write for a receipt not yet stored (`nil` only for a path and commit receipt; the
+   decision-answer calls, one in `state.go` and two in `submit.go`, pass the step metadata or `nil`: the answer path
+   never reads it):
+   `audit.go`, `closes.go`, `pass.go`, `reducer.go`, `state.go`, `submit.go` (four calls), and the tests `halt_test.go`,
    `publication_state_test.go`, `records_test.go`, `recovery_regression_test.go`, `registered_artifacts_test.go`,
    `cmd/mindspec/kernel_canonical_test.go`, `kernel_e2e_test.go` and `panel_kernel_test.go`. `--artifact` of a record kind
    and `--record` of a slot, implement step or fix
@@ -1903,11 +1906,13 @@ Bead 15, Bead 17, Bead 19
    re-derivation lines from `ms-bead-impl`, each `mindspec_readiness_attempt` reason with its clarification or `(none
    recorded)` (`internal/bead/readiness.go`, `clarify.go`), and the step `complete <w> --check` before the return. It
    runs the read-only check of `bead ready-check <w>` and exits non-zero with its report when the item is not ready,
+   with that check's diagnostic and no brief when the item is not plan-form,
    and exits non-zero naming a malformed `mindspec_readiness_attempt`. In `runEmitOnly`, this check replaces the
    positional line `emit-only: bead fetched by ID; readiness not checked.` and its exit 0. Rewrite
    `TestNextSelection_PositionalEmitOnly_BypassesSpecFilter` (`cmd/mindspec/next_selection_test.go`): the fetch by id,
-   filter bypass and absence of writes stay; a ready item exits 0 without that line, and an item that is not ready
-   exits non-zero with the report. Edit the two lines of `.mindspec/domains/workflow/` that pin the old contract:
+   filter bypass and absence of writes stay; a ready item exits 0 without that line, an item that is not ready
+   exits non-zero with the report, and `nonplan-r` (not plan-form) exits non-zero with the diagnostic and no brief.
+   Edit the two lines of `.mindspec/domains/workflow/` that pin the old contract:
    `interfaces.md` ("Positional emit-only fetches by ID without constructing a set and prints") and `architecture.md`
    ("Positional emit-only still fetches by ID and prints"). `readinessExitCodeRule` and its pins
    (`TestMsBeadImplSkill_OverrideCoverage{CheckShipped,MutationProbe,Refresh}`,
@@ -1916,14 +1921,16 @@ Bead 15, Bead 17, Bead 19
    commands of today's `ms-panel-tally` and `ms-bead-fix`, next to `tallyExitAction` and `tallyExitActionNonBead`
    (`cmd/mindspec/panel.go`). Add a leg field to `panel.Decision` (`internal/panel/gate.go`), set by each return of
    `panelGateDecision`, and choose the §13.11 route from it, not from `Message`; on the unresolved leg, non-empty
-   `GateFacts.ArtifactDetails` is the missing-artifact route. For a non-kernel gate both
+   `GateFacts.ArtifactDetails` is the missing-artifact route; a Block with an unset leg takes the halted-panel
+   route. For a non-kernel gate both
    functions print that route in place of their one re-run recovery for every Block; update their tests
    (`panel_test.go`, `panel_create_integrity_test.go`, `panel_tally_quote_unix_test.go`). The `next-action` refusal of a
    pre-kernel spec names today's cycle
    (§13.11).
 3. Rewrite `ms-bead-cycle`, `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally` under
    `plugins/mindspec/skills` as harness adapters of at most 50 lines, none longer than at `371dc360` (spec R12): when
-   started for a panel, run `panel tally`; when that prints a `Next` block, run that block and not
+   started for a panel, run `panel tally`; when that fails with no decision, stop and report the error; when that
+   prints a `Next` block, run that block and not
    `next-action --apply`; else loop on `next-action --apply` (the adapter states this order by sequence: the AC15
    word grep reads adapter text, not the binary output); for each actor step, `lease`, then start a fresh agent with the
    output of the action's
@@ -1933,7 +1940,7 @@ Bead 15, Bead 17, Bead 19
    `<!-- staged-rule: id=sequence.bead-impl-prompt; remove-by=2027-06-30 -->`; the "Apply" line that names the id and
    the `readinessExitCodeRule` line below the marker go. Copy each
    to `.claude/skills` byte-equal, and add each old text to `internal/setup/historical_skills` so existing installs
-   refresh. In the same commit, handle each pin that the slimming breaks:
+   refresh. In the same commit, handle each pin that the slimming or step 2 breaks:
    - `internal/guard/registries.go`: delete the six `ms-bead-cycle` rows of `KnownSitesExemptionList`; lower
      `wantKnownSitesLiveCount` of `TestKnownSitesExemptionList_CountSentinel` (`registries_test.go`) from 11 to 5
      (`KnownSitesExemptionListTotalCount` and `KnownSitesExemptionListLiveCount` are computed and follow).
@@ -1941,6 +1948,12 @@ Bead 15, Bead 17, Bead 19
      `internal/lint/destructive_guidance_test.go` delete the `ms-bead-cycle` rows of `backgroundExpectedExemptions`
      and `backgroundJustifiedWideningExemptions` (`TestBootstrapManifest_ExemptionListIdentity`), and lower the want
      of `TestBackgroundJustifiedWideningExemptions_CountSentinel` from 3 to 1.
+   - `tallyExitAction`, `tallyExitActionNonBead`: update the `Rationale` of their `OpaqueOperandRegistry` rows and the
+     renderings of `TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor` to the §13.11 routes. If an operand
+     becomes a literal or a list or moves to a helper, or a new unprovable command operand appears, change the row,
+     its obligation and its `destructive_seed_manifest.txt` line together
+     (`TestProductDiagnosticScan_OpaqueRegistryMembershipExact`, `TestBootstrapManifest_OpaqueRegistryIdentity`); keep
+     `mindspecVerbTemplateSites` on the functions that hold the `fmt.Sprintf` templates.
    - `internal/setup/skills_kernel_test.go`: rewrite `TestS134Skills_CycleContract` to the adapter contract; add
      `TestS134Skills_AdapterShape` (lines, base length, verb allowlist, word grep, `cmp`); delete
      `TestPanelSkills_AdapterShape` (`panel_adapter_spec131_test.go`), which `TestS134Skills_AdapterShape` replaces;
@@ -1961,8 +1974,10 @@ Bead 15, Bead 17, Bead 19
    reviewer of its round or an author of its subject, give a fix step to its verifier, or take a lease that a
    still-running agent of this loop holds."; replacement "Start a fresh
    agent for each actor step and choose a verifier and a fixer that did not do the work they judge."),
-   `decision.operator-answer`, `loop.stop-on-failed-run` and `readiness.not-ready-route` (contracts §13.6). State that
-   `review.reproduce` applies to a pre-kernel spec and that an enrolled spec runs the verify step. Add the four ids to
+   `decision.operator-answer`, `loop.stop-on-failed-run`, `readiness.not-ready-route` (contracts §13.6) and
+   `panel.no-self-skip` (prohibition "Do not set an environment variable that skips a panel gate."; replacement
+   "Return a blocked gate to the operator."). State that
+   `review.reproduce` applies to a pre-kernel spec and that an enrolled spec runs the verify step. Add the five ids to
    `TestRuleTable_MinimumSet` (`internal/rules/rules_test.go`) and to the end of each mode's want list in
    `TestInstruct_RulesSection` (`internal/instruct/rules_test.go`).
 5. Update `project-docs/user/guides/autonomy.md` and workflow "Kernel loop". Fix a defect found here in its bead's
@@ -1981,12 +1996,13 @@ Bead 15, Bead 17, Bead 19
 - [ ] AC19-AC22 hold on fixtures made by this binary.
 - [ ] AC15, AC16 (skills): the five adapters pass the line, base-length, verb-allowlist, word and `cmp` checks
       (mutation: a 7-line adapter that names `complete` fails); no `SKILL.md` grows against `371dc360`; `mindspec
-      instruct` renders the four new ids in every mode (mutation: one row scoped `reviewer`).
+      instruct` renders the five new ids in every mode (mutation: one row scoped `reviewer`).
 - [ ] AC15 (pre-kernel): after `mindspec setup`, a `PreKernelSpec` fixture reaches `impl approve` exit 0 through
       only the commands that the refusals, `instruct` and `panel tally` print; the spec and plan gates pass the same
       way (mutation: `panel tally` prints no `Next` block). An incomplete round prints no fix step and names each
       missing slot; a REJECT, a `hard_block` and a missing measurement artifact each print the operator-action line and
-      no fix step; a stale subject prints the recovery lines, and each other Block and a Warn the halt lines (mutation:
+      no fix step; a stale subject prints the recovery lines with their conditions, and each other Block and a Warn the
+      halt lines (mutation:
       the BLOCK branch prints fix steps for every Block decision fails). An adhoc gate on an enrolled fixture with an
       open work item that `next-action --apply` can authorise passes the same way and writes no kernel step (mutation: the
       adapter runs `next-action --apply` before `panel tally`).

@@ -442,12 +442,13 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    with no lens slot; unknown fields refused in lens and verify records; the slot `focus` carrier and its precedence
    (§13.11); files in scope, the prior-round asks rendered from `prior.asks` alone, and the
    `<epic>.final` brief sources (§13.11); the decision answer {`option`, `at`} with no actor and `run[].actor` kept as
-   an executor kind (§4, §6); the rule ids `decision.operator-answer`, `loop.stop-on-failed-run` and
-   `readiness.not-ready-route` (§13.6); the readiness review and `complete --check` in the implement and fix briefs,
-   and the `Next` block of `panel tally` on a gate that is not a kernel gate, with its gate-specific steps, routed by the
-   decision's
+   an executor kind (§4, §6); the rule ids `decision.operator-answer`, `loop.stop-on-failed-run`,
+   `readiness.not-ready-route` and `panel.no-self-skip` (§13.6); the readiness review and `complete --check` in the
+   implement and fix briefs, and the `Next` block of `panel tally` on a gate that is not a kernel gate, with its
+   gate-specific steps, routed by the decision's
    leg, a missing measurement artifact read from `artifact_path`, and each Warn a halted panel (§13.11); an
-   adapter started for a panel runs `panel tally` and then that block or the loop (§13.11); `next <w> --emit-only` runs
+   adapter started for a panel runs `panel tally` and then that block or the loop, or stops when the tally fails
+   with no decision (§13.11); `next <w> --emit-only` runs
    the readiness check in place of its
    unchecked exit 0, with the route of a failed brief in `readiness.not-ready-route` (§13.6, §13.11), and
    fails closed on a malformed `mindspec_readiness_attempt` (§13.11); the repair event fields and the takeovers Details
@@ -479,11 +480,13 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
    become orchestrator rules in `internal/rules/rules.yaml`, which `instruct` renders: `decision.operator-answer` (an
    open decision goes to the operator with its options, and only the operator's option is submitted; an agent never
    answers it), `loop.stop-on-failed-run` (a failed `run` entry, a failed merge or a dependency mismatch included,
-   stops the loop when the next pass lists the same entry, and goes to the operator) and `readiness.not-ready-route`
+   stops the loop when the next pass lists the same entry, and goes to the operator), `readiness.not-ready-route`
    (on a `NOT READY` return, accept it and revise the plan, or answer each cited reason once with `bead clarify` and
    dispatch again with the brief the binary prints; on a non-zero `next <w> --emit-only`, start no agent, release a
    held lease with `lease <step> --release <t>` and follow the printed report: revise the plan, or the operator decides
-   `next <w> --allow-not-ready`, which on an enrolled spec also writes the override marker and then takes the lease).
+   `next <w> --allow-not-ready=<signals> --evidence <path>`, which on an enrolled spec also writes the override marker
+   and then takes the lease) and, from `ms-panel-tally`, `panel.no-self-skip` (do not set an environment variable that
+   skips a panel gate; return a blocked gate to the operator).
 7. **Round opening (OQ10, OQ12).** `panel create` is the one writer of a round record (the registration and its ledger
    `round` line, which `ForBead` and §10 count). These outcomes authorise round N on a subject commit: a closed
    implement step (round 1); a closed fix `<gate>.r<N>.fix` (round N); a `re-panel` judgement, or under it a verify
@@ -692,10 +695,11 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     brief. The `brief` argv of each action: implement, `next <w> --emit-only` (work item, spec, plan; the readiness review
     SR-1..SR-5 with its `NOT READY: <w>` return form; on a work item with `mindspec_readiness_attempt`, each reported
     reason with its clarification or `(none recorded)`; and the step `complete <w> --check` before the return; it runs
-    the read-only check of `bead ready-check <w>` and exits non-zero with its report when the item is not ready, and a
+    the read-only check of `bead ready-check <w>` and exits non-zero with its report when the item is not ready, or
+    with its diagnostic and no brief when the item is not plan-form, and a
     malformed `mindspec_readiness_attempt` makes it exit non-zero and name the key; on every spec this check replaces
     the positional form's line `emit-only: bead fetched by ID; readiness not checked.` and its exit 0 for an item that
-    is not ready, while the fetch by id, the filter bypass and the absence of writes stay); review slot,
+    is not ready or not plan-form, while the fetch by id, the filter bypass and the absence of writes stay); review slot,
     `panel prompt` (the managed header, then one generated body for all slots of the round: a summary from the work
     item; the files in scope; the prior round's asks: round N's findings, rendered from `prior.asks` alone (§13.7), each with its text and its
     verify return, evidence or target, or the verb records that the §13.10 filter keeps, so a later edit of the verdict
@@ -749,14 +753,17 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
       unresolved finding whose `artifact_path` is absent from or unverified in the round tree): the line "A REJECT or
       missing required measurement artifact needs operator action. A text edit does not supply an artifact.", for a
       missing artifact also `panel refute` and `panel defer` as above, and the halt lines. It prints no fix step.
-    - Stale or unreadable subject: the recovery lines (`panel create --round <N+1> --brief-file`, `panel rebind`, `panel abandon`).
-    - Halted panel (each other Block: an unreadable or changed registration, a round mismatch, a dirty tree; and each
-      Warn): the halt lines. It prints no fix step.
+    - Stale or unreadable subject: the recovery lines, each with its condition; run one: `panel create --round <N+1>
+      --brief-file` when the subject needs a new round; `panel rebind` for a passing panel whose changed paths need no
+      new review; `panel abandon` by the operator only.
+    - Halted panel (each other Block: an unreadable or changed registration, a round mismatch, a dirty tree, an unset
+      leg; and each Warn): the halt lines. It prints no fix step.
     On a Block these lines replace the one re-run recovery that `panel tally` prints today for every Block.
     The halt lines are "Otherwise halt and report the panel state." and the recovery lines, marked for the operator.
     On a kernel gate
     `panel tally` prints no `Next` block; `next-action` decides. The `next-action` refusal of a pre-kernel spec (§8)
     names today's cycle in order: `next`, `panel create`, `panel tally`, `complete`, `impl approve`. An adapter started
-    for a panel runs `panel tally`; when that prints a `Next` block, the adapter runs that block and does not run
+    for a panel runs `panel tally`; when that fails with no decision, the adapter stops and reports the error; when
+    that prints a `Next` block, the adapter runs that block and does not run
     `next-action --apply`; otherwise it loops on `next-action --apply`. On a `next-action` refusal it runs what the
     refusal and `instruct` print (`spec.md` R12).
