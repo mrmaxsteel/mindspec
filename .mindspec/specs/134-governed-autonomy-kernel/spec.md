@@ -83,9 +83,10 @@ Every requirement holds contracts §2 and B1-B13 (§3). A bare `§<n>` cites con
 12. **Skills, docs and setup.** The binary owns sequence and rules; a skill keeps only harness mechanics. Both copies
     of `ms-bead-cycle`, `ms-spec-autopilot`, `ms-bead-impl`, `ms-bead-fix` and `ms-panel-tally` are adapters of at
     most 50 lines, none longer than at the spec base: loop on `next-action --apply`, `lease`, a fresh agent per actor
-    step with the brief the binary prints, `submit` and each `run` entry. An adapter runs `panel tally` first when
-    it is started for a panel; when `panel tally` prints a `Next` block (a gate that is not a kernel gate, §13.11), it
-    runs that block and does not run `next-action --apply`. On a `next-action` refusal (a pre-kernel spec, or no
+    step with the brief the binary prints, `submit` and each `run` entry. An adapter started for a panel runs
+    `panel tally`; when that prints a `Next` block (a gate that is not a kernel gate, §13.11), it
+    runs that block and does not run `next-action --apply`; otherwise it runs the loop. On a `next-action` refusal (a
+    pre-kernel spec, or no
     approved plan) it runs what the refusal and `instruct` print. They hold no other command sequence, pick order, round cap, halt table, rule or
     rationale. Each rule or step that leaves a skill becomes a rule id or binary output (§13.6, §13.11). Docs drop deleted keys and spec-wide halt rows (§13.6); `setup` adds `step` and keeps
     other `types.custom` entries. Each brief comes from the binary (§13.11): `panel prompt` for a slot, `brief <step>`
@@ -172,11 +173,13 @@ blocks Y" = Y waits for X.
 - [ ] AC10 (R9): `bd close <slot>` with no verdict: flag `unreceipted-close`, and the next `--apply` creates
   `<slot>.a2`. With a valid verdict and token, `submit` writes the receipt; no `.a2`. A leased slot raw-closed with a
   fitting verdict at its registered path and no token: the pass flags `unreceipted-close`, creates no `.a2` and lists `submit <slot>
-  --repair --reason`; that submit exits 0 with a receipt `via: "repair"` and one repair event (`mindspec_takes`, `via:
+  --repair --reason <text> --artifact <path>`; that submit exits 0 with a receipt `via:
+  "repair"` and one repair event (`mindspec_takes`, `via:
   "repair"`) with the step's current generation, and the lease generation does not change. `submit --repair` exits
   non-zero, step unchanged, on an open step, on a step with a valid receipt and with a verdict of another subject; a
   leased verify, raw-closed after its submit stored an all-`refuted` `mindspec_record`, gets a receipt from
-  `submit --repair` from those stored bytes (with `--record` it exits non-zero), its refutation records and a gate closed `passed` (`retally: "verify"`), and no `.verify.a2`; a
+  `submit --repair` from those stored bytes (a `--record` of other bytes exits non-zero; one of the same bytes exits 0),
+  its refutation records and a gate closed `passed` (`retally: "verify"`), and no `.verify.a2`; a
   leased lens step, raw-closed after its submit stored a fitting record, gets a receipt from `submit --repair`, and `panel create` gives each
   slot its drafted `focus` (mutation: the repair writes only the receipt). A
   never-leased verify, raw-closed: `run` lists no `submit --repair`, `submit --repair` exits
@@ -226,11 +229,16 @@ blocks Y" = Y waits for X.
   `dispatch.fresh-agent`, `decision.operator-answer`, `loop.stop-on-failed-run` and `readiness.not-ready-route` in
   each mode (mutation: one row scoped `reviewer`). After `mindspec setup` refreshes the skills, a pre-kernel fixture
   spec reaches `impl approve` exit 0 through only the commands that the refusals, `instruct` and `panel tally` print;
-  each spec and plan gate passes the same way (mutation: `panel tally` prints no `Next` block); an adhoc gate on an
-  enrolled fixture passes the same way and the run writes no kernel step (mutation: the adapter runs `next-action
-  --apply` before `panel tally`). The implement brief
+  each spec and plan gate passes the same way (mutation: `panel tally` prints no `Next` block); an incomplete round
+  prints no fix step and names each missing slot; a REJECT, a `hard_block` and a missing measurement artifact each
+  print the operator-action line and no fix step (mutation: the BLOCK branch prints fix steps for every Block decision
+  fails); an adhoc gate on an enrolled fixture with an open work item that `next-action --apply` can authorise passes
+  the same way and the run writes no kernel step (mutation: the adapter runs `next-action --apply` before `panel
+  tally`). The implement brief
   prints SR-1..SR-5 and `complete <w> --check`, and on a re-dispatch each `mindspec_readiness_attempt` reason; a
-  malformed `mindspec_readiness_attempt` makes it exit non-zero naming the key (mutation: it prints the brief). With `types.custom: gate,spike2`, `plan
+  malformed `mindspec_readiness_attempt` makes it exit non-zero naming the key (mutation: it prints the brief); a work
+  item that is not ready makes it exit non-zero with the `bead ready-check` report and no brief. With
+  `types.custom: gate,spike2`, `plan
   approve` exits non-zero naming `mindspec setup`; after plain `mindspec setup` (an old install), it holds
   `gate,spike2,step` and each installed skill copy matches its source.
 - [ ] AC16 (constraints): added non-test Go lines under `cmd/`, `internal/` and skill lines hold no ADR, spec,
