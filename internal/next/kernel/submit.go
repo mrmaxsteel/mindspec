@@ -20,6 +20,7 @@ type SubmitOptions struct {
 	Step     string
 	Lease    string
 	Artifact string
+	Record   string
 	Commit   string
 	Answer   string
 	// BeforeClose publishes validated evidence before the receipt and final reduction.
@@ -31,7 +32,7 @@ var artifactChecks = map[string]ArtifactCheck{}
 
 func RegisterArtifactCheck(kind string, check ArtifactCheck) error {
 	switch kind {
-	case "implement", "review-slot", "fix", "change-judge":
+	case "implement", "review-slot", "fix", "change-judge", "lens", "verify":
 	default:
 		return fmt.Errorf("unknown artifact kind %q", kind)
 	}
@@ -46,7 +47,7 @@ func RegisterArtifactCheck(kind string, check ArtifactCheck) error {
 }
 
 func init() {
-	for kind, check := range map[string]ArtifactCheck{"implement": checkImplement, "fix": checkFix, "review-slot": checkVerdict} {
+	for kind, check := range map[string]ArtifactCheck{"implement": checkImplement, "fix": checkFix, "review-slot": checkVerdict, "lens": checkLens, "verify": checkVerify} {
 		if err := RegisterArtifactCheck(kind, check); err != nil {
 			panic(err)
 		}
@@ -58,10 +59,21 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 		return Output{}, ErrPreKernel
 	}
 	if options.Answer != "" {
+		if options.Record != "" || options.Artifact != "" || options.Commit != "" {
+			return Output{}, actorFailure("submit needs one evidence flag")
+		}
 		return Answer(state, options.Step, options.Answer)
 	}
 	var output Output
 	err := withActorLock(state, func(s State) error {
+		var record string
+		if options.Record != "" {
+			var err error
+			record, err = readRecordFile(s, options.Record)
+			if err != nil {
+				return err
+			}
+		}
 		if err := refuseHalt(s); err != nil {
 			return err
 		}
@@ -89,16 +101,28 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 			if !matchesToken(lease, options.Lease) {
 				return actorFailure("lease token is not current")
 			}
-			if (options.Artifact == "") == (options.Commit == "") {
-				return actorFailure("submit needs one artifact or commit")
+			evidenceCount := 0
+			for _, value := range []string{options.Record, options.Artifact, options.Commit} {
+				if value != "" {
+					evidenceCount++
+				}
 			}
-			if (tuple.Kind == "implement" || tuple.Kind == "fix") != (options.Commit != "") {
+			if evidenceCount != 1 {
+				return actorFailure("submit needs one record, artifact or commit")
+			}
+			if recordKind(tuple.Kind) != (options.Record != "") || (tuple.Kind == "implement" || tuple.Kind == "fix") != (options.Commit != "") {
 				return actorFailure("artifact does not fit the step kind")
 			}
-			receipt, err := resolveArtifact(s, options)
-			if err != nil {
-				return err
+			var receipt Receipt
+			if recordKind(tuple.Kind) {
+				receipt = Receipt{Kind: "passed", RecordSHA256: recordDigest([]byte(record))}
+			} else {
+				receipt, err = resolveArtifact(s, options)
+				if err != nil {
+					return err
+				}
 			}
+			receipt.Generation = lease.Generation
 			check, ok := artifactChecks[tuple.Kind]
 			if !ok {
 				return actorFailure("artifact check is not available for " + tuple.Kind)
@@ -107,8 +131,9 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 			if err != nil {
 				return err
 			}
-			if present && ValidReceipt(s.Root, old) == nil {
+			if present && ValidReceipt(s.Root, old, r.Metadata) == nil {
 				receipt.Repaired = old.Repaired
+				receipt.At = old.At
 				if !reflect.DeepEqual(old, receipt) {
 					if old.Kind == "superseded" {
 						return actorFailure("step was superseded by a new subject or round; use the current actions")
@@ -123,6 +148,9 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 				if !lease.Expires.After(s.At) {
 					return actorFailure("lease has expired")
 				}
+				if recordKind(tuple.Kind) {
+					r.Metadata = mergedMetadata(r.Metadata, Metadata(KeyRecord, record))
+				}
 				if err = check(s, r, receipt); err != nil {
 					return err
 				}
@@ -132,12 +160,21 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 				if err = actorChildren(s, r); err != nil {
 					return err
 				}
+				receipt.Repaired = r.Status == "closed"
+				if recordKind(tuple.Kind) {
+					receipt, err = recordCloseWrites(s, r, receipt)
+					if err != nil {
+						return err
+					}
+				}
 				if options.BeforeClose != nil {
 					if err = options.BeforeClose(s, receipt); err != nil {
 						return err
 					}
 				}
-				receipt.Repaired = r.Status == "closed"
+				if err = checkClosingConflict(s, r); err != nil {
+					return err
+				}
 				if err = s.Store.WriteReceipt(r.Key(), receipt); err != nil {
 					return err
 				}
@@ -186,7 +223,7 @@ func actorOutput(s State) Output {
 	if s.Halted() {
 		status = "halted"
 	}
-	return Output{Schema: "mindspec.next-action/v1", Status: status, Applied: true,
+	return Output{Schema: "mindspec.next-action/v2", Status: status, Applied: true,
 		Policy:  PolicyView{RoundLimit: s.Policy.RoundLimit, LeaseTTL: s.Policy.LeaseTTL},
 		Actions: []Action{}, Waiting: []Waiting{}, Decisions: []Decision{}, Run: []Run{}, Flags: []Flag{}}
 }
@@ -293,7 +330,7 @@ func resolveArtifact(s State, o SubmitOptions) (Receipt, error) {
 	if err != nil {
 		return receipt, err
 	}
-	if err = ValidReceipt(s.Root, receipt); err != nil {
+	if err = ValidReceipt(s.Root, receipt, nil); err != nil {
 		return receipt, actorFailure(err.Error())
 	}
 	if o.Artifact != "" {
@@ -370,20 +407,25 @@ func checkFix(s State, r Record, receipt Receipt) error {
 	if err != nil {
 		return err
 	}
-	return commitPast(s, receipt, round.Subject, branch)
+	if err := commitPast(s, receipt, round.Subject, branch); err != nil {
+		return err
+	}
+	paths, err := actorGitBytes(s.Root, "diff", "--no-renames", "--name-only", "-z", round.Subject, receipt.Commit, "--")
+	if err != nil {
+		return err
+	}
+	for _, name := range strings.Split(string(paths), "\x00") {
+		if name != "" && !registeredPanelArtifact(s, t.Gate, name) {
+			return nil
+		}
+	}
+	return actorFailure("fix commit must change a path outside panel directories")
 }
 func checkVerdict(s State, r Record, receipt Receipt) error {
 	t, _, _ := r.Tuple()
 	round, err := activeActorRound(s, r)
 	if err != nil {
 		return err
-	}
-	head, err := effectiveSubject(s, t.Gate)
-	if err != nil {
-		return err
-	}
-	if head != "" && head != round.Subject {
-		return actorFailure("step subject or round is stale")
 	}
 	bytes, err := actorGitBytes(s.Root, "show", receipt.Commit+":"+receipt.Path)
 	if err != nil {
@@ -460,11 +502,11 @@ func answerLocked(s State, decision, option string) (Output, error) {
 		if err != nil {
 			return err
 		}
-		same := present && old.Answer != nil && old.Answer.Option == option && ValidReceipt(s.Root, old) == nil
+		same := present && old.Answer != nil && old.Answer.Option == option && ValidReceipt(s.Root, old, r.Metadata) == nil
 		if err = refuseHalt(s); err != nil && !(same && option == "halt") {
 			return err
 		}
-		if present && ValidReceipt(s.Root, old) == nil {
+		if present && ValidReceipt(s.Root, old, r.Metadata) == nil {
 			if !same {
 				return actorFailure("decision already has a different answer")
 			}
@@ -482,7 +524,7 @@ func answerLocked(s State, decision, option string) (Output, error) {
 			if !exists || !decisionOption(d, option) {
 				return actorFailure("answer must be a listed decision option")
 			}
-			answer := DecisionAnswer{Option: option, At: s.At, Actor: "operator"}
+			answer := DecisionAnswer{Option: option, At: s.At}
 			if err = s.Store.WriteMetadata(r.Key(), map[string]any{KeyAnswer: answer, KeyClose: Receipt{Kind: "passed", Answer: &answer}}); err != nil {
 				return err
 			}
@@ -499,7 +541,7 @@ func answerLocked(s State, decision, option string) (Output, error) {
 		if option == "halt" {
 			receipt := Receipt{Kind: "halted", HaltAnswer: r.Key(), Answer: old.Answer}
 			if receipt.Answer == nil {
-				answer := DecisionAnswer{Option: option, At: s.At, Actor: "operator"}
+				answer := DecisionAnswer{Option: option, At: s.At}
 				receipt.Answer = &answer
 			}
 			if err = s.Store.WriteReceipt(r.Key(), receipt); err != nil {

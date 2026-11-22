@@ -1,10 +1,8 @@
 package kernel
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -455,28 +453,19 @@ func judgeSupersede(s State) (Changes, error) {
 	return c, nil
 }
 
-func readJudgement(s State, receipt Receipt) (Judgement, error) {
-	var j Judgement
-	data, err := actorGitBytes(s.Root, "show", receipt.Commit+":"+receipt.Path)
+func readJudgement(r Record) (Judgement, error) {
+	data, err := recordBytes(r)
 	if err != nil {
-		return j, actorFailure("cannot read committed judgement artifact")
+		return Judgement{}, err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&j); err != nil {
-		return j, actorFailure("invalid judgement artifact")
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return j, actorFailure("invalid judgement artifact")
-	}
-	return j, nil
+	return strictRecord[Judgement](data)
 }
 
-func checkJudgement(s State, r Record, receipt Receipt) error {
-	return validateJudgement(s, r, receipt, true)
+func checkJudgement(s State, r Record, _ Receipt) error {
+	return validateJudgement(s, r, true)
 }
 
-func validateJudgement(s State, r Record, receipt Receipt, current bool) error {
+func validateJudgement(s State, r Record, current bool) error {
 	t, _, _ := r.Tuple()
 	gate := activeGate(s, t.Gate)
 	g := s.Records[gate]
@@ -490,7 +479,7 @@ func validateJudgement(s State, r Record, receipt Receipt, current bool) error {
 	if current && ended {
 		return actorFailure("review subject has already finished")
 	}
-	j, err := readJudgement(s, receipt)
+	j, err := readJudgement(r)
 	if err != nil {
 		return err
 	}
@@ -529,9 +518,6 @@ func validateJudgement(s State, r Record, receipt Receipt, current bool) error {
 	if !registered {
 		return actorFailure("judgement needs a registered panel directory")
 	}
-	if !registeredPanelArtifact(s, gate, receipt.Path) {
-		return actorFailure("judgement must be in its registered panel directory")
-	}
 	switch j.Value {
 	case "carry-over":
 		if strings.TrimSpace(j.Reason) == "" || j.SlotCount != 0 || len(j.Paths) != 0 {
@@ -564,7 +550,7 @@ func judgeApply(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
-		j, err := readJudgement(s, receipt)
+		j, err := readJudgement(r)
 		if err != nil {
 			return c, err
 		}
@@ -595,7 +581,7 @@ func judgeApply(s State) (Changes, error) {
 			continue
 		}
 		// Recheck durable evidence when a crash left only the actor's receipt and close.
-		if err := validateJudgement(s, r, receipt, false); err != nil {
+		if err := validateJudgement(s, r, false); err != nil {
 			return c, err
 		}
 		switch j.Value {

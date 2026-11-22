@@ -32,7 +32,7 @@ func validClose(s State, r Record) bool {
 		}
 	}
 	receipt, ok, err := Decode[Receipt](r.Metadata, KeyClose)
-	return r.Status == "closed" && ok && err == nil && ValidReceipt(s.Root, receipt) == nil
+	return r.Status == "closed" && ok && err == nil && ValidReceipt(s.Root, receipt, r.Metadata) == nil
 }
 
 func nextAttempt(id string) (string, error) {

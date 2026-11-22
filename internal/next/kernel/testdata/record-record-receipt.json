@@ -1,0 +1,9 @@
+{
+  "kind": "passed",
+  "record_sha256": "digest",
+  "generation": 1,
+  "superseded_generation": 2,
+  "via": "repair",
+  "at": "2026-01-02T03:04:05Z",
+  "retally": "verify"
+}

@@ -3,6 +3,8 @@ package kerneltest
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -18,10 +20,11 @@ func (e ExitError) ExitCode() int { return int(e) }
 
 // FakeBD models the local store and records argv. Hook can inject write faults.
 type FakeBD struct {
-	Records map[string]kernel.Record
-	Calls   [][]string
-	Hook    func([]string) error
-	next    int
+	Records        map[string]kernel.Record
+	Calls          [][]string
+	MetadataWrites map[int]map[string]any
+	Hook           func([]string) error
+	next           int
 }
 
 func (f *FakeBD) blockedBy(r kernel.Record) []string {
@@ -43,6 +46,10 @@ func (f *FakeBD) blockedBy(r kernel.Record) []string {
 func NewFakeBD() *FakeBD { return &FakeBD{Records: map[string]kernel.Record{}} }
 func (f *FakeBD) Run(args ...string) ([]byte, error) {
 	f.Calls = append(f.Calls, append([]string{}, args...))
+	callIndex := len(f.Calls) - 1
+	if len(f.Calls) == 1 {
+		f.MetadataWrites = map[int]map[string]any{}
+	}
 	if f.Hook != nil {
 		if err := f.Hook(args); err != nil {
 			return nil, err
@@ -55,6 +62,12 @@ func (f *FakeBD) Run(args ...string) ([]byte, error) {
 			}
 		}
 		return ""
+	}
+	metadataBytes := func(m string) ([]byte, error) {
+		if strings.HasPrefix(m, "@") {
+			return os.ReadFile(strings.TrimPrefix(m, "@"))
+		}
+		return []byte(m), nil
 	}
 	switch args[0] {
 	case "list":
@@ -97,9 +110,14 @@ func (f *FakeBD) Run(args ...string) ([]byte, error) {
 		}
 		r := kernel.Record{ID: id, Parent: value("--parent"), Title: title, Description: value("--description"), Type: value("--type"), Status: "open", Metadata: map[string]any{}}
 		if m := value("--metadata"); m != "" {
-			if err := json.Unmarshal([]byte(m), &r.Metadata); err != nil {
+			data, err := metadataBytes(m)
+			if err != nil {
 				return nil, err
 			}
+			if err := json.Unmarshal(data, &r.Metadata); err != nil {
+				return nil, err
+			}
+			f.MetadataWrites[callIndex] = maps.Clone(r.Metadata)
 		}
 		if labels := value("--labels"); labels != "" {
 			r.Labels = strings.Split(labels, ",")
@@ -143,9 +161,14 @@ func (f *FakeBD) Run(args ...string) ([]byte, error) {
 			}
 		}
 		if m := value("--metadata"); m != "" {
-			if err := json.Unmarshal([]byte(m), &r.Metadata); err != nil {
+			data, err := metadataBytes(m)
+			if err != nil {
 				return nil, err
 			}
+			if err := json.Unmarshal(data, &r.Metadata); err != nil {
+				return nil, err
+			}
+			f.MetadataWrites[callIndex] = maps.Clone(r.Metadata)
 		}
 		f.Records[r.ID] = r
 		return json.Marshal(r)

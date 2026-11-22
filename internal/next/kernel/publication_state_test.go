@@ -29,7 +29,7 @@ func TestS134Submit_RefreshesPublicationState(t *testing.T) {
 		if row.Status != "in_progress" || closed {
 			t.Fatal("publication ran after receipt or close")
 		}
-		return kernel.ValidReceipt(f.Root, receipt)
+		return kernel.ValidReceipt(f.Root, receipt, nil)
 	}})
 	f.Must(err)
 	if !called || actorRecord(t, f, id).Status != "closed" {

@@ -77,7 +77,12 @@ func TestS134Output_RevisionInputs(t *testing.T) {
 func TestS134Output_StatusAndOrdering(t *testing.T) {
 	f := reducerFixture(t)
 	s := f.State()
-	empty := kernel.PassResult{Output: kernel.Output{Schema: "mindspec.next-action/v1"}, State: s}
+	actual, err := kernel.NextAction(s, false)
+	f.Must(err)
+	if actual.Schema != "mindspec.next-action/v2" {
+		t.Fatalf("next-action schema=%q", actual.Schema)
+	}
+	empty := kernel.PassResult{Output: kernel.Output{Schema: "mindspec.next-action/v2"}, State: s}
 	out := kernel.OutputForPass(empty, s, false)
 	if out.Status != "indeterminate" || kernel.OutputExitCode(out) != 1 {
 		t.Fatalf("empty result=%+v", out)
@@ -88,15 +93,28 @@ func TestS134Output_StatusAndOrdering(t *testing.T) {
 		}
 	}
 	result := empty
-	result.Output.Actions = []kernel.Action{{Step: f.Items[2] + ".impl.a1"}, {Step: f.Items[0] + ".review.r1.R10"}, {Step: f.Items[0] + ".review.r1.R2"}, {Step: f.Items[0] + ".impl.a1"}}
+	result.Output.Actions = []kernel.Action{{Step: f.Items[2] + ".impl.a1"}, {Step: f.Items[0] + ".review.judge.a1"}, {Step: f.Items[0] + ".review.r2.fix"}, {Step: f.Items[0] + ".review.r1.verify"}, {Step: f.Items[0] + ".review.r1.R10"}, {Step: f.Items[0] + ".review.r1.lens"}, {Step: f.Items[0] + ".review.r1.R2"}, {Step: f.Items[0] + ".impl.a1"}}
 	out = kernel.OutputForPass(result, s, false)
 	got := []string{}
 	for _, a := range out.Actions {
 		got = append(got, a.Step)
 	}
-	want := []string{f.Items[0] + ".impl.a1", f.Items[0] + ".review.r1.R2", f.Items[0] + ".review.r1.R10", f.Items[2] + ".impl.a1"}
+	want := []string{f.Items[0] + ".impl.a1", f.Items[0] + ".review.r1.lens", f.Items[0] + ".review.r1.R2", f.Items[0] + ".review.r1.R10", f.Items[0] + ".review.r1.verify", f.Items[0] + ".review.r2.fix", f.Items[0] + ".review.judge.a1", f.Items[2] + ".impl.a1"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("plan-kind-numeric-slot order: %v", got)
+	}
+}
+
+func TestS134Output_AnswerRetrySchema(t *testing.T) {
+	kerneltest.WithRules(t, kernel.NewRegistry())
+	f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
+	id := kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
+	_, err := kernel.Answer(f.State(), id, "fix")
+	f.Must(err)
+	out, err := kernel.Answer(f.State(), id, "fix")
+	f.Must(err)
+	if out.Schema != "mindspec.next-action/v2" {
+		t.Fatalf("answer retry schema=%q", out.Schema)
 	}
 }
 func TestS134Output_Done(t *testing.T) {

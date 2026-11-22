@@ -23,6 +23,13 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 	}
 	options := kernel.SubmitOptions{Step: args[0]}
 	options.Lease, _ = cmd.Flags().GetString("lease")
+	options.Record, _ = cmd.Flags().GetString("record")
+	if options.Record != "" {
+		options.Record, err = filepath.Abs(options.Record)
+		if err != nil {
+			return err
+		}
+	}
 	options.Artifact, _ = cmd.Flags().GetString("artifact")
 	if options.Artifact != "" {
 		options.Artifact, err = filepath.Abs(options.Artifact)
@@ -72,10 +79,11 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 
 func init() {
 	submitCmd.Flags().String("lease", "", "Current lease token")
+	submitCmd.Flags().String("record", "", "Record file outside this repository")
 	submitCmd.Flags().String("artifact", "", "Artifact path held by a commit")
 	submitCmd.Flags().String("commit", "", "Commit that holds the implementation or fix")
 	submitCmd.Flags().String("answer", "", "Listed option for a decision")
-	submitCmd.MarkFlagsMutuallyExclusive("artifact", "commit", "answer")
+	submitCmd.MarkFlagsMutuallyExclusive("record", "artifact", "commit", "answer")
 	rootCmd.AddCommand(submitCmd)
 }
 

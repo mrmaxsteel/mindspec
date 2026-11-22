@@ -536,7 +536,7 @@ func TestS134PanelSubmit_LeaseReceiptAndForeignSnapshot(t *testing.T) {
 	if !ok || r.Status != "closed" || receipt.Path == "" {
 		t.Fatal(r)
 	}
-	f.Must(kernel.ValidReceipt(f.Root, receipt))
+	f.Must(kernel.ValidReceipt(f.Root, receipt, r.Metadata))
 	submitted, e := panel.LatestSubmissions(filepath.Dir(file), 1)
 	f.Must(e)
 	if len(submitted) != 1 || submitted["R1"].Seq == 0 || !strings.Contains(out, "R1 final") {
@@ -576,7 +576,7 @@ func kernelPanelDischarge(t *testing.T, deferIt bool, limit bool) {
 		if r.Status != "closed" || !ok || receipt.Kind != want {
 			t.Fatalf("%s: %+v", id, r)
 		}
-		f.Must(kernel.ValidReceipt(f.Root, receipt))
+		f.Must(kernel.ValidReceipt(f.Root, receipt, r.Metadata))
 	}
 	if deferIt {
 		_, ok, e := kernel.Decode[kernel.DeferRecord](kernelPanelRecord(t, f, gate).Metadata, kernel.KeyDefer)

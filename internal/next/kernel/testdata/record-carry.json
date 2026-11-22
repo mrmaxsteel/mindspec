@@ -4,9 +4,8 @@
   "judge": "judge",
   "receipt": {
     "kind": "passed",
-    "path": "judge.json",
-    "commit": "commit",
-    "blob": "blob"
+    "record_sha256": "digest",
+    "generation": 1
   },
   "rebind": "accepted-rebind"
 }

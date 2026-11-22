@@ -18,7 +18,7 @@ import (
 )
 
 func TestS134IDs_Grammar(t *testing.T) {
-	for _, base := range []string{"test-abc.1.impl", "test-abc.1.review", "test-abc.final", "test-abc.1.review.r2.R3", "test-abc.final.r2.R3", "test-abc.1.review.r2.fix", "test-abc.final.r2.fix", "test-abc.1.review.decide.reject.r1", "test-abc.final.decide.limit.r5", "test-abc.1.review.judge", "test-abc.final.judge"} {
+	for _, base := range []string{"test-abc.1.review.r2.verify", "test-abc.1.review.r2.lens", "test-abc.final.r1.verify", "test-abc.1.impl", "test-abc.1.review", "test-abc.final", "test-abc.1.review.r2.R3", "test-abc.final.r2.R3", "test-abc.1.review.r2.fix", "test-abc.final.r2.fix", "test-abc.1.review.decide.reject.r1", "test-abc.final.decide.limit.r5", "test-abc.1.review.judge", "test-abc.final.judge"} {
 		for _, suffix := range []string{"", ".a1", ".a2"} {
 			id := base + suffix
 			t.Run(id, func(t *testing.T) {
@@ -37,7 +37,7 @@ func TestS134IDs_Grammar(t *testing.T) {
 			})
 		}
 	}
-	for _, id := range []string{"test-abc.1.review.r99999999999999999999999999999.R1", "test-abc.final.r1.R99999999999999999999999999999", "test-abc.final.a99999999999999999999999999999", "test-abc.1.review.1", "test-abc", "test-abc.1", "test-abc.0.review", "test-abc.1.review.a0", "test-abc.impl.a1", "test-abc.1.final", "test-abc.1.impl.r1.R1", "test-abc.1.review.r0.fix", "test-abc.final.judge.1", "test-abc.1.review.a2.r1.R1", "test-abc.1.review.decide..r1", "test-abc.1.review.r1.R0", "test-abc.final.r1.R1.extra"} {
+	for _, id := range []string{"test-abc.1.review.r99999999999999999999999999999.R1", "test-abc.final.r1.R99999999999999999999999999999", "test-abc.final.a99999999999999999999999999999", "test-abc.1.review.1", "test-abc.1.review.verify", "test-abc.1.review.r2.lenses", "test-abc", "test-abc.1", "test-abc.0.review", "test-abc.1.review.a0", "test-abc.impl.a1", "test-abc.1.final", "test-abc.1.impl.r1.R1", "test-abc.1.review.r0.fix", "test-abc.final.judge.1", "test-abc.1.review.a2.r1.R1", "test-abc.1.review.decide..r1", "test-abc.1.review.r1.R0", "test-abc.final.r1.R1.extra"} {
 		if kernelid.IsKernel(id) {
 			t.Errorf("accepted foreign id %s", id)
 		}
@@ -325,7 +325,7 @@ var fixedTime = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 
 func TestS134State_ForeignAnswerCannotHalt(t *testing.T) {
 	f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
-	f.Fake.Records["foreign-abc"] = kernel.Record{ID: "foreign-abc", Parent: f.Epic, Status: "closed", Type: "decision", Metadata: kernel.Metadata(kernel.KeyClose, kernel.Receipt{Kind: "passed", Answer: &kernel.DecisionAnswer{Option: "halt", At: fixedTime, Actor: "foreign"}})}
+	f.Fake.Records["foreign-abc"] = kernel.Record{ID: "foreign-abc", Parent: f.Epic, Status: "closed", Type: "decision", Metadata: kernel.Metadata(kernel.KeyClose, kernel.Receipt{Kind: "passed", Answer: &kernel.DecisionAnswer{Option: "halt", At: fixedTime}})}
 	if f.State().Halted() {
 		t.Fatal("foreign answer halted the spec")
 	}

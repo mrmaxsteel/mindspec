@@ -47,6 +47,7 @@ func TestS134Subject_RegistrationBoundary(t *testing.T) {
 						doneItem(t, f, item)
 					}
 					registerGate(t, f, gate, slug, 1)
+					kerneltest.PassGate(f, gate, gateHead(t, f, gate))
 				} else {
 					passingPanel(t, f)
 				}
@@ -119,8 +120,19 @@ func TestS134Subject_RegistrationBoundary(t *testing.T) {
 						if next.Round != old.Round || next.Subject != old.Subject {
 							t.Fatalf("tracked panel-only commit moved subject: %+v", next)
 						}
-					} else if next.Round != old.Round+1 || next.Subject != head {
-						t.Fatalf("unreviewed commit did not move final subject: %+v", next)
+					} else {
+						if next.Round != old.Round || next.Subject != old.Subject {
+							t.Fatalf("unreviewed commit replaced the frozen round: %+v", next)
+						}
+						out := reduce(t, f, false)
+						if !action(out, gate+".judge.a1") {
+							t.Fatal("unreviewed commit did not create a final change judge")
+						}
+						for _, a := range out.Actions {
+							if a.Step == gate+".judge.a1" && a.Subject.Commit != head {
+								t.Fatalf("unreviewed commit was exempted by an unregistered directory: %+v", a)
+							}
+						}
 					}
 				} else if !honest && !action(reduce(t, f, false), gate+".judge.a1") {
 					t.Fatal("unreviewed commit did not create a change judge")

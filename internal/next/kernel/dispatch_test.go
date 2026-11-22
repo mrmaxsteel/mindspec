@@ -122,7 +122,7 @@ func TestS134Dispatch_OrderVisibilityAndParity(t *testing.T) {
 							continue
 						}
 						joined := strings.Join(args, " ")
-						if strings.Contains(joined, "mindspec_close") {
+						if _, has := f.Fake.MetadataWrites[i][kernel.KeyClose]; has {
 							receiptAt = i
 						}
 						if strings.Contains(joined, "--status closed") {

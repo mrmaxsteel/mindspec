@@ -1,0 +1,35 @@
+{
+  "round": 1,
+  "subject": "old",
+  "slots": [
+    "slot"
+  ],
+  "slot_count": 1,
+  "verify": "verify",
+  "read": {
+    "verdict.json": "digest"
+  },
+  "asks": [
+    {
+      "slot": "R1",
+      "round": 1,
+      "finding": "ccr[0]",
+      "finding_sha256": "digest",
+      "text": "full finding",
+      "returns": [
+        {
+          "slot": "R1",
+          "round": 1,
+          "finding": "ccr[0]",
+          "finding_sha256": "digest",
+          "ground": "out_of_acceptance_scope",
+          "ac": "AC-1",
+          "reason": "outside scope",
+          "evidence": "https://example.com/proof",
+          "target": "test-target",
+          "return": "refuted"
+        }
+      ]
+    }
+  ]
+}

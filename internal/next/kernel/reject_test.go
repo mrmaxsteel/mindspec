@@ -254,54 +254,6 @@ func TestS134Reject_RequestChanges(t *testing.T) {
 	assertNoPanel(t, out, f.Items[0])
 }
 
-func TestS134Supersede_RoundAndRetry(t *testing.T) {
-	for _, fix := range []bool{false, true} {
-		t.Run(fmt.Sprintf("open-fix=%t", fix), func(t *testing.T) {
-			f := reducerFixture(t)
-			doneItem(t, f, f.Items[0])
-			gate := f.Items[1] + ".review"
-			registerGate(t, f, gate, "review", 1)
-			refusedPanel(t, f, gate, "review", 2, "REJECT")
-			for i := 1; i <= 3; i++ {
-				f.Must(f.Store.SetStatusIf(fmt.Sprintf("%s.r2.R%d", gate, i), "closed", "open"))
-			}
-			reduce(t, f, true)
-			if fix {
-				f.Create(gate+".r3.fix", gate)
-			}
-			head := beadCommit(t, f, "bead/"+f.Items[1])
-			out := reduce(t, f, true)
-			for i := 1; i <= 3; i++ {
-				r := record(t, f, fmt.Sprintf("%s.r2.R%d", gate, i))
-				receipt, _, _ := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
-				if fix {
-					if r.Status != "open" {
-						t.Fatal("fix commit superseded slot")
-					}
-				} else if r.Status != "closed" || receipt.Kind != "superseded" || receipt.Subject != head {
-					t.Fatalf("slot not superseded: %+v", r)
-				}
-			}
-			if fix {
-				assertNoPanel(t, out, f.Items[1])
-				return
-			}
-			round, _, _ := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
-			if round.Round != 3 || round.Subject != head || !hasRun(out, "mindspec", "panel", "create", f.Items[1]) {
-				t.Fatalf("new round not authorised: %+v %+v", round, out)
-			}
-			before := kerneltest.Snapshot(t, f)
-			out = reduce(t, f, true)
-			if !hasRun(out, "mindspec", "panel", "create", f.Items[1]) || before != kerneltest.Snapshot(t, f) {
-				t.Fatalf("supersede retry changed state: %+v", out)
-			}
-			if r, _ := f.Store.Lookup(gate + ".r3.fix"); r != nil {
-				t.Fatal("superseded round created fix")
-			}
-		})
-	}
-}
-
 func TestS134Final_RequiresLastMerge(t *testing.T) {
 	f := reducerFixture(t)
 	for _, item := range f.Items[:2] {
@@ -362,20 +314,7 @@ func TestS134SeedMatch_OpenDecision(t *testing.T) {
 		})
 	}
 }
-func TestS134SeedMatch_AuthoriseSupersede(t *testing.T) {
-	real, seed := reducerFixture(t), reducerFixture(t)
-	gate := real.Items[0] + ".review"
-	for _, f := range []*kerneltest.Fixture{real, seed} {
-		registerGate(t, f, gate, "review", 1)
-		reduce(t, f, true)
-		beadCommit(t, f, "bead/"+f.Items[0])
-	}
-	reduce(t, real, true)
-	kerneltest.Authorise(seed, gate, gateRound(t, seed, gate, 2, gateHead(t, seed, gate)))
-	if !jsonEqual(record(t, real, gate), record(t, seed, gate)) {
-		t.Fatal("supersede authorisation differs from seeder")
-	}
-}
+
 func TestS134SeedMatch_AuthoriseFinal(t *testing.T) {
 	real, seed := reducerFixture(t), reducerFixture(t)
 	for _, f := range []*kerneltest.Fixture{real, seed} {
@@ -418,27 +357,6 @@ func TestS134Reject_ConsumerText(t *testing.T) {
 				t.Fatal("halt option lacks its scope")
 			}
 		})
-	}
-}
-
-func TestS134Supersede_SubmitFixPreservesRound(t *testing.T) {
-	f, _, _ := actorFixture(t)
-	put(t, filepath.Join(f.Root, ".beads", "config.yaml"), "types.custom: gate,step\n")
-	gate := f.Items[0] + ".review"
-	refusedPanel(t, f, gate, "changes", 1, "REQUEST_CHANGES")
-	reduce(t, f, true)
-	fix := gate + ".r2.fix"
-	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: fix}, kernel.LeaseDeps{})
-	f.Must(err)
-	commit := actorCommit(t, f, "fix-proof.txt", "fixed", "bead/"+f.Items[0])
-	out, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: fix, Lease: lease.Token, Commit: commit})
-	f.Must(err)
-	round, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
-	f.Must(err)
-	receipt, _, err := kernel.Decode[kernel.Receipt](record(t, f, fix).Metadata, kernel.KeyClose)
-	f.Must(err)
-	if round.Round != 2 || round.Subject != commit || receipt.Kind != "passed" || record(t, f, fix).Status != "closed" || !hasRun(out, "mindspec", "panel", "create", f.Items[0]) {
-		t.Fatalf("fix submission superseded its subject or did not open the next round: %+v %+v", round, out)
 	}
 }
 
@@ -492,45 +410,6 @@ func TestS134Reject_RawFixCloseAfterCommit(t *testing.T) {
 	assertNoPanel(t, reduce(t, f, true), f.Items[0])
 }
 
-func TestS134Supersede_ExistingOutcomeHoldsOpenSlots(t *testing.T) {
-	for _, outcome := range []string{"closed-fix", "answered-open-decision", "answered-closed-decision", "closed-decision"} {
-		t.Run(outcome, func(t *testing.T) {
-			f := reducerFixture(t)
-			gate := f.Items[0] + ".review"
-			registerGate(t, f, gate, "review", 1)
-			reduce(t, f, true)
-			if outcome == "closed-fix" {
-				fix := gate + ".r2.fix"
-				f.Create(fix, gate)
-				f.Must(f.Store.SetStatusIf(fix, "open", "closed"))
-			} else {
-				d := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
-				if outcome == "closed-decision" {
-					f.Must(f.Store.SetStatusIf(d, "open", "closed"))
-				} else {
-					kerneltest.Answer(f, d, "fix")
-					if outcome == "answered-open-decision" {
-						f.Must(f.Store.SetStatusIf(d, "closed", "open"))
-					}
-				}
-			}
-			beadCommit(t, f, "bead/"+f.Items[0])
-			out := reduce(t, f, true)
-			round, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
-			f.Must(err)
-			if round.Round != 1 {
-				t.Fatalf("%s allowed supersede to authorise round %d", outcome, round.Round)
-			}
-			for _, id := range round.Slots {
-				if record(t, f, id).Status != "open" {
-					t.Fatalf("%s superseded an open slot: %s", outcome, id)
-				}
-			}
-			assertNoPanel(t, out, f.Items[0])
-		})
-	}
-}
-
 func TestS134Final_FixBrief(t *testing.T) {
 	f, gate, _ := limitFixture(t, true)
 	reduce(t, f, true)
@@ -571,7 +450,67 @@ func TestS134Final_LimitUsesInitialRound(t *testing.T) {
 	assertNoPanel(t, out, f.SpecID)
 }
 
-func TestS134Supersede_ExcludedDecisionAnswerHoldsRound(t *testing.T) {
+func TestS134Submit_FixPreservesRound(t *testing.T) {
+	f, _, _ := actorFixture(t)
+	put(t, filepath.Join(f.Root, ".beads", "config.yaml"), "types.custom: gate,step\n")
+	gate := f.Items[0] + ".review"
+	refusedPanel(t, f, gate, "changes", 1, "REQUEST_CHANGES")
+	reduce(t, f, true)
+	fix := gate + ".r2.fix"
+	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: fix}, kernel.LeaseDeps{})
+	f.Must(err)
+	commit := actorCommit(t, f, "fix-proof.txt", "fixed", "bead/"+f.Items[0])
+	out, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: fix, Lease: lease.Token, Commit: commit})
+	f.Must(err)
+	round, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+	f.Must(err)
+	receipt, _, err := kernel.Decode[kernel.Receipt](record(t, f, fix).Metadata, kernel.KeyClose)
+	f.Must(err)
+	if round.Round != 2 || round.Subject != commit || receipt.Kind != "passed" || record(t, f, fix).Status != "closed" || !hasRun(out, "mindspec", "panel", "create", f.Items[0]) {
+		t.Fatalf("fix submission superseded its subject or did not open the next round: %+v %+v", round, out)
+	}
+}
+
+func TestS134Reducer_ExistingOutcomeHoldsOpenSlots(t *testing.T) {
+	for _, outcome := range []string{"closed-fix", "answered-open-decision", "answered-closed-decision", "closed-decision"} {
+		t.Run(outcome, func(t *testing.T) {
+			f := reducerFixture(t)
+			gate := f.Items[0] + ".review"
+			registerGate(t, f, gate, "review", 1)
+			reduce(t, f, true)
+			if outcome == "closed-fix" {
+				fix := gate + ".r2.fix"
+				f.Create(fix, gate)
+				f.Must(f.Store.SetStatusIf(fix, "open", "closed"))
+			} else {
+				d := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
+				if outcome == "closed-decision" {
+					f.Must(f.Store.SetStatusIf(d, "open", "closed"))
+				} else {
+					kerneltest.Answer(f, d, "fix")
+					if outcome == "answered-open-decision" {
+						f.Must(f.Store.SetStatusIf(d, "closed", "open"))
+					}
+				}
+			}
+			beadCommit(t, f, "bead/"+f.Items[0])
+			out := reduce(t, f, true)
+			round, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
+			f.Must(err)
+			if round.Round != 1 {
+				t.Fatalf("%s allowed supersede to authorise round %d", outcome, round.Round)
+			}
+			for _, id := range round.Slots {
+				if record(t, f, id).Status != "open" {
+					t.Fatalf("%s superseded an open slot: %s", outcome, id)
+				}
+			}
+			assertNoPanel(t, out, f.Items[0])
+		})
+	}
+}
+
+func TestS134Submit_ExcludedDecisionAnswerHoldsRound(t *testing.T) {
 	f := reducerFixture(t)
 	gate := f.Items[0] + ".review"
 	registerGate(t, f, gate, "review", 1)
@@ -601,7 +540,7 @@ func TestS134Supersede_ExcludedDecisionAnswerHoldsRound(t *testing.T) {
 	}
 }
 
-func TestS134Supersede_ExcludedClosedFixHoldsRound(t *testing.T) {
+func TestS134Submit_ExcludedClosedFixHoldsRound(t *testing.T) {
 	f := reducerFixture(t)
 	gate := f.Items[0] + ".review"
 	registerGate(t, f, gate, "review", 1)

@@ -21,6 +21,11 @@ func passExcept(reg *Registry, state State, apply bool, step string) (PassResult
 	if apply && state.Store == nil {
 		return result, fmt.Errorf("apply needs a store")
 	}
+	if apply {
+		if err := SweepMetadata(state.Root); err != nil {
+			return result, err
+		}
+	}
 	err := WithCASRetry(func() error {
 		var err error
 		result, err = reduce(reg, state, apply, step)
@@ -47,7 +52,7 @@ func passExcept(reg *Registry, state State, apply bool, step string) (PassResult
 	return result, err
 }
 func reduce(reg *Registry, state State, apply bool, step string) (PassResult, error) {
-	result := PassResult{State: state.Clone(), Output: Output{Schema: "mindspec.next-action/v1", Status: "wait", Applied: apply, Policy: PolicyView{RoundLimit: state.Policy.RoundLimit, LeaseTTL: state.Policy.LeaseTTL}, Actions: []Action{}, Waiting: []Waiting{}, Decisions: []Decision{}, Run: []Run{}, Flags: []Flag{}}, Writes: []Write{}}
+	result := PassResult{State: state.Clone(), Output: Output{Schema: "mindspec.next-action/v2", Status: "wait", Applied: apply, Policy: PolicyView{RoundLimit: state.Policy.RoundLimit, LeaseTTL: state.Policy.LeaseTTL}, Actions: []Action{}, Waiting: []Waiting{}, Decisions: []Decision{}, Run: []Run{}, Flags: []Flag{}}, Writes: []Write{}}
 	for _, name := range reg.names {
 		entry, ok := reg.entries[name]
 		if !ok {
@@ -159,7 +164,7 @@ func overlay(state *State, w Write) error {
 			if w.Receipt == nil {
 				return fmt.Errorf("close needs a receipt")
 			}
-			if err := ValidReceipt(state.Root, *w.Receipt); err != nil {
+			if err := ValidReceipt(state.Root, *w.Receipt, r.Metadata); err != nil {
 				return err
 			}
 			r.Metadata[KeyClose] = *w.Receipt

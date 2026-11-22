@@ -13,7 +13,7 @@ func init() {
 	for _, r := range []struct {
 		name string
 		fn   Rule
-	}{{"supersede", supersede}, {"refused-round", refusedRound}} {
+	}{{"refused-round", refusedRound}, {"verify-apply", pendingRecordRule}, {"lens-create", pendingRecordRule}} {
 		if err := RegisterRule(r.name, Ordinary, r.fn); err != nil {
 			panic(err)
 		}
@@ -45,124 +45,7 @@ func fixWrite(s State, gate string, round int, subject string) []Write {
 	return []Write{w}
 }
 
-func openFix(s State, gate string) bool {
-	if r := s.ExcludedStep; r != nil {
-		t, _, _ := r.Tuple()
-		if t.Gate == gate && t.Kind == "fix" && r.Status != "closed" {
-			return true
-		}
-	}
-
-	for _, id := range s.Steps {
-		r := s.Records[id]
-		t, _, _ := r.Tuple()
-		if t.Gate == gate && t.Kind == "fix" && r.Status != "closed" {
-			return true
-		}
-	}
-	return false
-}
-
-// supersede replaces an unfinished review when its subject moves outside a fix.
-func supersede(s State) (Changes, error) {
-	c := Changes{}
-	// Cover slots left behind when an earlier pass advanced their gate.
-	for _, id := range s.Steps {
-		r := s.Records[id]
-		t, _, _ := r.Tuple()
-		if t.Kind != "review-slot" || r.Status == "closed" || hasOpenChild(s, id) || hasOpenBlocker(s, id) {
-			continue
-		}
-		gate := s.Records[activeGate(s, t.Gate)]
-		round, has, err := Decode[GateRound](gate.Metadata, KeyRound)
-		if err != nil {
-			return c, err
-		}
-		if has && t.Round < round.Round {
-			receipt := Receipt{Kind: "superseded", Subject: round.Subject}
-			c.Writes = append(c.Writes, Write{Kind: "close", ID: id, Receipt: &receipt})
-		}
-	}
-	for _, gate := range s.Gates {
-		g := s.Records[gate]
-		t, _, _ := g.Tuple()
-		if gate != activeGate(s, t.Gate) || g.Status == "closed" || openFix(s, t.Gate) || gateDecision(s, t.Gate, true) {
-			continue
-		}
-		round, has, err := Decode[GateRound](g.Metadata, KeyRound)
-		if err != nil {
-			return c, err
-		}
-		reg, registered, err := Decode[RegistrationRecord](g.Metadata, KeyRegistration)
-		if err != nil {
-			return c, err
-		}
-		head, err := effectiveSubject(s, gate)
-		if err != nil {
-			return c, err
-		}
-		// Replaying an implementation result cannot replace its existing review.
-		if r := s.ExcludedStep; r != nil {
-			step, _, _ := r.Tuple()
-			if step.Kind == "implement" && step.WorkItem == t.WorkItem {
-				continue
-			}
-		}
-		if !has || !registered || reg.Round != round.Round || reg.Subject != round.Subject || head == "" || head == round.Subject {
-			continue
-		}
-		// A fix or decision keeps control of the refused round, even after
-		// a raw close or an answer. Only a passed fix can open its round.
-		_, hasFix := s.Records[fmt.Sprintf("%s.r%d.fix", t.Gate, round.Round+1)]
-		held := hasFix
-		if r := s.ExcludedStep; r != nil {
-			st, _, _ := r.Tuple()
-			held = held || (st.Gate == t.Gate && ((st.Kind == "review-slot" && st.Round == round.Round && r.Status != "closed") || (st.Kind == "decision" && st.Round == round.Round) || (st.Kind == "fix" && st.Round == round.Round+1)))
-		}
-		for _, id := range s.Steps {
-			st, _, _ := s.Records[id].Tuple()
-			if st.Kind == "decision" && st.Gate == t.Gate && st.Round == round.Round {
-				held = true
-				break
-			}
-		}
-		if held {
-			continue
-		}
-		superseded := false
-		for _, id := range s.Steps {
-			r := s.Records[id]
-			st, _, _ := r.Tuple()
-			if st.Kind != "review-slot" || st.Gate != t.Gate || st.Round != round.Round || r.Status == "closed" {
-				continue
-			}
-			if hasOpenChild(s, id) {
-				held = true
-				continue
-			}
-			receipt := Receipt{Kind: "superseded", Subject: head}
-			c.Writes = append(c.Writes, Write{Kind: "close", ID: id, Receipt: &receipt})
-			superseded = true
-		}
-		if held || !superseded {
-			continue
-		}
-		count, err := RoundsForGate(s, gate)
-		if err != nil {
-			return c, err
-		}
-		if count >= Allowance(s, gate) {
-			c.Writes = append(c.Writes, decisionWrite(s, gate, "limit", round.Round)...)
-			continue
-		}
-		next, err := authorisedRound(s, gate, round.Round+1, head)
-		if err != nil {
-			return c, err
-		}
-		c.Writes = append(c.Writes, Write{Kind: "metadata", ID: gate, Metadata: Metadata(KeyRound, next)})
-	}
-	return c, nil
-}
+func pendingRecordRule(State) (Changes, error) { return Changes{}, nil }
 
 // refusedRound releases a fix only after a local decision has an answer.
 func refusedRound(s State) (Changes, error) {

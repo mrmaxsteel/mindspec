@@ -24,7 +24,7 @@ func TestS134Audit_TypedRecordsAndLocalJournal(t *testing.T) {
 	f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyDefer, kernel.DeferRecord{Finding: "finding", At: fixedTime})))
 	f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyTake, kernel.TakeReason{Generation: 2, At: fixedTime})))
 	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRePanel, kernel.RePanel{SlotCount: 3, Paths: []string{"source"}})))
-	answer := kernel.DecisionAnswer{Option: "fix", At: fixedTime, Actor: "operator"}
+	answer := kernel.DecisionAnswer{Option: "fix", At: fixedTime}
 	f.Must(f.Store.WriteReceipt(gate, kernel.Receipt{Kind: "passed", Answer: &answer, CarryOvers: []kernel.CarryOver{{OldSubject: "old", NewSubject: "new"}}}))
 	id := item + ".impl.a1"
 	f.Must(f.Store.SetStatusIf(id, "open", "in_progress"))

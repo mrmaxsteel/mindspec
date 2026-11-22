@@ -13,7 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 )
 
-func TestS134Final_MovedHeadAllowsNextPanel(t *testing.T) {
+func TestS134SubmitCmd_MovedHeadKeepsRound(t *testing.T) {
 	e := finalKernelFixture(t)
 	e.apply()
 	e.create(e.implement(0))
@@ -31,10 +31,11 @@ func TestS134Final_MovedHeadAllowsNextPanel(t *testing.T) {
 	artifact := e.verdict(a, "APPROVE")
 	item := e.f.Items[0]
 	e.commit(e.tree(item), "moved.txt", "new subject\n")
-	refusal := e.refuse("stale", "submit", a.Step, "--lease", token, "--artifact", artifact)
+	refusal := e.refuse("lease token", "submit", a.Step, "--lease", "invalid", "--artifact", artifact)
 	if strings.Contains(refusal, "Usage:") {
 		t.Fatalf("submit refusal printed usage: %s", refusal)
 	}
+	e.ok("submit", a.Step, "--lease", token, "--artifact", artifact)
 	e.apply()
 	gate := item + ".review"
 	for i := 1; i <= 3; i++ {
@@ -42,18 +43,20 @@ func TestS134Final_MovedHeadAllowsNextPanel(t *testing.T) {
 		r := e.row(id)
 		receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
 		e.must(err)
-		if r.Status != "closed" || !has || receipt.Kind != "superseded" {
-			t.Fatalf("slot was not covered: %+v", r)
+		if id == a.Step {
+			if r.Status != "closed" || !has || receipt.Kind != "passed" {
+				t.Fatalf("round-subject verdict did not submit: %+v", r)
+			}
+		} else if r.Status == "closed" || has {
+			t.Fatalf("subject move closed another slot: %+v", r)
 		}
 	}
-	e.ok("panel", "create", item, "--round", "2")
-	e.review("APPROVE")
-	r := e.row(gate)
-	receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
+	round, has, err := kernel.Decode[kernel.GateRound](e.row(gate).Metadata, kernel.KeyRound)
 	e.must(err)
-	if r.Status != "closed" || !has || receipt.Kind != "passed" {
-		t.Fatalf("new slots were not submittable: %+v", r)
+	if !has || round.Round != 1 || round.Subject != a.Subject.Commit {
+		t.Fatalf("subject move authorized another round: %+v", round)
 	}
+	e.refuse("next-action", "panel", "create", item, "--round", "2")
 }
 
 func TestS134PanelCreate_IgnoresOlderOpenSlots(t *testing.T) {

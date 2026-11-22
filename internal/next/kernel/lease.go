@@ -244,7 +244,7 @@ func actorRecord(s State, id string, decision bool) (Record, Tuple, error) {
 			return Record{}, Tuple{}, actorFailure("work item is not in the approved plan: " + t.WorkItem)
 		}
 	}
-	valid := t.Kind == "implement" || t.Kind == "review-slot" || t.Kind == "fix" || t.Kind == "change-judge"
+	valid := t.Kind == "implement" || t.Kind == "review-slot" || t.Kind == "fix" || recordKind(t.Kind)
 	if decision {
 		valid = t.Kind == "decision"
 	}

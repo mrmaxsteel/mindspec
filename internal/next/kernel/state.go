@@ -281,7 +281,7 @@ func (s State) Answers() map[string]DecisionAnswer {
 			continue
 		}
 		receipt, ok, err := Decode[Receipt](r.Metadata, KeyClose)
-		if err == nil && ok && receipt.Answer != nil && ValidReceipt(s.Root, receipt) == nil {
+		if err == nil && ok && receipt.Answer != nil && ValidReceipt(s.Root, receipt, r.Metadata) == nil {
 			out[id] = *receipt.Answer
 		}
 	}

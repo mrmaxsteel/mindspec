@@ -414,7 +414,7 @@ func TestS134Submit_BadImplement(t *testing.T) {
 			want := map[string]string{
 				"old-token": "lease token is not current", "bad-token": "lease token is not current", "no-token": "lease token is not current",
 				"pre-lease": "commit is not past the claim base or round subject", "not-descendant": "commit is not past the claim base or round subject",
-				"wrong-branch": "commit must be on bead/", "missing-commit": "cannot resolve committed evidence", "no-artifact": "submit needs one artifact or commit",
+				"wrong-branch": "commit must be on bead/", "missing-commit": "cannot resolve committed evidence", "no-artifact": "submit needs one record, artifact or commit",
 				"verdict-instead": "artifact does not fit the step kind", "expired": "lease has expired", "forged-kind": "step already has a different result", "new-blocker": "step is held or blocked by " + f.Items[1],
 			}[name]
 			actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, want)
@@ -767,7 +767,7 @@ func TestS134SeedMatch_Repaired(t *testing.T) {
 		f.Must(json.Unmarshal(data, &copy))
 		twin.Fake.Records[row.ID] = copy
 	}
-	receipt := kernel.Receipt{Kind: "passed", Path: "verdict.json", Commit: commit, Blob: actorCommand(t, f, "rev-parse", commit+":verdict.json")}
+	receipt := kernel.Receipt{Kind: "passed", Path: "verdict.json", Commit: commit, Blob: actorCommand(t, f, "rev-parse", commit+":verdict.json"), Generation: lease.Lease.Generation}
 	kerneltest.Repaired(twin, id, receipt)
 	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: "verdict.json"})
 	f.Must(err)

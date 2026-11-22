@@ -1453,6 +1453,39 @@ Every close writes its receipt first.
 Artifact receipts retain the path, holding commit, and blob id.
 Reducer receipts retain the close reason.
 
+Round identities include `r<N>.lens` and `r<N>.verify`.
+Each identity can have an attempt suffix.
+The action schema is `mindspec.next-action/v2`.
+Actions sort by plan order, then implement, lens, review slot, verify, fix,
+and change judge. Decisions follow those kinds.
+A branch move during a registered round leaves its slots on the round subject.
+
+Each metadata write uses a unique external file with mode 0600.
+The store passes its path to the tracker with `--metadata @<file>`.
+It removes the file after the call.
+An apply pass removes metadata files from processes that no longer run.
+It keeps actor files in the `records` directory.
+Merged metadata has a 16 MiB limit. An oversized write refuses before mutation.
+The error names the gate, step, largest key, and size. Stored text is not cut.
+
+Lens, verify, and change-judge steps use `submit --record <path>`.
+The file must be outside every worktree of this repository and contain valid UTF-8.
+The decoder refuses unknown fields.
+The first close write stores the exact bytes as the JSON string `mindspec_record`.
+The receipt holds their `record_sha256`, with no path, commit, or blob.
+Receipt validation compares that digest with the stored string.
+A later metadata write preserves the string and its digest.
+Decision answers hold an option and time, with no actor field.
+
+A verify first builds and size-checks its close writes.
+It then pins the generation, record digest, and time in `mindspec_closing`.
+The pin precedes the stored record and each kind-specific close write.
+A matching retry keeps the time and repeats those writes before the receipt.
+A different generation or digest sets only the pin's conflict and refuses.
+A conflict prevents every later submit of that attempt.
+A submit with a valid receipt makes no close write and does not change the pin.
+A lens has no closing pin.
+
 `Pass` dispatches rules in registry order.
 Each rule reads the prior rules' projected writes.
 A read-only pass returns the same write list that an apply pass uses.

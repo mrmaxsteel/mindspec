@@ -41,7 +41,7 @@ func OutputForPass(result PassResult, input State, apply bool) Output {
 				break
 			}
 		}
-		kinds := map[string]int{"implement": 0, "review-slot": 1, "fix": 2, "change-judge": 3, "decision": 4}
+		kinds := map[string]int{"implement": 0, "lens": 1, "review-slot": 2, "verify": 3, "fix": 4, "change-judge": 5, "decision": 6}
 		return [5]int{p, kinds[t.Kind], t.Round, t.Slot, t.Attempt}
 	}
 	less := func(a, b string) bool {

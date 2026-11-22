@@ -18,8 +18,8 @@ func TestS134Judge_MissingArtifactRefusal(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("init: %v %s", err, out)
 	}
-	_, err := readJudgement(State{Root: root}, Receipt{Commit: strings.Repeat("a", 40), Path: "missing.json"})
-	if err == nil || !strings.Contains(err.Error(), "cannot read committed judgement artifact\nrecovery: mindspec next-action") {
+	_, err := readJudgement(Record{})
+	if err == nil || !strings.Contains(err.Error(), "mindspec_record is absent or invalid\nrecovery: mindspec next-action") {
 		t.Fatalf("missing artifact refusal: %v", err)
 	}
 }

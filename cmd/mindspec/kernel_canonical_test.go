@@ -91,7 +91,7 @@ func TestS134Final_CanonicalLayout(t *testing.T) {
 			e.ok("submit", a.Step, "--lease", token, "--artifact", filepath.Join(e.cwd, path))
 			receipt, ok, err := kernel.Decode[kernel.Receipt](e.row(a.Step).Metadata, kernel.KeyClose)
 			e.must(err)
-			if !ok || receipt.Commit != holding || receipt.Path != filepath.ToSlash(path) || kernel.ValidReceipt(f.Root, receipt) != nil {
+			if !ok || receipt.Commit != holding || receipt.Path != filepath.ToSlash(path) || kernel.ValidReceipt(f.Root, receipt, nil) != nil {
 				t.Fatalf("holding commit not retained: %+v", receipt)
 			}
 			if count == 0 {

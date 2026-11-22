@@ -87,7 +87,7 @@ func Audit(s State, events []journal.Record) ([]AuditRow, error) {
 		if err != nil {
 			return nil, err
 		}
-		if has && ValidReceipt(s.Root, receipt) == nil {
+		if has && ValidReceipt(s.Root, receipt, r.Metadata) == nil {
 			if receipt.Answer != nil {
 				row := byName["decision-answers"]
 				row.Count++

@@ -1,6 +1,7 @@
 package kerneltest
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/mrmaxsteel/mindspec/internal/config"
@@ -97,7 +98,7 @@ func OpenDecision(f *Fixture, gate, cause string, round int, options ...string) 
 	return id
 }
 func Answer(f *Fixture, decision, option string) {
-	answer := kernel.DecisionAnswer{Option: option, At: kernel.Now().UTC(), Actor: "operator"}
+	answer := kernel.DecisionAnswer{Option: option, At: kernel.Now().UTC()}
 	f.Must(f.Store.WriteMetadata(decision, kernel.Metadata(kernel.KeyAnswer, answer)))
 	receipt := kernel.Receipt{Kind: "passed", Answer: &answer}
 	if option == "halt" {
@@ -175,4 +176,39 @@ func Judge(f *Fixture, gate, subject string, attempt int) string {
 	f.Create(id, parent)
 	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: subject})))
 	return id
+}
+
+// Verify seeds a closed verify attempt with its exact record, returns and read set.
+func Verify(f *Fixture, gate string, record kernel.VerifyRecord, findings []kernel.Finding, read map[string]string) string {
+	f.t.Helper()
+	id := record.Step
+	f.Create(id, gate)
+	data, err := json.Marshal(record)
+	f.Must(err)
+	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+	at := kernel.Now().UTC()
+	f.Must(f.Store.WriteMetadata(id, map[string]any{
+		kernel.KeySubject: kernel.Subject{Commit: record.Subject}, kernel.KeyFindings: findings,
+		kernel.KeyRead: read, kernel.KeyReturns: record.Returns, kernel.KeyRecord: string(data),
+		kernel.KeyClosing: kernel.Closing{Generation: 1, RecordSHA256: digest, At: at},
+		kernel.KeyClose:   kernel.Receipt{Kind: "passed", Generation: 1, RecordSHA256: digest, At: at.Format(time.RFC3339Nano)},
+	}))
+	closeRecord(f, id)
+	return id
+}
+
+// Lens seeds a closed lens attempt with its exact record bytes.
+func Lens(f *Fixture, gate string, record kernel.LensRecord) string {
+	f.t.Helper()
+	f.Create(record.Step, gate)
+	round, _, err := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	data, err := json.Marshal(record)
+	f.Must(err)
+	f.Must(f.Store.WriteMetadata(record.Step, map[string]any{
+		kernel.KeySubject: kernel.Subject{Commit: round.Subject}, kernel.KeyRecord: string(data),
+		kernel.KeyClose: kernel.Receipt{Kind: "passed", Generation: 1, RecordSHA256: fmt.Sprintf("%x", sha256.Sum256(data))},
+	}))
+	closeRecord(f, record.Step)
+	return record.Step
 }
