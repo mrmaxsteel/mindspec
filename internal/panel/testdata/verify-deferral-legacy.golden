@@ -1,0 +1,2 @@
+{"record":"deferral","spec":"x","panel":"review","slot":"R1","round":1,"finding":"ccr[0]","finding_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","finding_text":"fix this","bead":"follow-up","by":"verifier","created_at":"2026-01-02T03:04:05.5Z"}
+review:R1:r1:ccr[0]:aaaaaaaaaaaa:deferral

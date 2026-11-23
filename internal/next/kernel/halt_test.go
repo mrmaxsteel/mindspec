@@ -141,6 +141,7 @@ func TestS134Halt_LocalRejectAndForeignDescendant(t *testing.T) {
 	doneItem(t, f, f.Items[0])
 	gate := f.Items[1] + ".review"
 	refusedPanel(t, f, gate, "review", 1, "REJECT")
+	reproduceVerify(t, f, gate)
 	reduce(t, f, true)
 	d := gate + ".decide.reject.r1"
 	// A first fix answer allows a later rejected round on the same gate.
@@ -150,6 +151,7 @@ func TestS134Halt_LocalRejectAndForeignDescendant(t *testing.T) {
 	f.Must(f.Store.WriteReceipt(fix, kernel.Receipt{Kind: "passed", Retally: "seeded-fix"}))
 	f.Must(f.Store.SetStatusIf(fix, "open", "closed"))
 	refusedPanel(t, f, gate, "review", 2, "REJECT")
+	reproduceVerify(t, f, gate)
 	reduce(t, f, true)
 	d = gate + ".decide.reject.r2"
 	foreign := foreignChild(t, f, gate)

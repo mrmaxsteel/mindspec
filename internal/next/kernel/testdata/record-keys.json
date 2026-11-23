@@ -25,5 +25,7 @@
   "mindspec_findings",
   "mindspec_read",
   "mindspec_returns",
-  "mindspec_reproduced"
+  "mindspec_reproduced",
+  "mindspec_verify_verdicts",
+  "mindspec_uncounted"
 ]

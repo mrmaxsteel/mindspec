@@ -1,0 +1,1 @@
+{"options":["redispatch","halt"],"cause":"uncounted","gate":"test-abc.1.review","slots":[{"slot":"R2","attempt":3},{"slot":"R5","attempt":3}]}

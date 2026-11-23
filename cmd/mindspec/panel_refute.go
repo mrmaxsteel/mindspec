@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -239,9 +240,19 @@ func runPanelRefuteBody(cmd *cobra.Command, args []string) error {
 	if model == "" {
 		return panelVerbFailure(fmt.Errorf("slot must belong to the recorded roster"))
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	view, enrolled, err := panelDispositionView(root, res)
+	if err != nil {
+		return err
+	}
+	for _, old := range view.Panel.Refutations {
+		if enrolled && old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 {
+			fmt.Fprintln(cmd.OutOrStdout(), panel.RuleLine(view))
+			return nil
+		}
+	}
+	now := kernel.Now().UTC().Format(time.RFC3339Nano)
 	ref := panel.Refutation{Slot: slot, Round: round, Finding: f.ID, FindingSHA256: f.SHA256,
-		FindingText: f.Text, Ground: ground, AC: ac, Reason: reason, Evidence: evidence, By: by, CreatedAt: now}
+		FindingText: f.Text, Ground: ground, AC: ac, Reason: reason, Evidence: evidence, By: by, CreatedAt: now, Enrolled: enrolled}
 	event, err := json.Marshal(panel.RefutationRecord{Record: panel.RecordRefutation, Spec: panelRecordSpec(*res.Panel), Panel: args[0], Refutation: ref})
 	if err != nil {
 		return panelVerbFailure(err)
@@ -250,7 +261,7 @@ func runPanelRefuteBody(cmd *cobra.Command, args []string) error {
 	if gate == "" {
 		gate = "adhoc"
 	}
-	row, err := json.Marshal(panel.DispositionRow{Record: "disposition", ID: fmt.Sprintf("%s:%s:r%d:%s:%s:refutation", args[0], slot, round, f.ID, f.SHA256[:12]),
+	row, err := json.Marshal(panel.DispositionRow{Record: "disposition", ID: panel.RefutationRowID(args[0], ref),
 		Spec: panelRecordSpec(*res.Panel), Gate: gate, Panel: args[0], Reviewer: slot, Model: model, Severity: "blocking",
 		Summary: termsafe.Escape(f.Text), ConvergentWith: []string{}, Disposition: "audited-refuted", EvidenceRef: evidence, CreatedAt: now, Round: &round})
 	if err != nil {
@@ -278,7 +289,11 @@ func runPanelRefuteBody(cmd *cobra.Command, args []string) error {
 		return panelVerbFailure(err)
 	}
 	found := false
-	for _, old := range res.Panel.Refutations {
+	view, _, err = panelDispositionView(root, res)
+	if err != nil {
+		return err
+	}
+	for _, old := range view.Panel.Refutations {
 		if old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 {
 			found = true
 		}

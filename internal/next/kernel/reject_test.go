@@ -147,6 +147,7 @@ func limitFixture(t *testing.T, final bool) (*kerneltest.Fixture, string, string
 	abandonPanel(t, f, "A")
 	registerGate(t, f, gate, "B", 4)
 	refusedPanel(t, f, gate, "B", 5, "REJECT")
+	reproduceVerify(t, f, gate)
 	return f, gate, target
 }
 func TestS134Reject_LimitAcrossPanels(t *testing.T) {
@@ -202,6 +203,7 @@ func TestS134Reject_ForeignChildAnswerReleasesFix(t *testing.T) {
 	f := reducerFixture(t)
 	gate := f.Items[0] + ".review"
 	refusedPanel(t, f, gate, "reject", 1, "REJECT")
+	reproduceVerify(t, f, gate)
 	d := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
 	raw, err := f.Store.Run("create", "--title", "foreign child", "--type", "task", "--parent", f.ID(d), "--json")
 	f.Must(err)
@@ -226,6 +228,7 @@ func TestS134Reject_LocalDecision(t *testing.T) {
 	doneItem(t, f, f.Items[0])
 	gate := f.Items[1] + ".review"
 	refusedPanel(t, f, gate, "reject", 1, "REJECT")
+	reproduceVerify(t, f, gate)
 	out := reduce(t, f, true)
 	d := gate + ".decide.reject.r1"
 	if len(out.Decisions) != 1 || out.Decisions[0].Step != d || !action(out, f.Items[2]+".impl.a1") || action(out, gate+".r2.fix") {
@@ -247,6 +250,7 @@ func TestS134Reject_RequestChanges(t *testing.T) {
 	f := reducerFixture(t)
 	gate := f.Items[0] + ".review"
 	refusedPanel(t, f, gate, "changes", 1, "REQUEST_CHANGES")
+	reproduceVerify(t, f, gate)
 	out := reduce(t, f, true)
 	if len(out.Decisions) != 0 || !action(out, gate+".r2.fix") {
 		t.Fatalf("ordinary refusal did not release fix: %+v", out)
@@ -304,7 +308,15 @@ func TestS134SeedMatch_OpenDecision(t *testing.T) {
 				}
 				refusedPanel(t, f, gate, "review", n, "REJECT")
 			}
-			reduce(t, real, true)
+			reproduceVerify(t, real, gate)
+			reduce(t, seed, true)
+			verify, v := verifyRecord(t, seed, gate, int(^uint(0)>>1))
+			lease, err := kernel.Lease(seed.State(), kernel.LeaseOptions{Step: verify}, kernel.LeaseDeps{})
+			seed.Must(err)
+			restore := kernel.ReplaceRulesForTest(kernel.NewRegistry())
+			_, err = submitVerify(t, seed, v, lease, nil)
+			restore()
+			seed.Must(err)
 			id := kerneltest.OpenDecision(seed, gate, cause, n, options...)
 			a, b := record(t, real, id), record(t, seed, id)
 			a.ID = b.ID
@@ -344,6 +356,7 @@ func TestS134Reject_ConsumerText(t *testing.T) {
 				registerGate(t, f, gate, "review", i)
 			}
 			refusedPanel(t, f, gate, "review", n, "REJECT")
+			reproduceVerify(t, f, gate)
 			out := reduce(t, f, true)
 			d := record(t, f, fmt.Sprintf("%s.decide.%s.r%d", gate, cause, n))
 			if len(out.Decisions) != 1 {
@@ -366,6 +379,7 @@ func TestS134Reject_CommitAfterRefusedTally(t *testing.T) {
 			f := reducerFixture(t)
 			gate := f.Items[0] + ".review"
 			refusedPanel(t, f, gate, "review", 1, verdict)
+			reproduceVerify(t, f, gate)
 			old, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
 			f.Must(err)
 			beadCommit(t, f, "bead/"+f.Items[0])
@@ -395,6 +409,7 @@ func TestS134Reject_RawFixCloseAfterCommit(t *testing.T) {
 	f := reducerFixture(t)
 	gate := f.Items[0] + ".review"
 	refusedPanel(t, f, gate, "review", 1, "REQUEST_CHANGES")
+	reproduceVerify(t, f, gate)
 	reduce(t, f, true)
 	fix := gate + ".r2.fix"
 	beadCommit(t, f, "bead/"+f.Items[0])
@@ -455,6 +470,7 @@ func TestS134Submit_FixPreservesRound(t *testing.T) {
 	put(t, filepath.Join(f.Root, ".beads", "config.yaml"), "types.custom: gate,step\n")
 	gate := f.Items[0] + ".review"
 	refusedPanel(t, f, gate, "changes", 1, "REQUEST_CHANGES")
+	reproduceVerify(t, f, gate)
 	reduce(t, f, true)
 	fix := gate + ".r2.fix"
 	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: fix}, kernel.LeaseDeps{})
@@ -535,8 +551,8 @@ func TestS134Submit_ExcludedDecisionAnswerHoldsRound(t *testing.T) {
 		}
 	}
 	assertNoPanel(t, out, f.Items[0])
-	if !action(out, gate+".r2.fix") || record(t, f, d).Status != "closed" {
-		t.Fatalf("answer did not release the fix: %+v", out)
+	if action(out, gate+".r2.fix") || record(t, f, d).Status != "closed" {
+		t.Fatalf("answer created a fix before a complete verified round: %+v", out)
 	}
 }
 

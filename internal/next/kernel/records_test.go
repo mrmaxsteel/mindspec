@@ -47,21 +47,25 @@ func TestS134Records_RoundTrips(t *testing.T) {
 		"approval": kernel.PlanApproval(true),
 		"tuple":    mustTuple(t, "test-abc.1.review.r2.R3.a2"),
 		"key":      kernel.ComputedKey("test-abc.1.impl.a1"), "from": kernel.From("test-abc.1.review"),
-		"links":        kernel.Links{{ID: "test-abc.1", Upstream: []string{}}, {ID: "test-abc.2", Upstream: []string{"test-abc.1"}}},
-		"run":          kernel.DefaultPolicy,
-		"lease":        kernel.LeaseRecord{Generation: 2, Expires: fixedTime, TokenHash: "sha256:token", ClaimBase: "base"},
-		"round":        kernel.GateRound{Round: 2, Subject: "subject", Slots: []string{"slot"}, SlotCount: 2, Paths: []string{"app.go"}},
-		"raw-claims":   []kernel.RawClaim{{At: fixedTime}},
-		"take":         kernel.TakeReason{Reason: "operator", At: fixedTime, Generation: 2},
-		"decision":     kernel.DecisionRecord{Options: []string{"fix", "halt"}, Cause: "reject", Gate: "test-abc.1.review"},
-		"answer":       kernel.DecisionAnswer{Option: "fix", At: fixedTime},
-		"defer":        kernel.DeferRecord{Finding: "finding", To: "follow-up", Reason: "bounded", At: fixedTime},
-		"judgement":    kernel.Judgement{Value: "re-panel", OldSubject: "old", NewSubject: "new", Reason: "changed", SlotCount: 2, Paths: []string{"app.go"}},
-		"repanel":      kernel.RePanel{Judge: "judge", SlotCount: 2, Paths: []string{"app.go"}},
-		"carry":        kernel.CarryOver{Rebind: "accepted-rebind", OldSubject: "old", NewSubject: "new", Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", RecordSHA256: "digest", Generation: 1}},
-		"close":        kernel.Receipt{Kind: "passed", Path: "proof", Commit: "commit", Blob: "blob", Repaired: true, Rebind: "rebind", CarryOvers: []kernel.CarryOver{{OldSubject: "old", NewSubject: "new", Judge: "judge"}}},
-		"registration": kernel.RegistrationRecord{Slug: "panel", Round: 2, Subject: "subject", Slots: []string{"R1", "R2"}},
-		"subject":      kernel.Subject{Commit: "subject"},
+		"links":              kernel.Links{{ID: "test-abc.1", Upstream: []string{}}, {ID: "test-abc.2", Upstream: []string{"test-abc.1"}}},
+		"run":                kernel.DefaultPolicy,
+		"lease":              kernel.LeaseRecord{Generation: 2, Expires: fixedTime, TokenHash: "sha256:token", ClaimBase: "base"},
+		"round":              kernel.GateRound{Round: 2, Subject: "subject", Slots: []string{"slot"}, SlotCount: 2, Paths: []string{"app.go"}},
+		"raw-claims":         []kernel.RawClaim{{At: fixedTime}},
+		"take":               kernel.TakeReason{Reason: "operator", At: fixedTime, Generation: 2},
+		"decision":           kernel.DecisionRecord{Options: []string{"fix", "halt"}, Cause: "reject", Gate: "test-abc.1.review"},
+		"answer":             kernel.DecisionAnswer{Option: "fix", At: fixedTime},
+		"defer":              kernel.DeferRecord{Finding: "finding", To: "follow-up", Reason: "bounded", At: fixedTime},
+		"judgement":          kernel.Judgement{Value: "re-panel", OldSubject: "old", NewSubject: "new", Reason: "changed", SlotCount: 2, Paths: []string{"app.go"}},
+		"repanel":            kernel.RePanel{Judge: "judge", SlotCount: 2, Paths: []string{"app.go"}},
+		"carry":              kernel.CarryOver{Rebind: "accepted-rebind", OldSubject: "old", NewSubject: "new", Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", RecordSHA256: "digest", Generation: 1}},
+		"close":              kernel.Receipt{Kind: "passed", Path: "proof", Commit: "commit", Blob: "blob", Repaired: true, Rebind: "rebind", CarryOvers: []kernel.CarryOver{{OldSubject: "old", NewSubject: "new", Judge: "judge"}}},
+		"registration":       kernel.RegistrationRecord{Slug: "panel", Round: 2, Subject: "subject", Slots: []string{"R1", "R2"}},
+		"subject":            kernel.Subject{Commit: "subject"},
+		"verify-verdicts":    kernel.VerifyVerdictSources{"R1": {Verdict: "REJECT", FileSHA256: "digest"}},
+		"uncounted":          true,
+		"uncounted-decision": kernel.DecisionRecord{Options: []string{"redispatch", "halt"}, Cause: "uncounted", Gate: "test-abc.1.review", Slots: []kernel.DecisionSlot{{Slot: "R2", Attempt: 3}, {Slot: "R5", Attempt: 3}}},
+		"verify-defer":       kernel.DeferRecord{Panel: "review", Round: 1, Slot: "R1", Finding: "ccr[0]", FindingSHA256: "finding-digest", SourceVerdict: "REQUEST_CHANGES", SourceFileSHA256: "verdict-digest", VerifyStep: "test-abc.1.review.r1.verify", To: "follow-up", Reason: "bounded", At: fixedTime},
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -79,7 +83,7 @@ func TestS134Records_RoundTrips(t *testing.T) {
 			}
 		})
 	}
-	keys := []string{kernel.KeyPlanApproval, kernel.KeyTuple, kernel.KeyID, kernel.KeyFrom, kernel.KeyLinks, kernel.KeyRun, kernel.KeyLease, kernel.KeyRound, kernel.KeyTake, kernel.KeyTakes, kernel.KeyDeferrals, kernel.KeyDecision, kernel.KeyAnswer, kernel.KeyDefer, kernel.KeyJudgement, kernel.KeyRePanel, kernel.KeyClose, kernel.KeySubject, kernel.KeyRegistration, kernel.KeyRawClaims, kernel.KeyCompletion, kernel.KeyRecord, kernel.KeyClosing, kernel.KeyFindings, kernel.KeyRead, kernel.KeyReturns, kernel.KeyReproduced}
+	keys := []string{kernel.KeyPlanApproval, kernel.KeyTuple, kernel.KeyID, kernel.KeyFrom, kernel.KeyLinks, kernel.KeyRun, kernel.KeyLease, kernel.KeyRound, kernel.KeyTake, kernel.KeyTakes, kernel.KeyDeferrals, kernel.KeyDecision, kernel.KeyAnswer, kernel.KeyDefer, kernel.KeyJudgement, kernel.KeyRePanel, kernel.KeyClose, kernel.KeySubject, kernel.KeyRegistration, kernel.KeyRawClaims, kernel.KeyCompletion, kernel.KeyRecord, kernel.KeyClosing, kernel.KeyFindings, kernel.KeyRead, kernel.KeyReturns, kernel.KeyReproduced, kernel.KeyVerifyVerdicts, kernel.KeyUncounted}
 	golden(t, "record-keys", keys)
 }
 

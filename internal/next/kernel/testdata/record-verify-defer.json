@@ -1,0 +1,1 @@
+{"panel":"review","round":1,"slot":"R1","finding":"ccr[0]","finding_sha256":"finding-digest","source_verdict":"REQUEST_CHANGES","source_file_sha256":"verdict-digest","verify_step":"test-abc.1.review.r1.verify","to":"follow-up","reason":"bounded","at":"2026-01-02T03:04:05Z"}

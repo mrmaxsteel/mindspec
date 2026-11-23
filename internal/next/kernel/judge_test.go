@@ -912,3 +912,23 @@ func TestS134Judge_LegacyPanelDirectory(t *testing.T) {
 		t.Fatalf("accepted %s, want %s", accepted, newest)
 	}
 }
+
+func TestS134Judge_PreviouslyJudgedSubject(t *testing.T) {
+	f, gate, old := judgeFixture(t)
+	first := judgeChange(t, f)
+	reduce(t, f, true)
+	judgeSubmit(t, f, gate, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: first, Reason: "checked first subject"})
+	second := judgeCommit(t, f, "later.txt", "later subject")
+	reduce(t, f, true)
+	id := gate + ".judge.a2"
+	lease := leaseActor(t, f, id, kernel.LeaseDeps{})
+	artifact := judgeArtifact(t, f, kernel.Judgement{Value: "carry-over", OldSubject: first, NewSubject: second, Reason: "checked second subject"})
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
+	f.Must(err)
+	// A branch can return to a commit whose judgement is already durable.
+	reducerGit(t, f, "update-ref", "refs/heads/bead/"+f.Items[0], first)
+	reduce(t, f, true)
+	if r, err := f.Store.Lookup(gate + ".judge.a3"); err != nil || r != nil {
+		t.Fatalf("a closed passed judge must end its subject change: %+v %v", r, err)
+	}
+}

@@ -34,6 +34,30 @@ const (
 // ignored.
 var verdictFileRE = regexp.MustCompile(`^(.+)-round-([1-9][0-9]*)\.json$`)
 
+// RoundVerdictFiles lists the files that belong to a round, including files
+// outside the roster. It uses the same filename grammar as the tally.
+func RoundVerdictFiles(dir string, round int) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		match := verdictFileRE.FindStringSubmatch(entry.Name())
+		if match == nil {
+			continue
+		}
+		n, err := strconv.Atoi(match[2])
+		if err == nil && n == round {
+			names = append(names, entry.Name())
+		}
+	}
+	return names, nil
+}
+
 // ConsolidatedName returns the basename of the consolidated
 // concrete_changes_required list for a round, as written by
 // /ms-panel-tally: consolidated-round-<N>.md.

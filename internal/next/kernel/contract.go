@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
@@ -174,6 +175,14 @@ type Write struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 	Receipt  *Receipt       `json:"receipt,omitempty"`
 	Upstream string         `json:"upstream,omitempty"`
+	Panel    *PanelWrite    `json:"panel,omitempty"`
+}
+
+// PanelWrite is a prepared record-close batch. It is checked before the pin.
+type PanelWrite struct {
+	Dir      string
+	Snapshot panel.Panel
+	Records  [][]byte
 }
 type Changes struct {
 	Writes    []Write

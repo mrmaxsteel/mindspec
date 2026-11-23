@@ -1656,10 +1656,12 @@ panel enforcement, no worktree and no surviving registration refuses.
 ## Rounds, decisions and halt
 
 Count registered rounds across all panels for a gate. Include abandoned panels.
-A refused round creates a fix for the next round. A REJECT also creates a local
-decision. Answer `fix` to release that fix. Other work items can continue.
-At the round limit, answer `continue:<n>` to add an allowance and create a fix.
-The answer does not authorise a round. A passed fix authorises the next round.
+A complete refused round creates a verify step. Only reproduced findings create
+a fix for the next round. A reproduced REJECT also creates a local decision.
+Answer `fix` to release that fix. Other work items can continue.
+At the round limit, the verify creates only a limit decision when findings remain.
+Answer `continue:<n>` to add an allowance and create the fix.
+The answer does not authorize a round. A passed fix authorizes the next round.
 
 A commit during a registered review keeps its slots open on the round subject.
 The commit authorizes no new round. A commit during an open fix keeps the review active.
@@ -1676,6 +1678,45 @@ It records each close as `halted`. It leaves the epic and work items open.
 An open foreign child prevents its parent and kernel ancestors from closing.
 The pass reports that child. A retry finishes the remaining permitted closes.
 Halted reads and retries return exit status 4. They create no steps.
+
+## Verify step
+
+The verify step pins every finding and the digest of each round verdict file.
+A REJECT, hard block, or unexpected veto file gives one veto finding.
+Other REQUEST_CHANGES verdicts give their concrete changes or legacy slot finding.
+The step stores each text in full, with machine-local paths replaced.
+It adds no registered round.
+
+An incomplete tally creates no verify. Each uncounted slot gets its next attempt
+on the round subject. After three uncounted attempts, one local decision lists
+each capped slot and its attempt. An open decision holds all slots of that round.
+The `redispatch` answer releases the listed slots that remain uncounted.
+
+Lease the verify step. Submit a record outside the repository with exactly one
+return for each pinned finding: `reproduced`, `refuted`, or `deferred`.
+A veto cannot be deferred. A refutation needs a supported ground, reason, and
+resolving evidence. A deferral needs an open follow-up outside the owning epic
+that contains the finding text and a discovered-from link.
+All checks and write size checks run before the closing pin.
+
+The closing pin fixes the generation, record digest, and close time.
+A matching retry repeats the same close writes and keeps that time.
+A different generation or record marks a conflict. The next pass retires that
+attempt and creates another verify with the same pinned findings and read set.
+Refutation and deferral events and their coverage rows name the verify attempt.
+The step stores all returns before its receipt.
+
+If no finding is reproduced, the gate passes with a verify receipt, including
+a refuted veto. Otherwise the fix contains only the reproduced findings.
+An applied verify freezes its round. Later edits to verdict files do not retire
+the verify or create slot attempts. A passed fix authorizes the next round and
+supersedes open slots of the previous round.
+
+A passing refute or defer retally supersedes an open verify or fix.
+During a fix, that retally must match the verify's complete verdict read set.
+Events of an unfinished or retired verify remain audit history and resolve no
+finding. A verb event written at or before the latest passed verify also resolves
+no finding. Filtered tallies preserve the original panel snapshot and its history.
 
 ## Enrolment
 

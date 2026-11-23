@@ -130,6 +130,8 @@ func TestHandEdit_EntryPayloadsAndAbandonment(t *testing.T) {
 				edited := snapshotFromRound(t, baseline)
 				value := tc.entry(&edited).Field(i)
 				switch value.Kind() {
+				case reflect.Bool:
+					value.SetBool(!value.Bool())
 				case reflect.String:
 					value.SetString(value.String() + "-changed")
 				case reflect.Int:
