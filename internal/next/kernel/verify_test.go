@@ -1,6 +1,7 @@
 package kernel_test
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -136,8 +137,8 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 				if !unexpected && i == 1 {
 					v = paneltest.Verdict(panel.VerdictRequestChanges)
 					v.HardBlock = true
-					v.Rationale = "retain this full veto rationale"
-					v.ConcreteChangesRequired[0].Text = "retain this full veto change"
+					v.Rationale = "retain this full veto rationale /Users/example/private/source.go"
+					v.ConcreteChangesRequired[0].Text = "retain this full veto change /tmp/private/change.txt"
 					v.ConcreteChangesRequired = append(v.ConcreteChangesRequired, v.ConcreteChangesRequired[0])
 					v.ConcreteChangesRequired[1].Text = "retain the second full veto change"
 				}
@@ -147,7 +148,7 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 				closePass(t, f, gate+".r1."+v.Slot)
 			}
 			if unexpected {
-				put(t, filepath.Join(dir, "R9-round-1.json"), `{"verdict":"REJECT","rationale":"stray veto"}`)
+				put(t, filepath.Join(dir, "R9-round-1.json"), `{"verdict":"REJECT","rationale":"stray veto /Users/example/private/source.go","concrete_changes_required":["stray change /tmp/private/change.txt"]}`)
 			}
 			reduce(t, f, true)
 			id, v := verifyRecord(t, f, gate, 1)
@@ -156,8 +157,16 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 			if len(findings) != 1 || findings[0].Finding != "veto" || unexpected && findings[0].Slot != "R9" {
 				t.Fatalf("veto files did not give exactly one veto: %+v", findings)
 			}
-			if !unexpected && findings[0].Text != "retain this full veto rationale\nretain this full veto change\nretain the second full veto change" {
+			if !unexpected && findings[0].Text != "retain this full veto rationale <path>\nretain this full veto change <path>\nretain the second full veto change" {
 				t.Fatalf("veto lost its fix text: %+v", findings)
+			}
+			if unexpected && findings[0].Text != "stray veto <path>\nstray change <path>" {
+				t.Fatalf("stray veto lost its redacted text: %+v", findings)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, findings[0].Slot+"-round-1.json"))
+			f.Must(err)
+			if findings[0].FindingSHA256 != fmt.Sprintf("%x", sha256.Sum256(data)) {
+				t.Fatal("veto digest changed after redaction")
 			}
 			lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
 			f.Must(err)

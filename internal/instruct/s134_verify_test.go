@@ -157,6 +157,15 @@ func TestS134Instruct_LegacyReadFailure(t *testing.T) {
 	if got != verdict || why != reason || !strings.Contains(text, "notice: kernel panel state is unavailable:") || !strings.Contains(text, "tracker read failed") || strings.Contains(text, "\nrecovery: forged") {
 		t.Fatalf("legacy verdict changed or notice lost: %s", text)
 	}
+	// A nil resolver uses the plain tally entry, which must keep the notice.
+	plain := gatherPanelState(nil, filepath.Dir(filepath.Dir(dir)))
+	if len(plain) != 1 || plain[0].Facts != nil || plain[0].KernelVerdict != nil {
+		t.Fatalf("missing tally-only fallback: %+v", plain)
+	}
+	text = renderPanelState(plain)
+	if !strings.Contains(text, "notice: kernel panel state is unavailable:") || !strings.Contains(text, "tracker read failed") || strings.Contains(text, "\nrecovery: forged") {
+		t.Fatalf("tally-only fallback lost its notice: %s", text)
+	}
 	for _, orchestrated := range []bool{false, true} {
 		p.Orchestrated = orchestrated
 		if err := panel.WriteSnapshot(dir, p); err != nil {

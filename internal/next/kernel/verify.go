@@ -85,6 +85,9 @@ func roundFindings(s State, res *panel.Result) ([]Finding, map[string]string, er
 			_ = json.Unmarshal(data, &payload)
 		}
 		texts := append([]string{payload.Rationale}, payload.ConcreteChangesRequired...)
+		for i, text := range texts {
+			texts[i] = panel.RedactFindingPaths(text)
+		}
 		findings = append(findings, Finding{Slot: v.Slot, Round: v.Round, Finding: "veto", FindingSHA256: recordDigest(data), Text: strings.Join(texts, "\n")})
 	}
 	for _, v := range res.Verdicts {
