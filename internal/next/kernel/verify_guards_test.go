@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,6 +20,9 @@ import (
 func TestS134Verify_CloseRows(t *testing.T) {
 	for _, outcome := range []string{"refuted", "deferred"} {
 		t.Run(outcome, func(t *testing.T) {
+			if outcome == "deferred" && runtime.GOOS == "windows" {
+				t.Skip("follow-up fixture uses a POSIX shell script")
+			}
 			f := reducerFixture(t)
 			gate := f.Items[0] + ".review"
 			registerGate(t, f, gate, "review", 1)

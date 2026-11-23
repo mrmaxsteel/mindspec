@@ -190,6 +190,42 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("stray-malformed-request-changes", func(t *testing.T) {
+		f := reducerFixture(t)
+		gate := f.Items[0] + ".review"
+		registerGate(t, f, gate, "review", 1)
+		dir := filepath.Join(f.SpecDir, "reviews", "review")
+		for i := 1; i <= 3; i++ {
+			v := paneltest.Verdict(panel.VerdictApprove)
+			v.Slot, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i), gateHead(t, f, gate), "test-model"
+			_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+			f.Must(err)
+			closePass(t, f, gate+".r1."+v.Slot)
+		}
+		put(t, filepath.Join(dir, "R9-round-1.json"), `{"verdict":"REQUEST_CHANGES","rationale":"stray malformed request","concrete_changes_required":5}`)
+		res, err := panel.Tally(dir)
+		f.Must(err)
+		if !res.Complete() || res.PassRule(true) || len(res.Unexpected) != 1 || !res.Unexpected[0].Invalid {
+			t.Fatalf("fixture must be refused by one malformed off-roster verdict: %+v", res)
+		}
+		reduce(t, f, true)
+		id, v := verifyRecord(t, f, gate, 1)
+		findings, _, err := kernel.Decode[[]kernel.Finding](record(t, f, id).Metadata, kernel.KeyFindings)
+		f.Must(err)
+		if len(findings) != 1 || findings[0].Slot != "R9" || findings[0].Finding != "veto" || findings[0].Text != "stray malformed request" {
+			t.Fatalf("malformed off-roster REQUEST_CHANGES must give exactly one veto: %+v", findings)
+		}
+		lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+		f.Must(err)
+		out, err := submitVerify(t, f, v, lease, nil)
+		f.Must(err)
+		reproduced, _, err := kernel.Decode[[]kernel.Finding](record(t, f, gate+".r2.fix").Metadata, kernel.KeyReproduced)
+		f.Must(err)
+		if len(out.Decisions) != 0 || !reflect.DeepEqual(reproduced, findings) {
+			t.Fatalf("malformed veto must create only its scoped fix: %+v %+v", out, reproduced)
+		}
+	})
 }
 
 func TestS134Verify_CrashAndConflict(t *testing.T) {
@@ -621,6 +657,27 @@ func TestS134SeedMatch_Verify(t *testing.T) {
 }
 
 func TestS134Verify_RetallyReadSet(t *testing.T) {
+
+	t.Run("added-non-veto-file", func(t *testing.T) {
+		f := reducerFixture(t)
+		gate := f.Items[0] + ".review"
+		refusedPanel(t, f, gate, "review", 1, panel.VerdictRequestChanges)
+		reproduceVerify(t, f, gate)
+		dir := filepath.Join(f.SpecDir, "reviews", "review")
+		before, err := panel.Tally(dir)
+		f.Must(err)
+		f.Must(kernel.VerifyRetallyFits(f.State(), gate, before))
+		stray := filepath.Join(dir, "R9-round-1.json")
+		put(t, stray, `{"verdict":"APPROVE","rationale":"added non-veto"}`)
+		res, err := panel.Tally(dir)
+		f.Must(err)
+		if len(res.Unexpected) != 1 || res.Unexpected[0].Verdict != panel.VerdictApprove || res.Unexpected[0].Invalid {
+			t.Fatalf("fixture must add one non-veto off-roster file: %+v", res.Unexpected)
+		}
+		relative, err := filepath.Rel(f.Root, stray)
+		f.Must(err)
+		assertSubmitRefusal(t, kernel.VerifyRetallyFits(f.State(), gate, res), "verify read set differs at: "+filepath.ToSlash(relative), "mindspec next-action")
+	})
 	f := reducerFixture(t)
 	gate := f.Items[0] + ".review"
 	refusedPanel(t, f, gate, "review", 1, panel.VerdictRequestChanges)

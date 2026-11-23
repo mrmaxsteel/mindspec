@@ -1684,7 +1684,8 @@ Halted reads and retries return exit status 4. They create no steps.
 The verify step pins every finding and the digest of each round verdict file.
 A REJECT, hard block, or unexpected veto file gives one veto finding.
 Other REQUEST_CHANGES verdicts give their concrete changes or legacy slot finding.
-The step stores each text in full. It adds no registered round.
+The step stores each text in full, with machine-local paths replaced.
+It adds no registered round.
 
 An incomplete tally creates no verify. Each uncounted slot gets its next attempt
 on the round subject. After three uncounted attempts, one local decision lists
