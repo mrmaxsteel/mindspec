@@ -148,7 +148,7 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					evidenceCount++
 				}
 			}
-			storedRepair := options.Repair && recordKind(tuple.Kind) && options.Record == ""
+			storedRepair := options.Repair && recordKind(tuple.Kind) && evidenceCount == 0
 			if evidenceCount != 1 && !(storedRepair && evidenceCount == 0) {
 				return actorFailure("submit needs one record, artifact or commit")
 			}
@@ -206,6 +206,7 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 				if options.Repair {
 					receipt.Via = "repair"
 				}
+				updates := map[string]any{}
 				if options.Repair {
 					history, err := takeHistory(r)
 					if err != nil {
@@ -216,9 +217,7 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 						return err
 					}
 					event := TakeReason{Via: "repair", Reason: options.Reason, At: s.At, Generation: lease.Generation, Subject: subject}
-					if err = s.Store.WriteMetadata(r.Key(), Metadata(KeyTakes, append(history, event))); err != nil {
-						return err
-					}
+					updates[KeyTakes] = append(history, event)
 				}
 				if recordKind(tuple.Kind) {
 					receipt, err = recordCloseWrites(s, r, receipt)
@@ -237,11 +236,11 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 
 				if receipt.SupersededGeneration != 0 {
 					lease.Ended = "superseded"
-					if err = s.Store.WriteMetadata(r.Key(), Metadata(KeyLease, lease)); err != nil {
-						return err
-					}
+					updates[KeyLease] = lease
 				}
-				if err = s.Store.WriteReceipt(r.Key(), receipt); err != nil {
+				// The receipt, repair event and superseded lease share one durable write.
+				updates[KeyClose] = receipt
+				if err = s.Store.WriteMetadata(r.Key(), updates); err != nil {
 					return err
 				}
 				changed = true
@@ -606,8 +605,14 @@ func activeActorRound(s State, r Record) (GateRound, error) {
 		for _, id := range s.Steps {
 			candidate := s.Records[id]
 			ct, _, _ := candidate.Tuple()
-			close, _, _ := Decode[Receipt](candidate.Metadata, KeyClose)
-			if ct.Gate == t.Gate && ct.Kind == t.Kind && ct.Round == t.Round && ct.Slot == t.Slot && ct.Attempt > t.Attempt && !(candidate.Status == "closed" && close.Kind == "superseded") {
+			if ct.Gate != t.Gate || ct.Kind != t.Kind || ct.Round != t.Round || ct.Slot != t.Slot || ct.Attempt <= t.Attempt {
+				continue
+			}
+			close, _, err := Decode[Receipt](candidate.Metadata, KeyClose)
+			if err != nil {
+				return round, pathFailure(err, "cannot read attempt receipt: ", "mindspec next-action")
+			}
+			if !(candidate.Status == "closed" && close.Kind == "superseded") {
 				return round, actorFailure("step is not the current round attempt")
 			}
 		}

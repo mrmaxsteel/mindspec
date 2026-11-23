@@ -110,9 +110,7 @@ func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, erro
 				revokedHash := lease.TokenHash
 				var subject Subject
 				if options.Take {
-					if t.Kind == "implement" {
-						subject.Commit = lease.ClaimBase
-					} else {
+					if t.Kind != "implement" {
 						subject, _, err = Decode[Subject](r.Metadata, KeySubject)
 						if err != nil {
 							return pathFailure(err, "cannot read step subject: ", "mindspec next-action")
@@ -148,6 +146,9 @@ func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, erro
 					}
 				}
 				if options.Take {
+					if t.Kind == "implement" {
+						subject.Commit = lease.ClaimBase
+					}
 					history, has, err := Decode[[]TakeReason](r.Metadata, KeyTakes)
 					if err != nil {
 						return err

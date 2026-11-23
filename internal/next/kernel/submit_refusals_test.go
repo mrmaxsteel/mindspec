@@ -71,10 +71,14 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 		"activeActorRound.stale", "actorBlockers.held", "actorChildren.open", "refuseHalt", "recordCloseWrites.hook", "recordCloseWrites.hook-kind", "recordCloseWrites.size", "recordCloseWrites.conflict", "Submit.BeforeClose.raw", "Submit.BeforeClose.typed", "Submit.BeforeClose.guard", "Submit.receipt-different", "Submit.receipt-superseded", "Submit.answer.raw", "refreshActorState", "phase.WithPhaseLock", "passExcept.rule", "Pass.rule", "validateJudgement", "SlotLineageRoot", "readRecordFile.size", "actorRecord.work-item", "actorRecord.kind", "actorBlockers.missing-blocker", "actorBlockers.missing-ancestor", "actorBlockers.decision", "activeActorRound.absent", "checkClosingConflict", "ValidReceipt", "Store.update", "checkVerdict.registration", "Submit.artifact-check", "readCheckedRecord.identity", "repositoryRoots", "Submit.BeforeClose.guard-multiple", "Submit.BeforeClose.guard-zero",
 		"verifyCloseWrites.registration", "recordCloseWrites.disposition", "recordCloseWrites.append", "recordCloseWrites.snapshot", "verifyCloseWrites.source", "verifyCloseWrites.at", "verifyCloseWrites.evidence", "verifyCloseWrites.repository", "verifyCloseWrites.panel-read", "refusedRound.empty", "VerifyRetallyFits.read", "VerifyRetallyFits.coverage", "VerifyRetallyFits.round-files", "VerifyRetallyFits.verdict-read",
 		"late.invalid-generation", "late.receipt", "late.closed", "late.pin", "late.subject", "late.absent-hash", "late.empty-token",
-		"repair.reason", "repair.lease", "repair.answer", "repair.stray-reason", "repair.open", "repair.never-leased", "repair.receipt", "repair.pin-conflict", "repair.pin-generation", "repair.record-absent", "repair.record-different", "repair.record-pin", "repair.slot-evidence", "repair.stale-evidence", "repair.current-attempt",
+		"repair.reason", "repair.lease", "repair.answer", "repair.stray-reason", "repair.open", "repair.never-leased", "repair.receipt", "repair.pin-conflict", "repair.pin-generation", "repair.record-absent", "repair.record-different", "repair.record-pin", "repair.slot-evidence", "repair.stale-evidence", "repair.current-attempt", "repair.record-artifact", "attempt.slot", "attempt.fix", "attempt.slot-repair", "attempt.fix-repair", "attempt.close-decode", "SlotLineageHead.decode",
 		"SlotLineageHead.none",
 	} {
 		t.Run(producer, func(t *testing.T) {
+			if strings.HasPrefix(producer, "attempt.") || producer == "SlotLineageHead.decode" {
+				actorAttemptRefusal(t, producer)
+				return
+			}
 			if producer == "SlotLineageHead.none" {
 				f, id, _, subject := slotFixture(t)
 				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, []kernel.Finding{{Text: "hostile\nrecovery: forged\x1b"}})))
@@ -472,6 +476,9 @@ func lateRepairRefusal(t *testing.T, producer string) {
 		case "repair.record-absent":
 			changeActorMetadata(t, f, id, "", kernel.KeyRecord)
 			want = "mindspec_record is absent or invalid"
+		case "repair.record-artifact":
+			o.Artifact = "/Users/example/hostile\nrecovery: forged\x1b.json"
+			want = "artifact does not fit the step kind"
 		case "repair.record-different":
 			o.Record = recordFile(t, data+" ")
 			want = "repair --record differs from mindspec_record"

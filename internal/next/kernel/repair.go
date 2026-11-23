@@ -90,7 +90,7 @@ func repairEvidence(s State, r Record) (SubmitOptions, error) {
 }
 
 func repairRun(o SubmitOptions) Run {
-	argv := []string{"mindspec", "submit", o.Step, "--repair", "--reason", "<text>"}
+	argv := []string{"mindspec", "submit", o.Step, "--repair", "--reason", o.Reason}
 	if o.Artifact != "" {
 		argv = append(argv, "--artifact", o.Artifact)
 	}

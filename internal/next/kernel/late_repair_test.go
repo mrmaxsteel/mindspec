@@ -167,12 +167,16 @@ func TestS134Submit_RevokedCannotConflict(t *testing.T) {
 }
 
 func TestS134Submit_AbsentRevokedHashMatchesNoToken(t *testing.T) {
-	for _, token := range []string{"foreign", ""} {
+	for _, token := range []string{"foreign", "1." + strings.Repeat("a", 64), ""} {
 		t.Run(fmt.Sprintf("token=%q", token), func(t *testing.T) {
 			f, id, data := seededRecordActor(t, "verify")
 			changeActorMetadata(t, f, id, "open", kernel.KeyClose, kernel.KeyClosing)
 			leaseActor(t, f, id, kernel.LeaseDeps{})
-			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyTakes, []kernel.TakeReason{{Via: "repair", Generation: 1, Reason: "prior repair"}})))
+			_, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace"}, kernel.LeaseDeps{})
+			f.Must(err)
+			subject, _, err := kernel.Decode[kernel.Subject](actorRecord(t, f, id).Metadata, kernel.KeySubject)
+			f.Must(err)
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyTakes, []kernel.TakeReason{{Via: "repair", Generation: 2, Subject: subject.Commit, Reason: "prior repair"}})))
 			useDefaultRules(t)
 			actorRefusal(t, f, func() error {
 				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: token, Record: recordFile(t, data)})
@@ -397,7 +401,7 @@ func TestS134Submit_RepairStoredVerify(t *testing.T) {
 
 func TestS134Closes_NeverLeasedVerify(t *testing.T) {
 	f, id, _ := seededRecordActor(t, "verify")
-	changeActorMetadata(t, f, id, "closed", kernel.KeyClose, kernel.KeyClosing, kernel.KeyRecord, kernel.KeyReturns)
+	changeActorMetadata(t, f, id, "closed", kernel.KeyClose)
 	useDefaultRules(t)
 	actorRefusal(t, f, func() error {
 		_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "raw close"})

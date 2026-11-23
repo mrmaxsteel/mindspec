@@ -319,7 +319,10 @@ func SlotLineageHead(s State, root string) (Record, error) {
 	}
 	var current Record
 	for {
-		receipt, _, _ := Decode[Receipt](r.Metadata, KeyClose)
+		receipt, _, err := Decode[Receipt](r.Metadata, KeyClose)
+		if err != nil {
+			return Record{}, pathFailure(err, "cannot read slot receipt: ", "mindspec next-action")
+		}
 		if r.Status != "closed" || receipt.Kind != "superseded" {
 			current = r
 		}

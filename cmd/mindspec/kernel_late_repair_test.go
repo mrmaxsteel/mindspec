@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,6 +126,9 @@ func binaryLateRepairRefusal(t *testing.T, bin, producer string) {
 			delete(r.Metadata, kernel.KeyRecord)
 			f.Fake.Records[r.ID] = *r
 			want = "mindspec_record is absent or invalid"
+		case "repair.record-artifact":
+			args = append(args, "--artifact", "/Users/example/hostile\nrecovery: forged\x1b.json")
+			want = "artifact does not fit the step kind"
 		case "repair.record-different":
 			f.Must(os.WriteFile(file, []byte(data+" "), 0600))
 			args = append(args, "--record", file)
@@ -199,7 +203,11 @@ func TestS134SubmitCmd_RepairStoredVerify(t *testing.T) {
 }
 
 func TestS134SubmitCmd_RepairRegisteredSlot(t *testing.T) {
-	bin := buildMindspecBinary(t)
+	binaryRepairSlot(t, buildMindspecBinary(t))
+}
+
+func binaryRepairSlot(t *testing.T, bin string) {
+	t.Helper()
 	f, _ := actorCmdFixture(t)
 	f.Must(os.MkdirAll(filepath.Join(f.Root, ".beads"), 0755))
 	f.Must(os.WriteFile(filepath.Join(f.Root, ".beads", "config.yaml"), []byte("types.custom: gate,step\n"), 0644))
@@ -214,13 +222,26 @@ func TestS134SubmitCmd_RepairRegisteredSlot(t *testing.T) {
 	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
 	f.Must(err)
 	v := paneltest.Verdict("APPROVE")
-	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
+	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "wrong-model"
 	file := filepath.Join(f.SpecDir, "reviews", "review", "R1-round-1.json")
 	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
 	actorCmdGit(t, f, "add", "--", file)
 	actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verdict")
 	f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))
 	store := actorCmdStore(t, f)
+	before := actorCmdRead(t, store, id)
+	raw, refusal := f.BinaryCommand(bin, "submit", id, "--repair", "--reason", "hostile\nrecovery: forged\x1b", "--artifact", file)
+	if refusal == nil || !strings.Contains(string(raw), "model") {
+		t.Fatalf("wrong-model repair accepted: %v %s", refusal, raw)
+	}
+	assertBinaryRecovery(t, raw, "correct the verdict and submit it again")
+	if !reflect.DeepEqual(before, actorCmdRead(t, store, id)) {
+		t.Fatal("publication refusal changed the step or takes history")
+	}
+	v.Model = "test-model"
+	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
+	actorCmdGit(t, f, "add", "--", file)
+	actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "correct model")
 	out, code := actorCmdRun(t, f, bin, "submit", id, "--repair", "--reason", "raw close", "--artifact", file)
 	if code != 0 {
 		t.Fatalf("registered slot repair: %d %s", code, out)
@@ -233,6 +254,11 @@ func TestS134SubmitCmd_RepairRegisteredSlot(t *testing.T) {
 	if !receipt.Repaired || receipt.Via != "repair" || receipt.Generation != 1 || !reflect.DeepEqual(current, lease.Lease) {
 		t.Fatalf("binary slot repair changed generation or lost receipt: %+v", r)
 	}
+	events, _, err := kernel.Decode[[]kernel.TakeReason](r.Metadata, kernel.KeyTakes)
+	f.Must(err)
+	if len(events) != 1 || events[0].Via != "repair" {
+		t.Fatalf("one repair receipt has wrong events: %+v", events)
+	}
 	submissions, err := panel.LatestSubmissions(filepath.Dir(file), 1)
 	f.Must(err)
 	if submissions["R1"].Seq == 0 {
@@ -241,37 +267,63 @@ func TestS134SubmitCmd_RepairRegisteredSlot(t *testing.T) {
 }
 
 func TestS134PanelSubmit_RevokedAfterReceipt(t *testing.T) {
+	bin := buildMindspecBinary(t)
 	f, gate, head := kernelPanelFixture(t)
 	kernelPanelAuthorise(f, gate, head, 1, 2)
 	out, err := kernelPanelCreate(t, f, "1")
 	kernelPanelRequire(t, out, err)
 	id := gate + ".r1.R1"
-	first, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
-	f.Must(err)
-	second, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace"}, kernel.LeaseDeps{})
-	f.Must(err)
 	v := paneltest.Verdict("APPROVE")
 	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
 	file := filepath.Join(f.SpecDir, "reviews", "1", "R1-round-1.json")
 	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
 	actorCmdGit(t, f, "add", ".")
 	actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verdict")
-	out, err = kernelPanelRun(t, panelSubmitCmd, "1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file, "--lease", second.Token)
-	kernelPanelRequire(t, out, err)
-	before := kernelPanelRecord(t, f, id)
+	store := actorCmdStore(t, f)
+	firstOut, code := actorCmdRun(t, f, bin, "lease", id)
+	if code != 0 {
+		t.Fatalf("first lease: %d %s", code, firstOut)
+	}
+	first := strings.Fields(firstOut)[2]
+	secondOut, code := actorCmdRun(t, f, bin, "lease", id, "--take", "--reason", "replace")
+	if code != 0 {
+		t.Fatalf("take: %d %s", code, secondOut)
+	}
+	second := strings.Fields(secondOut)[2]
+	out, code = actorCmdRun(t, f, bin, "panel", "submit", "1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file, "--lease", second)
+	if code != 0 {
+		t.Fatalf("current panel submit: %d %s", code, out)
+	}
+	before := actorCmdRead(t, store, id)
+	if before.Status != "closed" {
+		t.Fatal("generation-2 submit did not close the slot")
+	}
 	v.Rationale = "a different result"
 	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
 	actorCmdGit(t, f, "add", ".")
 	actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "different verdict")
-	out, err = kernelPanelRun(t, panelSubmitCmd, "1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file, "--lease", first.Token)
-	kernelPanelRefusal(t, out, err, "step already has a receipt from another generation")
-	if !reflect.DeepEqual(before, kernelPanelRecord(t, f, id)) {
+	raw, refusal := f.BinaryCommand(bin, "panel", "submit", "1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file, "--lease", first)
+	if refusal == nil || string(raw) != "Error: revoked lease refused: step already has a receipt from another generation\nrecovery: mindspec next-action\n" {
+		t.Fatalf("wrong revoked panel refusal: %v %q", refusal, raw)
+	}
+	if !reflect.DeepEqual(before, actorCmdRead(t, store, id)) {
 		t.Fatal("revoked panel submit changed the closed step or receipt")
 	}
-	_, err = kernel.NextAction(f.State(), true)
+	out, code = actorCmdRun(t, f, bin, "next-action", f.SpecID, "--apply")
+	if code != 0 {
+		t.Fatalf("next pass: %d %s", code, out)
+	}
+	if !reflect.DeepEqual(before, actorCmdRead(t, store, id)) {
+		t.Fatal("next pass changed the receipted slot")
+	}
+	bytes, err := os.ReadFile(store)
 	f.Must(err)
-	if retry, err := f.Store.Lookup(id + ".a2"); err != nil || retry != nil {
-		t.Fatalf("revoked panel submit caused retry: %+v %v", retry, err)
+	var rows map[string]kernel.Record
+	f.Must(json.Unmarshal(bytes, &rows))
+	for _, row := range rows {
+		if row.Key() == id+".a2" {
+			t.Fatal("revoked panel submit caused retry")
+		}
 	}
 }
 
@@ -299,5 +351,88 @@ func binaryNoCurrentSlotRefusal(t *testing.T, bin string) {
 	}
 	if !reflect.DeepEqual(before, actorCmdRead(t, store, id)) {
 		t.Fatal("retired-slot refusal changed the step")
+	}
+}
+
+func assertBinaryRecovery(t *testing.T, raw []byte, recovery string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	count := 0
+	for i, line := range lines {
+		if strings.HasPrefix(line, "recovery:") {
+			count++
+			if i != len(lines)-1 || line != "recovery: "+recovery {
+				t.Fatalf("forged or misplaced recovery: %q", raw)
+			}
+		}
+		for _, r := range line {
+			if r < 0x20 || r == 0x7f || r == 0x2028 || r == 0x2029 || r == 0x202e || r >= 0x80 && r <= 0x9f {
+				t.Fatalf("raw control in refusal: %q", raw)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("refusal needs one final recovery line: %q", raw)
+	}
+}
+
+func binaryAttemptRefusal(t *testing.T, bin, producer string) {
+	t.Helper()
+	f, _ := actorCmdFixture(t)
+	f.Must(os.WriteFile(filepath.Join(f.Root, ".mindspec", "config.yaml"), []byte("panel:\n  reviewers:\n    - family: harness\n      model: test-model\n      count: 2\n"), 0644))
+	gate := f.Items[0] + ".review"
+	id := gate + ".r1.R1"
+	head := actorCmdGit(t, f, "rev-parse", "HEAD")
+	kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: head, SlotCount: 2, Slots: []string{id, gate + ".r1.R2"}})
+	kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "review", Round: 1, Subject: head, Slots: []string{"R1", "R2"}})
+	if strings.Contains(producer, "fix") {
+		id = gate + ".r2.fix"
+	}
+	f.Create(id, gate)
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: head})))
+	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+	f.Must(err)
+	args := []string{"submit", id, "--lease", lease.Token}
+	file := filepath.Join(f.SpecDir, "reviews", "review", "R1-round-1.json")
+	if strings.Contains(producer, "fix") {
+		f.Must(os.WriteFile(filepath.Join(f.Root, "code.txt"), []byte("fixed"), 0600))
+		actorCmdGit(t, f, "add", "code.txt")
+		actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fix")
+		commit := actorCmdGit(t, f, "rev-parse", "HEAD")
+		actorCmdGit(t, f, "update-ref", "refs/heads/bead/"+f.Items[0], commit)
+		args = append(args, "--commit", commit)
+	} else {
+		v := paneltest.Verdict("APPROVE")
+		v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
+		f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0600))
+		actorCmdGit(t, f, "add", "--", file)
+		actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verdict")
+		args = append(args, "--artifact", file)
+	}
+	if strings.HasSuffix(producer, "-repair") {
+		f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))
+		args = append([]string{"submit", id, "--repair", "--reason", "hostile\nrecovery: forged\x1b"}, args[4:]...)
+	}
+	retry := f.Create(id+".a2", gate)
+	f.Must(f.Store.WriteMetadata(retry.Key(), map[string]any{kernel.KeyFrom: kernel.From(id), kernel.KeySubject: kernel.Subject{Commit: head}, kernel.KeyFindings: []kernel.Finding{{Text: "hostile\nrecovery: forged\x1b"}}}))
+	want := "step is not the current round attempt"
+	if producer == "attempt.close-decode" || producer == "SlotLineageHead.decode" {
+		f.Must(f.Store.WriteMetadata(retry.Key(), kernel.Metadata(kernel.KeyClose, map[string]any{"kind": []string{"hostile\nrecovery: forged\x1b"}})))
+		want = "cannot read attempt receipt:"
+	}
+	if producer == "SlotLineageHead.decode" {
+		f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))
+		args = []string{"panel", "submit", "review", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file, "--lease", lease.Token}
+		want = "cannot read slot receipt:"
+	}
+	store := actorCmdStore(t, f)
+	before := actorCmdRead(t, store, id)
+	raw, err := f.BinaryCommand(bin, args...)
+	if err == nil || !strings.Contains(string(raw), want) {
+		t.Fatalf("wrong attempt refusal: %v %s; want %s", err, raw, want)
+	}
+	assertBinaryRecovery(t, raw, "mindspec next-action")
+	if !reflect.DeepEqual(before, actorCmdRead(t, store, id)) {
+		t.Fatal("attempt refusal changed the step")
 	}
 }
