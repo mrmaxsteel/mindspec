@@ -192,6 +192,49 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 		})
 	}
 
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"empty-reject", `{"verdict":"REJECT"}`},
+		{"empty-object", `{}`},
+		{"empty-unknown-verdict", `{"verdict":"BOGUS"}`},
+		{"empty-hard-block", `{"verdict":"APPROVE","hard_block":true}`},
+		{"empty-ccr-items", `{"verdict":"REJECT","rationale":"","concrete_changes_required":["",""]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := reducerFixture(t)
+			gate := f.Items[0] + ".review"
+			registerGate(t, f, gate, "review", 1)
+			dir := filepath.Join(f.SpecDir, "reviews", "review")
+			for i := 1; i <= 3; i++ {
+				v := paneltest.Verdict(panel.VerdictApprove)
+				v.Slot, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i), gateHead(t, f, gate), "test-model"
+				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+				f.Must(err)
+				closePass(t, f, gate+".r1."+v.Slot)
+			}
+			put(t, filepath.Join(dir, "R9-round-1.json"), tc.body)
+			reduce(t, f, true)
+			id, v := verifyRecord(t, f, gate, 1)
+			findings, _, err := kernel.Decode[[]kernel.Finding](record(t, f, id).Metadata, kernel.KeyFindings)
+			f.Must(err)
+			want := kernel.Finding{Slot: "R9", Round: 1, Finding: "veto", FindingSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(tc.body))), Text: "the verdict file gives no reason"}
+			if !reflect.DeepEqual(findings, []kernel.Finding{want}) {
+				t.Fatalf("empty veto must name its missing reason and keep the file digest: got %+v want %+v", findings, want)
+			}
+			lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+			f.Must(err)
+			_, err = submitVerify(t, f, v, lease, nil)
+			f.Must(err)
+			reproduced, _, err := kernel.Decode[[]kernel.Finding](record(t, f, gate+".r2.fix").Metadata, kernel.KeyReproduced)
+			f.Must(err)
+			if !reflect.DeepEqual(reproduced, findings) {
+				t.Fatalf("fix lost the veto reason: got %+v want %+v", reproduced, findings)
+			}
+		})
+	}
+
 	t.Run("stray-malformed-request-changes", func(t *testing.T) {
 		f := reducerFixture(t)
 		gate := f.Items[0] + ".review"
@@ -852,4 +895,73 @@ func TestS134Verify_CrashRetiredDeferrals(t *testing.T) {
 	res, err = panel.Tally(dir)
 	f.Must(err)
 	assertFiltered()
+}
+
+func TestS134Verify_CrashMatchingDeferrals(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("follow-up fixture uses a POSIX shell script")
+	}
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	refusedPanel(t, f, gate, "review", 1, panel.VerdictRequestChanges)
+	reduce(t, f, true)
+	id, v := verifyRecord(t, f, gate, 0)
+	findings, _, err := kernel.Decode[[]kernel.Finding](record(t, f, id).Metadata, kernel.KeyFindings)
+	f.Must(err)
+	var descriptions []string
+	for i := range v.Returns {
+		v.Returns[i] = kernel.VerifyReturn{
+			Slot: v.Returns[i].Slot, Round: v.Returns[i].Round,
+			Finding: v.Returns[i].Finding, FindingSHA256: v.Returns[i].FindingSHA256,
+			Return: "deferred", Target: "follow-up", Reason: "track the follow-up",
+		}
+		descriptions = append(descriptions, findings[i].Text)
+	}
+	fake := t.TempDir()
+	data, err := json.Marshal([]any{map[string]any{
+		"id": "follow-up", "status": "open", "description": strings.Join(descriptions, "\n"),
+		"dependencies": []map[string]string{{"id": f.Epic, "dependency_type": "discovered-from"}},
+	}})
+	f.Must(err)
+	path := filepath.Join(fake, "follow-up.json")
+	f.Must(os.WriteFile(path, data, 0600))
+	t.Setenv("S134_VERIFY_FOLLOW_UP", path)
+	f.Must(os.WriteFile(filepath.Join(fake, "bd"), []byte("#!/bin/sh\nif [ \"$1\" != show ] || [ \"$2\" != follow-up ]; then exit 1; fi\ncat \"$S134_VERIFY_FOLLOW_UP\"\n"), 0700))
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+	f.Must(err)
+	killed := errors.New("stopped after deferral close writes")
+	_, err = submitVerify(t, f, v, lease, func(kernel.State, kernel.Receipt) error { return killed })
+	if !errors.Is(err, killed) {
+		t.Fatalf("crash seam did not run: %v", err)
+	}
+	r := record(t, f, id)
+	if r.Status == "closed" || r.Metadata[kernel.KeyClose] != nil {
+		t.Fatalf("crash fixture must have no receipt: %+v", r)
+	}
+	if len(v.Returns) != 3 {
+		t.Fatalf("fixture must defer three findings: %+v", v.Returns)
+	}
+	kerneltest.SetClock(t, fixedTime.Add(time.Second))
+	_, err = submitVerify(t, f, v, lease, nil)
+	f.Must(err)
+	res, err := panel.Tally(filepath.Join(f.SpecDir, "reviews", "review"))
+	f.Must(err)
+	if len(res.Panel.Deferrals) != 3 {
+		t.Fatalf("matching retry duplicated panel deferrals: got %d want 3", len(res.Panel.Deferrals))
+	}
+	for _, ret := range v.Returns {
+		count := 0
+		for _, d := range res.Panel.Deferrals {
+			if d.Slot == ret.Slot && d.Round == ret.Round && d.Finding == ret.Finding && d.FindingSHA256 == ret.FindingSHA256 && d.VerifyStep == id {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("matching retry must keep one deferral per finding: %+v has %d", ret, count)
+		}
+	}
+	if !res.PassRule(true) || record(t, f, gate).Status != "closed" {
+		t.Fatal("matching retry did not pass the gate")
+	}
 }

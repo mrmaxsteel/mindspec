@@ -263,7 +263,7 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 	read := map[string]bool{}
 	for _, reg := range regs {
 		notice := ""
-		if reg.Err == nil && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review") {
+		if reg.Err == nil && reg.Panel.Spec != "" && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review") {
 			spec := reg.Panel.Spec
 			if !read[spec] {
 				read[spec] = true

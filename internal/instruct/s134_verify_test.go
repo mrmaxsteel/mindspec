@@ -178,3 +178,44 @@ func TestS134Instruct_LegacyReadFailure(t *testing.T) {
 		}
 	}
 }
+
+func TestS134Instruct_LegacyEmptySpec(t *testing.T) {
+	for _, orchestrated := range []bool{false, true} {
+		t.Run(fmt.Sprint(orchestrated), func(t *testing.T) {
+			f := paneltest.New(t)
+			p := f.Panel
+			p.Gate, p.Spec, p.Orchestrated, p.Telemetry, p.SubjectDigest = "bead", "", orchestrated, "", ""
+			bead := "test-1.1"
+			p.BeadID, p.Target = &bead, "bead/"+bead
+			dir := filepath.Join(t.TempDir(), "reviews", "review")
+			if err := panel.WriteSnapshot(dir, p); err != nil {
+				t.Fatal(err)
+			}
+			old := instructKernelStateFn
+			t.Cleanup(func() { instructKernelStateFn = old })
+			resolve := func(string) (string, bool) { return strings.Repeat("b", 40), true }
+			instructKernelStateFn = func(string, string) (*kernel.State, error) { return nil, nil }
+			before := gatherPanelState(resolve, filepath.Dir(filepath.Dir(dir)))
+			if len(before) != 1 {
+				t.Fatalf("missing legacy panel: %+v", before)
+			}
+			verdict, reason := before[0].verdict()
+			if verdict != GateBlock || !strings.Contains(reason, "commits landed after review") {
+				t.Fatalf("stale legacy panel must block: %s", renderPanelState(before))
+			}
+			instructKernelStateFn = func(string, string) (*kernel.State, error) {
+				t.Error("empty spec must not read kernel state")
+				return nil, errors.New("invalid spec ID: empty")
+			}
+			after := gatherPanelState(resolve, filepath.Dir(filepath.Dir(dir)))
+			if len(after) != 1 {
+				t.Fatalf("missing legacy panel after kernel stub: %+v", after)
+			}
+			got, why := after[0].verdict()
+			text := renderPanelState(after)
+			if got != verdict || why != reason || after[0].KernelVerdict != nil || after[0].Notice != "" || text != renderPanelState(before) || strings.Contains(text, "notice:") {
+				t.Fatalf("empty spec changed the legacy verdict or added a notice: %s", text)
+			}
+		})
+	}
+}

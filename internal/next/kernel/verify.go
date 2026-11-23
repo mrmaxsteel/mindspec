@@ -85,10 +85,16 @@ func roundFindings(s State, res *panel.Result) ([]Finding, map[string]string, er
 			_ = json.Unmarshal(data, &payload)
 		}
 		texts := append([]string{payload.Rationale}, payload.ConcreteChangesRequired...)
+		hasText := false
 		for i, text := range texts {
+			hasText = hasText || text != ""
 			texts[i] = panel.RedactFindingPaths(text)
 		}
-		findings = append(findings, Finding{Slot: v.Slot, Round: v.Round, Finding: "veto", FindingSHA256: recordDigest(data), Text: strings.Join(texts, "\n")})
+		text := strings.Join(texts, "\n")
+		if !hasText {
+			text = "the verdict file gives no reason"
+		}
+		findings = append(findings, Finding{Slot: v.Slot, Round: v.Round, Finding: "veto", FindingSHA256: recordDigest(data), Text: text})
 	}
 	for _, v := range res.Verdicts {
 		if v.Verdict == panel.VerdictReject || v.HardBlock {

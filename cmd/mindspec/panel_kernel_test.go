@@ -299,6 +299,65 @@ func TestS134PanelCreate_CollisionHaltAndOpenSlot(t *testing.T) {
 		})
 	}
 }
+
+func TestS134PanelKernel_ListedRecoveryAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		cause   string
+		options []string
+		answer  string
+	}{
+		{"reject", []string{"fix", "halt"}, "fix"},
+		{"uncounted", []string{"redispatch", "halt"}, "redispatch"},
+		{"limit", []string{"continue:<n>", "halt"}, "continue:1"},
+	} {
+		verbs := []string{"create", "refute"}
+		if tc.cause == "limit" {
+			// Disposition verbs keep their existing limit exemption.
+			verbs = []string{"create"}
+		}
+		for _, verb := range verbs {
+			t.Run(tc.cause+"/"+verb, func(t *testing.T) {
+				f, gate, head := kernelPanelFixture(t)
+				kernelPanelAuthorise(f, gate, head, 1, 2)
+				kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "review", Round: 1, Subject: head, Slots: []string{"R1", "R2"}})
+				id := kerneltest.OpenDecision(f, gate, tc.cause, 1, tc.options...)
+				var out string
+				var err error
+				if verb == "create" {
+					out, err = kernelPanelCreate(t, f, "review", "--gate", "bead", "--target", "bead/"+f.Items[0])
+				} else {
+					out, err = kernelPanelRun(t, panelRefuteCmd, "review", "R1", "--spec", f.SpecID, "--finding", "ccr[0]", "--ground", "disproven", "--reason", "checked", "--evidence", "proof.txt", "--by", "operator")
+				}
+				if err == nil {
+					t.Fatal("open decision did not hold the panel verb")
+				}
+				message := strings.TrimSpace(out + err.Error())
+				lines := strings.Split(message, "\n")
+				count := 0
+				for _, line := range lines {
+					if strings.HasPrefix(line, "recovery:") {
+						count++
+					}
+				}
+				want := "recovery: mindspec submit " + id + " --answer " + tc.answer
+				if count != 1 || !strings.HasPrefix(lines[len(lines)-1], "recovery: mindspec submit "+id+" --answer ") {
+					t.Fatalf("decision recovery must be one final submit command: %s", message)
+				}
+				argv := strings.Fields(strings.TrimPrefix(lines[len(lines)-1], "recovery: "))
+				if len(argv) != 5 {
+					t.Fatalf("decision recovery has invalid arguments: %s", message)
+				}
+				_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: argv[2], Answer: argv[4]})
+				if err != nil {
+					t.Fatalf("printed recovery answer was refused: %v", err)
+				}
+				if lines[len(lines)-1] != want {
+					t.Fatalf("decision recovery must use the first non-halt option %q: %s", want, message)
+				}
+			})
+		}
+	}
+}
 func TestS134PanelCreate_LocalDecisionAndLease(t *testing.T) {
 	f, _, head := kernelPanelFixture(t)
 	gate := f.Items[1] + ".review"

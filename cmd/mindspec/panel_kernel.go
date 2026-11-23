@@ -163,8 +163,18 @@ func panelKernelGuard(s kernel.State, gate string, limit bool) error {
 	for _, r := range s.OpenDecisions() {
 		t, _, _ := r.Tuple()
 		if t.Gate == gateBase(s, gate) && (t.Cause != "limit" || limit) {
-			answer := "fix"
-			if t.Cause == "limit" {
+			decision, _, err := kernel.Decode[kernel.DecisionRecord](r.Metadata, kernel.KeyDecision)
+			if err != nil {
+				return panelVerbFailure(err)
+			}
+			answer := ""
+			for _, option := range decision.Options {
+				answer = option
+				if option != "halt" {
+					break
+				}
+			}
+			if answer == "continue:<n>" {
 				answer = "continue:1"
 			}
 			return guard.NewFailure(fmt.Sprintf("answer decision %s first", r.Key()), fmt.Sprintf("mindspec submit %s --answer %s", r.Key(), answer))
