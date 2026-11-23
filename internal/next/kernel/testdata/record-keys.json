@@ -19,5 +19,11 @@
   "mindspec_subject",
   "mindspec_registration",
   "mindspec_raw_claims",
-  "mindspec_completed_subject"
+  "mindspec_completed_subject",
+  "mindspec_record",
+  "mindspec_closing",
+  "mindspec_findings",
+  "mindspec_read",
+  "mindspec_returns",
+  "mindspec_reproduced"
 ]

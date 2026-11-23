@@ -1661,8 +1661,8 @@ decision. Answer `fix` to release that fix. Other work items can continue.
 At the round limit, answer `continue:<n>` to add an allowance and create a fix.
 The answer does not authorise a round. A passed fix authorises the next round.
 
-A new subject during a review supersedes its open slots and authorises the next
-round. A commit during an open fix does not supersede the review.
+A commit during a registered review keeps its slots open on the round subject.
+The commit authorizes no new round. A commit during an open fix keeps the review active.
 The final review starts on the spec branch head after every work item has a
 passed gate, a closed work item and a completion record from `complete`.
 The record names the accepted subject. A raw close and Git ancestry alone
@@ -1720,20 +1720,20 @@ Its receipt identifies the rebind.
 Merged work items and closed epics create no judges.
 
 Lease the judge before submission.
-Commit its judgement file in the registered panel directory.
+Write its judgment to a file outside the repository and submit it with `--record <path>`.
+Do not commit the record.
 Use `carry-over` with a reason to retain the passing gate.
 The gate receipt records both subjects and the judge receipt.
 The carry-over also records the current rebind identity.
 Use `re-panel` with changed paths to request another round.
 Set at least two slots and no more than the passing round used.
 The successor gate records its predecessor, the judge ID, and the requested scope.
-The scope applies only to the subject the judge saw.
-After a `re-panel` judgement, a later non-panel commit before `panel create`
-moves the subject and restores the full roster with no path limit.
+Before registration, a scoped re-panel keeps the subject, slot count, and path limit
+that the judge authorized.
 A panel-only commit does not move the subject.
 The re-panel record states what the judge authorised.
 Its slot count and paths stay unchanged when the subject moves.
 The gate round record alone states the slots that run.
 The next panel-create entry carries the gate round scope.
-Submission checks committed evidence and subject identity.
-It does not assess the judgement content.
+Submission checks the external record and subject identity.
+It does not assess the judgment content.

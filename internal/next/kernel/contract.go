@@ -1,13 +1,14 @@
 package kernel
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
-var ErrPreKernel = errors.New("this spec uses the existing lifecycle; use mindspec next, mindspec complete and mindspec impl approve\nrecovery: mindspec next")
+var ErrPreKernel error = termsafe.NewFailure("this spec uses the existing lifecycle; use mindspec next, mindspec complete and mindspec impl approve", "mindspec next")
 
 type Subject struct {
 	Commit string `json:"commit"`
@@ -82,10 +83,10 @@ type RuleSpec struct {
 }
 
 var RuleContracts = []RuleSpec{
-	{"recreate", Ordinary}, {"missing-link", Ordinary}, {"tally", Ordinary},
-	{"supersede", Ordinary}, {"refused-round", Ordinary}, {"final-round", Ordinary},
-	{"judge-apply", Ordinary}, {"judge-supersede", Ordinary}, {"judge-create", Ordinary},
-	{"round-open", Ordinary}, {"slots", Ordinary}, {"implement", Ordinary},
+	{"recreate", Ordinary}, {"missing-link", Ordinary}, {"judge-apply", Ordinary}, {"tally", Ordinary},
+	{"refused-round", Ordinary}, {"verify-apply", Ordinary}, {"final-round", Ordinary},
+	{"judge-supersede", Ordinary}, {"judge-create", Ordinary}, {"round-open", Ordinary},
+	{"lens-create", Ordinary}, {"slots", Ordinary}, {"implement", Ordinary},
 	{"retry-attempt", Ordinary}, {"complete-entry", Ordinary}, {"halt", Halt},
 	{"run-marker-missing", FlagOnly}, {"foreign-child-open", FlagOnly}, {"foreign-blocker", FlagOnly}, {"id-collision", FlagOnly},
 	{"unreceipted-close", FlagOnly}, {"raw-close", FlagOnly}, {"forced-close", FlagOnly}, {"raw-claim", FlagOnly},

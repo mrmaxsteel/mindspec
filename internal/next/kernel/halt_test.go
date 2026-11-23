@@ -27,7 +27,7 @@ func haltFixture(t *testing.T) (*kerneltest.Fixture, string) {
 }
 func seedHalt(t *testing.T, f *kerneltest.Fixture, d string) {
 	t.Helper()
-	answer := kernel.DecisionAnswer{Option: "halt", At: kernel.Now().UTC(), Actor: "operator"}
+	answer := kernel.DecisionAnswer{Option: "halt", At: kernel.Now().UTC()}
 	f.Must(f.Store.WriteMetadata(d, map[string]any{kernel.KeyAnswer: answer, kernel.KeyClose: kernel.Receipt{Kind: "passed", Answer: &answer}}))
 }
 func assertHaltWrites(t *testing.T, before, after kernel.State, answerID string) {
@@ -44,7 +44,7 @@ func assertHaltWrites(t *testing.T, before, after kernel.State, answerID string)
 			continue
 		}
 		receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
-		if err != nil || !has || receipt.Kind != "halted" || receipt.HaltAnswer != answerID || old.Status == "closed" || r.Status != "closed" || kernel.ValidReceipt(after.Root, receipt) != nil {
+		if err != nil || !has || receipt.Kind != "halted" || receipt.HaltAnswer != answerID || old.Status == "closed" || r.Status != "closed" || kernel.ValidReceipt(after.Root, receipt, r.Metadata) != nil {
 			t.Fatalf("halt close must name answer %s: %s %+v", answerID, id, receipt)
 		}
 		old.Status = r.Status
@@ -174,7 +174,7 @@ func TestS134Halt_LocalRejectAndForeignDescendant(t *testing.T) {
 		}
 		if before.Records[id].Status != "closed" {
 			receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
-			if err != nil || !has || receipt.Kind != "halted" || receipt.HaltAnswer != d || kernel.ValidReceipt(f.Root, receipt) != nil {
+			if err != nil || !has || receipt.Kind != "halted" || receipt.HaltAnswer != d || kernel.ValidReceipt(f.Root, receipt, r.Metadata) != nil {
 				t.Fatalf("halt close must name answer %s: %s %+v", d, id, receipt)
 			}
 		}

@@ -64,13 +64,9 @@ func judgeCmdArtifact(t *testing.T, f *kerneltest.Fixture, j kernel.Judgement, s
 	t.Helper()
 	data, err := json.Marshal(j)
 	f.Must(err)
-	slug := "panel"
-	if len(slugs) > 0 {
-		slug = slugs[0]
-	}
-	path := filepath.Join(".mindspec", "specs", f.SpecID, "reviews", slug, "judgement.json")
-	judgeCmdCommit(t, f, path, string(data))
-	return filepath.Join(f.Root, path)
+	path := filepath.Join(t.TempDir(), "judgement.json")
+	f.Must(os.WriteFile(path, data, 0600))
+	return path
 }
 func TestS134JudgeCmd_CreateSupersedeAndCarry(t *testing.T) {
 	bin := buildMindspecBinary(t)
@@ -90,13 +86,13 @@ func TestS134JudgeCmd_CreateSupersedeAndCarry(t *testing.T) {
 		t.Fatalf("superseded receipt: %+v", receipt)
 	}
 	artifact := judgeCmdArtifact(t, f, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "review covers the new change"})
-	raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--artifact", artifact)
+	raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--record", artifact)
 	if code == 0 {
 		t.Fatalf("stale submit: %s", raw)
 	}
 	id = gate + ".judge.a2"
 	token = judgeCmdLease(t, f, bin, id)
-	raw, code = actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--artifact", artifact)
+	raw, code = actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--record", artifact)
 	if code != 0 {
 		t.Fatalf("carry-over: %d %s", code, raw)
 	}
@@ -112,7 +108,7 @@ func TestS134JudgeCmd_CreateSupersedeAndCarry(t *testing.T) {
 	}
 	before, err := os.ReadFile(store)
 	f.Must(err)
-	raw, code = actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--artifact", artifact)
+	raw, code = actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--record", artifact)
 	after, err := os.ReadFile(store)
 	f.Must(err)
 	if code != 0 || string(before) != string(after) {
@@ -138,7 +134,7 @@ func TestS134JudgeCmd_InvalidThenRepanel(t *testing.T) {
 				artifact := judgeCmdArtifact(t, f, bad)
 				before, err := os.ReadFile(store)
 				f.Must(err)
-				raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--artifact", artifact)
+				raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--record", artifact)
 				after, err := os.ReadFile(store)
 				f.Must(err)
 				if code == 0 || string(before) != string(after) || actorCmdRead(t, store, id).Status != "in_progress" {
@@ -147,7 +143,7 @@ func TestS134JudgeCmd_InvalidThenRepanel(t *testing.T) {
 			}
 			paths := []string{".mindspec/config.yaml"}
 			artifact := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: n, Paths: paths})
-			raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--artifact", artifact)
+			raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--record", artifact)
 			if code != 0 {
 				t.Fatalf("re-panel: %d %s", code, raw)
 			}
@@ -195,7 +191,7 @@ func TestS134JudgeCmd_RepanelCreateSlots(t *testing.T) {
 			}
 			token := judgeCmdLease(t, f, bin, id)
 			artifact := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}}, slug)
-			raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--artifact", artifact)
+			raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--record", artifact)
 			if code != 0 {
 				t.Fatalf("re-panel: %d %s", code, raw)
 			}

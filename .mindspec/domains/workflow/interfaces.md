@@ -9,8 +9,8 @@ An enrolled spec uses its active gate to authorise each review round.
 It refuses a `--target` other than the gate branch.
 It selects the highest gate attempt.
 A re-panel uses the slot count and changed paths from the gate round record.
-A later non-panel commit before registration restores the full roster and removes the path limit.
-A round after a refused re-panel also uses the full roster with no path limit.
+Before registration, a scoped re-panel keeps the subject, slot count, and path limit that the judge authorized.
+A round after a refused re-panel uses the full roster with no path limit.
 The re-panel judgment record retains what the judge authorized; it does not override a later round.
 An open successor gate cannot create a change judge for an older passed attempt.
 The registration and round ledger retain that scope.
@@ -1453,6 +1453,48 @@ Every close writes its receipt first.
 Artifact receipts retain the path, holding commit, and blob id.
 Reducer receipts retain the close reason.
 
+Round identities include `r<N>.lens` and `r<N>.verify`.
+Each identity can have an attempt suffix.
+The action schema is `mindspec.next-action/v2`.
+Actions sort by plan order, then implement, lens, review slot, verify, fix,
+and change judge. Decisions follow those kinds.
+A branch move during a registered round leaves its slots on the round subject.
+
+Each metadata write uses a unique external file with mode 0600.
+The store passes its path to the tracker with `--metadata @<file>`.
+It removes the file after the call.
+An apply pass removes metadata files from processes that no longer run.
+It keeps actor files in the `records` directory.
+Merged metadata has a 16 MiB limit. An oversized write refuses before mutation.
+The error names the gate, step, largest key, and size. Stored text is not cut.
+
+Lens, verify, and change-judge steps use `submit --record <path>`.
+Record and temporary paths must be outside every worktree of the repository.
+The supplied path and its cleaned spelling must exist and name the same file.
+Use an existing path without `..` segments if these spellings differ.
+Containment checks the cleaned path and resolved target by file identity.
+Git supplies the worktree roots, including the top of an enclosing worktree.
+A record submission refuses if Git cannot supply these roots.
+For a temporary path before Git initialization, containment uses the physical project root.
+This requires a failed Git query and no `.git` entry in that root or its ancestors.
+An opened record must be the checked regular file.
+The file must contain valid UTF-8.
+The decoder refuses unknown fields.
+The first close write stores the exact bytes as the JSON string `mindspec_record`.
+The receipt holds their `record_sha256`, with no path, commit, or blob.
+Receipt validation compares that digest with the stored string.
+A later metadata write preserves the string and its digest.
+Decision answers hold an option and time, with no actor field.
+
+A verify first builds and size-checks its close writes.
+It then pins the generation, record digest, and time in `mindspec_closing`.
+The pin precedes the stored record and each kind-specific close write.
+A matching retry keeps the time and repeats those writes before the receipt.
+A different generation or digest sets only the pin's conflict and refuses.
+A conflict prevents every later submit of that attempt.
+A submit with a valid receipt makes no close write and does not change the pin.
+A lens has no closing pin.
+
 `Pass` dispatches rules in registry order.
 Each rule reads the prior rules' projected writes.
 A read-only pass returns the same write list that an apply pass uses.
@@ -1472,12 +1514,14 @@ A take requires a reason and creates a new generation.
 A live lease, a hold, a blocker, or an unanswered gate decision prevents another claim.
 Implementation claims use the worktree adapter and record the branch head as the claim base.
 
-`submit` requires the current token and committed evidence for the actor kind.
+`submit` requires the current token.
+Implement and fix steps use a commit. Review slots use a committed verdict.
+Lens, verify, and change-judge steps use an external record. Do not commit the record.
 Implementation commits must follow the claim base on the work branch.
 Fix commits must follow the round subject on the gate branch.
 Final fixes use the spec branch.
 Review verdicts must match the active slot, round, and subject.
-Verdict and judgment artifact paths use the same recorded panel directory set as subject checks.
+Verdict artifact paths use the same recorded panel directory set as subject checks.
 A stored directory list replaces the canonical path; a path outside every recorded directory is refused.
 Enrolled panel creation writes in the worktree that contains the spec, including non-flat layouts.
 An artifact can come from any linked worktree of the same repository.
@@ -1516,8 +1560,8 @@ A removed branch uses its recorded landed merge and verified second parent.
 Only a passed close with a valid receipt can authorise a round.
 The gate must remain open.
 A registered round creates slots only when its round and subject match the authorisation.
-A subject change before registration changes the authorized subject.
-For a scoped re-panel, it also restores the full roster and removes the path limit.
+Before registration, a subject change updates an ordinary round.
+A scoped re-panel keeps its authorized subject, slot count, and path limit.
 The panel tally closes a passing gate after every child has closed.
 An open change judge holds the completion command.
 
@@ -1542,7 +1586,8 @@ Display time does not change the revision.
 Actions use plan order, kind order and numeric slot order.
 Commands use argument arrays.
 Implement and fix actions submit with `--commit <commit>`.
-Review slots and change judges submit with `--artifact <path>`.
+Review slots submit with `--artifact <path>`.
+Lens, verify, and change-judge steps submit with `--record <path>` outside the repository.
 A successful actor submit returns the current action document, including step existence and revision.
 The revision uses a fresh read after the writes, including assigned store ids.
 An exact retry returns the current read-only document.
@@ -1659,7 +1704,8 @@ Panel creation records the directory and keeps earlier directories of that gate.
 An older record with no directory list uses its canonical spec review location.
 Panel files and ledgers in a judged commit cannot define an exemption.
 Untracked and ignored working files cannot define an exemption.
-Round creation, submission, superseding, tally, and approval use the same effective subject.
+Round creation, tally, and approval use the effective subject.
+A review slot submission uses the registered round subject.
 A commit that also changes another path moves the subject.
 A merge compares its tree with its first parent; an empty commit moves the subject.
 Panel evidence can be committed on the subject branch.

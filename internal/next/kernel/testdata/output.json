@@ -1,5 +1,5 @@
 {
-  "schema": "mindspec.next-action/v1", "status": "work", "applied": true,
+  "schema": "mindspec.next-action/v2", "status": "work", "applied": true,
   "revision": "sha256:revision", "retry_at": "2026-01-02T03:04:05Z",
   "policy": {"round_limit": 5, "lease_ttl": "2h"},
   "actions": [{"step": "test-abc.1.review.r2.R3", "kind": "review-slot", "exists": true, "round": 2,

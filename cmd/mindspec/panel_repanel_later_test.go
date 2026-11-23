@@ -29,7 +29,19 @@ func TestS134PanelRepanel_LaterRounds(t *testing.T) {
 				e.commit(tree, "changed.txt", "change after review\n")
 				e.judge("re-panel", 2)
 				if trigger == "subject-move" {
+					before, ok, err := kernel.Decode[kernel.GateRound](e.row(gate).Metadata, kernel.KeyRound)
+					e.must(err)
+					if !ok || before.SlotCount != 2 || !samePaths(before.Paths, []string{".mindspec/config.yaml"}) {
+						t.Fatalf("missing scoped authorization: %+v", before)
+					}
 					e.commit(tree, "later.txt", "change after judgement\n")
+					e.apply()
+					after, ok, err := kernel.Decode[kernel.GateRound](e.row(gate).Metadata, kernel.KeyRound)
+					e.must(err)
+					if !ok || after.Subject != before.Subject || after.Round != before.Round || after.SlotCount != before.SlotCount || !samePaths(after.Paths, before.Paths) || !samePaths(after.Slots, before.Slots) {
+						t.Fatalf("subject move reset scope without a judgement: before=%+v after=%+v", before, after)
+					}
+					return
 				} else {
 					e.create(e.apply())
 					repanelReview(t, e, gate, 2, "REQUEST_CHANGES", []string{".mindspec/config.yaml"})

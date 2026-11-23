@@ -192,7 +192,7 @@ func matchesToken(lease LeaseRecord, token string) bool {
 	return token != "" && lease.Generation > 0 && lease.TokenHash != "" && tokenHash(token) == lease.TokenHash
 }
 func actorFailure(message string) error {
-	return fmt.Errorf("%s\nrecovery: mindspec next-action", termsafe.Escape(message))
+	return termsafe.NewFailure(message, "mindspec next-action")
 }
 func refuseHalt(s State) error {
 	ids := []string{}
@@ -203,7 +203,7 @@ func refuseHalt(s State) error {
 	}
 	sort.Strings(ids)
 	if len(ids) > 0 {
-		return fmt.Errorf("spec is halted by %s (%s)\nrecovery: mindspec next-action %s", termsafe.Escape(ids[0]), idrender.Spec(s.SpecID), idrender.Spec(s.SpecID))
+		return termsafe.NewFailure(fmt.Sprintf("spec is halted by %s (%s)", ids[0], idrender.Spec(s.SpecID)), "mindspec next-action "+idrender.Spec(s.SpecID))
 	}
 	return nil
 }
@@ -244,7 +244,7 @@ func actorRecord(s State, id string, decision bool) (Record, Tuple, error) {
 			return Record{}, Tuple{}, actorFailure("work item is not in the approved plan: " + t.WorkItem)
 		}
 	}
-	valid := t.Kind == "implement" || t.Kind == "review-slot" || t.Kind == "fix" || t.Kind == "change-judge"
+	valid := t.Kind == "implement" || t.Kind == "review-slot" || t.Kind == "fix" || recordKind(t.Kind)
 	if decision {
 		valid = t.Kind == "decision"
 	}
@@ -326,11 +326,9 @@ func actorBlockers(s State, target Record) error {
 	return nil
 }
 
-type openActorChild struct{ id string }
+type openActorChild struct{ *termsafe.Failure }
 
-func (e *openActorChild) Error() string {
-	return actorFailure("open child prevents close: " + e.id).Error()
-}
+func (e *openActorChild) Unwrap() error { return e.Failure }
 
 func actorChildren(s State, target Record) error {
 	all, err := s.Store.All()
@@ -351,7 +349,7 @@ func actorChildren(s State, target Record) error {
 			}
 		}
 		if parent == target.ID || parent == target.Key() {
-			return &openActorChild{id: child.Key()}
+			return &openActorChild{termsafe.NewFailure("open child prevents close: "+child.Key(), "mindspec next-action")}
 		}
 	}
 	return nil

@@ -52,7 +52,7 @@ func recoverySuperseded(t *testing.T, f *kerneltest.Fixture, id string) {
 	r := record(t, f, id)
 	receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
 	f.Must(err)
-	if r.Status != "closed" || !has || receipt.Kind != "superseded" || kernel.ValidReceipt(f.Root, receipt) != nil {
+	if r.Status != "closed" || !has || receipt.Kind != "superseded" || kernel.ValidReceipt(f.Root, receipt, r.Metadata) != nil {
 		t.Fatalf("stale slot has no superseded close: %s %+v receipt=%+v", id, r, receipt)
 	}
 	next := id + ".a2"
@@ -62,69 +62,10 @@ func recoverySuperseded(t *testing.T, f *kerneltest.Fixture, id string) {
 	assertRetry(t, f, id, next, false)
 }
 
-func TestS134Supersede_RefusedSubmitCoveredNextPass(t *testing.T) {
-	for _, bogus := range []bool{false, true} {
-		t.Run(fmt.Sprint(bogus), func(t *testing.T) {
-			f, gate, slot, lease, artifact, head := recoveryMovedHead(t)
-			token := lease.Token
-			if bogus {
-				token = "bogus"
-			}
-			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: slot, Lease: token, Artifact: artifact})
-			if err == nil {
-				t.Fatal("stale submit accepted")
-			}
-			// The pre-pass cannot close the named step or advance past an open slot.
-			if record(t, f, slot).Status != "in_progress" || recoveryRound(t, f, gate).Round != 1 {
-				t.Fatal("pre-pass advanced past its excluded open slot")
-			}
-			if _, has, _ := kernel.Decode[kernel.Receipt](record(t, f, slot).Metadata, kernel.KeyClose); has {
-				t.Fatal("pre-pass receipted the excluded slot")
-			}
-			out := reduce(t, f, true)
-			for i := 1; i <= 3; i++ {
-				recoverySuperseded(t, f, fmt.Sprintf("%s.r1.R%d", gate, i))
-			}
-			r := recoveryRound(t, f, gate)
-			if r.Round != 2 || r.Subject != head || !hasRun(out, "mindspec", "panel", "create", f.Items[0]) {
-				t.Fatalf("next pass did not release the next round: %+v %+v", r, out)
-			}
-			before := kerneltest.Snapshot(t, f)
-			reduce(t, f, true)
-			if before != kerneltest.Snapshot(t, f) {
-				t.Fatal("replay wrote")
-			}
-		})
-	}
-}
-
-func TestS134Supersede_SweepsOlderSlotsAndRetries(t *testing.T) {
-	f, gate, slot, _, _, head := recoveryMovedHead(t)
-	// Model a store left by an interrupted older controller, two rounds behind.
-	retry := slot + ".a2"
-	f.Must(f.Store.SetStatusIf(slot, "in_progress", "closed"))
-	f.Create(retry, gate)
-	f.Must(f.Store.WriteMetadata(retry, kernel.Metadata(kernel.KeyFrom, kernel.From(slot))))
-	kerneltest.Authorise(f, gate, gateRound(t, f, gate, 3, head))
-	reduce(t, f, true)
-	for _, id := range []string{gate + ".r1.R1", gate + ".r1.R3", retry} {
-		recoverySuperseded(t, f, id)
-	}
-	// The superseded retry also explains its raw-closed predecessor.
-	if !kernel.RepairedClose(f.State(), slot) {
-		t.Fatal("raw close has no repair evidence")
-	}
-	assertRetry(t, f, retry, slot+".a3", false)
-}
-
 func TestS134Closes_StaleSlotHasNoRetry(t *testing.T) {
 	for _, mode := range []string{"round", "subject"} {
 		t.Run(mode, func(t *testing.T) {
-			f, gate, slot, lease, artifact, head := recoveryMovedHead(t)
-			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: slot, Lease: lease.Token, Artifact: artifact})
-			if err == nil {
-				t.Fatal("stale submit accepted")
-			}
+			f, gate, slot, _, _, head := recoveryMovedHead(t)
 			// Raw close before the pass that would cover the excluded step.
 			f.Must(f.Store.SetStatusIf(slot, "in_progress", "closed"))
 			n := 2
@@ -201,4 +142,23 @@ func TestS134Halt_OpenBlockersKeepRecordsOpen(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestS134Reducer_SweepsOlderSlotsAndRetries(t *testing.T) {
+	f, gate, slot, _, _, head := recoveryMovedHead(t)
+	// Model a store left by an interrupted older controller, two rounds behind.
+	retry := slot + ".a2"
+	f.Must(f.Store.SetStatusIf(slot, "in_progress", "closed"))
+	f.Create(retry, gate)
+	f.Must(f.Store.WriteMetadata(retry, kernel.Metadata(kernel.KeyFrom, kernel.From(slot))))
+	kerneltest.Authorise(f, gate, gateRound(t, f, gate, 3, head))
+	reduce(t, f, true)
+	for _, id := range []string{gate + ".r1.R1", gate + ".r1.R3", retry} {
+		recoverySuperseded(t, f, id)
+	}
+	// The superseded retry also explains its raw-closed predecessor.
+	if !kernel.RepairedClose(f.State(), slot) {
+		t.Fatal("raw close has no repair evidence")
+	}
+	assertRetry(t, f, retry, slot+".a3", false)
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -23,11 +24,16 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 	}
 	options := kernel.SubmitOptions{Step: args[0]}
 	options.Lease, _ = cmd.Flags().GetString("lease")
+	options.Record, _ = cmd.Flags().GetString("record")
 	options.Artifact, _ = cmd.Flags().GetString("artifact")
-	if options.Artifact != "" {
-		options.Artifact, err = filepath.Abs(options.Artifact)
-		if err != nil {
-			return err
+	for _, path := range []*string{&options.Record, &options.Artifact} {
+		if *path != "" && !filepath.IsAbs(*path) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			// The kernel checks the supplied spelling before it cleans the path.
+			*path = cwd + string(filepath.Separator) + *path
 		}
 	}
 	options.Commit, _ = cmd.Flags().GetString("commit")
@@ -72,10 +78,11 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 
 func init() {
 	submitCmd.Flags().String("lease", "", "Current lease token")
+	submitCmd.Flags().String("record", "", "Record file outside this repository")
 	submitCmd.Flags().String("artifact", "", "Artifact path held by a commit")
 	submitCmd.Flags().String("commit", "", "Commit that holds the implementation or fix")
 	submitCmd.Flags().String("answer", "", "Listed option for a decision")
-	submitCmd.MarkFlagsMutuallyExclusive("artifact", "commit", "answer")
+	submitCmd.MarkFlagsMutuallyExclusive("record", "artifact", "commit", "answer")
 	rootCmd.AddCommand(submitCmd)
 }
 

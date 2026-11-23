@@ -999,8 +999,8 @@ func stubNonBeadRevParse(t *testing.T, fn func(root, ref string) (string, error)
 // runPanelVerbCmd runs `mindspec panel <args...>` against rootCmd and
 // returns combined stdout+stderr and the error.
 func runPanelVerbCmd(args ...string) (string, error) {
-	for _, command := range []*cobra.Command{panelSubmitCmd, panelVerifyCmd} {
-		for _, name := range []string{"file", "slot", "round", "spec", "json"} {
+	for _, command := range []*cobra.Command{panelSubmitCmd, panelVerifyCmd, panelRecoverCmd} {
+		for _, name := range []string{"file", "slot", "round", "spec", "json", "reason"} {
 			if f := command.Flags().Lookup(name); f != nil {
 				_ = f.Value.Set(f.DefValue)
 				f.Changed = false

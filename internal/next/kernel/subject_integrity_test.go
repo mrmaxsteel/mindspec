@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
@@ -66,29 +67,19 @@ func TestS134Subject_PanelCommitsOnSubjectBranch(t *testing.T) {
 				f.Must(err)
 				artifact := recoveryVerdict(t, f, "R2", 1, old.Subject, "verdict-1-R2.json")
 				mixed := mode == "mixed" || mode == "mixed-merge" || mode == "empty"
-				var head string
+
 				if mode == "empty" {
 					wt := filepath.Join(t.TempDir(), "empty-worktree")
 					reducerGit(t, f, "worktree", "add", "--detach", wt, branch)
 					reducerGit(t, f, "-C", wt, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "empty subject move")
-					head = reducerGit(t, f, "-C", wt, "rev-parse", "HEAD")
+					head := reducerGit(t, f, "-C", wt, "rev-parse", "HEAD")
 					reducerGit(t, f, "update-ref", "refs/heads/"+branch, head)
 				} else {
-					head = subjectEvidenceCommit(t, f, branch, artifact, mixed, mode == "panel-merge" || mode == "mixed-merge")
+					subjectEvidenceCommit(t, f, branch, artifact, mixed, mode == "panel-merge" || mode == "mixed-merge")
 				}
 				// A read or apply must not supersede a round for evidence alone.
 				reduce(t, f, true)
-				if mixed {
-					next := recoveryRound(t, f, gate)
-					if next.Round != 2 || next.Subject != head {
-						t.Fatalf("mixed change did not supersede: %+v", next)
-					}
-					_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: slot, Lease: lease.Token, Artifact: artifact})
-					if err == nil {
-						t.Fatal("mixed change accepted stale verdict")
-					}
-					return
-				}
+
 				next := recoveryRound(t, f, gate)
 				if next.Round != old.Round || next.Subject != old.Subject {
 					t.Fatalf("panel-only commit moved round: old=%+v new=%+v", old, next)
@@ -97,6 +88,14 @@ func TestS134Subject_PanelCommitsOnSubjectBranch(t *testing.T) {
 				f.Must(err)
 				if record(t, f, slot).Status != "closed" {
 					t.Fatal("panel evidence did not submit")
+				}
+				kerneltest.PassGate(f, gate, old.Subject)
+				err = kernel.CheckPassedGate(f.State(), gate)
+				if moved := err != nil && strings.Contains(err.Error(), "differs from accepted subject"); moved != mixed {
+					t.Fatalf("subject exemption %s: moved=%v want %v: %v", mode, moved, mixed, err)
+				}
+				if !mixed {
+					f.Must(err)
 				}
 			})
 		}

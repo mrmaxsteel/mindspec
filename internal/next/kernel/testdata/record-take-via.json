@@ -1,0 +1,8 @@
+{
+  "reason": "take",
+  "at": "2026-01-02T03:04:05Z",
+  "generation": 2,
+  "via": "lease",
+  "revoked_token_hash": "hash",
+  "subject": "subject"
+}

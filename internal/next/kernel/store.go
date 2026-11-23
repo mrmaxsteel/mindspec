@@ -121,6 +121,9 @@ func (s *Store) SetStatusIf(key, from, to string) error {
 
 // SetStatusMetadataIf commits a status and its lease metadata in one guarded write.
 func (s *Store) SetStatusMetadataIf(key, from, to string, updates map[string]any) error {
+	if _, err := checkMetadataSize(key, updates, "update size"); err != nil {
+		return err
+	}
 	r, err := s.owned(key)
 	if err != nil {
 		return err
@@ -134,11 +137,12 @@ func (s *Store) SetStatusMetadataIf(key, from, to string, updates map[string]any
 		for k, v := range updates {
 			metadata[k] = v
 		}
-		data, e := json.Marshal(metadata)
+		arg, cleanup, e := s.metadataArg(key, metadata)
 		if e != nil {
 			return e
 		}
-		args = append(args, "--metadata", string(data))
+		defer cleanup()
+		args = append(args, "--metadata", arg)
 	}
 	_, err = s.Run(args...)
 	var code exitCoder
@@ -203,6 +207,9 @@ func (s *Store) owned(key string) (*Record, error) {
 
 // WriteMetadata merges named records without replacing unrelated metadata.
 func (s *Store) WriteMetadata(key string, updates map[string]any) error {
+	if _, err := checkMetadataSize(key, updates, "update size"); err != nil {
+		return err
+	}
 	r, err := s.owned(key)
 	if err != nil {
 		return err
@@ -224,11 +231,12 @@ func (s *Store) WriteMetadata(key string, updates map[string]any) error {
 		}
 		metadata[KeyRawClaims] = append(claims, RawClaim{At: Now().UTC()})
 	}
-	data, err := json.Marshal(metadata)
+	arg, cleanup, err := s.metadataArg(key, metadata)
 	if err != nil {
 		return err
 	}
-	_, err = s.Run("update", r.ID, "--metadata", string(data))
+	defer cleanup()
+	_, err = s.Run("update", r.ID, "--metadata", arg)
 	return err
 }
 func (s *Store) WriteReceipt(key string, receipt Receipt) error {
@@ -256,7 +264,7 @@ func RequireStepType(root string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("custom issue type step is missing\nrecovery: mindspec setup")
+	return termsafe.NewFailure("custom issue type step is missing", "mindspec setup")
 }
 
 func markedTitle(title string) string {
@@ -282,6 +290,10 @@ func (s *Store) Create(c CreateRecord) (*Record, error) {
 	if (t.Kind == "decision") != (c.Type == "decision") {
 		return nil, fmt.Errorf("type does not match kernel kind")
 	}
+	metadata := mergedMetadata(c.Metadata, map[string]any{KeyTuple: c.Tuple, KeyID: ComputedKey(c.ID)})
+	if _, err := CheckMetadataSize(c.ID, metadata); err != nil {
+		return nil, err
+	}
 	if err = s.Collision(c.ID, c.Tuple); err != nil {
 		return nil, err
 	}
@@ -293,17 +305,12 @@ func (s *Store) Create(c CreateRecord) (*Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	metadata := map[string]any{}
-	for k, v := range c.Metadata {
-		metadata[k] = v
-	}
-	metadata[KeyTuple] = c.Tuple
-	metadata[KeyID] = ComputedKey(c.ID)
-	data, err := json.Marshal(metadata)
+	arg, cleanup, err := s.metadataArg(c.ID, metadata)
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"create", markedTitle(c.Title), "--type", c.Type, "--parent", parent.ID, "--labels", "mindspec", "--metadata", string(data), "--json"}
+	defer cleanup()
+	args := []string{"create", markedTitle(c.Title), "--type", c.Type, "--parent", parent.ID, "--labels", "mindspec", "--metadata", arg, "--json"}
 	if s.NativeIDs {
 		args = append(args, "--id", c.ID)
 	}

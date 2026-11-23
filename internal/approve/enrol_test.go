@@ -296,7 +296,7 @@ func enrolKill(t *testing.T, f *kerneltest.Fixture, stage string) {
 	defer cancel()
 	t.Setenv("S134_UNEXPECTED", "caller-only")
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestS134EnrolHelper$")
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + f.Root, "TMPDIR=" + f.Root, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false", "S134_KILL_AT=" + stage, "S134_ROOT=" + f.Root, "S134_EPIC=" + f.Epic}
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + f.Root, "TMPDIR=" + t.TempDir(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/usr/bin/false", "S134_KILL_AT=" + stage, "S134_ROOT=" + f.Root, "S134_EPIC=" + f.Epic}
 	out, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 137 {

@@ -1,0 +1,7 @@
+{
+  "generation": 2,
+  "expires": "2026-01-02T03:04:05Z",
+  "token_hash": "hash",
+  "claim_base": "base",
+  "ended": "superseded"
+}

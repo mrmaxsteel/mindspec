@@ -14,10 +14,21 @@ import (
 type DeferralRequirementsError struct {
 	Missing  []string
 	Recovery string
+	absent   []string
 }
 
 func (e *DeferralRequirementsError) Error() string {
-	return "follow-up bead does not meet the deferral requirements:\n- " + strings.Join(e.Missing, "\n- ")
+	return strings.Join(e.MessageLines(), "\n")
+}
+
+// MessageLines returns structural message lines. Each absent finding is one value,
+// so a terminal formatter can escape its bytes without changing list structure.
+func (e *DeferralRequirementsError) MessageLines() []string {
+	lines := []string{"follow-up bead does not meet the deferral requirements:"}
+	for _, missing := range e.Missing {
+		lines = append(lines, "- "+missing)
+	}
+	return append(lines, e.absent...)
 }
 
 // DeferralIssue contains the live facts used at write time and at both gates.
@@ -115,12 +126,12 @@ func CheckDeferral(id, epic, panelBead string, texts []string, redact func(strin
 		}
 	}
 	if len(absent) > 0 {
-		missing = append(missing, "follow-up description must contain every deferred finding; add this text to the description of "+id+":\n"+strings.Join(absent, "\n"))
+		missing = append(missing, "follow-up description must contain every deferred finding; add this text to the description of "+id+":")
 		recovery = append(recovery, "add the listed finding text to the description of "+id)
 	}
 	if len(missing) > 0 {
 		recovery = append(recovery, "retry the panel verb")
-		return &DeferralRequirementsError{Missing: missing, Recovery: strings.Join(recovery, ", then ")}
+		return &DeferralRequirementsError{Missing: missing, absent: absent, Recovery: strings.Join(recovery, ", then ")}
 	}
 	return nil
 }

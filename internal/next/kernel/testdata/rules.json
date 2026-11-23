@@ -8,11 +8,11 @@
     "mode": "ordinary"
   },
   {
-    "name": "tally",
+    "name": "judge-apply",
     "mode": "ordinary"
   },
   {
-    "name": "supersede",
+    "name": "tally",
     "mode": "ordinary"
   },
   {
@@ -20,11 +20,11 @@
     "mode": "ordinary"
   },
   {
-    "name": "final-round",
+    "name": "verify-apply",
     "mode": "ordinary"
   },
   {
-    "name": "judge-apply",
+    "name": "final-round",
     "mode": "ordinary"
   },
   {
@@ -37,6 +37,10 @@
   },
   {
     "name": "round-open",
+    "mode": "ordinary"
+  },
+  {
+    "name": "lens-create",
     "mode": "ordinary"
   },
   {

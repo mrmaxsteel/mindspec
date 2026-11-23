@@ -24,6 +24,11 @@ path=os.environ['S134_DATA']
 with open(path) as f: rows=json.load(f)
 def val(flag, default=''):
  return args[args.index(flag)+1] if flag in args else default
+def metadata():
+ raw=val('--metadata','{}')
+ if raw.startswith('@'):
+  with open(raw[1:]) as f: return json.load(f)
+ return json.loads(raw)
 def save():
  with open(path,'w') as f: json.dump(rows,f,sort_keys=True)
 def row(id):
@@ -32,12 +37,12 @@ if args[0]=='list': print(json.dumps(rows,sort_keys=True));sys.exit(0)
 if args[0]=='create':
  parent=val('--parent');n=1
  while any(r['id']==parent+'.'+str(n) for r in rows): n+=1
- r={'id':parent+'.'+str(n),'parent':parent,'title':args[1],'issue_type':val('--type'),'status':'open','metadata':json.loads(val('--metadata','{}')),'labels':['mindspec']}
+ r={'id':parent+'.'+str(n),'parent':parent,'title':args[1],'issue_type':val('--type'),'status':'open','metadata':metadata(),'labels':['mindspec']}
  rows.append(r);save();print(json.dumps(r));sys.exit(0)
 if args[0]=='update':
  r=row(args[1])
  if val('--if-status') and r['status']!=val('--if-status'):sys.exit(13)
- if val('--metadata'):r['metadata']=json.loads(val('--metadata'))
+ if val('--metadata'):r['metadata']=metadata()
  if val('--status'):r['status']=val('--status')
  save();print(json.dumps(r));sys.exit(0)
 if args[:2]==['dep','add']:

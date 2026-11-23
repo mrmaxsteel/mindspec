@@ -192,8 +192,14 @@ func TestS134SubmitCmd_ImplementAndHalt(t *testing.T) {
 			}
 		}
 		out, code := actorCmdRun(t, f, bin, "panel", "create", f.Items[0])
-		if code == 0 || !strings.Contains(out, "spec is halted by "+d) || !strings.Contains(out, "recovery: mindspec next-action") || strings.Contains(out, "correct the panel arguments") {
+		panelWant := fmt.Sprintf("spec is halted by %s\nrecovery: mindspec next-action\n", d)
+		if code == 0 || !strings.Contains(out, panelWant) || strings.Count(out, "recovery:") != 1 || strings.Contains(out, `\n`) || strings.Contains(out, "correct the panel arguments") {
 			t.Fatalf("halted panel recovery: %d %s", code, out)
+		}
+		out, code = actorCmdRun(t, f, bin, "submit", f.Items[0]+".impl.a1", "--lease", "unused", "--commit", strings.Repeat("a", 40))
+		want := fmt.Sprintf("spec is halted by %s (%s)\nrecovery: mindspec next-action %s\n", d, f.SpecID, f.SpecID)
+		if code == 0 || !strings.Contains(out, want) || strings.Count(out, "recovery:") != 1 || strings.Contains(out, `\n`) {
+			t.Fatalf("halted submit recovery: %d %q, want %q", code, out, want)
 		}
 	})
 }

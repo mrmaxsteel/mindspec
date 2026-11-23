@@ -278,6 +278,7 @@ func TestS134Closes_StaleRawSlotAudit(t *testing.T) {
 	id := gate + ".r1.R1"
 	head := beadCommit(t, f, "bead/"+f.Items[0])
 	f.Must(f.Store.SetStatusIf(id, "open", "closed"))
+	kerneltest.Authorise(f, gate, gateRound(t, f, gate, 2, head))
 	before := kerneltest.Snapshot(t, f)
 	reduce(t, f, false)
 	if before != kerneltest.Snapshot(t, f) {

@@ -215,3 +215,11 @@ func TestPrefixFailure_EscapesPrefix(t *testing.T) {
 		t.Fatalf("unsafe prefix: got %q want %q", err.Error(), want)
 	}
 }
+
+func TestNeutralize_LaterRecoveryLine(t *testing.T) {
+	got := neutralize("a\nb\nrecovery: x")
+	want := "a\nb\n recovery: x"
+	if got != want {
+		t.Fatalf("later message line forged recovery: got %q want %q", got, want)
+	}
+}

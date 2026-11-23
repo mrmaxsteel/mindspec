@@ -20,7 +20,7 @@ type Tuple struct {
 	Cause    string `json:"cause,omitempty"`
 }
 
-var shape = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_-]*-[A-Za-z0-9]+)(?:\.([1-9][0-9]*))?\.(impl|review|final)(?:(\.r([1-9][0-9]*)\.(R([1-9][0-9]*)|fix))|(?:\.decide\.([a-z][a-z-]*)\.r([1-9][0-9]*))|(\.judge))?(?:\.a([1-9][0-9]*))?$`)
+var shape = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_-]*-[A-Za-z0-9]+)(?:\.([1-9][0-9]*))?\.(impl|review|final)(?:(\.r([1-9][0-9]*)\.(R([1-9][0-9]*)|fix|verify|lens))|(?:\.decide\.([a-z][a-z-]*)\.r([1-9][0-9]*))|(\.judge))?(?:\.a([1-9][0-9]*))?$`)
 
 // Parse accepts exact kernel shapes. Numeric children are foreign.
 func Parse(id string) (Tuple, error) {
@@ -61,6 +61,9 @@ func Parse(id string) (Tuple, error) {
 	if m[5] != "" {
 		t.Round, _ = strconv.Atoi(m[5])
 		t.Kind = "fix"
+		if m[6] == "verify" || m[6] == "lens" {
+			t.Kind = m[6]
+		}
 		if m[7] != "" {
 			t.Kind = "review-slot"
 			t.Slot, _ = strconv.Atoi(m[7])
@@ -98,8 +101,8 @@ func Format(t Tuple) (string, error) {
 		id = t.Epic + ".final"
 	case "review-slot":
 		id = fmt.Sprintf("%s.r%d.R%d", t.Gate, t.Round, t.Slot)
-	case "fix":
-		id = fmt.Sprintf("%s.r%d.fix", t.Gate, t.Round)
+	case "fix", "verify", "lens":
+		id = fmt.Sprintf("%s.r%d.%s", t.Gate, t.Round, t.Kind)
 	case "decision":
 		id = fmt.Sprintf("%s.decide.%s.r%d", t.Gate, t.Cause, t.Round)
 	case "change-judge":

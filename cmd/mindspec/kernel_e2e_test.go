@@ -339,7 +339,7 @@ func (e *kernelE2E) judge(value string, n int) {
 	old, err := kernel.AcceptedSubject(s, tuple.Gate)
 	e.must(err)
 	token := e.lease(action.Step)
-	reg, ok, err := kernel.Decode[kernel.RegistrationRecord](s.Records[tuple.Gate].Metadata, kernel.KeyRegistration)
+	_, ok, err := kernel.Decode[kernel.RegistrationRecord](s.Records[tuple.Gate].Metadata, kernel.KeyRegistration)
 	e.must(err)
 	if !ok {
 		e.t.Fatal("judge has no passing panel")
@@ -352,9 +352,9 @@ func (e *kernelE2E) judge(value string, n int) {
 	}
 	data, err := json.Marshal(j)
 	e.must(err)
-	path := filepath.Join(".mindspec/specs", e.f.SpecID, "reviews", reg.Slug, "judgement-"+value+".json")
-	e.commit(e.proof, path, string(data))
-	e.ok("submit", action.Step, "--lease", token, "--artifact", filepath.Join(e.proof, path))
+	path := filepath.Join(e.t.TempDir(), "judgement-"+value+".json")
+	e.must(os.WriteFile(path, data, 0600))
+	e.ok("submit", action.Step, "--lease", token, "--record", path)
 }
 func (e *kernelE2E) foreign() {
 	e.t.Helper()
@@ -1023,7 +1023,7 @@ func TestS134SubmitCmd_PublishesCommittedReview(t *testing.T) {
 	if !ok {
 		t.Fatal("published submission has no receipt")
 	}
-	f.Must(kernel.ValidReceipt(f.Root, receipt))
+	f.Must(kernel.ValidReceipt(f.Root, receipt, nil))
 	ledgerBefore, err = panel.ReadLedger(filepath.Dir(file))
 	f.Must(err)
 	before := kerneltest.Snapshot(t, f)
@@ -1073,7 +1073,7 @@ func TestS134SubmitCmd_RefreshesPublicationState(t *testing.T) {
 	if row.Status != "closed" || !ok || len(subs) != 1 || subs["R1"].Verdict != "APPROVE" || subs["R1"].Seq != 1 {
 		t.Fatal("submit did not publish with refreshed registration", row.Status, ok, subs)
 	}
-	f.Must(kernel.ValidReceipt(f.Root, receipt))
+	f.Must(kernel.ValidReceipt(f.Root, receipt, nil))
 }
 
 func TestS134PanelCreate_NonEnrolledSpecShorthand(t *testing.T) {

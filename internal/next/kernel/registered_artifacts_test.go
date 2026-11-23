@@ -2,6 +2,7 @@ package kernel_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,7 +49,7 @@ func TestS134Submit_RecordedPanelDirectory(t *testing.T) {
 			}
 			f.Must(err)
 			receipt := actorReceipt(t, f, id)
-			if actorRecord(t, f, id).Status != "closed" || receipt.Path != filepath.ToSlash(path) || kernel.ValidReceipt(f.Root, receipt) != nil {
+			if actorRecord(t, f, id).Status != "closed" || receipt.Path != filepath.ToSlash(path) || kernel.ValidReceipt(f.Root, receipt, nil) != nil {
 				t.Fatalf("missing committed verdict receipt: %+v", receipt)
 			}
 		})
@@ -56,7 +57,7 @@ func TestS134Submit_RecordedPanelDirectory(t *testing.T) {
 }
 
 func TestS134Judge_RecordedPanelDirectory(t *testing.T) {
-	for _, mode := range []string{"recorded-root", "unrecorded-root", "unrecorded-flat", "unrecorded-prefix-sibling"} {
+	for _, mode := range []string{"external-record", "worktree-record", "linked-worktree-record"} {
 		t.Run(mode, func(t *testing.T) {
 			f, gate, old := judgeFixture(t)
 			reg, _, err := kernel.Decode[kernel.RegistrationRecord](actorRecord(t, f, gate).Metadata, kernel.KeyRegistration)
@@ -83,14 +84,18 @@ func TestS134Judge_RecordedPanelDirectory(t *testing.T) {
 				f.Must(e)
 				path = filepath.ToSlash(rel)
 			}
-			mainRoot := f.Root
-			f.Root = wt
-			judgeCommit(t, f, path, string(data))
-			f.Root = mainRoot
+			path = filepath.Join(t.TempDir(), "judgement.json")
+			if mode == "worktree-record" {
+				path = filepath.Join(f.Root, "judgement.json")
+			}
+			if mode == "linked-worktree-record" {
+				path = filepath.Join(wt, "judgement.json")
+			}
+			f.Must(os.WriteFile(path, data, 0600))
 			before := kerneltest.Snapshot(t, f)
-			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: filepath.Join(wt, filepath.FromSlash(path))})
-			if mode != "recorded-root" {
-				if err == nil || !strings.Contains(err.Error(), "judgement must be in its registered panel directory") {
+			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: path})
+			if mode != "external-record" {
+				if err == nil || !strings.Contains(err.Error(), "outside every worktree") {
 					t.Fatalf("unrecorded judgement: %v", err)
 				}
 				if before != kerneltest.Snapshot(t, f) {

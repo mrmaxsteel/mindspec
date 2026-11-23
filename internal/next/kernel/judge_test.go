@@ -54,14 +54,8 @@ func judgeArtifact(t *testing.T, f *kerneltest.Fixture, j kernel.Judgement, slug
 	t.Helper()
 	data, err := json.Marshal(j)
 	f.Must(err)
-	slug := "panel"
-	if len(slugs) > 0 {
-		slug = slugs[0]
-	}
-	path := filepath.Join(f.SpecDir, "reviews", slug, "judgement.json")
-	rel, err := filepath.Rel(f.Root, path)
-	f.Must(err)
-	judgeCommit(t, f, rel, string(data))
+	path := filepath.Join(t.TempDir(), "judgement.json")
+	f.Must(os.WriteFile(path, data, 0600))
 	return path
 }
 func judgeSubmit(t *testing.T, f *kerneltest.Fixture, gate string, j kernel.Judgement) kernel.Output {
@@ -71,7 +65,7 @@ func judgeSubmit(t *testing.T, f *kerneltest.Fixture, gate string, j kernel.Judg
 	reg, _, err := kernel.Decode[kernel.RegistrationRecord](f.State().Records[gate].Metadata, kernel.KeyRegistration)
 	f.Must(err)
 	artifact := judgeArtifact(t, f, j, reg.Slug)
-	out, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+	out, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
 	f.Must(err)
 	return out
 }
@@ -111,7 +105,7 @@ func TestS134Judge_CreateSupersedeAndStaleSubmit(t *testing.T) {
 		t.Fatalf("judge attempts: %v subject %+v", s.Steps, sub)
 	}
 	artifact := judgeArtifact(t, f, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "same result"})
-	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
 	if err == nil {
 		t.Fatal("stale judge submit succeeded")
 	}
@@ -227,16 +221,15 @@ func TestS134Judge_RePanelValidationAndScope(t *testing.T) {
 				} else {
 					data = append(data, []byte(` {}`)...)
 				}
-				rel, err := filepath.Rel(f.Root, artifact)
-				f.Must(err)
-				judgeCommit(t, f, rel, string(data))
+				f.Must(os.WriteFile(artifact, data, 0600))
 			}
 			if bad == "bad-receipt" {
 				f.Must(f.Store.WriteReceipt(gate, kernel.Receipt{Kind: "passed"}))
 			}
 			before := kerneltest.Snapshot(t, f)
 			gateBefore := actorRecord(t, f, gate)
-			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
+			assertSubmitRefusal(t, err, "", "mindspec next-action")
 			if err == nil || actorRecord(t, f, id).Status != "in_progress" {
 				t.Fatalf("invalid judgement accepted: %v", err)
 			}
@@ -477,7 +470,7 @@ func TestS134Judge_SubmitPreservesForeignRecords(t *testing.T) {
 	refsBefore := reducerGit(t, f, "for-each-ref")
 	statusBefore := reducerGit(t, f, "status", "--porcelain")
 	foreignBefore := kerneltest.Snapshot(t, f)
-	_, err := kernel.Submit(before, kernel.SubmitOptions{Step: gate + ".judge.a1", Lease: lease.Token, Artifact: artifact})
+	_, err := kernel.Submit(before, kernel.SubmitOptions{Step: gate + ".judge.a1", Lease: lease.Token, Record: artifact})
 	f.Must(err)
 	after := f.State()
 	if !reflect.DeepEqual(before.Refs, after.Refs) || refsBefore != reducerGit(t, f, "for-each-ref") || statusBefore != reducerGit(t, f, "status", "--porcelain") {
@@ -557,7 +550,7 @@ func TestS134Judge_ResumeReceiptedSubmit(t *testing.T) {
 			}
 			artifact := judgeArtifact(t, f, j)
 			restore := kernel.ReplaceRulesForTest(kernel.NewRegistry())
-			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
 			restore()
 			f.Must(err)
 			if actorRecord(t, f, id).Status != "closed" {
@@ -614,7 +607,7 @@ func TestS134Judge_HighestGateAndSeparateAttempts(t *testing.T) {
 	}
 	lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 	artifact := judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: newest, NewSubject: latest, SlotCount: 3, Paths: []string{".mindspec/config.yaml"}})
-	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
 	if err == nil {
 		t.Fatal("successor passing-round ceiling ignored")
 	}
@@ -633,7 +626,7 @@ func TestS134Judge_SecondRePanel(t *testing.T) {
 	id := gate + ".judge.a2"
 	lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 	artifact := judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: newest, NewSubject: latest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}})
-	if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact}); err != nil {
+	if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact}); err != nil {
 		t.Fatalf("second re-panel refused: %v", err)
 	}
 	reduce(t, f, true)
@@ -655,7 +648,7 @@ func TestS134Judge_ResumeReceiptBeforeNewCommit(t *testing.T) {
 	lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 	artifact := judgeArtifact(t, f, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "review result"})
 	restore := kernel.ReplaceRulesForTest(kernel.NewRegistry())
-	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
 	restore()
 	f.Must(err)
 	later := judgeCommit(t, f, "later.go", "package app\n")
@@ -722,15 +715,12 @@ func TestS134Judge_RePanelSubjectBound(t *testing.T) {
 	if round.Subject != newest || round.SlotCount != 2 || !reflect.DeepEqual(round.Paths, scope.Paths) {
 		t.Fatalf("panel-only commit changed the authorised round: %+v", round)
 	}
-	later := judgeCommit(t, f, "evil.go", "package evil\n")
+	judgeCommit(t, f, "evil.go", "package evil\n")
 	reduce(t, f, true)
 	round, _, err = kernel.Decode[kernel.GateRound](actorRecord(t, f, successor).Metadata, kernel.KeyRound)
 	f.Must(err)
-	if round.Subject == later && (round.SlotCount == 2 || len(round.Paths) != 0) {
-		t.Fatalf("unjudged commit inherited reduced scope: %+v", round)
-	}
-	if round.Subject != later || round.Round != 2 || round.SlotCount != 3 || len(round.Slots) != 3 || len(round.Paths) != 0 {
-		t.Fatalf("later subject needs the next full round: %+v", round)
+	if round.Subject != newest || round.Round != 2 || round.SlotCount != 2 || len(round.Slots) != 2 || !reflect.DeepEqual(round.Paths, scope.Paths) {
+		t.Fatalf("authorised scope was reset without a judgement: %+v", round)
 	}
 	saved, ok, err := kernel.Decode[kernel.RePanel](actorRecord(t, f, successor).Metadata, kernel.KeyRePanel)
 	f.Must(err)
@@ -753,12 +743,22 @@ func TestS134Judge_RePanelCrashRecovery(t *testing.T) {
 	artifact := judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}})
 	crash := errors.New("crash before applied marker")
 	f.Fake.Hook = func(args []string) error {
-		if args[0] == "update" && strings.Contains(strings.Join(args, " "), kernel.KeyJudgement) {
-			return crash
+		if args[0] == "update" {
+			for i, arg := range args {
+				if arg == "--metadata" {
+					raw, e := os.ReadFile(strings.TrimPrefix(args[i+1], "@"))
+					f.Must(e)
+					var metadata map[string]any
+					f.Must(json.Unmarshal(raw, &metadata))
+					if _, has := metadata[kernel.KeyJudgement]; has {
+						return crash
+					}
+				}
+			}
 		}
 		return nil
 	}
-	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
 	if !errors.Is(err, crash) {
 		t.Fatalf("crash point not reached: %v", err)
 	}
@@ -841,8 +841,8 @@ func TestS134Judge_OutsidePanelLocation(t *testing.T) {
 	judgeCommit(t, f, "other.json", string(data))
 	f.Root = mainRoot
 	before := kerneltest.Snapshot(t, f)
-	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: filepath.Join(wt, "other.json")})
-	if err == nil || !strings.Contains(err.Error(), "must be in its registered panel directory") {
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: filepath.Join(wt, "other.json")})
+	if err == nil || !strings.Contains(err.Error(), "outside every worktree") {
 		t.Fatalf("location refusal: %v", err)
 	}
 	if before != kerneltest.Snapshot(t, f) {
@@ -873,13 +873,13 @@ func TestS134Judge_PassingRoundCeiling(t *testing.T) {
 			id := gate + ".judge.a1"
 			lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 			artifact := judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 4, Paths: []string{"app.go"}}, reg.Slug)
-			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
 			if err == nil || !strings.Contains(err.Error(), "2 to 3 slots") {
 				t.Fatalf("passing-round ceiling refusal: %v", err)
 			}
 			// The gate's frozen roster also allows valid scope without a snapshot.
 			artifact = judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 3, Paths: []string{"app.go"}}, reg.Slug)
-			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
 			f.Must(err)
 		})
 	}
@@ -902,8 +902,9 @@ func TestS134Judge_LegacyPanelDirectory(t *testing.T) {
 	reg.Directories = []string{"review/panel"}
 	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRegistration, reg)))
 	reducerGit(t, f, "add", "--", filepath.Join("review", "panel", "panel.json"), filepath.Join("review", "panel", "dispositions.jsonl"))
-	judgeCommit(t, f, filepath.Join("review", "panel", "judgement.json"), string(data))
-	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: filepath.Join(dir, "judgement.json")})
+	path := filepath.Join(t.TempDir(), "judgement.json")
+	f.Must(os.WriteFile(path, data, 0600))
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: path})
 	f.Must(err)
 	accepted, err := kernel.AcceptedSubject(f.State(), gate)
 	f.Must(err)

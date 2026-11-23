@@ -28,16 +28,14 @@
     },
     "mindspec_answer": {
       "option": "halt",
-      "at": "2026-01-02T03:04:05Z",
-      "actor": "operator"
+      "at": "2026-01-02T03:04:05Z"
     },
     "mindspec_close": {
       "kind": "halted",
       "halt_answer": "test-1.1.review.decide.reject.r1",
       "answer": {
         "option": "halt",
-        "at": "2026-01-02T03:04:05Z",
-        "actor": "operator"
+        "at": "2026-01-02T03:04:05Z"
       }
     }
   }

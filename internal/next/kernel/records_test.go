@@ -54,11 +54,11 @@ func TestS134Records_RoundTrips(t *testing.T) {
 		"raw-claims":   []kernel.RawClaim{{At: fixedTime}},
 		"take":         kernel.TakeReason{Reason: "operator", At: fixedTime, Generation: 2},
 		"decision":     kernel.DecisionRecord{Options: []string{"fix", "halt"}, Cause: "reject", Gate: "test-abc.1.review"},
-		"answer":       kernel.DecisionAnswer{Option: "fix", At: fixedTime, Actor: "operator"},
+		"answer":       kernel.DecisionAnswer{Option: "fix", At: fixedTime},
 		"defer":        kernel.DeferRecord{Finding: "finding", To: "follow-up", Reason: "bounded", At: fixedTime},
 		"judgement":    kernel.Judgement{Value: "re-panel", OldSubject: "old", NewSubject: "new", Reason: "changed", SlotCount: 2, Paths: []string{"app.go"}},
 		"repanel":      kernel.RePanel{Judge: "judge", SlotCount: 2, Paths: []string{"app.go"}},
-		"carry":        kernel.CarryOver{Rebind: "accepted-rebind", OldSubject: "old", NewSubject: "new", Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", Path: "judge.json", Commit: "commit", Blob: "blob"}},
+		"carry":        kernel.CarryOver{Rebind: "accepted-rebind", OldSubject: "old", NewSubject: "new", Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", RecordSHA256: "digest", Generation: 1}},
 		"close":        kernel.Receipt{Kind: "passed", Path: "proof", Commit: "commit", Blob: "blob", Repaired: true, Rebind: "rebind", CarryOvers: []kernel.CarryOver{{OldSubject: "old", NewSubject: "new", Judge: "judge"}}},
 		"registration": kernel.RegistrationRecord{Slug: "panel", Round: 2, Subject: "subject", Slots: []string{"R1", "R2"}},
 		"subject":      kernel.Subject{Commit: "subject"},
@@ -79,8 +79,50 @@ func TestS134Records_RoundTrips(t *testing.T) {
 			}
 		})
 	}
-	keys := []string{kernel.KeyPlanApproval, kernel.KeyTuple, kernel.KeyID, kernel.KeyFrom, kernel.KeyLinks, kernel.KeyRun, kernel.KeyLease, kernel.KeyRound, kernel.KeyTake, kernel.KeyTakes, kernel.KeyDeferrals, kernel.KeyDecision, kernel.KeyAnswer, kernel.KeyDefer, kernel.KeyJudgement, kernel.KeyRePanel, kernel.KeyClose, kernel.KeySubject, kernel.KeyRegistration, kernel.KeyRawClaims, kernel.KeyCompletion}
+	keys := []string{kernel.KeyPlanApproval, kernel.KeyTuple, kernel.KeyID, kernel.KeyFrom, kernel.KeyLinks, kernel.KeyRun, kernel.KeyLease, kernel.KeyRound, kernel.KeyTake, kernel.KeyTakes, kernel.KeyDeferrals, kernel.KeyDecision, kernel.KeyAnswer, kernel.KeyDefer, kernel.KeyJudgement, kernel.KeyRePanel, kernel.KeyClose, kernel.KeySubject, kernel.KeyRegistration, kernel.KeyRawClaims, kernel.KeyCompletion, kernel.KeyRecord, kernel.KeyClosing, kernel.KeyFindings, kernel.KeyRead, kernel.KeyReturns, kernel.KeyReproduced}
 	golden(t, "record-keys", keys)
+}
+
+func TestS134Records_AmendmentRoundTrips(t *testing.T) {
+	finding := kernel.Finding{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: "digest", Text: "full finding"}
+	ret := kernel.VerifyReturn{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: "digest", Return: "refuted", Ground: "out_of_acceptance_scope", AC: "AC-1", Reason: "outside scope", Evidence: "https://example.com/proof", Target: "test-target"}
+	minimal := kernel.GateRound{Round: 1, Subject: "old", Slots: []string{"slot"}, SlotCount: 1}
+	prior := minimal
+	prior.Verify = "verify"
+	prior.Read = map[string]string{"verdict.json": "digest"}
+	prior.Asks = []kernel.PriorAsk{{Finding: finding, Returns: []kernel.VerifyReturn{ret}}, {Finding: finding}}
+	cases := map[string]any{
+		"lens":     kernel.LensRecord{Step: "lens", Lenses: []kernel.SlotLens{{Slot: "R1", Lens: "inspect paths"}}},
+		"verify":   kernel.VerifyRecord{Step: "verify", Subject: "subject", Returns: []kernel.VerifyReturn{ret}},
+		"findings": []kernel.Finding{finding}, "returns": []kernel.VerifyReturn{ret},
+		"reproduced":       []kernel.Finding{{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: "digest"}},
+		"read":             map[string]string{"verdict.json": "digest"},
+		"record":           " {\n\"step\": \"lens\", \"lenses\": [] }\n",
+		"closing":          kernel.Closing{Generation: 1, RecordSHA256: "digest", At: fixedTime},
+		"closing-conflict": kernel.Closing{Generation: 1, RecordSHA256: "digest", At: fixedTime, Conflict: &kernel.ClosingIdentity{Generation: 2, RecordSHA256: "different"}},
+		"lease-ended":      kernel.LeaseRecord{Generation: 2, Expires: fixedTime, TokenHash: "hash", ClaimBase: "base", Ended: "superseded"},
+		"take-via":         kernel.TakeReason{Reason: "take", At: fixedTime, Generation: 2, Via: "lease", RevokedTokenHash: "hash", Subject: "subject"},
+		"decision-slots":   kernel.DecisionRecord{Options: []string{"redispatch", "halt"}, Cause: "uncounted", Gate: "gate", Slots: []kernel.DecisionSlot{{Slot: "R2", Attempt: 3}}},
+		"prior-minimal":    minimal, "prior": prior,
+		"round-expanded": kernel.GateRound{Round: 2, Subject: "subject", Slots: []string{"slot"}, SlotCount: 1, Lenses: []kernel.SlotLens{{Slot: "R1", Lens: "inspect paths"}}, Lens: "lens", Verify: "verify", Prior: &prior, Judged: &kernel.Judged{Judge: "judge", Value: "carry-over", NewSubject: "subject"}},
+		"record-receipt": kernel.Receipt{Kind: "passed", RecordSHA256: "digest", Generation: 1, SupersededGeneration: 2, Via: "repair", At: fixedTime.Format("2006-01-02T15:04:05Z07:00"), Retally: "verify"},
+	}
+	for name, value := range cases {
+		t.Run(name, func(t *testing.T) {
+			golden(t, "record-"+name, value)
+			data, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			copy := reflect.New(reflect.TypeOf(value))
+			if err = json.Unmarshal(data, copy.Interface()); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(value, copy.Elem().Interface()) {
+				t.Fatal("amended record did not round trip")
+			}
+		})
+	}
 }
 func TestS134Records_PassReceipts(t *testing.T) {
 	cases := map[string]kernel.Receipt{
@@ -120,7 +162,7 @@ func TestS134Records_PassReceipts(t *testing.T) {
 				t.Fatal("receipt missing")
 			}
 			golden(t, "receipt-"+name, actual)
-			if err = kernel.ValidReceipt(f.Root, actual); err != nil {
+			if err = kernel.ValidReceipt(f.Root, actual, record.Metadata); err != nil {
 				t.Fatal(err)
 			}
 			if actual.Path != "" || actual.Commit != "" || actual.Blob != "" {
@@ -154,8 +196,8 @@ func TestS134Records_ArtifactReceipt(t *testing.T) {
 	commit := git(t, f.Root, "rev-parse", "HEAD")
 	blob := git(t, f.Root, "rev-parse", "HEAD:"+path)
 	otherBlob := git(t, f.Root, "rev-parse", "HEAD:other.json")
-	receipt := kernel.Receipt{Kind: "passed", Path: path, Commit: commit, Blob: blob}
-	if err := kernel.ValidReceipt(f.Root, receipt); err != nil {
+	receipt := kernel.Receipt{Kind: "passed", Path: path, Commit: commit, Blob: blob, Generation: 1}
+	if err := kernel.ValidReceipt(f.Root, receipt, nil); err != nil {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*kernel.Receipt){"mutable-commit": func(r *kernel.Receipt) { r.Commit = "HEAD" },
@@ -163,7 +205,7 @@ func TestS134Records_ArtifactReceipt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			bad := receipt
 			mutate(&bad)
-			if kernel.ValidReceipt(f.Root, bad) == nil {
+			if kernel.ValidReceipt(f.Root, bad, nil) == nil {
 				t.Fatal("bad artifact receipt accepted")
 			}
 		})
@@ -189,14 +231,14 @@ func TestS134Records_ArtifactReceipt(t *testing.T) {
 }
 
 func TestS134Records_ReceiptNeedsEvidence(t *testing.T) {
-	if err := kernel.ValidReceipt(t.TempDir(), kernel.Receipt{Kind: "passed"}); err == nil {
+	if err := kernel.ValidReceipt(t.TempDir(), kernel.Receipt{Kind: "passed"}, nil); err == nil {
 		t.Fatal("receipt without artifact or reason accepted")
 	}
 }
 
 func TestS134Contract_OutputGolden(t *testing.T) {
 	out := kernel.Output{
-		Schema: "mindspec.next-action/v1", Status: "work", Applied: true,
+		Schema: "mindspec.next-action/v2", Status: "work", Applied: true,
 		Revision: "sha256:revision", RetryAt: "2026-01-02T03:04:05Z", Policy: kernel.PolicyView{RoundLimit: kernel.DefaultPolicy.RoundLimit, LeaseTTL: kernel.DefaultPolicy.LeaseTTL},
 		Actions: []kernel.Action{{Step: "test-abc.1.review.r2.R3", Kind: "review-slot", Exists: true, Round: 2,
 			Subject: kernel.Subject{Commit: "subject"}, Claim: []string{"mindspec", "lease", "step"}, Brief: []string{"brief"}, Submit: []string{"submit"}}},

@@ -45,7 +45,7 @@ func owned(s State, id string) bool {
 }
 func passed(s State, r Record) bool {
 	receipt, ok, err := Decode[Receipt](r.Metadata, KeyClose)
-	if r.Status != "closed" || err != nil || !ok || receipt.Kind != "passed" || ValidReceipt(s.Root, receipt) != nil {
+	if r.Status != "closed" || err != nil || !ok || receipt.Kind != "passed" || ValidReceipt(s.Root, receipt, r.Metadata) != nil {
 		return false
 	}
 	t, _, _ := r.Tuple()
@@ -142,6 +142,20 @@ func recreate(s State) (Changes, error) {
 }
 func roundOpen(s State) (Changes, error) {
 	c := Changes{}
+	for _, id := range s.Steps {
+		r := s.Records[id]
+		t, _, _ := r.Tuple()
+		if t.Kind != "review-slot" || r.Status == "closed" || hasOpenChild(s, id) || hasOpenBlocker(s, id) {
+			continue
+		}
+		round, has, err := Decode[GateRound](s.Records[activeGate(s, t.Gate)].Metadata, KeyRound)
+		if err != nil {
+			return c, err
+		}
+		if has && t.Round < round.Round {
+			c.Writes = append(c.Writes, Write{Kind: "close", ID: id, Receipt: &Receipt{Kind: "superseded", Subject: round.Subject}})
+		}
+	}
 	cfg, err := config.Load(s.Root)
 	if err != nil {
 		return c, err
@@ -191,28 +205,16 @@ func roundOpen(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
-		resetScope := false
 		if _, repanel, err := Decode[RePanel](g.Metadata, KeyRePanel); err != nil {
 			return c, err
 		} else if repanel && has && wanted == round.Round {
-			newest, err := effectiveSubject(s, gate)
-			if err != nil {
-				return c, err
-			}
-			if newest == round.Subject {
-				// The judgement authorizes this scope only on the subject the judge saw.
-				head = round.Subject
-			} else {
-				// A later subject needs a full round. The scoped round is superseded.
-				head = newest
-				resetScope = true
-			}
+			head = round.Subject
 		}
 
 		if head == "" {
 			continue
 		}
-		if !has || wanted != round.Round || resetScope {
+		if !has || wanted != round.Round {
 			kind := "bead"
 			if t.WorkItem == "" {
 				kind = "final_review"
@@ -344,6 +346,9 @@ func implement(s State) (Changes, error) {
 			brief = []string{"mindspec", "panel", "prompt", reg.Slug, "--slot", fmt.Sprintf("R%d", t.Slot), "--spec", s.SpecID}
 		}
 		flag, placeholder := "--artifact", "<path>"
+		if recordKind(t.Kind) {
+			flag = "--record"
+		}
 		if t.Kind == "implement" || t.Kind == "fix" {
 			flag, placeholder = "--commit", "<commit>"
 		}

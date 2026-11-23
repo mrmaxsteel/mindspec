@@ -1,0 +1,14 @@
+{
+  "options": [
+    "redispatch",
+    "halt"
+  ],
+  "cause": "uncounted",
+  "gate": "gate",
+  "slots": [
+    {
+      "slot": "R2",
+      "attempt": 3
+    }
+  ]
+}
