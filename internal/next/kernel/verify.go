@@ -444,7 +444,7 @@ func verifyCloseWrites(s State, r Record, receipt Receipt) ([]Write, error) {
 			if err != nil {
 				return nil, actorFailure("verify receipt needs a valid at")
 			}
-			dr := DeferRecord{Panel: registration.Slug, Round: ret.Round, Slot: ret.Slot, Finding: ret.Finding, FindingSHA256: ret.FindingSHA256, To: ret.Target, Reason: ret.Reason, At: at, SourceVerdict: d.SourceVerdict, SourceFileSHA256: source, VerifyStep: r.Key()}
+			dr := DeferRecord{Panel: registration.Slug, Round: ret.Round, Slot: ret.Slot, Finding: ret.Finding, FindingSHA256: ret.FindingSHA256, To: ret.Target, Reason: ret.Reason, At: at.UTC(), SourceVerdict: d.SourceVerdict, SourceFileSHA256: source, VerifyStep: r.Key()}
 			found = false
 			for i, old := range history {
 				if old.VerifyStep == dr.VerifyStep && old.Panel == dr.Panel && old.Round == dr.Round && old.Slot == dr.Slot && old.Finding == dr.Finding && old.FindingSHA256 == dr.FindingSHA256 {

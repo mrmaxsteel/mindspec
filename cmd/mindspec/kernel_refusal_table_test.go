@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -23,6 +24,9 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 		"checkVerify.return", "checkVerify.ground", "checkVerify.ac", "checkVerify.reason", "checkVerify.evidence", "checkVerify.target", "checkVerify.veto",
 	} {
 		t.Run(producer, func(t *testing.T) {
+			if runtime.GOOS == "windows" && (producer == "recordCloseWrites.append" || producer == "recordCloseWrites.snapshot") {
+				t.Skip("close-write fault fixture uses a POSIX shell script")
+			}
 			if producer == "refusedRound.empty" {
 				binaryEmptyVerifyRefusal(t, bin)
 				return

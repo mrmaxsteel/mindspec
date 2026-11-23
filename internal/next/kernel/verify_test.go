@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -318,13 +319,22 @@ func TestS134Verify_CrashAndConflict(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "mindspec_closing") {
 					t.Fatalf("conflicting submission accepted: %v", err)
 				}
+				// Change the files so recomputing the pin cannot equal copying it.
+				put(t, filepath.Join(f.SpecDir, "reviews", "review", "R9-round-1.json"), `{"verdict":"REJECT","rationale":"late stray veto"}`)
 				reduce(t, f, true)
 				next := record(t, f, id+".a2")
+				from, has, err := kernel.Decode[kernel.From](next.Metadata, kernel.KeyFrom)
+				f.Must(err)
+				if !has || string(from) != id {
+					t.Fatalf("conflict retry mindspec_from = %q, want %q", from, id)
+				}
 				for _, key := range []string{kernel.KeyFindings, kernel.KeyRead} {
 					if !reflect.DeepEqual(r.Metadata[key], next.Metadata[key]) {
 						t.Fatalf("conflict retry lost %s", key)
 					}
 				}
+				// Restore the pinned file set before the remaining close assertions.
+				f.Must(os.Rename(filepath.Join(f.SpecDir, "reviews", "review", "R9-round-1.json"), filepath.Join(t.TempDir(), "late-veto.json")))
 				res, err := panel.Tally(filepath.Join(f.SpecDir, "reviews", "review"))
 				f.Must(err)
 				if kernel.FilterDispositions(f.State(), gate, res).PassRule(true) {
@@ -753,4 +763,93 @@ func TestS134Verify_ExcludedOutcome(t *testing.T) {
 	if kernel.VerifyApplied(s, gate, round) {
 		t.Fatal("fixture has another verify outcome")
 	}
+}
+
+// A crashed verify's deferrals are history until that attempt has a valid receipt.
+func TestS134Verify_CrashRetiredDeferrals(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("follow-up fixture uses a POSIX shell script")
+	}
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	refusedPanel(t, f, gate, "review", 1, panel.VerdictRequestChanges)
+	reduce(t, f, true)
+	id, v := verifyRecord(t, f, gate, 0)
+	findings, _, err := kernel.Decode[[]kernel.Finding](record(t, f, id).Metadata, kernel.KeyFindings)
+	f.Must(err)
+	var descriptions []string
+	for i := range v.Returns {
+		v.Returns[i] = kernel.VerifyReturn{
+			Slot: v.Returns[i].Slot, Round: v.Returns[i].Round,
+			Finding: v.Returns[i].Finding, FindingSHA256: v.Returns[i].FindingSHA256,
+			Return: "deferred", Target: "follow-up", Reason: "track the follow-up",
+		}
+		descriptions = append(descriptions, findings[i].Text)
+	}
+	fake := t.TempDir()
+	data, err := json.Marshal([]any{map[string]any{
+		"id": "follow-up", "status": "open", "description": strings.Join(descriptions, "\n"),
+		"dependencies": []map[string]string{{"id": f.Epic, "dependency_type": "discovered-from"}},
+	}})
+	f.Must(err)
+	path := filepath.Join(fake, "follow-up.json")
+	f.Must(os.WriteFile(path, data, 0600))
+	t.Setenv("S134_VERIFY_FOLLOW_UP", path)
+	f.Must(os.WriteFile(filepath.Join(fake, "bd"), []byte("#!/bin/sh\nif [ \"$1\" != show ] || [ \"$2\" != follow-up ]; then exit 1; fi\ncat \"$S134_VERIFY_FOLLOW_UP\"\n"), 0700))
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+	lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+	f.Must(err)
+	killed := errors.New("stopped after deferral close writes")
+	_, err = submitVerify(t, f, v, lease, func(kernel.State, kernel.Receipt) error { return killed })
+	if !errors.Is(err, killed) {
+		t.Fatalf("crash seam did not run: %v", err)
+	}
+	dir := filepath.Join(f.SpecDir, "reviews", "review")
+	res, err := panel.Tally(dir)
+	f.Must(err)
+	if len(res.Panel.Deferrals) != len(v.Returns) || !res.PassRule(true) {
+		t.Fatalf("crashed attempt must leave all passing deferrals: %+v", res.Panel.Deferrals)
+	}
+	for _, d := range res.Panel.Deferrals {
+		if d.VerifyStep != id {
+			t.Fatalf("deferral is not bound to the crashed attempt: %+v", d)
+		}
+	}
+	assertFiltered := func() {
+		t.Helper()
+		filtered := kernel.FilterDispositions(f.State(), gate, res)
+		if len(filtered.Panel.Deferrals) != 0 || filtered.PassRule(true) {
+			t.Fatalf("retired attempt's deferrals still discharge findings: kept=%d pass=%v", len(filtered.Panel.Deferrals), filtered.PassRule(true))
+		}
+		if len(res.Panel.Deferrals) != len(v.Returns) {
+			t.Fatal("filter deleted deferral audit history")
+		}
+		if kernel.CheckPassedGate(f.State(), gate) == nil {
+			t.Fatal("gate passed on a retired attempt's deferrals")
+		}
+		if record(t, f, gate).Status == "closed" {
+			t.Fatal("retired attempt closed the gate")
+		}
+	}
+	assertFiltered()
+	kerneltest.SetClock(t, fixedTime.Add(time.Second))
+	lease, err = kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "retry after crash"}, kernel.LeaseDeps{})
+	f.Must(err)
+	v.Returns[0].Return, v.Returns[0].Target, v.Returns[0].Reason = "reproduced", "", ""
+	_, err = submitVerify(t, f, v, lease, nil)
+	assertSubmitRefusal(t, err, "mindspec_closing differs from this submission", "mindspec next-action")
+	reduce(t, f, true)
+	next := record(t, f, id+".a2")
+	if next.Status != "open" {
+		t.Fatalf("retry verify must be open: %+v", next)
+	}
+	retired := record(t, f, id)
+	receipt, _, err := kernel.Decode[kernel.Receipt](retired.Metadata, kernel.KeyClose)
+	f.Must(err)
+	if retired.Status != "closed" || receipt.Kind != "superseded" {
+		t.Fatalf("crashed verify was not retired: %+v", retired)
+	}
+	res, err = panel.Tally(dir)
+	f.Must(err)
+	assertFiltered()
 }
