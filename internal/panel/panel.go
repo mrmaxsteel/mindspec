@@ -115,6 +115,8 @@ type Panel struct {
 // FindingSHA256 pins raw finding text. Legacy entries can omit both. Only a
 // REQUEST_CHANGES finding is dischargeable; other vetoes remain consumer checks.
 type Refutation struct {
+	VerifyStep string `json:"verify_step,omitempty"`
+	Enrolled   bool   `json:"enrolled,omitempty"`
 	// Slot is the reviewer slot this refutation targets — matched
 	// byte-exactly (case-sensitive) against a Verdict.Slot.
 	Slot string `json:"slot"`
@@ -145,6 +147,8 @@ type RosterSlot struct {
 
 // Deferral pins a finding to a follow-up bead. Gate-time checks belong to callers.
 type Deferral struct {
+	VerifyStep       string `json:"verify_step,omitempty"`
+	Enrolled         bool   `json:"enrolled,omitempty"`
 	SourceVerdict    string `json:"source_verdict,omitempty"`
 	SourceFileSHA256 string `json:"source_file_sha256,omitempty"`
 	Slot             string `json:"slot"`

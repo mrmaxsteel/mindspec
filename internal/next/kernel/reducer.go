@@ -215,6 +215,8 @@ func roundOpen(s State) (Changes, error) {
 			continue
 		}
 		if !has || wanted != round.Round {
+			prior := round
+			prior.Prior = nil
 			kind := "bead"
 			if t.WorkItem == "" {
 				kind = "final_review"
@@ -224,6 +226,17 @@ func roundOpen(s State) (Changes, error) {
 				return c, err
 			}
 			round = GateRound{Round: wanted, Subject: head, SlotCount: n, Slots: []string{}}
+			if has {
+				prior = verifyPrior(s, prior)
+				round.Prior = &prior
+				for _, step := range s.Steps {
+					r := s.Records[step]
+					st, _, _ := r.Tuple()
+					if st.Kind == "review-slot" && st.Gate == t.Gate && st.Round == prior.Round && r.Status != "closed" && !hasOpenChild(s, step) && !hasOpenBlocker(s, step) {
+						c.Writes = append(c.Writes, Write{Kind: "close", ID: step, Receipt: &Receipt{Kind: "superseded", Subject: head}})
+					}
+				}
+			}
 			for i := 1; i <= n; i++ {
 				round.Slots = append(round.Slots, fmt.Sprintf("%s.r%d.R%d", t.Gate, wanted, i))
 			}
@@ -366,7 +379,7 @@ func implement(s State) (Changes, error) {
 func gateDecision(s State, gate string, fix bool) bool {
 	for _, r := range s.OpenDecisions() {
 		t, _, _ := r.Tuple()
-		if t.Gate == gate && (t.Cause == "reject" || fix) {
+		if t.Gate == gate && (t.Cause != "limit" || fix) {
 			return true
 		}
 	}
@@ -377,6 +390,18 @@ func tally(s State) (Changes, error) {
 	for _, gate := range s.Gates {
 		g := s.Records[gate]
 		if g.Status == "closed" || hasOpenChild(s, gate) {
+			continue
+		}
+		round, _, err := Decode[GateRound](g.Metadata, KeyRound)
+		if err != nil {
+			return c, err
+		}
+		if verifyPassed(s, round) {
+			continue // verify-apply owns this receipt and its return kind.
+		}
+		if held, err := tallyHeldForJudge(s, gate, round); err != nil {
+			return c, err
+		} else if held {
 			continue
 		}
 		accepted, ok, err := gatePassEvidence(s, g)
@@ -440,6 +465,9 @@ func gatePassEvidence(s State, gate Record) (string, bool, error) {
 	if round.Subject == "" || reg.Round != round.Round || reg.Subject != round.Subject || len(reg.Slots) != round.SlotCount || !receiptedSlots(s, round) {
 		return "", false, nil
 	}
+	if verifyPassed(s, round) {
+		return reviewSubject(round), true, nil
+	}
 	tuple, _, _ := gate.Tuple()
 	for i, id := range round.Slots {
 		slot, ok, err := s.Records[id].Tuple()
@@ -478,8 +506,8 @@ func gatePassEvidence(s State, gate Record) (string, bool, error) {
 		if result.Panel == nil || !gatePanel(tuple, *result.Panel) || result.Panel.Abandoned || result.Panel.Round != round.Round || result.RoundReviewedHeadSHA != round.Subject {
 			continue
 		}
-		if result.PassRule(true) {
-			return round.Subject, true, nil
+		if FilterDispositions(s, tuple.Gate, result).PassRule(true) && VerifyRetallyFits(s, gate.Key(), result) == nil {
+			return reviewSubject(round), true, nil
 		}
 	}
 	return "", false, nil

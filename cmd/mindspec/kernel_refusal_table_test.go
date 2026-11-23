@@ -14,7 +14,11 @@ import (
 
 func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 	bin := buildMindspecBinary(t)
-	for _, producer := range []string{"refuseHalt", "actorChildren.open", "checkVerify.deferral", "Answer.store-update"} {
+	for _, producer := range []string{
+		"refuseHalt", "actorChildren.open", "checkVerify.deferral", "verifyCloseWrites.registration", "Answer.store-update",
+		"checkVerify.unknown-field", "checkVerify.empty", "checkVerify.missing", "checkVerify.repeated", "checkVerify.unknown",
+		"checkVerify.return", "checkVerify.ground", "checkVerify.ac", "checkVerify.reason", "checkVerify.evidence", "checkVerify.target", "checkVerify.veto",
+	} {
 		t.Run(producer, func(t *testing.T) {
 			f, _ := actorCmdFixture(t)
 			gate := f.Items[0] + ".review"
@@ -46,6 +50,46 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 				var child kernel.Record
 				f.Must(json.Unmarshal(raw, &child))
 				want = "open child prevents close: " + child.Key()
+			case "verifyCloseWrites.registration":
+				ret.Return, ret.Ground, ret.Reason, ret.Evidence = "refuted", "disproven", "checked", "https://example.invalid/proof"
+				want = "verify close needs an intact registered panel"
+			case "checkVerify.unknown-field":
+				want = `invalid record: json: unknown field "extra"`
+			case "checkVerify.empty":
+				want = "verify record needs its step, subject and returns"
+			case "checkVerify.missing":
+				second := finding
+				second.Slot = "R2"
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, []kernel.Finding{finding, second})))
+				want = "verify record is missing finding: R2/1/ccr[0]/" + finding.FindingSHA256
+			case "checkVerify.repeated":
+				want = "verify record has an unknown or repeated finding: R1/1/ccr[0]/" + finding.FindingSHA256
+			case "checkVerify.unknown":
+				ret.Finding = "other"
+				want = "verify record has an unknown or repeated finding: R1/1/other/" + finding.FindingSHA256
+			case "checkVerify.return":
+				ret.Return = "accepted"
+				want = "verify return must be reproduced, refuted or deferred"
+			case "checkVerify.ground":
+				ret.Return, ret.Ground = "refuted", "accepted"
+				want = "refuted finding needs a valid ground"
+			case "checkVerify.ac":
+				ret.Return, ret.Ground = "refuted", "out_of_acceptance_scope"
+				want = "out_of_acceptance_scope needs ac that names an acceptance criterion in the owning spec"
+			case "checkVerify.reason":
+				ret.Return, ret.Ground, ret.Evidence = "refuted", "disproven", "https://example.invalid/proof"
+				want = "refuted finding needs reason and resolving evidence"
+			case "checkVerify.evidence":
+				ret.Return, ret.Ground, ret.Reason, ret.Evidence = "refuted", "disproven", "checked", "does-not-exist"
+				want = "refuted finding needs reason and resolving evidence"
+			case "checkVerify.target":
+				ret.Return, ret.Reason = "deferred", "follow up"
+				want = "deferred finding needs reason and target"
+			case "checkVerify.veto":
+				finding.Finding = "veto"
+				ret.Finding, ret.Return = "veto", "deferred"
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, []kernel.Finding{finding})))
+				want = "a veto cannot be deferred"
 			case "checkVerify.deferral":
 				ret.Return = "deferred"
 				ret.Reason = "follow up"
@@ -53,7 +97,7 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 				want = "follow-up bead does not meet the deferral requirements:\n- follow-up bead needs a discovered-from edge to the owning epic or reviewed bead; run: bd dep add follow-up " + f.Epic + " --type discovered-from\n- follow-up description must contain every deferred finding; add this text to the description of follow-up:\n recovery: forged"
 				recovery = "bd dep add follow-up " + f.Epic + " --type discovered-from, then add the listed finding text to the description of follow-up, then retry the panel verb"
 			}
-			actorCmdStore(t, f)
+			storePath := actorCmdStore(t, f)
 			if producer == "checkVerify.deferral" {
 				dir := t.TempDir()
 				script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = show ] && [ \"$2\" = follow-up ]; then\nprintf '%%s\\n' '[{\"id\":\"follow-up\",\"status\":\"open\",\"description\":\"other\"}]'\nelse\nexec '%s' \"$@\"\nfi\n", fakeBDBinary(t))
@@ -66,8 +110,17 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 				f.Must(os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0700))
 				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			}
-			data, err := json.Marshal(kernel.VerifyRecord{Step: id, Subject: subject, Returns: []kernel.VerifyReturn{ret}})
+			returns := []kernel.VerifyReturn{ret}
+			if producer == "checkVerify.empty" {
+				returns = nil
+			} else if producer == "checkVerify.repeated" {
+				returns = append(returns, ret)
+			}
+			data, err := json.Marshal(kernel.VerifyRecord{Step: id, Subject: subject, Returns: returns})
 			f.Must(err)
+			if producer == "checkVerify.unknown-field" {
+				data = append(data[:len(data)-1], []byte(`,"extra":true}`)...)
+			}
 			file := filepath.Join(t.TempDir(), "record.json")
 			f.Must(os.WriteFile(file, data, 0600))
 			if producer != "Answer.store-update" {
@@ -76,6 +129,10 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 			raw, err := f.BinaryCommand(bin, args...)
 			if err == nil {
 				t.Fatal("binary accepted refusal fixture")
+			}
+			row := actorCmdRead(t, storePath, id)
+			if row.Status == "closed" || row.Metadata[kernel.KeyClosing] != nil {
+				t.Fatalf("refused verify was closed or pinned: %+v", row)
 			}
 			text := string(raw)
 			// CLI errors add the fixed error prefix, then print the producer text exactly.

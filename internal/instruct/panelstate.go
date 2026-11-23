@@ -12,6 +12,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -57,6 +58,8 @@ const (
 // is the formatter's pure input — build it from a panel.Result and a
 // branch-SHA lookup, then format with no further I/O.
 type PanelStateEntry struct {
+	KernelVerdict *PanelGateVerdict
+	KernelReason  string
 	// Slug is the panel directory basename (review/<slug>).
 	Slug string
 	// Tally is the fs-derived round/verdict state (panel.Tally).
@@ -103,6 +106,9 @@ var errBranchGone = errors.New("bead branch no longer exists")
 // directory from disk); that I/O belongs to gatherPanelState. It
 // assumes e.Tally != nil.
 func (e PanelStateEntry) verdict() (PanelGateVerdict, string) {
+	if e.KernelVerdict != nil {
+		return *e.KernelVerdict, e.KernelReason
+	}
 	r := e.Tally
 
 	reg := panel.Registration{Dir: r.Dir, Err: r.PanelErr}
@@ -244,7 +250,40 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 		return nil
 	}
 	var entries []PanelStateEntry
+	states := map[string]*kernel.State{}
+	stateErrors := map[string]error{}
+	read := map[string]bool{}
 	for _, reg := range regs {
+		if reg.Err == nil && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review") {
+			spec := reg.Panel.Spec
+			if !read[spec] {
+				read[spec] = true
+				states[spec], stateErrors[spec] = instructKernelStateFn(roots[0], spec)
+			}
+			state, stateErr := states[spec], stateErrors[spec]
+			if state != nil && state.Enrolled || stateErr != nil || reg.Panel.Orchestrated {
+				res, err := panel.Tally(reg.Dir)
+				if err != nil {
+					continue
+				}
+				verdict, reason := GateWarn, "notice: kernel panel state is unavailable"
+				if stateErr != nil {
+					reason += ": " + termsafe.Escape(stateErr.Error())
+				} else if state != nil && state.Enrolled {
+					gate := state.Epic + ".final"
+					if reg.Panel.IsBead() {
+						gate = kernel.GateBase(*reg.Panel.BeadID)
+					}
+					if err := kernel.CheckPassedGate(*state, gate); err == nil {
+						verdict, reason = GatePass, "kernel gate passed; completion can proceed"
+					} else {
+						verdict, reason = GateBlock, termsafe.Escape(err.Error())
+					}
+				}
+				entries = append(entries, PanelStateEntry{Slug: reg.Slug(), Tally: res, KernelVerdict: &verdict, KernelReason: reason})
+				continue
+			}
+		}
 		if reg.Err == nil && (!reg.Panel.IsBead() || resolve != nil) {
 			beadID := ""
 			if reg.Panel.IsBead() {
@@ -300,6 +339,47 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 		entries = append(entries, PanelStateEntry{Slug: reg.Slug(), Tally: res})
 	}
 	return entries
+}
+
+// instructKernelStateFn reads enrollment and gate receipts without reducing them.
+var instructKernelStateFn = func(root, spec string) (*kernel.State, error) {
+	if err := idvalidate.SpecID(spec); err != nil {
+		return nil, err
+	}
+	available := os.Getenv("BEADS_DIR") != ""
+	for _, name := range []string{"config.yaml", "metadata.json", "dolt", "beads.db", "redirect"} {
+		if _, err := os.Stat(filepath.Join(root, ".beads", name)); err == nil {
+			available = true
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	if !available {
+		return nil, nil
+	}
+	store := kernel.NewStore(root, "", nil)
+	rows, err := store.All()
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		if r.Type != "epic" {
+			continue
+		}
+		id, err := phase.ResolveSpec(phase.EpicInfo{ID: r.ID, Title: r.Title, Metadata: r.Metadata})
+		if err != nil || id != spec {
+			continue
+		}
+		dir := filepath.Join(workspace.SpecsDir(root), spec)
+		s, err := kernel.ReadState(kernel.NewStore(root, r.ID, nil), spec, dir)
+		if err != nil {
+			return nil, err
+		}
+		if s.Enrolled {
+			return &s, nil
+		}
+	}
+	return nil, nil
 }
 
 // --- In-progress-beads block (Spec 093 Req 14 bullet 1) ----------------

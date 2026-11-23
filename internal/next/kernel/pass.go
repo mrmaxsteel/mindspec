@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
 // Pass dispatches the fixed rule order and overlays every write for later rules.
@@ -183,6 +184,14 @@ func overlay(state *State, w Write) error {
 }
 func applyWrite(s *Store, w Write) error {
 	switch w.Kind {
+	case "panel":
+		if w.Panel == nil {
+			return actorFailure("panel close write is absent")
+		}
+		if err := panel.AppendRecords(w.Panel.Dir, w.Panel.Records...); err != nil {
+			return pathFailure(err, "cannot append verify dispositions: ", "restore the panel ledger, then retry submit")
+		}
+		return pathFailure(panel.WriteSnapshot(w.Panel.Dir, w.Panel.Snapshot), "cannot write verify panel snapshot: ", "restore the panel directory, then retry submit")
 	case "create":
 		_, err := s.Create(*w.Create)
 		return err

@@ -37,6 +37,9 @@ func (r *Result) intactError() error {
 	return nil
 }
 
+// Intact reports registration failures that prevent any tally outcome.
+func (r *Result) Intact() error { return r.intactError() }
+
 func invalidVerdict(v Verdict) bool {
 	return v.Invalid || (v.Verdict != VerdictApprove && v.Verdict != VerdictReject && v.Verdict != VerdictRequestChanges)
 }

@@ -211,6 +211,7 @@ func TestS134PanelCreate_AuthorisationAndFrozenGate(t *testing.T) {
 				}
 				kernelPanelVerdict(t, f, gate, head, "old", "R1", word, 1)
 				kernelPanelVerdict(t, f, gate, head, "old", "R2", "REQUEST_CHANGES", 1)
+				kernelPanelReproduce(t, f, gate)
 				fix := gate + ".r2.fix"
 				f.Create(fix, gate)
 				if mode == "reject" {
@@ -439,9 +440,10 @@ func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
 				kernelPanelRefusal(t, out, e, "round 6 exceeds the allowance")
 				kernelPanelAuthorise(f, gate, head, 5, 2)
 			}
-			// A completed refused tally at the limit opens its decision.
+			// A completed refused tally at the limit is verified before its decision.
 			_, e := kernel.Pass(kernel.Rules(), f.State(), true)
 			f.Must(e)
+			kernelPanelReproduce(t, f, gate)
 			if got := kernel.Allowance(f.State(), gate); got != 5 {
 				t.Fatalf("want allowance 5, got %d", got)
 			}
@@ -497,6 +499,7 @@ func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
 				out, e = create()
 				kernelPanelRefusal(t, out, e, "round 7 exceeds the allowance")
 			}
+			kernelPanelReproduce(t, f, gate)
 			_, e = kernel.Pass(kernel.Rules(), f.State(), true)
 			f.Must(e)
 			out, e = create()

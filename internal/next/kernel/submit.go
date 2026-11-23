@@ -465,7 +465,11 @@ func activeActorRound(s State, r Record) (GateRound, error) {
 	if err != nil {
 		return round, err
 	}
-	if exists && subject.Commit != round.Subject {
+	expectedSubject := round.Subject
+	if t.Kind == "verify" || t.Kind == "fix" {
+		expectedSubject = reviewSubject(round)
+	}
+	if exists && subject.Commit != expectedSubject {
 		return round, actorFailure("step subject is stale")
 	}
 	return round, nil
@@ -485,10 +489,16 @@ func checkFix(s State, r Record, receipt Receipt) error {
 	if err != nil {
 		return err
 	}
-	if err := commitPast(s, receipt, round.Subject, branch); err != nil {
+	base := reviewSubject(round)
+	if subject, has, err := Decode[Subject](r.Metadata, KeySubject); err != nil {
+		return err
+	} else if has {
+		base = subject.Commit
+	}
+	if err := commitPast(s, receipt, base, branch); err != nil {
 		return err
 	}
-	paths, err := actorGitBytes(s.Root, "diff", "--no-renames", "--name-only", "-z", round.Subject, receipt.Commit, "--")
+	paths, err := actorGitBytes(s.Root, "diff", "--no-renames", "--name-only", "-z", base, receipt.Commit, "--")
 	if err != nil {
 		return err
 	}

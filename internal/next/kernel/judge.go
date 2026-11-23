@@ -367,7 +367,12 @@ func judgeCreate(s State) (Changes, error) {
 	for _, gate := range s.Gates {
 		g := s.Records[gate]
 		t, _, _ := g.Tuple()
-		if gate != activeGate(s, t.Gate) || !passed(s, g) {
+		frozen := passed(s, g)
+		round, _, err := Decode[GateRound](g.Metadata, KeyRound)
+		if err != nil {
+			return c, err
+		}
+		if gate != activeGate(s, t.Gate) || (!frozen && !openTallyDue(s, gate, round)) {
 			continue
 		}
 		ended, err := judgeEnded(s, gate)
@@ -385,6 +390,9 @@ func judgeCreate(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
+		if !frozen {
+			accepted = reviewSubject(round)
+		}
 		if newest == "" || newest == accepted {
 			continue
 		}
@@ -397,6 +405,9 @@ func judgeCreate(s State) (Changes, error) {
 			}
 			attempt = max(attempt, jt.Attempt)
 			live = live || r.Status != "closed"
+			if sub, _, _ := Decode[Subject](r.Metadata, KeySubject); sub.Commit == newest && passed(s, r) {
+				live = true
+			}
 		}
 		if live {
 			continue
@@ -407,6 +418,71 @@ func judgeCreate(s State) (Changes, error) {
 		c.Writes = append(c.Writes, w)
 	}
 	return c, nil
+}
+
+func openTallyDue(s State, gate string, round GateRound) bool {
+	t, _, _ := s.Records[gate].Tuple()
+	if omitted := s.ExcludedStep; omitted != nil {
+		d, _, _ := omitted.Tuple()
+		if d.Kind == "decision" && d.Cause == "uncounted" && d.Gate == t.Gate && d.Round == round.Round {
+			return false
+		}
+	}
+	if s.Records[gate].Status == "closed" || round.Round == 0 || VerifyApplied(s, gate, round) || gateDecision(s, t.Gate, false) {
+		return false
+	}
+	if _, _, ok := verifyReturns(s, round); ok {
+		return true
+	}
+	for id, answer := range s.Answers() {
+		d, _, _ := s.Records[id].Tuple()
+		if d.Kind != "decision" || d.Cause != "uncounted" || d.Gate != t.Gate || d.Round != round.Round || answer.Option != "redispatch" {
+			continue
+		}
+		decision, _, _ := Decode[DecisionRecord](s.Records[id].Metadata, KeyDecision)
+		for _, slot := range decision.Slots {
+			head, err := SlotLineageHead(s, fmt.Sprintf("%s.r%d.%s", t.Gate, round.Round, slot.Slot))
+			if err != nil {
+				return false
+			}
+			attempt, _, _ := head.Tuple()
+			if attempt.Attempt <= slot.Attempt {
+				return false
+			}
+		}
+	}
+	if len(round.Slots) == 0 {
+		return false
+	}
+	for _, root := range round.Slots {
+		r, err := SlotLineageHead(s, root)
+		if err != nil || !passed(s, r) {
+			return false
+		}
+	}
+	return true
+}
+
+func tallyHeldForJudge(s State, gate string, round GateRound) (bool, error) {
+	if VerifyApplied(s, gate, round) {
+		return false, nil
+	}
+	t, _, _ := s.Records[gate].Tuple()
+	for _, id := range s.Steps {
+		r := s.Records[id]
+		jt, _, _ := r.Tuple()
+		if jt.Kind == "change-judge" && jt.Gate == t.Gate && r.Status != "closed" {
+			return true, nil
+		}
+	}
+	if !openTallyDue(s, gate, round) {
+		return false, nil
+	}
+	newest, err := effectiveSubject(s, gate)
+	if err != nil {
+		return false, err
+	}
+	return newest != "" && newest != reviewSubject(round), nil
 }
 
 func judgeSupersede(s State) (Changes, error) {

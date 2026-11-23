@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/frontmatter"
@@ -25,6 +26,21 @@ import (
 
 func panelStoreFailure(err error) error {
 	return guard.NewFailure("panel tracker store is unavailable: "+termsafe.Escape(err.Error()), "restore the tracker store and bd on PATH, then run bd list --all --json")
+}
+
+func panelDispositionView(root string, res *panel.Result) (*panel.Result, bool, error) {
+	if res.Panel == nil || (res.Panel.Gate != "bead" && res.Panel.Gate != "final_review") {
+		return res, false, nil
+	}
+	s, err := panelKernelStateFn(root, res.Panel.Spec)
+	if err != nil {
+		return nil, false, err
+	}
+	if s == nil || !s.Enrolled {
+		return res, false, nil
+	}
+	gate := kernelPanelGate(*s, *res.Panel)
+	return kernel.FilterDispositions(*s, gateBase(*s, gate), res), true, nil
 }
 
 func panelHasEnrollment(root, spec string) bool {
@@ -146,7 +162,7 @@ func panelKernelGuard(s kernel.State, gate string, limit bool) error {
 	}
 	for _, r := range s.OpenDecisions() {
 		t, _, _ := r.Tuple()
-		if t.Gate == gateBase(s, gate) && (t.Cause == "reject" || limit) {
+		if t.Gate == gateBase(s, gate) && (t.Cause != "limit" || limit) {
 			answer := "fix"
 			if t.Cause == "limit" {
 				answer = "continue:1"
@@ -485,7 +501,22 @@ func withKernelPanelVerb(cmd *cobra.Command, slug string, rebind bool, mutate fu
 				to, _ := cmd.Flags().GetString("bead")
 				slot, _ := cmd.Flags().GetString("slot")
 				n, _ := cmd.Flags().GetInt("round")
-				record := kernel.DeferRecord{Finding: finding, To: to, Reason: "panel defer", At: kernel.Now().UTC(), Panel: slug, Round: n, Slot: slot}
+				res, err := panel.Tally(reg.Dir)
+				if err != nil {
+					return panelVerbFailure(err)
+				}
+				view := kernel.FilterDispositions(fresh, gateBase(fresh, gate), res)
+				var selected panel.Deferral
+				for _, d := range view.Panel.Deferrals {
+					if d.Round == n && d.Slot == slot && d.Finding == finding && d.Bead == to {
+						selected = d
+					}
+				}
+				at, err := time.Parse(time.RFC3339Nano, selected.CreatedAt)
+				if err != nil {
+					return panelVerbFailure(fmt.Errorf("panel deferral has no valid created_at"))
+				}
+				record := kernel.DeferRecord{Finding: finding, To: to, Reason: "panel defer", At: at, Panel: slug, Round: n, Slot: slot, FindingSHA256: selected.FindingSHA256, SourceVerdict: selected.SourceVerdict, SourceFileSHA256: selected.SourceFileSHA256, VerifyStep: selected.VerifyStep}
 				history, has, err := kernel.Decode[[]kernel.DeferRecord](fresh.Records[gate].Metadata, kernel.KeyDeferrals)
 				if err != nil {
 					return err
@@ -501,7 +532,7 @@ func withKernelPanelVerb(cmd *cobra.Command, slug string, rebind bool, mutate fu
 				}
 				duplicate := false
 				for _, old := range history {
-					duplicate = duplicate || (old.Panel == record.Panel && old.Round == record.Round && old.Slot == record.Slot && old.Finding == record.Finding && old.To == record.To)
+					duplicate = duplicate || (kernel.KeepDisposition(fresh, gateBase(fresh, gate), old.Round, old.VerifyStep, old.At.UTC().Format(time.RFC3339Nano)) && old.Panel == record.Panel && old.Round == record.Round && old.Slot == record.Slot && old.Finding == record.Finding && old.To == record.To && old.FindingSHA256 == record.FindingSHA256 && old.SourceVerdict == record.SourceVerdict && old.SourceFileSHA256 == record.SourceFileSHA256 && old.VerifyStep == record.VerifyStep)
 				}
 				if !duplicate {
 					history = append(history, record)
@@ -535,7 +566,8 @@ func closeRetalliedChildren(s kernel.State, gate, dir string) error {
 	if res.Panel == nil {
 		return panelVerbFailure(fmt.Errorf("panel registration is missing"))
 	}
-	if !ok || !res.PassRule(res.Panel.ReviewedHeadSHA == round.Subject) {
+	filtered := kernel.FilterDispositions(s, gateBase(s, gate), res)
+	if !ok || !filtered.PassRule(res.Panel.ReviewedHeadSHA == round.Subject) || kernel.VerifyRetallyFits(s, gate, res) != nil {
 		return nil
 	}
 	// Refuse a foreign child before any close writes.
@@ -556,7 +588,7 @@ func closeRetalliedChildren(s kernel.State, gate, dir string) error {
 	for _, id := range s.Steps {
 		r := s.Records[id]
 		t, _, _ := r.Tuple()
-		if r.Status == "closed" || t.Gate != gateBase(s, gate) || (t.Kind != "fix" && !(t.Kind == "decision" && t.Cause == "limit")) {
+		if r.Status == "closed" || t.Gate != gateBase(s, gate) || (t.Kind != "fix" && t.Kind != "verify" && !(t.Kind == "decision" && t.Cause == "limit")) {
 			continue
 		}
 		for _, child := range s.Records {
@@ -572,7 +604,7 @@ func closeRetalliedChildren(s kernel.State, gate, dir string) error {
 	for _, id := range s.Steps {
 		r := s.Records[id]
 		t, _, _ := r.Tuple()
-		if r.Status == "closed" || t.Gate != gateBase(s, gate) || (t.Kind != "fix" && !(t.Kind == "decision" && t.Cause == "limit")) {
+		if r.Status == "closed" || t.Gate != gateBase(s, gate) || (t.Kind != "fix" && t.Kind != "verify" && !(t.Kind == "decision" && t.Cause == "limit")) {
 			continue
 		}
 

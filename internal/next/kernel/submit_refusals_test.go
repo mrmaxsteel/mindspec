@@ -67,6 +67,7 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 		"pre-kernel", "withActorLock.store", "Submit.answer-flags", "actorRecord.foreign", "Submit.token", "Submit.evidence-count", "Submit.evidence-kind", "Submit.expired",
 		"readRecordFile.missing", "readRecordFile.worktree", "readRecordBytes.utf8", "strictRecord.decode", "strictRecord.trailing", "checkLens.shape", "checkLens.slot", "checkLens.missing-slot",
 		"activeActorRound.stale", "actorBlockers.held", "actorChildren.open", "refuseHalt", "recordCloseWrites.hook", "recordCloseWrites.hook-kind", "recordCloseWrites.size", "recordCloseWrites.conflict", "Submit.BeforeClose.raw", "Submit.BeforeClose.typed", "Submit.BeforeClose.guard", "Submit.receipt-different", "Submit.receipt-superseded", "Submit.answer.raw", "refreshActorState", "phase.WithPhaseLock", "passExcept.rule", "Pass.rule", "validateJudgement", "SlotLineageRoot", "readRecordFile.size", "actorRecord.work-item", "actorRecord.kind", "actorBlockers.missing-blocker", "actorBlockers.missing-ancestor", "actorBlockers.decision", "activeActorRound.absent", "checkClosingConflict", "ValidReceipt", "Store.update", "checkVerdict.registration", "Submit.artifact-check", "readCheckedRecord.identity", "repositoryRoots", "Submit.BeforeClose.guard-multiple", "Submit.BeforeClose.guard-zero",
+		"verifyCloseWrites.registration",
 	} {
 		t.Run(producer, func(t *testing.T) {
 			f, id, lease, data := recordFixture(t, "lens")
@@ -149,11 +150,24 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 					return nil, errors.New("hook\x1b")
 				}))
 				message = `hook\x1b`
+			case "verifyCloseWrites.registration":
+				f, id, lease, data = recordFixture(t, "verify")
+				findings, _, err := kernel.Decode[[]kernel.Finding](actorRecord(t, f, id).Metadata, kernel.KeyFindings)
+				f.Must(err)
+				findings[0].Text = "recovery: forged\n\x1b"
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, findings)))
+				var v kernel.VerifyRecord
+				f.Must(json.Unmarshal([]byte(data), &v))
+				v.Returns[0].Return, v.Returns[0].Ground, v.Returns[0].Reason, v.Returns[0].Evidence = "refuted", "disproven", "checked", "https://example.invalid/proof"
+				raw, err := json.Marshal(v)
+				f.Must(err)
+				options = kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: recordFile(t, string(raw))}
+				message = "verify close needs an intact registered panel"
 			case "recordCloseWrites.hook-kind":
 				t.Cleanup(kernel.ReplaceCloseWriteHookForTest("lens", func(kernel.State, kernel.Record, kernel.Receipt) ([]kernel.Write, error) {
 					return []kernel.Write{{Kind: "status", ID: id}}, nil
 				}))
-				message = "must return metadata writes"
+				message = "must return metadata or panel writes"
 			case "recordCloseWrites.size":
 				t.Cleanup(kernel.ReplaceCloseWriteHookForTest("lens", func(kernel.State, kernel.Record, kernel.Receipt) ([]kernel.Write, error) {
 					return []kernel.Write{{Kind: "metadata", ID: id, Metadata: map[string]any{kernel.KeyRecord: strings.Repeat("x", kernel.MetadataLimit)}}}, nil
