@@ -22,8 +22,19 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 		"checkVerify.unknown-field", "checkVerify.empty", "checkVerify.missing", "checkVerify.repeated", "checkVerify.unknown",
 		"verifyCloseWrites.source", "recordCloseWrites.disposition", "refusedRound.empty", "recordCloseWrites.append", "recordCloseWrites.snapshot",
 		"checkVerify.return", "checkVerify.ground", "checkVerify.ac", "checkVerify.reason", "checkVerify.evidence", "checkVerify.target", "checkVerify.veto",
+		"late.invalid-generation", "late.receipt", "late.closed", "late.pin", "late.subject", "late.absent-hash", "late.empty-token",
+		"repair.reason", "repair.lease", "repair.answer", "repair.stray-reason", "repair.open", "repair.never-leased", "repair.receipt", "repair.pin-conflict", "repair.pin-generation", "repair.record-absent", "repair.record-different", "repair.record-pin", "repair.slot-evidence", "repair.stale-evidence", "repair.current-attempt",
+		"SlotLineageHead.none",
 	} {
 		t.Run(producer, func(t *testing.T) {
+			if producer == "SlotLineageHead.none" {
+				binaryNoCurrentSlotRefusal(t, bin)
+				return
+			}
+			if strings.HasPrefix(producer, "late.") || strings.HasPrefix(producer, "repair.") {
+				binaryLateRepairRefusal(t, bin, producer)
+				return
+			}
 			if runtime.GOOS == "windows" && (producer == "recordCloseWrites.append" || producer == "recordCloseWrites.snapshot") {
 				t.Skip("close-write fault fixture uses a POSIX shell script")
 			}

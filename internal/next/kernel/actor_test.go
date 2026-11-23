@@ -171,10 +171,11 @@ func TestS134Lease_ExpiredFirstLease(t *testing.T) {
 	}
 }
 func TestS134Lease_RefusalTable(t *testing.T) {
-	for _, name := range []string{"foreign", "gate", "decision", "pre-kernel", "halted", "held-step", "held-parent", "held-upstream", "unanswered", "foreign-blocker"} {
+	for _, name := range []string{"foreign", "gate", "decision", "pre-kernel", "halted", "held-step", "held-parent", "held-upstream", "unanswered", "foreign-blocker", "take-subject"} {
 		t.Run(name, func(t *testing.T) {
 			f, id, deps := actorFixture(t)
 			want := ""
+			options := kernel.LeaseOptions{}
 			switch name {
 			case "foreign":
 				raw, err := f.Store.Run("create", "--title", "foreign", "--type", "bug", "--parent", f.Epic, "--json")
@@ -220,8 +221,15 @@ func TestS134Lease_RefusalTable(t *testing.T) {
 				f.Must(err)
 				id = f.Items[0] + ".review.r1.R1"
 				f.Create(id, f.Items[0]+".review")
+			case "take-subject":
+				id = f.Items[0] + ".review.r1.R1"
+				f.Create(id, f.Items[0]+".review")
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, map[string]any{"commit": []string{"hostile\nrecovery: forged\x1b"}})))
+				options.Take, options.Reason = true, "replace"
+				want = "cannot read step subject"
 			}
-			actorRefusal(t, f, func() error { _, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, deps); return err }, want)
+			options.Step = id
+			actorRefusal(t, f, func() error { _, err := kernel.Lease(f.State(), options, deps); return err }, want)
 		})
 	}
 }
@@ -374,7 +382,7 @@ func TestS134Submit_ImplementReceiptGoldenAndRetry(t *testing.T) {
 	actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, "different result")
 }
 func TestS134Submit_BadImplement(t *testing.T) {
-	for _, name := range []string{"old-token", "bad-token", "no-token", "pre-lease", "not-descendant", "wrong-branch", "missing-commit", "no-artifact", "verdict-instead", "expired", "forged-kind", "new-blocker"} {
+	for _, name := range []string{"revoked-after-receipt", "bad-token", "no-token", "pre-lease", "not-descendant", "wrong-branch", "missing-commit", "no-artifact", "verdict-instead", "expired", "forged-kind", "new-blocker"} {
 		t.Run(name, func(t *testing.T) {
 			f, id, deps := actorFixture(t)
 			base := actorCommand(t, f, "rev-parse", "HEAD")
@@ -382,13 +390,18 @@ func TestS134Submit_BadImplement(t *testing.T) {
 				base = actorCommit(t, f, "earlier.json", "{}", "bead/"+f.Items[0])
 			}
 			lease := leaseActor(t, f, id, deps)
-			if name == "old-token" {
-				_, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace"}, deps)
+			var taken kernel.LeaseResult
+			if name == "revoked-after-receipt" {
+				var err error
+				taken, err = kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace"}, deps)
 				f.Must(err)
 			}
 			commit := actorCommit(t, f, "proof.json", "{}", "bead/"+f.Items[0])
 			o := kernel.SubmitOptions{Step: id, Lease: lease.Token, Commit: commit}
 			switch name {
+			case "revoked-after-receipt":
+				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: taken.Token, Commit: commit})
+				f.Must(err)
 			case "bad-token":
 				o.Lease = "invalid-token"
 			case "no-token":
@@ -415,13 +428,13 @@ func TestS134Submit_BadImplement(t *testing.T) {
 				f.Must(f.Store.AddLink(id, f.Items[1]))
 			}
 			want := map[string]string{
-				"old-token": "lease token is not current", "bad-token": "lease token is not current", "no-token": "lease token is not current",
+				"revoked-after-receipt": "step already has a receipt from another generation", "bad-token": "lease token is not current", "no-token": "lease token is not current",
 				"pre-lease": "commit is not past the claim base or round subject", "not-descendant": "commit is not past the claim base or round subject",
 				"wrong-branch": "commit must be on bead/", "missing-commit": "cannot resolve committed evidence", "no-artifact": "submit needs one record, artifact or commit",
 				"verdict-instead": "artifact does not fit the step kind", "expired": "lease has expired", "forged-kind": "step already has a different result", "new-blocker": "step is held or blocked by " + f.Items[1],
 			}[name]
 			actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, want)
-			if actorRecord(t, f, id).Status == "closed" {
+			if actorRecord(t, f, id).Status == "closed" && name != "revoked-after-receipt" {
 				t.Fatal("bad submit closed step")
 			}
 		})
@@ -462,7 +475,9 @@ func TestS134Submit_BadVerdictsAndFix(t *testing.T) {
 			actorCommit(t, f, "verdict.json", data, "")
 			switch name {
 			case "old-token":
-				_, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace"}, kernel.LeaseDeps{})
+				taken, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: "replace"}, kernel.LeaseDeps{})
+				f.Must(err)
+				_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: taken.Token, Artifact: "verdict.json"})
 				f.Must(err)
 			case "bad-token":
 				lease.Token = "invalid-token"
@@ -493,13 +508,13 @@ func TestS134Submit_BadVerdictsAndFix(t *testing.T) {
 				"verdict-round": "verdict slot, round or subject does not match the step", "draft": "verdict slot, round or subject does not match the step",
 				"changed-blob": "artifact blob differs from its holding commit", "uncommitted": "artifact has no holding commit", "missing": "artifact must be a regular committed file",
 				"stale-round": "step subject or round is stale", "stale-step-subject": "step subject is stale", "foreign-slot": "foreign step", "unlisted-slot": "slot is not in the active gate round",
-				"old-token": "lease token is not current", "bad-token": "lease token is not current",
+				"old-token": "step already has a receipt from another generation", "bad-token": "lease token is not current",
 			}[name]
 			actorRefusal(t, f, func() error {
 				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
 				return err
 			}, want)
-			if actorRecord(t, f, id).Status == "closed" {
+			if actorRecord(t, f, id).Status == "closed" && name != "old-token" {
 				t.Fatal("bad verdict closed slot")
 			}
 		})

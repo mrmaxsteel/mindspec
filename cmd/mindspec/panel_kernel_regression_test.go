@@ -65,8 +65,19 @@ func TestS134PanelSubmit_WrongAndOldLease(t *testing.T) {
 			actorCmdGit(t, f, "add", ".")
 			actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verdict")
 			out, err = kernelPanelRun(t, panelSubmitCmd, "1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file, "--lease", token)
-			kernelPanelRefusal(t, out, err, "lease token is not current")
-			kernelPanelAssertUnpublished(t, f, id, filepath.Dir(file))
+			if old {
+				kernelPanelRequire(t, out, err)
+				receipt, _, e := kernel.Decode[kernel.Receipt](kernelPanelRecord(t, f, id).Metadata, kernel.KeyClose)
+				f.Must(e)
+				current, _, e := kernel.Decode[kernel.LeaseRecord](kernelPanelRecord(t, f, id).Metadata, kernel.KeyLease)
+				f.Must(e)
+				if receipt.Generation != 1 || receipt.SupersededGeneration != 2 || current.Ended != "superseded" {
+					t.Fatalf("late panel submit lost its generation: receipt=%+v lease=%+v", receipt, current)
+				}
+			} else {
+				kernelPanelRefusal(t, out, err, "lease token is not current")
+				kernelPanelAssertUnpublished(t, f, id, filepath.Dir(file))
+			}
 		})
 	}
 }

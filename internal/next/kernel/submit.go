@@ -24,6 +24,8 @@ type SubmitOptions struct {
 	Record   string
 	Commit   string
 	Answer   string
+	Repair   bool
+	Reason   string
 	// BeforeClose publishes validated evidence before the receipt and final reduction.
 	BeforeClose func(State, Receipt) error
 }
@@ -58,6 +60,9 @@ func init() {
 func Submit(state State, options SubmitOptions) (Output, error) {
 	if !state.Enrolled {
 		return Output{}, ErrPreKernel
+	}
+	if (options.Repair && (strings.TrimSpace(options.Reason) == "" || options.Lease != "" || options.Answer != "")) || (!options.Repair && options.Reason != "") {
+		return Output{}, actorFailure("submit --repair requires --reason and excludes --lease and --answer")
 	}
 	if options.Answer != "" {
 		if options.Record != "" || options.Artifact != "" || options.Commit != "" {
@@ -104,8 +109,38 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 			if err != nil {
 				return err
 			}
-			if !matchesToken(lease, options.Lease) {
-				return actorFailure("lease token is not current")
+			old, present, err := Decode[Receipt](r.Metadata, KeyClose)
+			if err != nil {
+				return err
+			}
+			valid := present && ValidReceipt(s.Root, old, r.Metadata) == nil
+			generation := lease.Generation
+			if options.Repair {
+				if err = repairable(r, lease, valid); err != nil {
+					return err
+				}
+				if recordKind(tuple.Kind) {
+					stored, err := recordBytes(r)
+					if err != nil {
+						return err
+					}
+					if options.Record != "" && recordDigest([]byte(record)) != recordDigest(stored) {
+						return actorFailure("repair --record differs from mindspec_record")
+					}
+					record = string(stored)
+					pin, has, err := Decode[Closing](r.Metadata, KeyClosing)
+					if err != nil {
+						return err
+					}
+					if has && pin.RecordSHA256 != recordDigest(stored) {
+						return actorFailure("repair record differs from mindspec_closing")
+					}
+				}
+			} else {
+				generation, err = submitGeneration(r, lease, options.Lease, old, valid)
+				if err != nil {
+					return err
+				}
 			}
 			evidenceCount := 0
 			for _, value := range []string{options.Record, options.Artifact, options.Commit} {
@@ -113,10 +148,11 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					evidenceCount++
 				}
 			}
-			if evidenceCount != 1 {
+			storedRepair := options.Repair && recordKind(tuple.Kind) && options.Record == ""
+			if evidenceCount != 1 && !(storedRepair && evidenceCount == 0) {
 				return actorFailure("submit needs one record, artifact or commit")
 			}
-			if recordKind(tuple.Kind) != (options.Record != "") || (tuple.Kind == "implement" || tuple.Kind == "fix") != (options.Commit != "") {
+			if recordKind(tuple.Kind) != (options.Record != "" || storedRepair) || (tuple.Kind == "implement" || tuple.Kind == "fix") != (options.Commit != "") {
 				return actorFailure("artifact does not fit the step kind")
 			}
 			var receipt Receipt
@@ -128,18 +164,18 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					return err
 				}
 			}
-			receipt.Generation = lease.Generation
+			receipt.Generation = generation
+			if generation != lease.Generation {
+				receipt.SupersededGeneration = lease.Generation
+			}
 			check, ok := artifactChecks[tuple.Kind]
 			if !ok {
 				return actorFailure("artifact check is not available for " + tuple.Kind)
 			}
-			old, present, err := Decode[Receipt](r.Metadata, KeyClose)
-			if err != nil {
-				return err
-			}
-			if present && ValidReceipt(s.Root, old, r.Metadata) == nil {
+			if valid {
 				receipt.Repaired = old.Repaired
 				receipt.At = old.At
+				receipt.Via = old.Via
 				if !reflect.DeepEqual(old, receipt) {
 					if old.Kind == "superseded" {
 						return actorFailure("step was superseded by a new subject or round; use the current actions")
@@ -151,7 +187,7 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					return nil
 				}
 			} else {
-				if !lease.Expires.After(s.At) {
+				if !options.Repair && generation == lease.Generation && !lease.Expires.After(s.At) {
 					return actorFailure("lease has expired")
 				}
 				if recordKind(tuple.Kind) {
@@ -167,6 +203,23 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					return err
 				}
 				receipt.Repaired = r.Status == "closed"
+				if options.Repair {
+					receipt.Via = "repair"
+				}
+				if options.Repair {
+					history, err := takeHistory(r)
+					if err != nil {
+						return err
+					}
+					subject, err := leaseSubject(r, lease)
+					if err != nil {
+						return err
+					}
+					event := TakeReason{Via: "repair", Reason: options.Reason, At: s.At, Generation: lease.Generation, Subject: subject}
+					if err = s.Store.WriteMetadata(r.Key(), Metadata(KeyTakes, append(history, event))); err != nil {
+						return err
+					}
+				}
 				if recordKind(tuple.Kind) {
 					receipt, err = recordCloseWrites(s, r, receipt)
 					if err != nil {
@@ -180,6 +233,13 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 				}
 				if err = checkClosingConflict(s, r); err != nil {
 					return err
+				}
+
+				if receipt.SupersededGeneration != 0 {
+					lease.Ended = "superseded"
+					if err = s.Store.WriteMetadata(r.Key(), Metadata(KeyLease, lease)); err != nil {
+						return err
+					}
 				}
 				if err = s.Store.WriteReceipt(r.Key(), receipt); err != nil {
 					return err
@@ -232,6 +292,73 @@ func actorOutput(s State) Output {
 	return Output{Schema: "mindspec.next-action/v2", Status: status, Applied: true,
 		Policy:  PolicyView{RoundLimit: s.Policy.RoundLimit, LeaseTTL: s.Policy.LeaseTTL},
 		Actions: []Action{}, Waiting: []Waiting{}, Decisions: []Decision{}, Run: []Run{}, Flags: []Flag{}}
+}
+
+func takeHistory(r Record) ([]TakeReason, error) {
+	history, has, err := Decode[[]TakeReason](r.Metadata, KeyTakes)
+	if err != nil || has {
+		return history, err
+	}
+	old, has, err := Decode[TakeReason](r.Metadata, KeyTake)
+	if has && old.Generation > 0 {
+		history = append(history, old)
+	}
+	return history, err
+}
+
+func leaseSubject(r Record, lease LeaseRecord) (string, error) {
+	t, _, _ := r.Tuple()
+	if t.Kind == "implement" {
+		return lease.ClaimBase, nil
+	}
+	subject, _, err := Decode[Subject](r.Metadata, KeySubject)
+	return subject.Commit, err
+}
+
+// submitGeneration fences a revoked actor before any close-write hook can run.
+func submitGeneration(r Record, lease LeaseRecord, token string, receipt Receipt, valid bool) (int, error) {
+	if matchesToken(lease, token) {
+		return lease.Generation, nil
+	}
+	history, err := takeHistory(r)
+	if err != nil {
+		return 0, err
+	}
+	for _, take := range history {
+		if token == "" || take.RevokedTokenHash == "" || take.RevokedTokenHash != tokenHash(token) {
+			continue
+		}
+		prefix, _, _ := strings.Cut(token, ".")
+		generation, err := strconv.Atoi(prefix)
+		if err != nil || generation <= 0 || generation != take.Generation-1 || generation >= lease.Generation {
+			return 0, actorFailure("revoked lease generation is invalid")
+		}
+		if valid {
+			if receipt.Generation == generation && receipt.SupersededGeneration == lease.Generation {
+				return generation, nil
+			}
+			return 0, actorFailure("revoked lease refused: step already has a receipt from another generation")
+		}
+		if r.Status == "closed" {
+			return 0, actorFailure("revoked lease refused: step is closed")
+		}
+		pin, has, err := Decode[Closing](r.Metadata, KeyClosing)
+		if err != nil {
+			return 0, err
+		}
+		if has && pin.Generation > generation {
+			return 0, actorFailure("revoked lease refused: mindspec_closing belongs to a newer generation")
+		}
+		subject, err := leaseSubject(r, lease)
+		if err != nil {
+			return 0, err
+		}
+		if take.Subject != subject {
+			return 0, actorFailure("revoked lease refused: step subject changed since the take")
+		}
+		return generation, nil
+	}
+	return 0, actorFailure("lease token is not current")
 }
 
 func actorGit(root string, args ...string) (string, error) {
@@ -471,6 +598,19 @@ func activeActorRound(s State, r Record) (GateRound, error) {
 	}
 	if exists && subject.Commit != expectedSubject {
 		return round, actorFailure("step subject is stale")
+	}
+	if (t.Kind == "lens" && round.Lens != "" && round.Lens != r.Key()) || (t.Kind == "verify" && round.Verify != "" && round.Verify != r.Key()) {
+		return round, actorFailure("step is not the current round attempt")
+	}
+	if t.Kind == "review-slot" || t.Kind == "fix" {
+		for _, id := range s.Steps {
+			candidate := s.Records[id]
+			ct, _, _ := candidate.Tuple()
+			close, _, _ := Decode[Receipt](candidate.Metadata, KeyClose)
+			if ct.Gate == t.Gate && ct.Kind == t.Kind && ct.Round == t.Round && ct.Slot == t.Slot && ct.Attempt > t.Attempt && !(candidate.Status == "closed" && close.Kind == "superseded") {
+				return round, actorFailure("step is not the current round attempt")
+			}
+		}
 	}
 	return round, nil
 }
