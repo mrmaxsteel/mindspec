@@ -45,6 +45,7 @@ func TestS134PanelRepanel_LaterRounds(t *testing.T) {
 				} else {
 					e.create(e.apply())
 					repanelReview(t, e, gate, 2, "REQUEST_CHANGES", []string{".mindspec/config.yaml"})
+					e.verifyReproduced()
 					fix := base + ".r3.fix"
 					token := e.lease(fix)
 					head := e.commit(tree, "fixed.txt", "fixed\n")
@@ -108,7 +109,9 @@ func repanelReview(t *testing.T, e *kernelE2E, gate string, size int, word strin
 	n := 0
 	for _, action := range out.Actions {
 		if action.Kind != "review-slot" {
-			t.Fatalf("unexpected action: %+v", action)
+			accepted, err := kernel.AcceptedSubject(e.f.State(), gate)
+			e.must(err)
+			t.Fatalf("unexpected action: %+v; gate: %+v; accepted: %s", action, e.row(gate), accepted)
 		}
 		token := e.lease(action.Step)
 		e.ok("submit", action.Step, "--lease", token, "--artifact", e.verdict(action, word))

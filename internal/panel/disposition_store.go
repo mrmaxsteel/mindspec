@@ -102,6 +102,11 @@ func recordKey(m map[string]interface{}) (kind, key string) {
 		if kind == RecordDeferral && (m["source_verdict"] != nil || m["source_file_sha256"] != nil) {
 			fields = append(fields, "source_verdict", "source_file_sha256")
 		}
+		if step, _ := m["verify_step"].(string); step != "" {
+			fields = append(fields, "verify_step")
+		} else if enrolled, _ := m["enrolled"].(bool); enrolled {
+			fields = append(fields, "created_at")
+		}
 	case RecordRebind:
 		fields = []string{"to_sha"}
 	case RecordAbandon:
@@ -551,9 +556,24 @@ func (e *UncoveredSlotError) Error() string {
 // submission. Unbound legacy deferrals retain their original ID shape.
 func DeferralRowID(panelName string, d Deferral) string {
 	if d.SourceVerdict == "" && d.SourceFileSHA256 == "" {
-		return fmt.Sprintf("%s:%s:r%d:%s:%.12s:deferral", panelName, d.Slot, d.Round, d.Finding, d.FindingSHA256)
+		return fmt.Sprintf("%s:%s:r%d:%s:%.12s:deferral", panelName, d.Slot, d.Round, d.Finding, d.FindingSHA256) + dispositionSuffix(d.VerifyStep, d.Enrolled, d.CreatedAt)
 	}
-	return fmt.Sprintf("%s:%s:r%d:%s:%s:%s:%s:deferral", panelName, d.Slot, d.Round, d.Finding, d.FindingSHA256, d.SourceVerdict, d.SourceFileSHA256)
+	return fmt.Sprintf("%s:%s:r%d:%s:%s:%s:%s:deferral", panelName, d.Slot, d.Round, d.Finding, d.FindingSHA256, d.SourceVerdict, d.SourceFileSHA256) + dispositionSuffix(d.VerifyStep, d.Enrolled, d.CreatedAt)
+}
+
+// RefutationRowID keeps the event and its coverage row in the same namespace.
+func RefutationRowID(panelName string, r Refutation) string {
+	return fmt.Sprintf("%s:%s:r%d:%s:%.12s:refutation", panelName, r.Slot, r.Round, r.Finding, r.FindingSHA256) + dispositionSuffix(r.VerifyStep, r.Enrolled, r.CreatedAt)
+}
+
+func dispositionSuffix(step string, enrolled bool, at string) string {
+	if step != "" {
+		return ":" + step
+	}
+	if enrolled {
+		return ":" + at
+	}
+	return ""
 }
 
 // DispositionRowID derives a disposition row's canonical DispositionRow.ID:

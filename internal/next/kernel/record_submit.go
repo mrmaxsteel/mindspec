@@ -8,12 +8,15 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
@@ -247,8 +250,8 @@ func checkVerify(s State, r Record, _ Receipt) error {
 			if ret.Ground != "disproven" && ret.Ground != "not-load-bearing" && ret.Ground != "out_of_acceptance_scope" {
 				return actorFailure("refuted finding needs a valid ground")
 			}
-			if ret.Ground == "out_of_acceptance_scope" && strings.TrimSpace(ret.AC) == "" {
-				return actorFailure("out_of_acceptance_scope needs ac")
+			if ret.Ground == "out_of_acceptance_scope" && !verifyAcceptanceExists(s, ret.AC) {
+				return actorFailure("out_of_acceptance_scope needs ac that names an acceptance criterion in the owning spec")
 			}
 			if strings.TrimSpace(ret.Reason) == "" || !recordEvidenceResolves(s.Root, ret.Evidence) {
 				return actorFailure("refuted finding needs reason and resolving evidence")
@@ -261,7 +264,7 @@ func checkVerify(s State, r Record, _ Receipt) error {
 				return actorFailure("deferred finding needs reason and target")
 			}
 			t, _, _ := r.Tuple()
-			if err := bead.CheckDeferral(ret.Target, s.Epic, t.WorkItem, []string{finding.Text}, func(text string) string { return text }); err != nil {
+			if err := bead.CheckDeferral(ret.Target, s.Epic, t.WorkItem, []string{finding.Text}, panel.RedactFindingPaths); err != nil {
 				var requirements *bead.DeferralRequirementsError
 				if errors.As(err, &requirements) {
 					return termsafe.NewLinesFailure(err, requirements.MessageLines(), requirements.Recovery)
@@ -280,6 +283,14 @@ func checkVerify(s State, r Record, _ Receipt) error {
 	return nil
 }
 
+func verifyAcceptanceExists(s State, ac string) bool {
+	if !regexp.MustCompile(`^AC-[0-9]+$`).MatchString(ac) {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(s.SpecDir, "spec.md"))
+	return err == nil && regexp.MustCompile(`\b`+regexp.QuoteMeta(ac)+`\b`).Match(data)
+}
+
 func recordEvidenceResolves(root, evidence string) bool {
 	if u, err := url.Parse(evidence); err == nil && u.Scheme == "https" && u.Host != "" {
 		return true
@@ -292,10 +303,10 @@ func recordEvidenceResolves(root, evidence string) bool {
 			return true
 		}
 	}
-	if !objectID(evidence) {
+	if strings.HasPrefix(evidence, "-") {
 		return false
 	}
-	_, err := actorGit(root, "rev-parse", "--verify", evidence+"^{commit}")
+	_, err := actorGit(root, "cat-file", "-e", evidence+"^{commit}")
 	return err == nil
 }
 
@@ -327,8 +338,29 @@ func recordCloseWrites(s State, r Record, receipt Receipt) (Receipt, error) {
 	// Project all writes first so an oversized later write cannot leave a pin.
 	projected := s.Clone()
 	for _, w := range writes {
+		if w.Kind == "panel" && w.Panel != nil {
+			data, err := json.MarshalIndent(w.Panel.Snapshot, "", "  ")
+			if err != nil {
+				return receipt, pathFailure(err, "cannot encode verify panel snapshot: ", "correct the verify record and retry submit")
+			}
+			if len(data)+1 > MetadataLimit {
+				return receipt, metadataSizeFailure(t.Gate, r.Key(), "panel.json", int64(len(data)+1), "panel snapshot size")
+			}
+			if _, err := CheckMetadataSize(r.Key(), Metadata("panel.json", w.Panel.Snapshot)); err != nil {
+				return receipt, err
+			}
+			for _, record := range w.Panel.Records {
+				if err := panel.Validate(record); err != nil {
+					return receipt, pathFailure(err, "invalid verify disposition: ", "correct the verify record and retry submit")
+				}
+				if err := panel.HygienePredicate(record); err != nil {
+					return receipt, pathFailure(err, "invalid verify disposition: ", "correct the verify record and retry submit")
+				}
+			}
+			continue
+		}
 		if w.Kind != "metadata" {
-			return receipt, actorFailure("record close hook must return metadata writes")
+			return receipt, actorFailure("record close hook must return metadata or panel writes")
 		}
 		if err := overlay(&projected, w); err != nil {
 			return receipt, err

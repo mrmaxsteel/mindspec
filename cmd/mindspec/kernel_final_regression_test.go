@@ -209,12 +209,14 @@ func TestS134Final_SlotRetryVerbs(t *testing.T) {
 				}
 			}
 			if mode == "request-changes" {
+				e.verifyReproduced()
 				if e.row(e.f.Items[0]+".review.r2.fix").Status != "open" {
 					t.Fatal("retry did not release fix")
 				}
 				return
 			}
 			if mode == "reject" {
+				out = e.verifyReproduced()
 				if len(out.Decisions) != 1 {
 					t.Fatalf("retry did not release decision: %+v", out)
 				}
@@ -291,7 +293,7 @@ func TestS134Final_CheckAndPrintedSubmit(t *testing.T) {
 			if reviewed.Revision != current.Revision {
 				t.Fatalf("submit revision differs from durable state: %s != %s", reviewed.Revision, current.Revision)
 			}
-			for _, a := range e.apply().Actions {
+			for _, a := range e.verifyReproduced().Actions {
 				if a.Kind == "fix" {
 					action = a
 				}

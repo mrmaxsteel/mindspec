@@ -13,29 +13,31 @@ import (
 )
 
 const (
-	KeyTuple      = "mindspec_tuple"
-	KeyID         = "mindspec_key"
-	KeyClose      = "mindspec_close"
-	KeyCompletion = "mindspec_completed_subject"
-	KeyFrom       = "mindspec_from"
-	KeyLinks      = "mindspec_links"
-	KeyRun        = "mindspec_run"
-	KeyLease      = "mindspec_lease"
-	KeyRound      = "mindspec_round"
-	KeyTake       = "mindspec_take"
-	KeyTakes      = "mindspec_takes"
-	KeyDeferrals  = "mindspec_deferrals"
-	KeyRawClaims  = "mindspec_raw_claims"
-	KeyAnswer     = "mindspec_answer"
-	KeyDefer      = "mindspec_defer"
-	KeyJudgement  = "mindspec_judgement"
-	KeyRePanel    = "mindspec_repanel"
-	KeyRecord     = "mindspec_record"
-	KeyClosing    = "mindspec_closing"
-	KeyFindings   = "mindspec_findings"
-	KeyRead       = "mindspec_read"
-	KeyReturns    = "mindspec_returns"
-	KeyReproduced = "mindspec_reproduced"
+	KeyTuple          = "mindspec_tuple"
+	KeyID             = "mindspec_key"
+	KeyClose          = "mindspec_close"
+	KeyCompletion     = "mindspec_completed_subject"
+	KeyFrom           = "mindspec_from"
+	KeyLinks          = "mindspec_links"
+	KeyRun            = "mindspec_run"
+	KeyLease          = "mindspec_lease"
+	KeyRound          = "mindspec_round"
+	KeyTake           = "mindspec_take"
+	KeyTakes          = "mindspec_takes"
+	KeyDeferrals      = "mindspec_deferrals"
+	KeyRawClaims      = "mindspec_raw_claims"
+	KeyAnswer         = "mindspec_answer"
+	KeyDefer          = "mindspec_defer"
+	KeyJudgement      = "mindspec_judgement"
+	KeyRePanel        = "mindspec_repanel"
+	KeyRecord         = "mindspec_record"
+	KeyClosing        = "mindspec_closing"
+	KeyFindings       = "mindspec_findings"
+	KeyRead           = "mindspec_read"
+	KeyReturns        = "mindspec_returns"
+	KeyReproduced     = "mindspec_reproduced"
+	KeyVerifyVerdicts = "mindspec_verify_verdicts"
+	KeyUncounted      = "mindspec_uncounted"
 )
 
 const (
@@ -107,6 +109,13 @@ type Finding struct {
 	FindingSHA256 string `json:"finding_sha256"`
 	Text          string `json:"text,omitempty"`
 }
+
+// VerifyVerdictSource retains the source identity needed after files change.
+type VerifyVerdictSource struct {
+	Verdict    string `json:"verdict"`
+	FileSHA256 string `json:"file_sha256"`
+}
+type VerifyVerdictSources map[string]VerifyVerdictSource
 type VerifyReturn struct {
 	Slot          string `json:"slot"`
 	Round         int    `json:"round"`
@@ -172,13 +181,17 @@ type DecisionAnswer struct {
 	At     time.Time `json:"at"`
 }
 type DeferRecord struct {
-	Panel   string    `json:"panel,omitempty"`
-	Round   int       `json:"round,omitempty"`
-	Slot    string    `json:"slot,omitempty"`
-	Finding string    `json:"finding"`
-	To      string    `json:"to"`
-	Reason  string    `json:"reason"`
-	At      time.Time `json:"at"`
+	FindingSHA256    string    `json:"finding_sha256,omitempty"`
+	SourceVerdict    string    `json:"source_verdict,omitempty"`
+	SourceFileSHA256 string    `json:"source_file_sha256,omitempty"`
+	VerifyStep       string    `json:"verify_step,omitempty"`
+	Panel            string    `json:"panel,omitempty"`
+	Round            int       `json:"round,omitempty"`
+	Slot             string    `json:"slot,omitempty"`
+	Finding          string    `json:"finding"`
+	To               string    `json:"to"`
+	Reason           string    `json:"reason"`
+	At               time.Time `json:"at"`
 }
 type Judgement struct {
 	Value      string   `json:"value"`

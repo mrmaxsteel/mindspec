@@ -242,7 +242,8 @@ func SlotLineageRoot(s State, id string) (string, error) {
 			return "", actorFailure("slot retry has no valid predecessor")
 		}
 		prior := s.Records[predecessor]
-		if prior.Status != "closed" || validClose(s, prior) {
+		uncounted, _, _ := Decode[bool](r.Metadata, KeyUncounted)
+		if prior.Status != "closed" || (validClose(s, prior) && !(uncounted && passed(s, prior))) {
 			return "", actorFailure("slot retry would duplicate a valid vote")
 		}
 		id = predecessor

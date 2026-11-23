@@ -93,7 +93,13 @@ func OpenDecision(f *Fixture, gate, cause string, round int, options ...string) 
 	id := fmt.Sprintf("%s.decide.%s.r%d", gate, cause, round)
 	tuple, err := kernelid.Parse(id)
 	f.Must(err)
-	_, err = f.Store.Create(kernel.CreateRecord{ID: id, Parent: gate, Type: "decision", Title: "decision: halt stops the spec and every work item", Tuple: tuple, Metadata: kernel.Metadata(kernel.KeyDecision, kernel.DecisionRecord{Gate: tuple.Gate, Cause: cause, Options: options})})
+	metadata := kernel.Metadata(kernel.KeyDecision, kernel.DecisionRecord{Gate: tuple.Gate, Cause: cause, Options: options})
+	roundRecord, _, err := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	if roundRecord.Verify != "" {
+		metadata[kernel.KeyFrom] = kernel.From(roundRecord.Verify)
+	}
+	_, err = f.Store.Create(kernel.CreateRecord{ID: id, Parent: gate, Type: "decision", Title: "decision: halt stops the spec and every work item", Tuple: tuple, Metadata: metadata})
 	f.Must(err)
 	return id
 }
@@ -194,6 +200,12 @@ func Verify(f *Fixture, gate string, record kernel.VerifyRecord, findings []kern
 		kernel.KeyClose:   kernel.Receipt{Kind: "passed", Generation: 1, RecordSHA256: digest, At: at.Format(time.RFC3339Nano)},
 	}))
 	closeRecord(f, id)
+	round, has, err := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	if has {
+		round.Verify = id
+		f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRound, round)))
+	}
 	return id
 }
 

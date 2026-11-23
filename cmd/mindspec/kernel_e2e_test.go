@@ -320,6 +320,33 @@ func (e *kernelE2E) review(word string) kernel.Output {
 	return latest
 }
 
+func (e *kernelE2E) verifyReproduced() kernel.Output {
+	e.t.Helper()
+	out := e.apply()
+	for _, a := range out.Actions {
+		if a.Kind != "verify" {
+			continue
+		}
+		r := e.row(a.Step)
+		findings, _, err := kernel.Decode[[]kernel.Finding](r.Metadata, kernel.KeyFindings)
+		e.must(err)
+		v := kernel.VerifyRecord{Step: a.Step, Subject: a.Subject.Commit, Returns: []kernel.VerifyReturn{}}
+		for _, f := range findings {
+			v.Returns = append(v.Returns, kernel.VerifyReturn{Slot: f.Slot, Round: f.Round, Finding: f.Finding, FindingSHA256: f.FindingSHA256, Return: "reproduced"})
+		}
+		data, err := json.Marshal(v)
+		e.must(err)
+		path := filepath.Join(e.t.TempDir(), "verify.json")
+		e.must(os.WriteFile(path, data, 0600))
+		raw := e.ok("submit", a.Step, "--lease", e.lease(a.Step), "--record", path)
+		var verified kernel.Output
+		e.must(json.Unmarshal([]byte(raw), &verified))
+		return verified
+	}
+	e.t.Fatalf("no verify action: %+v", out)
+	return kernel.Output{}
+}
+
 func (e *kernelE2E) judge(value string, n int) {
 	e.t.Helper()
 	out := e.apply()
@@ -650,7 +677,7 @@ func TestS134E2E_RejectRequiresSubmittedFix(t *testing.T) {
 	e.apply()
 	e.create(e.implement(0))
 	e.review("REJECT")
-	out := e.apply()
+	out := e.verifyReproduced()
 	if len(out.Decisions) != 1 {
 		t.Fatalf("no reject decision: %+v", out)
 	}
@@ -806,7 +833,7 @@ func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
 	e.ok("submit", step, "--lease", token, "--commit", head)
 	e.create(e.apply())
 	e.mixedReview([]string{"REJECT", "APPROVE", "APPROVE"}, false)
-	out := e.apply()
+	out := e.verifyReproduced()
 	if len(out.Decisions) != 1 {
 		t.Fatalf("no decision: %+v", out)
 	}
