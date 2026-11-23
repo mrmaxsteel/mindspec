@@ -15,23 +15,41 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
+// The binary is shared read-only; tests needing to modify it must copy it first.
+// TestMain owns its lifetime so parallel tests can use it until m.Run returns.
+var mindspecTestBinary struct {
+	sync.Once
+	dir, path string
+	err       error
+	stderr    bytes.Buffer
+}
+
 func buildMindspecBinary(t *testing.T) string {
 	t.Helper()
-	tmp := t.TempDir()
-	out := filepath.Join(tmp, "mindspec")
 	repoRoot := repoRootFromTestDir(t)
 
-	cmd := exec.Command("go", "build", "-o", out, "./cmd/mindspec")
-	cmd.Dir = repoRoot
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("go build mindspec: %v\nstderr: %s", err, stderr.String())
+	mindspecTestBinary.Do(func() {
+		mindspecTestBinary.dir, mindspecTestBinary.err = os.MkdirTemp("", "mindspec-test-binary-")
+		if mindspecTestBinary.err != nil {
+			return
+		}
+		mindspecTestBinary.path = filepath.Join(mindspecTestBinary.dir, "mindspec")
+		cmd := exec.Command("go", "build", "-o", mindspecTestBinary.path, "./cmd/mindspec")
+		cmd.Dir = repoRoot
+		cmd.Stderr = &mindspecTestBinary.stderr
+		mindspecTestBinary.err = cmd.Run()
+		if mindspecTestBinary.err == nil {
+			mindspecTestBinary.err = os.Chmod(mindspecTestBinary.path, 0o555)
+		}
+	})
+	if mindspecTestBinary.err != nil {
+		t.Fatalf("build mindspec test binary: %v\nstderr: %s", mindspecTestBinary.err, mindspecTestBinary.stderr.String())
 	}
-	return out
+	return mindspecTestBinary.path
 }
 
 // strippedEnv returns an environment with:
