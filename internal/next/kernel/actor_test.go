@@ -91,6 +91,9 @@ func actorRefusal(t *testing.T, f *kerneltest.Fixture, call func() error, contai
 	if err == nil || !strings.Contains(err.Error(), contains) {
 		t.Fatalf("wanted refusal %q, got %v", contains, err)
 	}
+	lines := strings.Split(err.Error(), "\n")
+	recovery := strings.TrimPrefix(lines[len(lines)-1], "recovery: ")
+	assertSubmitRefusal(t, err, contains, recovery)
 	if after := kerneltest.Snapshot(t, f); after != before {
 		t.Fatal("refusal changed snapshot")
 	}

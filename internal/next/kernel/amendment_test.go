@@ -108,6 +108,7 @@ func TestS134Submit_FixPanelOnlyCommit(t *testing.T) {
 	f.Must(err)
 	commit := actorCommit(t, f, path, "review note", "bead/"+f.Items[0])
 	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Commit: commit})
+	assertSubmitRefusal(t, err, "outside panel directories", "mindspec next-action")
 	if err == nil || !strings.Contains(err.Error(), "outside panel directories") || actorRecord(t, f, id).Status == "closed" {
 		t.Fatalf("panel-only fix accepted: %v", err)
 	}

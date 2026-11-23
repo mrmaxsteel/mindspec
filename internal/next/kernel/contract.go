@@ -1,13 +1,13 @@
 package kernel
 
 import (
-	"errors"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"sync"
 	"time"
 )
 
-var ErrPreKernel = errors.New("this spec uses the existing lifecycle; use mindspec next, mindspec complete and mindspec impl approve\nrecovery: mindspec next")
+var ErrPreKernel error = termsafe.NewFailure("this spec uses the existing lifecycle; use mindspec next, mindspec complete and mindspec impl approve", "mindspec next")
 
 type Subject struct {
 	Commit string `json:"commit"`

@@ -264,13 +264,7 @@ func checkVerify(s State, r Record, _ Receipt) error {
 			if err := bead.CheckDeferral(ret.Target, s.Epic, t.WorkItem, []string{finding.Text}, func(text string) string { return text }); err != nil {
 				var requirements *bead.DeferralRequirementsError
 				if errors.As(err, &requirements) {
-					// Escape the finding before preserving the list's own line breaks.
-					message := strings.ReplaceAll(requirements.Error(), finding.Text, termsafe.EscapeRecovery(finding.Text))
-					lines := strings.Split(message, "\n")
-					for i := range lines {
-						lines[i] = termsafe.EscapeRecovery(lines[i])
-					}
-					return &preservedRecovery{cause: err, text: strings.Join(lines, "\n") + "\nrecovery: " + termsafe.EscapeRecovery(requirements.Recovery)}
+					return termsafe.NewLinesFailure(err, requirements.MessageLines(), requirements.Recovery)
 				}
 				return pathFailure(err, "", "mindspec next-action")
 			}

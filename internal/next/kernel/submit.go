@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -62,7 +63,8 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 		if options.Record != "" || options.Artifact != "" || options.Commit != "" {
 			return Output{}, actorFailure("submit needs one evidence flag")
 		}
-		return Answer(state, options.Step, options.Answer)
+		output, err := Answer(state, options.Step, options.Answer)
+		return output, pathFailure(err, "", "mindspec next-action")
 	}
 	var output Output
 	err := withActorLock(state, func(s State) error {
@@ -241,17 +243,8 @@ func actorGitBytes(root string, args ...string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = root
-	if (len(args) >= 2 && args[0] == "worktree" && args[1] == "list") ||
-		(len(args) == 2 && args[0] == "rev-parse" && args[1] == "--show-toplevel") {
-		cmd.Env = []string{}
-		for _, entry := range os.Environ() {
-			key, _, _ := strings.Cut(entry, "=")
-			switch key {
-			case "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE":
-				continue
-			}
-			cmd.Env = append(cmd.Env, entry)
-		}
+	if gitNamesRoot(args) {
+		cmd.Env = rootQueryEnvironment(os.Environ(), runtime.GOOS)
 	}
 	data, err := cmd.Output()
 	if err != nil {
@@ -274,6 +267,45 @@ func actorGitBytes(root string, args ...string) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// gitNamesRoot classifies the query, independent of flag order and count.
+func gitNamesRoot(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	if args[0] == "worktree" {
+		return args[1] == "list"
+	}
+	if args[0] != "rev-parse" {
+		return false
+	}
+	for _, arg := range args[1:] {
+		switch arg {
+		case "--show-toplevel", "--show-prefix", "--git-common-dir", "--git-dir", "--absolute-git-dir":
+			return true
+		}
+	}
+	return false
+}
+
+func rootQueryEnvironment(environ []string, goos string) []string {
+	env := make([]string, 0, len(environ))
+	for _, entry := range environ {
+		key, _, _ := strings.Cut(entry, "=")
+		override := false
+		for _, name := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"} {
+			if key == name || (goos == "windows" && strings.EqualFold(key, name)) {
+				override = true
+				break
+			}
+		}
+		if !override {
+			env = append(env, entry)
+		}
+	}
+	return env
+}
+
 func resolveArtifact(s State, o SubmitOptions) (Receipt, error) {
 	receipt := Receipt{Kind: "passed"}
 	evidenceRoot := s.Root

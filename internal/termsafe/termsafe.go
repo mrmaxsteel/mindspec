@@ -81,7 +81,28 @@ func EscapeRecovery(s string) string {
 
 // NewFailure escapes raw message and recovery text once.
 func NewFailure(message, recovery string) *Failure {
-	return &Failure{message: EscapeRecovery(message), recovery: EscapeRecovery(recovery)}
+	return &Failure{message: neutralize(EscapeRecovery(message)), recovery: EscapeRecovery(recovery)}
+}
+
+// NewLinesFailure escapes each message value once and keeps the supplied line breaks.
+// A value with a newline cannot add a message line. The cause stays available.
+func NewLinesFailure(cause error, lines []string, recovery string) *Failure {
+	safe := make([]string, len(lines))
+	for i, line := range lines {
+		safe[i] = neutralize(EscapeRecovery(line))
+	}
+	return &Failure{message: strings.Join(safe, "\n"), recovery: EscapeRecovery(recovery), cause: cause}
+}
+
+// neutralize prevents a safe message from supplying a recovery line.
+func neutralize(message string) string {
+	lines := strings.Split(message, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "recovery:") {
+			lines[i] = " " + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // NewWrappedFailure retains cause for errors.Is and errors.As.
@@ -103,7 +124,7 @@ func JoinFailures(failures []error, recovery string) *Failure {
 			messages = append(messages, Escape(err.Error()))
 		}
 	}
-	return &Failure{message: strings.Join(messages, "; "), recovery: EscapeRecovery(recovery)}
+	return &Failure{message: neutralize(strings.Join(messages, "; ")), recovery: EscapeRecovery(recovery), cause: errors.Join(failures...)}
 }
 
 func (f *Failure) Error() string { return f.message + "\nrecovery: " + f.recovery }
@@ -126,7 +147,7 @@ func PrefixFailure(err error, prefix string) error {
 	}
 	var failure *Failure
 	if errors.As(err, &failure) {
-		return &Failure{message: EscapeRecovery(prefix) + failure.message, recovery: failure.recovery, cause: err}
+		return &Failure{message: neutralize(EscapeRecovery(prefix) + failure.message), recovery: failure.recovery, cause: err}
 	}
 	return fmt.Errorf("%s%w", prefix, err)
 }

@@ -229,6 +229,7 @@ func TestS134Judge_RePanelValidationAndScope(t *testing.T) {
 			before := kerneltest.Snapshot(t, f)
 			gateBefore := actorRecord(t, f, gate)
 			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
+			assertSubmitRefusal(t, err, "", "mindspec next-action")
 			if err == nil || actorRecord(t, f, id).Status != "in_progress" {
 				t.Fatalf("invalid judgement accepted: %v", err)
 			}

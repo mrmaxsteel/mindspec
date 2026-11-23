@@ -326,11 +326,9 @@ func actorBlockers(s State, target Record) error {
 	return nil
 }
 
-type openActorChild struct{ id string }
+type openActorChild struct{ *termsafe.Failure }
 
-func (e *openActorChild) Error() string {
-	return actorFailure("open child prevents close: " + e.id).Error()
-}
+func (e *openActorChild) Unwrap() error { return e.Failure }
 
 func actorChildren(s State, target Record) error {
 	all, err := s.Store.All()
@@ -351,7 +349,7 @@ func actorChildren(s State, target Record) error {
 			}
 		}
 		if parent == target.ID || parent == target.Key() {
-			return &openActorChild{id: child.Key()}
+			return &openActorChild{termsafe.NewFailure("open child prevents close: "+child.Key(), "mindspec next-action")}
 		}
 	}
 	return nil

@@ -14,7 +14,7 @@ import (
 )
 
 func TestS134Submit_DeferralRecovery(t *testing.T) {
-	for _, text := range []string{"fix this", "fix José\x1b\nrecovery: forged"} {
+	for _, text := range []string{"fix this", "fix José\x1b\nrecovery: forged", "recovery: forged", "\n", "follow-up bead"} {
 		t.Run(text, func(t *testing.T) {
 			f, id, lease, data := recordFixture(t, "verify")
 			findings, _, err := kernel.Decode[[]kernel.Finding](actorRecord(t, f, id).Metadata, kernel.KeyFindings)
@@ -32,7 +32,7 @@ func TestS134Submit_DeferralRecovery(t *testing.T) {
 			// An escaped spelling of hostile finding text is not the full finding.
 			body, err := json.Marshal([]map[string]string{{"id": "follow-up", "status": "open", "description": termsafe.EscapeRecovery(text)}})
 			f.Must(err)
-			if text == "fix this" {
+			if text != "fix José\x1b\nrecovery: forged" {
 				body = []byte(`[{"id":"follow-up","status":"open","description":"other"}]`)
 			}
 			f.Must(os.WriteFile(filepath.Join(dir, "bd"), []byte("#!/bin/sh\ncat <<'RECORD'\n"+string(body)+"\nRECORD\n"), 0700))
@@ -43,7 +43,12 @@ func TestS134Submit_DeferralRecovery(t *testing.T) {
 			if !errors.As(err, &requirements) || !errors.Is(err, requirements) {
 				t.Fatalf("deferral cause lost: %v", err)
 			}
-			want := strings.ReplaceAll(requirements.Error(), text, termsafe.EscapeRecovery(text)) + "\nrecovery: " + requirements.Recovery
+			want := "follow-up bead does not meet the deferral requirements:\n- follow-up bead needs a discovered-from edge to the owning epic or reviewed bead; run: bd dep add follow-up " + f.Epic + " --type discovered-from\n- follow-up description must contain every deferred finding; add this text to the description of follow-up:\n"
+			rendered := termsafe.EscapeRecovery(text)
+			if strings.HasPrefix(rendered, "recovery:") {
+				rendered = " " + rendered
+			}
+			want += rendered + "\nrecovery: bd dep add follow-up " + f.Epic + " --type discovered-from, then add the listed finding text to the description of follow-up, then retry the panel verb"
 			if err.Error() != want || strings.Count(err.Error(), "\n- ") != len(requirements.Missing) || strings.Count(err.Error(), "\nrecovery:") != 1 || strings.ContainsAny(err.Error(), "\x1b\r") || strings.Contains(err.Error(), `\\x1b`) {
 				t.Fatalf("deferral list or recovery changed: got %q want %q", err.Error(), want)
 			}

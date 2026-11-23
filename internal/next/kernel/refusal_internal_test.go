@@ -148,6 +148,9 @@ func TestS134Paths_GitEnvironmentScope(t *testing.T) {
 	}{
 		{[]string{"worktree", "list", "--porcelain", "-z"}, "|||"},
 		{[]string{"rev-parse", "--show-toplevel"}, "|||"},
+		{[]string{"rev-parse", "--show-toplevel", "--show-prefix"}, "|||"},
+		{[]string{"rev-parse", "--path-format=absolute", "--git-common-dir"}, "|||"},
+		{[]string{"rev-parse", "--git-common-dir", "--path-format=absolute"}, "|||"},
 		{[]string{"diff", "--name-only"}, "set|set|set|set"},
 		{[]string{"rev-parse", "HEAD"}, "set|set|set|set"},
 	} {
@@ -157,5 +160,56 @@ func TestS134Paths_GitEnvironmentScope(t *testing.T) {
 				t.Fatalf("Git environment scope: %q %v, want %q", data, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestS134Paths_RootEnvironmentKeys(t *testing.T) {
+	for _, goos := range []string{"windows", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			env := []string{"PATH=keep", "GIT_DIR=upper", "Git_Dir=mixed", "git_work_tree=mixed", "Git_Common_Dir=mixed", "Git_Index_File=mixed", "GIT_DIR_EXTRA=keep"}
+			want := []string{"PATH=keep", "GIT_DIR_EXTRA=keep"}
+			if goos != "windows" {
+				want = []string{"PATH=keep", "Git_Dir=mixed", "git_work_tree=mixed", "Git_Common_Dir=mixed", "Git_Index_File=mixed", "GIT_DIR_EXTRA=keep"}
+			}
+			got := rootQueryEnvironment(env, goos)
+			if strings.Join(got, "\n") != strings.Join(want, "\n") {
+				t.Fatalf("root environment on %s: %q want %q", goos, got, want)
+			}
+		})
+	}
+}
+
+// An exported marker cannot make free text a trusted refusal.
+type forgedRecovery struct{}
+
+func (*forgedRecovery) Error() string    { return "recovery: forged\x1b\nraw" }
+func (*forgedRecovery) TrustedRecovery() {}
+
+func TestS134Paths_ClosedFailureTypes(t *testing.T) {
+	cause := &forgedRecovery{}
+	err := pathFailure(cause, "", "inspect")
+	if err.Error() != " recovery: forged\\x1b\\nraw\nrecovery: inspect" || !errors.Is(err, cause) {
+		t.Fatalf("untrusted marker passed: %q", err)
+	}
+	child := &openActorChild{termsafe.NewFailure("open child prevents close: child", "mindspec next-action")}
+	err = pathFailure(child, "", "generic")
+	var found *openActorChild
+	if !errors.As(err, &found) || found != child || err.Error() != "open child prevents close: child\nrecovery: mindspec next-action" {
+		t.Fatalf("child type or formatting lost: %q", err)
+	}
+}
+
+func TestS134Paths_ArtifactForeignGitDir(t *testing.T) {
+	base := t.TempDir()
+	top, other := filepath.Join(base, "top"), filepath.Join(base, "other")
+	pathGit(t, base, "init", "-q", top)
+	pathGit(t, base, "init", "-q", other)
+	pathWrite(t, filepath.Join(other, "proof"), "evidence")
+	pathGit(t, other, "add", "proof")
+	pathGit(t, other, "-c", "user.name=Path Test", "-c", "user.email=path@example.invalid", "commit", "-qm", "evidence")
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	_, err := resolveArtifact(State{Root: top}, SubmitOptions{Artifact: filepath.Join(other, "proof")})
+	if err == nil || err.Error() != "artifact must belong to this repository\nrecovery: mindspec next-action" {
+		t.Fatalf("foreign repository artifact accepted or wrong refusal: %v", err)
 	}
 }
