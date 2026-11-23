@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -73,18 +74,23 @@ func TestDeferral_ReportsEveryMissingRequirement(t *testing.T) {
 	if err == nil {
 		t.Fatal("check = nil, want refusal")
 	}
-	for _, want := range []string{
-		"discovered-from edge",
-		"bd dep add follow-up epic-x --type discovered-from",
-		"must contain every deferred finding",
+	wantLines := []string{
+		"follow-up bead does not meet the deferral requirements:",
+		"- follow-up bead needs a discovered-from edge to the owning epic or reviewed bead; run: bd dep add follow-up epic-x --type discovered-from",
+		"- follow-up description must contain every deferred finding; add this text to the description of follow-up:",
 		"fix the parser",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("refusal lacks %q:\n%v", want, err)
-		}
+	}
+	if want := strings.Join(wantLines, "\n"); err.Error() != want {
+		t.Fatalf("deferral refusal changed: got %q want %q", err, want)
 	}
 	var reqErr *DeferralRequirementsError
-	if !errors.As(err, &reqErr) || !strings.HasPrefix(reqErr.Recovery, "bd dep add follow-up epic-x --type discovered-from") {
-		t.Errorf("recovery must start with the edge command: %#v", err)
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("deferral requirements type lost: %v", err)
+	}
+	if got := reqErr.MessageLines(); !reflect.DeepEqual(got, wantLines) {
+		t.Errorf("deferral message structure changed: got %#v want %#v", got, wantLines)
+	}
+	if want := "bd dep add follow-up epic-x --type discovered-from, then add the listed finding text to the description of follow-up, then retry the panel verb"; reqErr.Recovery != want {
+		t.Errorf("deferral recovery changed: got %q want %q", reqErr.Recovery, want)
 	}
 }

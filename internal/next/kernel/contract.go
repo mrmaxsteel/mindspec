@@ -2,9 +2,10 @@ package kernel
 
 import (
 	"fmt"
-	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"sync"
 	"time"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 var ErrPreKernel error = termsafe.NewFailure("this spec uses the existing lifecycle; use mindspec next, mindspec complete and mindspec impl approve", "mindspec next")

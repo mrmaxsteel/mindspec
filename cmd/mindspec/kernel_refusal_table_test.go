@@ -14,7 +14,7 @@ import (
 
 func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 	bin := buildMindspecBinary(t)
-	for _, producer := range []string{"refuseHalt", "actorChildren.open", "checkVerify.deferral"} {
+	for _, producer := range []string{"refuseHalt", "actorChildren.open", "checkVerify.deferral", "Answer.store-update"} {
 		t.Run(producer, func(t *testing.T) {
 			f, _ := actorCmdFixture(t)
 			gate := f.Items[0] + ".review"
@@ -29,7 +29,12 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 			ret := kernel.VerifyReturn{Slot: finding.Slot, Round: 1, Finding: finding.Finding, FindingSHA256: finding.FindingSHA256, Return: "reproduced"}
 			want := ""
 			recovery := "mindspec next-action"
+			args := []string{"submit", id, "--lease", lease.Token}
 			switch producer {
+			case "Answer.store-update":
+				d := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
+				args = []string{"submit", d, "--answer", "fix"}
+				want = `exit status 1: answer store\x1b[31m\nforged recovery: x`
 			case "refuseHalt":
 				d := kerneltest.OpenDecision(f, gate, "reject", 1, "halt")
 				kerneltest.Answer(f, d, "halt")
@@ -55,11 +60,20 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 				f.Must(os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0700))
 				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			}
+			if producer == "Answer.store-update" {
+				dir := t.TempDir()
+				script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = update ]; then\nprintf 'answer store\\033[31m\\nforged recovery: x\\n' >&2\nexit 1\nfi\nexec '%s' \"$@\"\n", fakeBDBinary(t))
+				f.Must(os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0700))
+				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			}
 			data, err := json.Marshal(kernel.VerifyRecord{Step: id, Subject: subject, Returns: []kernel.VerifyReturn{ret}})
 			f.Must(err)
 			file := filepath.Join(t.TempDir(), "record.json")
 			f.Must(os.WriteFile(file, data, 0600))
-			raw, err := f.BinaryCommand(bin, "submit", id, "--lease", lease.Token, "--record", file)
+			if producer != "Answer.store-update" {
+				args = append(args, "--record", file)
+			}
+			raw, err := f.BinaryCommand(bin, args...)
 			if err == nil {
 				t.Fatal("binary accepted refusal fixture")
 			}
@@ -68,6 +82,11 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 			expected := want + "\nrecovery: " + recovery + "\n"
 			if text != "Error: "+expected {
 				t.Fatalf("binary refusal changed: got %q want %q", text, expected)
+			}
+			for _, r := range strings.TrimSuffix(text, "\n") {
+				if (r < 0x20 && r != '\n') || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+					t.Fatalf("raw binary control: %q", text)
+				}
 			}
 			lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 			count := 0

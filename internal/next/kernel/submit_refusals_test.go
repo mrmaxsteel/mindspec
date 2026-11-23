@@ -450,3 +450,80 @@ func TestS134Submit_ArtifactRefusalProducers(t *testing.T) {
 		t.Run(tc.name, tc.run)
 	}
 }
+
+func TestS134Submit_AnswerRefusalProducers(t *testing.T) {
+	for _, producer := range []string{"store-read", "store-update", "typed", "guard", "pre-kernel", "no-store"} {
+		t.Run(producer, func(t *testing.T) {
+			f, _, _, _ := recordFixture(t, "lens")
+			d := kerneltest.OpenDecision(f, f.Items[0]+".review", "reject", 1, "fix", "halt")
+			s := f.State()
+			var cause error = errors.New("answer store\x1b[31m\nrecovery: forged")
+			message, recovery := `answer store\x1b[31m`, "mindspec next-action"
+			switch producer {
+			case "pre-kernel":
+				s.Enrolled = false
+				cause = kernel.ErrPreKernel
+				message, recovery = "existing lifecycle", "mindspec next"
+			case "no-store":
+				s.Store = nil
+				message = "operation needs a store"
+			case "typed":
+				cause = termsafe.NewWrappedFailure(cause, "typed José\x1b", "inspect typed 'José'")
+				message, recovery = `typed José\x1b`, "inspect typed 'José'"
+			case "guard":
+				cause = guard.NewFailure("guard José\x1b", "inspect guard 'José'")
+				message, recovery = `guard José\x1b`, "inspect guard 'José'"
+			}
+			if producer != "pre-kernel" && producer != "no-store" {
+				store := *s.Store
+				run := store.Run
+				store.Run = func(args ...string) ([]byte, error) {
+					if producer == "store-read" || args[0] == "update" {
+						return nil, cause
+					}
+					return run(args...)
+				}
+				s.Store = &store
+			}
+			_, direct := kernel.Answer(s, d, "fix")
+			_, viaSubmit := kernel.Submit(s, kernel.SubmitOptions{Step: d, Answer: "fix"})
+			for _, err := range []error{direct, viaSubmit} {
+				if producer == "store-read" || producer == "store-update" {
+					want := `answer store\x1b[31m\nrecovery: forged` + "\nrecovery: " + recovery
+					if err == nil || err.Error() != want {
+						t.Fatalf("raw answer refusal changed: got %q want %q", err, want)
+					}
+					lines := strings.Split(err.Error(), "\n")
+					if len(lines) != 2 || lines[1] != "recovery: "+recovery {
+						t.Fatalf("answer recovery is not unique and final: %q", err)
+					}
+					for _, r := range lines[0] {
+						if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+							t.Fatalf("raw answer control: %q", err)
+						}
+					}
+				} else {
+					assertSubmitRefusal(t, err, message, recovery)
+				}
+				if producer != "no-store" && !errors.Is(err, cause) {
+					t.Fatalf("answer cause lost: %v", err)
+				}
+				if producer == "typed" {
+					var found *termsafe.Failure
+					if !errors.As(err, &found) || err.Error() != cause.Error() {
+						t.Fatalf("typed answer text or type changed: %v", err)
+					}
+				}
+				if producer == "guard" {
+					var found *guard.Failure
+					if !errors.As(err, &found) || err.Error() != cause.Error() {
+						t.Fatalf("guard answer text or type changed: %v", err)
+					}
+				}
+			}
+			if direct.Error() != viaSubmit.Error() {
+				t.Fatalf("answer entry points differ: direct %q submit %q", direct, viaSubmit)
+			}
+		})
+	}
+}

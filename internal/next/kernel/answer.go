@@ -10,5 +10,5 @@ func Answer(state State, decision, option string) (Output, error) {
 		output, err = answerLocked(s, decision, option)
 		return err
 	})
-	return output, err
+	return output, pathFailure(err, "", "mindspec next-action")
 }

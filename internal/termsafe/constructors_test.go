@@ -21,6 +21,7 @@ func TestRefusalConstructors(t *testing.T) {
 	cause := errors.New("cause")
 	messages := []struct{ name, raw, flat, lines string }{
 		{"recovery", "recovery: x", " recovery: x", " recovery: x"},
+		{"later-recovery", "a\nb\nrecovery: x", `a\nb\nrecovery: x`, "a\nb\n recovery: x"},
 		{"newline-recovery", "a\nrecovery: x", `a\nrecovery: x`, "a\n recovery: x"},
 		{"escape", "a\x1b", `a\x1b`, `a\x1b`},
 		{"nul", "a\x00", `a\x00`, `a\x00`},
