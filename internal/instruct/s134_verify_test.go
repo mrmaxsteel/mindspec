@@ -17,9 +17,24 @@ import (
 )
 
 func TestS134Instruct_VerifiedReject(t *testing.T) {
-	f := kerneltest.Enrolled(t, kerneltest.WithFake(true))
-	f.Must(os.MkdirAll(filepath.Join(f.Root, ".beads"), 0755))
-	f.Must(os.WriteFile(filepath.Join(f.Root, ".beads", "config.yaml"), []byte("types.custom: gate,step\n"), 0600))
+	instructVerifiedReject(t, true)
+}
+
+func TestS134Instruct_RealStoreVerifiedReject(t *testing.T) {
+	instructVerifiedReject(t, false)
+}
+
+func instructVerifiedReject(t *testing.T, fake bool) {
+	t.Helper()
+	var options []kerneltest.Option
+	if fake {
+		options = append(options, kerneltest.WithFake(true))
+	}
+	f := kerneltest.Enrolled(t, options...)
+	if fake {
+		f.Must(os.MkdirAll(filepath.Join(f.Root, ".beads"), 0755))
+		f.Must(os.WriteFile(filepath.Join(f.Root, ".beads", "config.yaml"), []byte("types.custom: gate,step\n"), 0600))
+	}
 	gate := f.Items[0] + ".review"
 	raw, err := f.Command("git", "rev-parse", "HEAD")
 	f.Must(err)
@@ -64,11 +79,13 @@ func TestS134Instruct_VerifiedReject(t *testing.T) {
 	if receipt.Retally != "verify" {
 		t.Fatalf("fixture did not close through verify: %+v", receipt)
 	}
-	old := instructKernelStateFn
-	instructKernelStateFn = func(string, string) (*kernel.State, error) { s := f.State(); return &s, nil }
-	t.Cleanup(func() { instructKernelStateFn = old })
+	if fake {
+		old := instructKernelStateFn
+		instructKernelStateFn = func(string, string) (*kernel.State, error) { s := f.State(); return &s, nil }
+		t.Cleanup(func() { instructKernelStateFn = old })
+	}
 	text := renderPanelState(gatherPanelState(func(string) (string, bool) { return head, true }, f.Root, f.SpecDir))
-	if !strings.Contains(text, "gate would PASS") || strings.Contains(text, "gate would BLOCK") || strings.Contains(strings.ToLower(text), "halt") {
+	if !strings.Contains(text, "- **review** — gate would PASS\n") || !strings.Contains(text, "kernel gate passed; completion can proceed") || strings.Contains(text, "gate would BLOCK") || strings.Contains(strings.ToLower(text), "halt") {
 		t.Fatalf("instruct retained the pre-kernel REJECT halt: %s", text)
 	}
 }
@@ -96,7 +113,59 @@ func TestS134Instruct_StoreFailureNotice(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := renderPanelState(gatherPanelState(nil, filepath.Dir(filepath.Dir(dir))))
-	if !strings.Contains(text, "notice:") || !strings.Contains(text, "tracker read failed") || strings.Contains(text, "gate would BLOCK") || strings.Contains(strings.ToLower(text), "halt") || strings.Contains(text, "\nrecovery: forged") {
+	if strings.Contains(text, "would PASS") || !strings.Contains(text, "- **review** — gate state is unknown\n") || !strings.Contains(text, "notice:") || !strings.Contains(text, "tracker read failed") || strings.Contains(text, "gate would BLOCK") || strings.Contains(strings.ToLower(text), "halt") || strings.Contains(text, "\nrecovery: forged") {
 		t.Fatalf("store read failure gave a halt or hid its notice: %s", text)
+	}
+}
+
+func TestS134Instruct_LegacyReadFailure(t *testing.T) {
+	f := paneltest.New(t)
+	p := f.Panel
+	p.Gate, p.Orchestrated, p.Telemetry, p.SubjectDigest = "bead", false, "", ""
+	bead := "test-1.1"
+	p.BeadID = &bead
+	p.Target = "bead/" + bead
+	dir := filepath.Join(t.TempDir(), "reviews", "review")
+	if err := panel.WriteSnapshot(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	old := instructKernelStateFn
+	t.Cleanup(func() { instructKernelStateFn = old })
+	resolve := func(string) (string, bool) { return strings.Repeat("b", 40), true }
+	instructKernelStateFn = func(string, string) (*kernel.State, error) { return nil, nil }
+	before := gatherPanelState(resolve, filepath.Dir(filepath.Dir(dir)))
+	if len(before) != 1 {
+		t.Fatalf("missing legacy panel: %+v", before)
+	}
+	verdict, reason := before[0].verdict()
+	if verdict != GateBlock || !strings.Contains(reason, "commits landed after review") {
+		t.Fatalf("stale legacy panel must block: %s", renderPanelState(before))
+	}
+	p.Orchestrated = false
+	if err := panel.WriteSnapshot(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	instructKernelStateFn = func(string, string) (*kernel.State, error) {
+		return nil, errors.New("tracker read failed\nrecovery: forged")
+	}
+	after := gatherPanelState(resolve, filepath.Dir(filepath.Dir(dir)))
+	if len(after) != 1 {
+		t.Fatalf("missing legacy panel after read failure: %+v", after)
+	}
+	got, why := after[0].verdict()
+	text := renderPanelState(after)
+	if got != verdict || why != reason || !strings.Contains(text, "notice: kernel panel state is unavailable:") || !strings.Contains(text, "tracker read failed") || strings.Contains(text, "\nrecovery: forged") {
+		t.Fatalf("legacy verdict changed or notice lost: %s", text)
+	}
+	for _, orchestrated := range []bool{false, true} {
+		p.Orchestrated = orchestrated
+		if err := panel.WriteSnapshot(dir, p); err != nil {
+			t.Fatal(err)
+		}
+		instructKernelStateFn = func(string, string) (*kernel.State, error) { return nil, nil }
+		text := renderPanelState(gatherPanelState(resolve, filepath.Dir(filepath.Dir(dir))))
+		if strings.Contains(text, "unavailable") || !strings.Contains(text, "gate would BLOCK\n") {
+			t.Fatalf("unenrolled read changed legacy verdict: %s", text)
+		}
 	}
 }

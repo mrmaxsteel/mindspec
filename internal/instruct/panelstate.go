@@ -51,6 +51,8 @@ const (
 	// GateWarn — the gate would pass with a Warn (abandoned panels,
 	// missing-ref pass-through); the complete proceeds but is audited.
 	GateWarn
+	// GateUnknown means that the gate state could not be read.
+	GateUnknown
 )
 
 // PanelStateEntry is one panel's resolved state: the fs-derived tally
@@ -60,6 +62,7 @@ const (
 type PanelStateEntry struct {
 	KernelVerdict *PanelGateVerdict
 	KernelReason  string
+	Notice        string
 	// Slug is the panel directory basename (review/<slug>).
 	Slug string
 	// Tally is the fs-derived round/verdict state (panel.Tally).
@@ -173,6 +176,9 @@ func renderPanelState(entries []PanelStateEntry) string {
 		b.WriteString("\n")
 		b.WriteString(fmt.Sprintf("- **%s** — %s\n", termsafe.Escape(e.Slug), gateLabel(v)))
 		b.WriteString(fmt.Sprintf("  - %s\n", reason))
+		if e.Notice != "" {
+			b.WriteString("  - " + e.Notice + "\n")
+		}
 		if e.Tally != nil && e.Tally.Panel != nil {
 			b.WriteString("  - " + panel.RuleLine(e.Tally) + "\n")
 			if notice := panel.LegacyThresholdNotice(e.Tally.Panel); notice != "" {
@@ -196,6 +202,8 @@ func gateLabel(v PanelGateVerdict) string {
 		return "gate would PASS"
 	case GateWarn:
 		return "gate would PASS (with Warn)"
+	case GateUnknown:
+		return "gate state is unknown"
 	default:
 		return "gate would BLOCK"
 	}
@@ -254,6 +262,7 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 	stateErrors := map[string]error{}
 	read := map[string]bool{}
 	for _, reg := range regs {
+		notice := ""
 		if reg.Err == nil && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review") {
 			spec := reg.Panel.Spec
 			if !read[spec] {
@@ -261,15 +270,16 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 				states[spec], stateErrors[spec] = instructKernelStateFn(roots[0], spec)
 			}
 			state, stateErr := states[spec], stateErrors[spec]
-			if state != nil && state.Enrolled || stateErr != nil || reg.Panel.Orchestrated {
+			if stateErr != nil {
+				notice = "notice: kernel panel state is unavailable: " + termsafe.Escape(stateErr.Error())
+			}
+			if stateErr == nil && state != nil && state.Enrolled || stateErr != nil && reg.Panel.Orchestrated {
 				res, err := panel.Tally(reg.Dir)
 				if err != nil {
 					continue
 				}
-				verdict, reason := GateWarn, "notice: kernel panel state is unavailable"
-				if stateErr != nil {
-					reason += ": " + termsafe.Escape(stateErr.Error())
-				} else if state != nil && state.Enrolled {
+				verdict, reason := GateUnknown, notice
+				if stateErr == nil && state != nil && state.Enrolled {
 					gate := state.Epic + ".final"
 					if reg.Panel.IsBead() {
 						gate = kernel.GateBase(*reg.Panel.BeadID)
@@ -324,6 +334,7 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 			}
 			entries = append(entries, PanelStateEntry{
 				Facts:         &facts,
+				Notice:        notice,
 				Slug:          reg.Slug(),
 				Tally:         facts.Res,
 				LiveBranchSHA: facts.HeadSHA,
@@ -336,7 +347,7 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 		if err != nil {
 			continue
 		}
-		entries = append(entries, PanelStateEntry{Slug: reg.Slug(), Tally: res})
+		entries = append(entries, PanelStateEntry{Slug: reg.Slug(), Tally: res, Notice: notice})
 	}
 	return entries
 }

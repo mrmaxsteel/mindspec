@@ -14,6 +14,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
@@ -51,7 +53,7 @@ func assertSubmitRefusal(t *testing.T, err error, message, recovery string) {
 			}
 		}
 		for _, r := range line {
-			if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == 0x2028 || r == 0x2029 || r == 0x202e {
 				t.Fatalf("raw control: %q", text)
 			}
 		}
@@ -67,7 +69,7 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 		"pre-kernel", "withActorLock.store", "Submit.answer-flags", "actorRecord.foreign", "Submit.token", "Submit.evidence-count", "Submit.evidence-kind", "Submit.expired",
 		"readRecordFile.missing", "readRecordFile.worktree", "readRecordBytes.utf8", "strictRecord.decode", "strictRecord.trailing", "checkLens.shape", "checkLens.slot", "checkLens.missing-slot",
 		"activeActorRound.stale", "actorBlockers.held", "actorChildren.open", "refuseHalt", "recordCloseWrites.hook", "recordCloseWrites.hook-kind", "recordCloseWrites.size", "recordCloseWrites.conflict", "Submit.BeforeClose.raw", "Submit.BeforeClose.typed", "Submit.BeforeClose.guard", "Submit.receipt-different", "Submit.receipt-superseded", "Submit.answer.raw", "refreshActorState", "phase.WithPhaseLock", "passExcept.rule", "Pass.rule", "validateJudgement", "SlotLineageRoot", "readRecordFile.size", "actorRecord.work-item", "actorRecord.kind", "actorBlockers.missing-blocker", "actorBlockers.missing-ancestor", "actorBlockers.decision", "activeActorRound.absent", "checkClosingConflict", "ValidReceipt", "Store.update", "checkVerdict.registration", "Submit.artifact-check", "readCheckedRecord.identity", "repositoryRoots", "Submit.BeforeClose.guard-multiple", "Submit.BeforeClose.guard-zero",
-		"verifyCloseWrites.registration",
+		"verifyCloseWrites.registration", "recordCloseWrites.disposition", "recordCloseWrites.append", "recordCloseWrites.snapshot", "verifyCloseWrites.source", "verifyCloseWrites.at", "verifyCloseWrites.evidence", "verifyCloseWrites.repository", "verifyCloseWrites.panel-read", "refusedRound.empty", "VerifyRetallyFits.read", "VerifyRetallyFits.coverage", "VerifyRetallyFits.round-files", "VerifyRetallyFits.verdict-read",
 	} {
 		t.Run(producer, func(t *testing.T) {
 			f, id, lease, data := recordFixture(t, "lens")
@@ -77,6 +79,9 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 			var expectedCause error
 			var expectedText string
 			switch producer {
+			case "verifyCloseWrites.source", "verifyCloseWrites.at", "verifyCloseWrites.evidence", "verifyCloseWrites.repository", "verifyCloseWrites.panel-read", "refusedRound.empty", "VerifyRetallyFits.read", "VerifyRetallyFits.coverage", "VerifyRetallyFits.round-files", "VerifyRetallyFits.verdict-read":
+				verifyProjectionRefusal(t, producer)
+				return
 			case "pre-kernel":
 				s.Enrolled = false
 				recovery = "mindspec next"
@@ -150,6 +155,28 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 					return nil, errors.New("hook\x1b")
 				}))
 				message = `hook\x1b`
+			case "recordCloseWrites.append", "recordCloseWrites.snapshot":
+				fixture := paneltest.New(t)
+				lines, err := panel.ReadLedger(fixture.Dir)
+				f.Must(err)
+				base := filepath.Join(t.TempDir(), "hostile\x1b\n recovery: forged")
+				f.Must(os.MkdirAll(base, 0700))
+				dir := filepath.Join(base, "p")
+				if producer == "recordCloseWrites.append" {
+					f.Must(os.WriteFile(dir, []byte("fault"), 0600))
+					message, recovery = "cannot append verify dispositions:", "restore the panel ledger, then retry submit"
+				} else {
+					f.Must(os.MkdirAll(filepath.Join(dir, panel.FileName), 0700))
+					message, recovery = "cannot write verify panel snapshot:", "restore the panel directory, then retry submit"
+				}
+				t.Cleanup(kernel.ReplaceCloseWriteHookForTest("lens", func(kernel.State, kernel.Record, kernel.Receipt) ([]kernel.Write, error) {
+					return []kernel.Write{{Kind: "panel", ID: id, Panel: &kernel.PanelWrite{Dir: dir, Records: lines}}}, nil
+				}))
+			case "recordCloseWrites.disposition":
+				t.Cleanup(kernel.ReplaceCloseWriteHookForTest("lens", func(kernel.State, kernel.Record, kernel.Receipt) ([]kernel.Write, error) {
+					return []kernel.Write{{Kind: "panel", Panel: &kernel.PanelWrite{Records: [][]byte{[]byte(`{"record":"recovery: forged\n\u001b"}`)}}}}, nil
+				}))
+				message, recovery = "invalid verify disposition:", "correct the verify record and retry submit"
 			case "verifyCloseWrites.registration":
 				f, id, lease, data = recordFixture(t, "verify")
 				findings, _, err := kernel.Decode[[]kernel.Finding](actorRecord(t, f, id).Metadata, kernel.KeyFindings)
@@ -382,6 +409,10 @@ func TestS134Submit_VerifyRefusalProducers(t *testing.T) {
 			f, id, lease, data := recordFixture(t, "verify")
 			var record kernel.VerifyRecord
 			f.Must(json.Unmarshal([]byte(data), &record))
+			findings, _, err := kernel.Decode[[]kernel.Finding](actorRecord(t, f, id).Metadata, kernel.KeyFindings)
+			f.Must(err)
+			findings[0].Text = "hostile\x1b\r\nrecovery: forged\u2028\u202e\u0085"
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, findings)))
 			ret := &record.Returns[0]
 			message, recovery := "", "mindspec next-action"
 			switch producer {
@@ -395,9 +426,12 @@ func TestS134Submit_VerifyRefusalProducers(t *testing.T) {
 				ret.Slot = ""
 				message = "needs a finding identity"
 			case "checkVerify.unknown":
-				ret.Finding = "other"
+				ret.Slot, ret.Finding = "hostile\x1b\n recovery: forged", "hostile\r\n recovery: forged"
 				message = "unknown or repeated finding"
 			case "checkVerify.repeated":
+				ret.Slot, ret.Finding = "hostile\x1b\n recovery: forged", "hostile\r\n recovery: forged"
+				findings[0].Slot, findings[0].Finding = ret.Slot, ret.Finding
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, findings)))
 				record.Returns = append(record.Returns, *ret)
 				message = "unknown or repeated finding"
 			case "checkVerify.ground":
@@ -512,7 +546,7 @@ func TestS134Submit_AnswerRefusalProducers(t *testing.T) {
 						t.Fatalf("answer recovery is not unique and final: %q", err)
 					}
 					for _, r := range lines[0] {
-						if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+						if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == 0x2028 || r == 0x2029 || r == 0x202e {
 							t.Fatalf("raw answer control: %q", err)
 						}
 					}
@@ -540,4 +574,103 @@ func TestS134Submit_AnswerRefusalProducers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func verifyProjectionRefusal(t *testing.T, producer string) {
+	t.Helper()
+	// The projection seam can exercise guards whose input has already passed
+	// Submit validation, including an invalid receipt time and missing source.
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	refusedPanel(t, f, gate, "review", 1, panel.VerdictRequestChanges)
+	// recordFixture disables rules for its caller. Restore the real registry here.
+	t.Cleanup(kernel.ReplaceRulesForTest(kernel.DefaultRegistry))
+	reduce(t, f, true)
+	id, v := verifyRecord(t, f, gate, 0)
+	r := record(t, f, id)
+	findings, _, err := kernel.Decode[[]kernel.Finding](r.Metadata, kernel.KeyFindings)
+	f.Must(err)
+	for i := range findings {
+		findings[i].Text = "hostile\x1b\n recovery: forged\u2028\u202e\u0085"
+	}
+	r.Metadata[kernel.KeyFindings] = findings
+	v.Returns = v.Returns[:1]
+	v.Returns[0].Return, v.Returns[0].Target = "deferred", "follow-up"
+	raw, err := json.Marshal(v)
+	f.Must(err)
+	r.Metadata[kernel.KeyRecord] = string(raw)
+	receipt := kernel.Receipt{At: kernel.Now().UTC().Format(time.RFC3339Nano)}
+	message, recovery := "", "mindspec next-action"
+	s := f.State()
+	switch producer {
+	case "verifyCloseWrites.source":
+		delete(r.Metadata, kernel.KeyRead)
+		delete(r.Metadata, kernel.KeyVerifyVerdicts)
+		message = "deferred finding has no pinned source verdict"
+	case "verifyCloseWrites.at":
+		receipt.At = "invalid"
+		message = "verify receipt needs a valid at"
+	case "verifyCloseWrites.evidence", "verifyCloseWrites.repository":
+		v.Returns[0].Return = "refuted"
+		v.Returns[0].Evidence = filepath.Join(t.TempDir(), "hostile\x1b\n recovery: forged")
+		raw, err = json.Marshal(v)
+		f.Must(err)
+		r.Metadata[kernel.KeyRecord] = string(raw)
+		message, recovery = "cannot resolve verify evidence:", "give a resolving repository path, commit or HTTPS URL"
+		if producer == "verifyCloseWrites.repository" {
+			f.Must(os.WriteFile(v.Returns[0].Evidence, []byte("proof"), 0600))
+			s.Root = filepath.Join(t.TempDir(), "hostile\x1b\n recovery: forged")
+			message, recovery = "cannot resolve verify repository:", "restore access to the repository and retry submit"
+		}
+	case "verifyCloseWrites.panel-read":
+		dir := filepath.Join(f.SpecDir, "reviews", "review")
+		f.Must(os.Rename(dir, filepath.Join(t.TempDir(), "panel")))
+		f.Must(os.WriteFile(dir, []byte("hostile\x1b\n recovery: forged"), 0600))
+		message, recovery = "cannot read verify panel:", "restore the panel directory and retry submit"
+	case "refusedRound.empty":
+		f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, []kernel.Finding{})))
+		f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyClosing, kernel.Closing{At: kernel.Now(), Conflict: &kernel.ClosingIdentity{Generation: 2}})))
+		_, err = kernel.NextAction(f.State(), true)
+		assertSubmitRefusal(t, err, "a complete refused round has no findings", recovery)
+		return
+	case "VerifyRetallyFits.read", "VerifyRetallyFits.coverage", "VerifyRetallyFits.round-files", "VerifyRetallyFits.verdict-read":
+		v.Returns = v.Returns[:0]
+		for _, finding := range findings {
+			v.Returns = append(v.Returns, kernel.VerifyReturn{Slot: finding.Slot, Round: 1, Finding: finding.Finding, FindingSHA256: finding.FindingSHA256, Return: "reproduced"})
+		}
+		// Seed the closed verify and its only outcome without rewriting the panel.
+		data, err := json.Marshal(v)
+		f.Must(err)
+		f.Must(f.Store.WriteMetadata(id, map[string]any{kernel.KeyRecord: string(data), kernel.KeyReturns: v.Returns}))
+		f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", RecordSHA256: digest(string(data)), At: receipt.At}))
+		f.Must(f.Store.SetStatusIf(id, "open", "closed"))
+		fix := gate + ".r2.fix"
+		f.Create(fix, gate)
+		f.Must(f.Store.WriteMetadata(fix, kernel.Metadata(kernel.KeyFrom, kernel.From(id))))
+		res, err := panel.Tally(filepath.Join(f.SpecDir, "reviews", "review"))
+		f.Must(err)
+		frozen := f.State()
+		if producer == "VerifyRetallyFits.round-files" {
+			res.Dir = filepath.Join(t.TempDir(), "hostile\x1b\n recovery: forged")
+			f.Must(os.WriteFile(res.Dir, []byte("fault"), 0600))
+			message, recovery = "cannot read round verdict files:", "restore the panel directory and retry"
+		} else if producer == "VerifyRetallyFits.verdict-read" {
+			f.Must(os.Symlink(filepath.Join(t.TempDir(), "absent"), filepath.Join(res.Dir, "hostile\x1b\r recovery: forged-round-1.json")))
+			message, recovery = "cannot read round verdict:", "restore the panel verdict file and retry"
+		} else if producer == "VerifyRetallyFits.read" {
+			read, _, err := kernel.Decode[map[string]string](record(t, f, id).Metadata, kernel.KeyRead)
+			f.Must(err)
+			read["hostile\x1b\n recovery: forged"] = strings.Repeat("b", 64)
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRead, read)))
+			frozen = f.State()
+			message = "verify read set differs at: hostile\\x1b"
+		} else {
+			res.Verdicts[0].Findings[0].SHA256 = strings.Repeat("b", 64)
+			message = "verify returns do not cover the round findings"
+		}
+		assertSubmitRefusal(t, kernel.VerifyRetallyFits(frozen, gate, res), message, recovery)
+		return
+	}
+	_, err = kernel.VerifyCloseWritesForTest(s, r, receipt)
+	assertSubmitRefusal(t, err, message, recovery)
 }

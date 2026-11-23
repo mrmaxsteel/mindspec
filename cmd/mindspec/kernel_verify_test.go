@@ -383,3 +383,40 @@ func TestS134VerifyCmd_FrozenRoundCreate(t *testing.T) {
 		t.Fatalf("next registration lost the frozen verify: %+v", round)
 	}
 }
+
+func TestS134VerifyCmd_RetallyReadSet(t *testing.T) {
+	kerneltest.SetClock(t, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "review", Round: 1, Subject: head, Slots: []string{"R1", "R2"}})
+	dir := filepath.Join(f.SpecDir, "reviews", "review")
+	stray := filepath.Join(dir, "R9-round-1.json")
+	f.Must(os.WriteFile(stray, []byte(`{"verdict":"REQUEST_CHANGES","hard_block":true,"rationale":"stray hard block"}`), 0644))
+	kernelPanelVerdict(t, f, gate, head, "review", "R1", "APPROVE", 1)
+	kernelPanelVerdict(t, f, gate, head, "review", "R2", "REQUEST_CHANGES", 1)
+	v := kernelPanelVerifyRecord(t, f, gate, 99)
+	t.Logf("verify findings: %+v", v.Returns)
+	kerneltest.SetClock(t, kernel.Now().Add(500*time.Millisecond))
+	out := kernelPanelSubmitVerify(t, f, v)
+	t.Logf("verify out decisions=%d", len(out.Decisions))
+	fix := gate + ".r2.fix"
+	if kernelPanelRecord(t, f, fix).Status != "open" || kernelPanelRecord(t, f, gate).Status == "closed" {
+		t.Fatal("setup: fix not open")
+	}
+	// Remove the stray veto file after the verify reproduced it (moved, not deleted).
+	f.Must(os.Rename(stray, filepath.Join(t.TempDir(), "R9-round-1.json")))
+	kerneltest.SetClock(t, kernel.Now().Add(time.Second))
+	o, err := kernelPanelRun(t, panelRefuteCmd, "review", "--spec", f.SpecID, "--slot", "R2", "--round", "1", "--finding", "ccr[0]", "--by", "operator", "--ground", "disproven", "--reason", "checked", "--evidence", "https://example.invalid/second")
+	kernelPanelRequire(t, o, err)
+	g := kernelPanelRecord(t, f, gate)
+	t.Logf("gate status=%s fix status=%s passErr=%v", g.Status, kernelPanelRecord(t, f, fix).Status, kernel.CheckPassedGate(f.State(), gate))
+	if g.Status == "closed" || kernelPanelRecord(t, f, fix).Status != "open" {
+		t.Fatal("retally closed a gate or fix after its frozen veto file moved")
+	}
+	res, err := panel.Tally(dir)
+	f.Must(err)
+	err = kernel.VerifyRetallyFits(f.State(), gate, res)
+	if err == nil || !strings.Contains(err.Error(), "verify read set differs at: ") {
+		t.Fatalf("missing read-set mismatch: %v", err)
+	}
+}

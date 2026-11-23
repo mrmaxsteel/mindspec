@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -135,7 +136,10 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 				if !unexpected && i == 1 {
 					v = paneltest.Verdict(panel.VerdictRequestChanges)
 					v.HardBlock = true
+					v.Rationale = "retain this full veto rationale"
 					v.ConcreteChangesRequired[0].Text = "retain this full veto change"
+					v.ConcreteChangesRequired = append(v.ConcreteChangesRequired, v.ConcreteChangesRequired[0])
+					v.ConcreteChangesRequired[1].Text = "retain the second full veto change"
 				}
 				v.Slot, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i), gateHead(t, f, gate), "test-model"
 				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
@@ -152,7 +156,7 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 			if len(findings) != 1 || findings[0].Finding != "veto" || unexpected && findings[0].Slot != "R9" {
 				t.Fatalf("veto files did not give exactly one veto: %+v", findings)
 			}
-			if !unexpected && !strings.Contains(findings[0].Text, "retain this full veto change") {
+			if !unexpected && findings[0].Text != "retain this full veto rationale\nretain this full veto change\nretain the second full veto change" {
 				t.Fatalf("veto lost its fix text: %+v", findings)
 			}
 			lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
@@ -168,6 +172,12 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 			f.Must(err)
 			if unexpected && len(out.Decisions) != 1 || !unexpected && len(out.Decisions) != 0 {
 				t.Fatalf("hard-block and REJECT veto decisions differ: %+v", out)
+			}
+			fix := record(t, f, gate+".r2.fix")
+			reproduced, _, err := kernel.Decode[[]kernel.Finding](fix.Metadata, kernel.KeyReproduced)
+			f.Must(err)
+			if fix.Status != "open" || !reflect.DeepEqual(reproduced, findings) {
+				t.Fatalf("fix must keep exactly the full veto finding: got %+v want %+v", reproduced, findings)
 			}
 		})
 	}
@@ -458,7 +468,9 @@ func TestS134Verify_Frozen(t *testing.T) {
 	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: fix, Lease: lease.Token, Commit: commit})
 	f.Must(err)
 	round, _, _ := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
-	if round.Round != 2 || round.Prior == nil || round.Prior.Verify != gate+".r1.verify" || record(t, f, extra).Status != "closed" {
+	receipt, _, err := kernel.Decode[kernel.Receipt](record(t, f, extra).Metadata, kernel.KeyClose)
+	f.Must(err)
+	if round.Round != 2 || round.Prior == nil || round.Prior.Verify != gate+".r1.verify" || record(t, f, extra).Status != "closed" || receipt.Kind != "superseded" {
 		t.Fatalf("next round lost the frozen prior or open slot: %+v", round)
 	}
 }
@@ -596,5 +608,83 @@ func TestS134SeedMatch_Verify(t *testing.T) {
 	a.Metadata[kernel.KeyLease] = al
 	if !jsonEqual(a, b) {
 		t.Fatalf("verify seeder differs from real close: real=%+v seed=%+v", a, b)
+	}
+}
+
+func TestS134Verify_RetallyReadSet(t *testing.T) {
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	refusedPanel(t, f, gate, "review", 1, panel.VerdictRequestChanges)
+	dir := filepath.Join(f.SpecDir, "reviews", "review")
+	stray := filepath.Join(dir, "R9-round-1.json")
+	put(t, stray, `{"verdict":"REQUEST_CHANGES","hard_block":true,"rationale":"stray hard block"}`)
+	reproduceVerify(t, f, gate)
+	fix := gate + ".r2.fix"
+	f.Must(os.Rename(stray, filepath.Join(t.TempDir(), "R9-round-1.json")))
+	res, err := panel.Tally(dir)
+	f.Must(err)
+	// Append a later enrolled verb for each roster finding. The frozen veto
+	// remains reproduced even though the current tally can pass without it.
+	findings, _, err := kernel.Decode[[]kernel.Finding](record(t, f, fix).Metadata, kernel.KeyReproduced)
+	f.Must(err)
+	for _, finding := range findings {
+		if finding.Finding == "veto" {
+			continue
+		}
+		ref := panel.Refutation{Slot: finding.Slot, Round: 1, Finding: finding.Finding, FindingSHA256: finding.FindingSHA256, FindingText: finding.Text, Ground: "disproven", Reason: "checked", Evidence: "https://example.invalid/proof", By: "operator", CreatedAt: kernel.Now().Add(time.Second).UTC().Format(time.RFC3339Nano), Enrolled: true}
+		line, err := json.Marshal(panel.RefutationRecord{Record: panel.RecordRefutation, Spec: f.SpecID, Panel: "review", Refutation: ref})
+		f.Must(err)
+		f.Must(panel.AppendRecords(dir, line))
+		res.Panel.Refutations = append(res.Panel.Refutations, ref)
+	}
+	f.Must(panel.WriteSnapshot(dir, *res.Panel))
+	res, err = panel.Tally(dir)
+	f.Must(err)
+	if !kernel.FilterDispositions(f.State(), gate, res).PassRule(true) {
+		t.Fatal("fixture must pass without the frozen read set")
+	}
+	reduce(t, f, true)
+	if record(t, f, gate).Status == "closed" || record(t, f, fix).Status != "open" {
+		t.Fatal("retally closed a gate or fix after its frozen veto file moved")
+	}
+	// A receipt written by a raw close must also fail the shared gate-pass
+	// evidence reader, even when the current tally alone passes.
+	s := f.State()
+	g := s.Records[gate]
+	round, _, err := kernel.Decode[kernel.GateRound](g.Metadata, kernel.KeyRound)
+	f.Must(err)
+	g.Status = "closed"
+	g.Metadata[kernel.KeyClose] = kernel.Receipt{Kind: "passed", Retally: "tally", Subject: round.Subject}
+	s.Records[gate] = g
+	if err := kernel.CheckPassedGate(s, gate); err == nil || !strings.Contains(err.Error(), "has no passing receipt") {
+		t.Fatalf("gatePassEvidence accepted a retally with a changed read set: %v", err)
+	}
+	assertSubmitRefusal(t, kernel.VerifyRetallyFits(f.State(), gate, res), "verify read set differs at: ", "mindspec next-action")
+}
+
+func TestS134Verify_ExcludedOutcome(t *testing.T) {
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	refusedPanel(t, f, gate, "review", 1, panel.VerdictRequestChanges)
+	reproduceVerify(t, f, gate)
+	s := f.State()
+	round, _, err := kernel.Decode[kernel.GateRound](s.Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	fix := s.Records[gate+".r2.fix"]
+	delete(s.Records, fix.Key())
+	var steps []string
+	for _, id := range s.Steps {
+		if id != fix.Key() {
+			steps = append(steps, id)
+		}
+	}
+	s.Steps = steps
+	s.ExcludedStep = &fix
+	if !kernel.VerifyApplied(s, gate, round) {
+		t.Fatal("omitting the only fix target thawed the applied verify")
+	}
+	s.ExcludedStep = nil
+	if kernel.VerifyApplied(s, gate, round) {
+		t.Fatal("fixture has another verify outcome")
 	}
 }
