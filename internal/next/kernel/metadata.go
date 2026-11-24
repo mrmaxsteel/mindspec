@@ -60,6 +60,10 @@ func metadataSizeFailure(gate, step, key string, size int64, sizeKind string) er
 
 // KernelTempDir returns the external directory for metadata files and actor records.
 func KernelTempDir(root string) (string, error) {
+	return kernelTempDir(root, true)
+}
+
+func kernelTempDir(root string, create bool) (string, error) {
 	root, err := absoluteSuppliedPath(root)
 	if err != nil {
 		return "", pathFailure(err, "cannot resolve project root: ", "restore access to the project root, then retry")
@@ -93,10 +97,15 @@ func KernelTempDir(root string) (string, error) {
 	base := checked.resolved
 	sum := sha256.Sum256([]byte(root))
 	dir := filepath.Join(base, "mindspec-kernel-"+hex.EncodeToString(sum[:12]))
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", tempDirFailure(err)
+	if create {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return "", tempDirFailure(err)
+		}
 	}
 	info, err := os.Lstat(dir)
+	if !create && os.IsNotExist(err) {
+		return dir, nil
+	}
 	if err != nil {
 		return "", tempDirFailure(err)
 	}

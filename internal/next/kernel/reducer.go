@@ -373,6 +373,9 @@ func implement(s State) (Changes, error) {
 			target = id
 		}
 		brief := []string{"mindspec", "next", target, "--emit-only"}
+		if t.Kind == "lens" || t.Kind == "verify" || t.Kind == "fix" || t.Kind == "change-judge" {
+			brief = []string{"mindspec", "brief", id}
+		}
 		if t.Kind == "review-slot" {
 			gate := activeGate(s, t.Gate)
 			reg, _, err := Decode[RegistrationRecord](s.Records[gate].Metadata, KeyRegistration)

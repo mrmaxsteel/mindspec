@@ -1734,3 +1734,32 @@ create and review it through the normal workflow first.
 An open epic or any other branch tip still requires the accepted subject.
 Setup ignores the configured panel isolation directory and local panel config, including without init.
 If config cannot load, the ignore step prints under `Warnings` and uses the default isolation directory.
+
+## Briefs
+
+The binary renders actor briefs for enrolled specs. `brief <step>` is read-only.
+It accepts an actor step and refuses a gate, decision, or foreign record.
+Implementation actions use `next --emit-only`. Review slots use `panel prompt`.
+Lens, verify, fix, and change-judge actions use `brief`.
+
+Kernel panel creation supplies the shared body below the managed header.
+It refuses `--brief-file`. Other gates keep authored briefs and the initial stub.
+A slot prompt refuses an unfilled stub.
+
+The shared body gives the work-item context and files in scope. A full round
+uses the implementation claim base. A scoped round uses its recorded paths.
+Later rounds also list paths changed since the prior round subject.
+Prior asks come only from the round's stored `prior.asks`, with full finding
+text and each return, evidence, or target. Rendering reads no prior verdict file.
+Refuted or deferred findings need new evidence to be raised again.
+The final review uses the spec summary, all recorded work items, and the diff
+from the merge base with the destination branch.
+
+A verify brief lists every pinned finding, including vetoes. A fix brief lists
+only reproduced findings and retains the concrete changes of a veto.
+A work-item fix ends with the content check command. For a final gate, the fix
+brief tells the actor to run the verification commands in the approved plan before the return. A change judge gets the accepted and
+new subjects, their diff, and the slot ceiling. A lens gets the spec, plan,
+work context, and scope diff. Record briefs name the external record path for
+the current lease generation and the submission command. Rendering creates
+no directory or record. Untrusted text is labeled and escaped on one line.

@@ -277,6 +277,9 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 	if s == nil {
 		return false, nil
 	}
+	if cmd.Flags().Changed("brief-file") {
+		return true, guard.NewFailure("--brief-file is not accepted for a kernel gate; the binary renders its brief", "rerun panel create without --brief-file")
+	}
 	return true, phase.WithPhaseLock(s.Root, func() error {
 		fresh, e := refreshPanelState(*s)
 		if e != nil {
@@ -418,12 +421,12 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 		if e != nil {
 			return e
 		}
-		brief, _ := cmd.Flags().GetString("brief-file")
-		if cmd.Flags().Changed("brief-file") && brief == "" {
-			return panelVerbFailure(fmt.Errorf("brief file must be an absolute path"))
+		body, e := kernel.ReviewSlotBody(*s, gate)
+		if e != nil {
+			return e
 		}
 		overrides, _ := cmd.Flags().GetStringArray("reviewer")
-		in := panel.CreateInput{Orchestrated: true, KernelGate: gate, Scope: round.Paths, Spec: s.SpecID, BeadID: p.BeadID, Target: expected, Gate: p.Gate, Round: round.Round, ReviewedHeadSHA: round.Subject, SubjectDigest: digest, Roster: roster, ExpectedReviewers: size, ReviewersOverride: true, ReviewerOverrides: overrides, BriefFile: brief, BriefRegions: regions, HasRunner: func(f string) bool { _, ok := cfg.RunnerFor(f); return ok }}
+		in := panel.CreateInput{Orchestrated: true, KernelGate: gate, Scope: round.Paths, Spec: s.SpecID, BeadID: p.BeadID, Target: expected, Gate: p.Gate, Round: round.Round, ReviewedHeadSHA: round.Subject, SubjectDigest: digest, Roster: roster, ExpectedReviewers: size, ReviewersOverride: true, ReviewerOverrides: overrides, BriefBody: body, BriefRegions: regions, HasRunner: func(f string) bool { _, ok := cfg.RunnerFor(f); return ok }}
 		if e = panel.CheckCreate(dir, in); e != nil {
 			return panelCreateFailure(e, slug, in)
 		}

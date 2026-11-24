@@ -309,7 +309,7 @@ var panelCheckoutCmd = &cobra.Command{
 			return err
 		}
 		if dispatch {
-			if _, err := panel.ReadFilledBrief(filepath.Join(reg.Dir, "BRIEF.md")); err != nil {
+			if _, err := panel.ReadPanelBrief(reg.Dir, reg.Panel); err != nil {
 				return err
 			}
 		}
