@@ -1748,33 +1748,47 @@ Title parsers skip this tag.
 
 ## Change judge
 
-A passed gate keeps its original receipt.
-`AcceptedSubject` reads the highest gate attempt.
-It uses a ledger-backed panel rebind or the latest carry-over.
-A commit that changes only a panel directory for that gate needs no judge.
+A gate has a round subject and a review subject. Registration fixes the round
+subject for its slots and panel evidence. A judgment sets the review subject.
+Verify and fix steps use that review subject. A fix must commit a change after
+its subject and outside the gate's panel directories.
 
-A later subject commit creates one change-judge step.
-The step is a child of the work item or the epic.
-A newer commit supersedes the open judge.
-A successful panel rebind also supersedes that judge.
-Its receipt identifies the rebind.
-Merged work items and closed epics create no judges.
+A complete round waits for a change judge when the subject moved. The same rule
+holds before an unapplied verify retally and after a gate passed. A panel-only
+commit does not move the subject. An applied verify freezes its round, so a fix
+commit creates no judge until the gate passes. Merged work items and closed epics
+create no judges. A closed judgment ends that subject change.
 
-Lease the judge before submission.
-Write its judgment to a file outside the repository and submit it with `--record <path>`.
-Do not commit the record.
-Use `carry-over` with a reason to retain the passing gate.
-The gate receipt records both subjects and the judge receipt.
-The carry-over also records the current rebind identity.
-Use `re-panel` with changed paths to request another round.
-Set at least two slots and no more than the passing round used.
-The successor gate records its predecessor, the judge ID, and the requested scope.
-Before registration, a scoped re-panel keeps the subject, slot count, and path limit
-that the judge authorized.
-A panel-only commit does not move the subject.
-The re-panel record states what the judge authorised.
-Its slot count and paths stay unchanged when the subject moves.
-The gate round record alone states the slots that run.
-The next panel-create entry carries the gate round scope.
-Submission checks the external record and subject identity.
-It does not assess the judgment content.
+The judge is a child of the work item or epic. A newer commit supersedes an open
+judge. A successful panel rebind also supersedes it and supplies its receipt.
+Lease the judge and submit its judgment with `--record <path>` outside the
+repository. Submission stores the record in the tracker and creates no Git object.
+
+Use `carry-over` with a reason to accept the new subject. On an open gate, the
+waiting tally uses the review subject. On a passed gate, the original receipt
+keeps its evidence and adds the carry-over and judge receipt.
+
+Use `re-panel` with changed paths and at least two slots. The slot count cannot
+exceed the reviewed round's count. The paths must cover the diff from the accepted
+subject to the new subject, with the gate's panel directories excluded.
+On a passed gate, a successor gate gets the scoped round. On an open gate, a
+passing tally or an all-refuted verify authorizes the scoped round on that gate.
+A refused tally creates a verify on the new review subject. A reproduced finding
+creates a fix. The round after a passed fix is a full round.
+
+Each successor round keeps its prior round's findings, full text, returns, kept
+verb records, and read digests in tracker metadata. A passed verify supplies its
+pinned findings and read set. Otherwise the authorizing tally supplies them.
+Later verdict edits do not change these asks. Reading a proposed transition
+writes no tracker record or Git object.
+
+A non-panel commit before scoped registration requires another judge. Its diff
+starts at the accepted subject. Its judgment supersedes the unregistered successor
+or restores the open gate's prior round. A current verify is retired and replaced
+once on the new review subject. The latest judgment supplies the next scope.
+
+Refute and defer retallies wait while a judge is open or due. During an open fix,
+a passing retally also needs every finding covered by the current verify and an
+exact match to its pinned verdict file set and digests on disk. It supersedes the
+fix and passes on the review subject, or authorizes the scoped round if the
+judgment requires one. A later subject commit then needs its own judge.

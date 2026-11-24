@@ -66,6 +66,7 @@ func seedPassingSlots(f *Fixture, gate string, reg kernel.RegistrationRecord) {
 		id := fmt.Sprintf("%s.r%d.%s", tuple.Gate, reg.Round, slot)
 		if _, exists := f.State().Records[id]; !exists {
 			f.Create(id, gate)
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: reg.Subject})))
 		}
 		f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Retally: "seeded-verdict"}))
 		closeRecord(f, id)

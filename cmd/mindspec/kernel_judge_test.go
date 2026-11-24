@@ -190,7 +190,11 @@ func TestS134JudgeCmd_RepanelCreateSlots(t *testing.T) {
 				t.Fatalf("missing real change judge: %+v", out)
 			}
 			token := judgeCmdLease(t, f, bin, id)
-			artifact := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}}, slug)
+			paths := []string{".mindspec/config.yaml"}
+			if kind == "final" {
+				paths = append(paths, "final.go")
+			}
+			artifact := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: paths}, slug)
 			raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--record", artifact)
 			if code != 0 {
 				t.Fatalf("re-panel: %d %s", code, raw)

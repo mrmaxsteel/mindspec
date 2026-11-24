@@ -43,7 +43,7 @@ func TestS134PassExcept_GateAttempts(t *testing.T) {
 						t.Fatal("excluded gate is a rule target")
 					}
 				}
-				if accepted, err := kernel.AcceptedSubject(s, gate); err != nil || accepted != "" {
+				if accepted, err := kernel.AcceptedSubject(s, gate); err != nil || accepted != newest {
 					t.Fatalf("selected old passing attempt: %s %v", accepted, err)
 				}
 				if err := kernel.CheckPassedGate(s, gate); err == nil || !strings.Contains(err.Error(), "gate "+successor+" has no passing receipt") {

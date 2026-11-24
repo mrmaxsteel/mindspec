@@ -24,10 +24,17 @@ func decisionWrite(s State, gate, cause string, round int) []Write {
 	t, _ := kernelid.Parse(gate)
 	id := fmt.Sprintf("%s.decide.%s.r%d", t.Gate, cause, round)
 	if _, exists := s.Records[id]; exists {
-		if cause != "uncounted" {
+		if cause != "uncounted" && cause != "limit" {
 			return nil
 		}
 		for {
+			if cause == "limit" {
+				r := s.Records[id]
+				receipt, _, _ := Decode[Receipt](r.Metadata, KeyClose)
+				if r.Status != "closed" || receipt.Kind != "superseded" {
+					return nil
+				}
+			}
 			next, err := nextAttempt(id)
 			if err != nil {
 				return nil

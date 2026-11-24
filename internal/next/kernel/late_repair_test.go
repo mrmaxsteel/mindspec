@@ -485,9 +485,12 @@ func TestS134Closes_RepairCommit(t *testing.T) {
 				subject := actorCommand(t, f, "rev-parse", "HEAD")
 				kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: subject, SlotCount: 2, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}})
 				kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "review", Round: 1, Subject: subject, Slots: []string{"R1", "R2"}})
+				finding := kernel.Finding{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64), Text: "fix this finding"}
+				verify := gate + ".r1.verify"
+				kerneltest.Verify(f, gate, kernel.VerifyRecord{Step: verify, Subject: subject, Returns: []kernel.VerifyReturn{{Slot: finding.Slot, Round: 1, Finding: finding.Finding, FindingSHA256: finding.FindingSHA256, Return: "reproduced"}}}, []kernel.Finding{finding}, map[string]string{})
 				id = gate + ".r2.fix"
 				f.Create(id, gate)
-				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: subject})))
+				f.Must(f.Store.WriteMetadata(id, map[string]any{kernel.KeySubject: kernel.Subject{Commit: subject}, kernel.KeyFrom: kernel.From(verify)}))
 			}
 			lease := leaseActor(t, f, id, deps)
 			commit := actorCommit(t, f, "code.txt", "implementation or fix", "bead/"+f.Items[0])

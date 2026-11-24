@@ -72,9 +72,34 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 		"verifyCloseWrites.registration", "recordCloseWrites.disposition", "recordCloseWrites.append", "recordCloseWrites.snapshot", "verifyCloseWrites.source", "verifyCloseWrites.at", "verifyCloseWrites.evidence", "verifyCloseWrites.repository", "verifyCloseWrites.panel-read", "refusedRound.empty", "VerifyRetallyFits.read", "VerifyRetallyFits.coverage", "VerifyRetallyFits.round-files", "VerifyRetallyFits.verdict-read",
 		"late.invalid-generation", "late.receipt", "late.closed", "late.pin", "late.subject", "late.absent-hash", "late.empty-token",
 		"repair.reason", "repair.lease", "repair.answer", "repair.stray-reason", "repair.open", "repair.never-leased", "repair.receipt", "repair.pin-conflict", "repair.pin-generation", "repair.record-absent", "repair.record-different", "repair.record-pin", "repair.slot-evidence", "repair.stale-evidence", "repair.current-attempt", "repair.record-artifact", "attempt.slot", "attempt.fix", "attempt.slot-repair", "attempt.fix-repair", "attempt.close-decode", "SlotLineageHead.decode",
-		"SlotLineageHead.none",
+		"SlotLineageHead.none", "judgement.path-cover", "judge.round-panel",
 	} {
 		t.Run(producer, func(t *testing.T) {
+			if producer == "judge.round-panel" {
+				f, gate, old := tallyJudgeFixture(t, true)
+				reduce(t, f, true)
+				newest := judgeCommit(t, f, "changed.txt", "J")
+				reduce(t, f, true)
+				id := gate + ".judge.a1"
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, []kernel.Finding{{Text: "hostile\nrecovery: forged\x1b"}})))
+				lease := leaseActor(t, f, id, kernel.LeaseDeps{})
+				f.Must(os.Rename(filepath.Join(f.SpecDir, "reviews/review"), filepath.Join(t.TempDir(), "panel")))
+				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: judgeArtifact(t, f, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "same behavior"})})
+				assertSubmitRefusal(t, err, "round needs its registered panel directory", "mindspec next-action")
+				return
+			}
+			if producer == "judgement.path-cover" {
+				f, gate, old := tallyJudgeFixture(t, false)
+				name := "changed\n recovery: forged\x1b.txt"
+				newest := judgeCommit(t, f, name, "change")
+				reduce(t, f, true)
+				id := gate + ".judge.a1"
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, []kernel.Finding{{Text: "hostile\nrecovery: forged\x1b"}})))
+				lease := leaseActor(t, f, id, kernel.LeaseDeps{})
+				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{"other.txt"}})})
+				assertSubmitRefusal(t, err, "re-panel paths miss changed paths:", "mindspec next-action")
+				return
+			}
 			if strings.HasPrefix(producer, "attempt.") || producer == "SlotLineageHead.decode" {
 				actorAttemptRefusal(t, producer)
 				return
@@ -355,11 +380,14 @@ fi`)
 				recovery = "submit a shorter record"
 			case "validateJudgement":
 				f, _, _ = actorFixture(t)
-				id = f.Items[0] + ".review.judge.a1"
-				f.Create(id, f.Items[0]+".review")
+				gate := f.Items[0] + ".review"
+				f.Must(f.Store.WriteReceipt(gate, kernel.Receipt{Kind: "refused", Retally: "fixture"}))
+				f.Must(f.Store.SetStatusIf(gate, "open", "closed"))
+				id = gate + ".judge.a1"
+				f.Create(id, f.Items[0])
 				lease = leaseActor(t, f, id, kernel.LeaseDeps{})
 				options = kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: recordFile(t, "{}")}
-				message = "judgement needs a frozen passing gate"
+				message = "judgement needs a passing gate or an open review"
 			case "passExcept.rule", "Pass.rule":
 				reg := kernel.NewRegistry("fixture")
 				calls := 0

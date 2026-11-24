@@ -38,7 +38,29 @@ func AcceptedSubject(s State, gate string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	g := s.Records[activeGate(s, t.Gate)]
+	return acceptedGateSubject(s, s.Records[activeGate(s, t.Gate)])
+}
+
+func acceptedGateSubject(s State, g Record) (string, error) {
+	if g.Status != "closed" {
+		round, _, err := Decode[GateRound](g.Metadata, KeyRound)
+		if err != nil {
+			return "", err
+		}
+		if scopedPending(g, round) {
+			if round.Prior != nil {
+				return reviewSubject(*round.Prior), nil
+			}
+			from, _, err := Decode[From](g.Metadata, KeyFrom)
+			if err != nil {
+				return "", err
+			}
+			if prior, ok := s.Records[string(from)]; ok {
+				return acceptedGateSubject(s, prior)
+			}
+		}
+		return reviewSubject(round), nil
+	}
 	receipt, _, err := Decode[Receipt](g.Metadata, KeyClose)
 	if err != nil {
 		return "", err
@@ -372,7 +394,7 @@ func judgeCreate(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
-		if gate != activeGate(s, t.Gate) || (!frozen && !openTallyDue(s, gate, round)) {
+		if gate != activeGate(s, t.Gate) || (!frozen && !openTallyDue(s, gate, round) && !scopedPending(g, round)) {
 			continue
 		}
 		ended, err := judgeEnded(s, gate)
@@ -389,9 +411,6 @@ func judgeCreate(s State) (Changes, error) {
 		accepted, err := AcceptedSubject(s, gate)
 		if err != nil {
 			return c, err
-		}
-		if !frozen {
-			accepted = reviewSubject(round)
 		}
 		if newest == "" || newest == accepted {
 			continue
@@ -463,6 +482,15 @@ func openTallyDue(s State, gate string, round GateRound) bool {
 	return true
 }
 
+// TallyHeldForJudge holds gate outcomes until the subject change is judged.
+func TallyHeldForJudge(s State, gate string) (bool, error) {
+	round, _, err := Decode[GateRound](s.Records[gate].Metadata, KeyRound)
+	if err != nil {
+		return false, err
+	}
+	return tallyHeldForJudge(s, gate, round)
+}
+
 func tallyHeldForJudge(s State, gate string, round GateRound) (bool, error) {
 	if VerifyApplied(s, gate, round) {
 		return false, nil
@@ -482,7 +510,19 @@ func tallyHeldForJudge(s State, gate string, round GateRound) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return newest != "" && newest != reviewSubject(round), nil
+	accepted, err := AcceptedSubject(s, gate)
+	if err != nil {
+		return false, err
+	}
+	for _, id := range s.Steps {
+		r := s.Records[id]
+		jt, _, _ := r.Tuple()
+		sub, _, _ := Decode[Subject](r.Metadata, KeySubject)
+		if jt.Kind == "change-judge" && jt.Gate == t.Gate && sub.Commit == newest && passed(s, r) {
+			return false, nil
+		}
+	}
+	return newest != "" && newest != accepted, nil
 }
 
 func judgeSupersede(s State) (Changes, error) {
@@ -545,8 +585,9 @@ func validateJudgement(s State, r Record, current bool) error {
 	t, _, _ := r.Tuple()
 	gate := activeGate(s, t.Gate)
 	g := s.Records[gate]
-	if !passed(s, g) {
-		return actorFailure("judgement needs a frozen passing gate")
+	source := judgementGate(s, g)
+	if source.Status == "closed" && !passed(s, source) {
+		return actorFailure("judgement needs a passing gate or an open review")
 	}
 	ended, err := judgeEnded(s, gate)
 	if err != nil {
@@ -571,11 +612,11 @@ func validateJudgement(s State, r Record, current bool) error {
 	if err != nil {
 		return err
 	}
-	reg, registered, err := Decode[RegistrationRecord](g.Metadata, KeyRegistration)
+	reg, registered, err := Decode[RegistrationRecord](source.Metadata, KeyRegistration)
 	if err != nil {
 		return err
 	}
-	round, _, err := Decode[GateRound](g.Metadata, KeyRound)
+	round, _, err := Decode[GateRound](source.Metadata, KeyRound)
 	if err != nil {
 		return err
 	}
@@ -608,10 +649,60 @@ func validateJudgement(s State, r Record, current bool) error {
 				return actorFailure(fmt.Sprintf("re-panel paths must be repository-relative files; expected old subject %s and new subject %s; slot ceiling %d", accepted, expectedNew, ceiling))
 			}
 		}
+		changed, err := subjectPaths(s, gate, j.OldSubject, j.NewSubject)
+		if err != nil {
+			return err
+		}
+		covered := map[string]bool{}
+		for _, name := range j.Paths {
+			covered[name] = true
+		}
+		var missing []string
+		for _, name := range changed {
+			if !covered[name] {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) != 0 {
+			return actorFailure("re-panel paths miss changed paths: " + strings.Join(missing, ", "))
+		}
 	default:
 		return actorFailure("judgement must be carry-over or re-panel")
 	}
 	return nil
+}
+
+// scopedPending identifies a judged authorization that has not been registered.
+func scopedPending(g Record, round GateRound) bool {
+	scope, _, _ := Decode[RePanel](g.Metadata, KeyRePanel)
+	reg, has, _ := Decode[RegistrationRecord](g.Metadata, KeyRegistration)
+	return g.Status != "closed" && scope.Judge != "" && len(round.Paths) > 0 && (!has || reg.Round < round.Round)
+}
+
+func judgementGate(s State, g Record) Record {
+	round, _, _ := Decode[GateRound](g.Metadata, KeyRound)
+	if scopedPending(g, round) {
+		if round.Prior != nil {
+			g.Metadata = mergedMetadata(g.Metadata, Metadata(KeyRound, *round.Prior))
+		} else if from, has, _ := Decode[From](g.Metadata, KeyFrom); has {
+			return s.Records[string(from)]
+		}
+	}
+	return g
+}
+
+func subjectPaths(s State, gate, old, newest string) ([]string, error) {
+	data, err := actorGitBytes(s.Root, "diff", "--no-renames", "--name-only", "-z", old, newest, "--")
+	if err != nil {
+		return nil, pathFailure(err, "cannot read changed paths: ", "restore the subject commits and retry submit")
+	}
+	var paths []string
+	for _, name := range strings.Split(string(data), "\x00") {
+		if name != "" && !registeredPanelArtifact(s, gate, name) {
+			paths = append(paths, name)
+		}
+	}
+	return paths, nil
 }
 
 func judgeApply(s State) (Changes, error) {
@@ -649,6 +740,8 @@ func judgeApply(s State) (Changes, error) {
 			for _, carry := range prior.CarryOvers {
 				applied = applied || carry.Judge == id
 			}
+			round, _, _ := Decode[GateRound](record.Metadata, KeyRound)
+			applied = applied || round.Judged != nil && round.Judged.Judge == id || round.Prior != nil && round.Prior.Judged != nil && round.Prior.Judged.Judge == id
 			from, hasFrom, _ := Decode[From](record.Metadata, KeyFrom)
 			scope, hasScope, _ := Decode[RePanel](record.Metadata, KeyRePanel)
 			applied = applied || (hasFrom && hasScope && sameJudgeGate(string(from), t.Gate) && scope.Judge == id)
@@ -658,6 +751,64 @@ func judgeApply(s State) (Changes, error) {
 		}
 		// Recheck durable evidence when a crash left only the actor's receipt and close.
 		if err := validateJudgement(s, r, false); err != nil {
+			return c, err
+		}
+		round, _, err := Decode[GateRound](g.Metadata, KeyRound)
+		if err != nil {
+			return c, err
+		}
+		if scopedPending(g, round) {
+			if round.Prior != nil {
+				round = *round.Prior
+				w := Write{Kind: "metadata", ID: gate, Metadata: Metadata(KeyRound, round)}
+				c.Writes = append(c.Writes, w)
+				if err := overlay(&s, w); err != nil {
+					return c, err
+				}
+			} else {
+				w := Write{Kind: "close", ID: gate, Receipt: &Receipt{Kind: "superseded", Subject: j.NewSubject}}
+				c.Writes = append(c.Writes, w)
+				if err := overlay(&s, w); err != nil {
+					return c, err
+				}
+				gate = activeGate(s, t.Gate)
+			}
+			g = s.Records[gate]
+		}
+		if g.Status != "closed" {
+			round, _, err = Decode[GateRound](g.Metadata, KeyRound)
+			if err != nil {
+				return c, err
+			}
+			round.Judged = &Judged{Judge: id, Value: j.Value, NewSubject: j.NewSubject}
+			metadata := Metadata(KeyRound, round)
+			metadata[KeyRePanel] = nil
+			if j.Value == "re-panel" {
+				metadata[KeyRePanel] = RePanel{Judge: id, SlotCount: j.SlotCount, Paths: j.Paths}
+			}
+			w := Write{Kind: "metadata", ID: gate, Metadata: metadata}
+			c.Writes = append(c.Writes, w)
+			if err := overlay(&s, w); err != nil {
+				return c, err
+			}
+			// The restored verify is no longer applied. Retire it once on the new subject.
+			if round.Verify != "" {
+				more, err := replaceJudgedVerify(s, gate, round)
+				if err != nil {
+					return c, err
+				}
+				c.Writes = append(c.Writes, more...)
+				for _, w := range more {
+					if err := overlay(&s, w); err != nil {
+						return c, err
+					}
+				}
+			}
+			c.Writes = append(c.Writes, Write{Kind: "metadata", ID: id, Metadata: Metadata(KeyJudgement, j)})
+			continue
+		}
+		frozen, _, err = Decode[Receipt](g.Metadata, KeyClose)
+		if err != nil {
 			return c, err
 		}
 		switch j.Value {
@@ -670,7 +821,14 @@ func judgeApply(s State) (Changes, error) {
 			c.Writes = append(c.Writes, Write{Kind: "metadata", ID: gate, Metadata: Metadata(KeyClose, frozen)})
 		case "re-panel":
 			gt, _, _ := g.Tuple()
-			next := fmt.Sprintf("%s.a%d", gt.Gate, gt.Attempt+1)
+			attempt := gt.Attempt
+			for _, candidate := range s.gateAttempts() {
+				ct, _, _ := s.Records[candidate].Tuple()
+				if ct.Gate == gt.Gate {
+					attempt = max(attempt, ct.Attempt)
+				}
+			}
+			next := fmt.Sprintf("%s.a%d", gt.Gate, attempt+1)
 			count, err := RoundsForGate(s, gate)
 			if err != nil {
 				return c, err

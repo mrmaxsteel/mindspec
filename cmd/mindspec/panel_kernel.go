@@ -143,7 +143,8 @@ func kernelPanelGate(s kernel.State, p panel.Panel) string {
 	best, attempt := base, 0
 	for _, id := range s.Gates {
 		t, _, _ := s.Records[id].Tuple()
-		if t.Gate == base && t.Attempt > attempt {
+		receipt, _, _ := kernel.Decode[kernel.Receipt](s.Records[id].Metadata, kernel.KeyClose)
+		if t.Gate == base && t.Attempt > attempt && !(s.Records[id].Status == "closed" && receipt.Kind == "superseded") {
 			best, attempt = id, t.Attempt
 		}
 	}
@@ -575,6 +576,13 @@ func closeRetalliedChildren(s kernel.State, gate, dir string) error {
 	}
 	if res.Panel == nil {
 		return panelVerbFailure(fmt.Errorf("panel registration is missing"))
+	}
+	held, err := kernel.TallyHeldForJudge(s, gate)
+	if err != nil {
+		return panelVerbFailure(err)
+	}
+	if held {
+		return nil
 	}
 	filtered := kernel.FilterDispositions(s, gateBase(s, gate), res)
 	if !ok || !filtered.PassRule(res.Panel.ReviewedHeadSHA == round.Subject) || kernel.VerifyRetallyFits(s, gate, res) != nil {

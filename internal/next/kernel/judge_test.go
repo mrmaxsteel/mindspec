@@ -878,7 +878,7 @@ func TestS134Judge_PassingRoundCeiling(t *testing.T) {
 				t.Fatalf("passing-round ceiling refusal: %v", err)
 			}
 			// The gate's frozen roster also allows valid scope without a snapshot.
-			artifact = judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 3, Paths: []string{"app.go"}}, reg.Slug)
+			artifact = judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 3, Paths: []string{".mindspec/config.yaml"}}, reg.Slug)
 			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
 			f.Must(err)
 		})

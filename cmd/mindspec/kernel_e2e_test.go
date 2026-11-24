@@ -374,7 +374,22 @@ func (e *kernelE2E) judge(value string, n int) {
 	j := kernel.Judgement{Value: value, OldSubject: old, NewSubject: action.Subject.Commit, Reason: "The review covers this change."}
 	if value == "re-panel" {
 		j.SlotCount = n
-		j.Paths = []string{".mindspec/config.yaml"}
+		root := e.cwd
+		if tuple.WorkItem != "" {
+			root = e.tree(tuple.WorkItem)
+		}
+		raw := e.git(root, "diff", "--name-only", "--no-renames", old, action.Subject.Commit, "--")
+		j.Paths = nil
+		dirs := kernel.RegisteredPanelPaths(s, tuple.Gate)
+		for _, name := range strings.Split(strings.TrimSpace(raw), "\n") {
+			excluded := name == ""
+			for _, dir := range dirs {
+				excluded = excluded || strings.HasPrefix(name, dir)
+			}
+			if !excluded {
+				j.Paths = append(j.Paths, name)
+			}
+		}
 		j.Reason = ""
 	}
 	data, err := json.Marshal(j)
