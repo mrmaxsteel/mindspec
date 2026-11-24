@@ -87,10 +87,14 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 		return in, reg.Err
 	}
 	p := reg.Panel
+	// A hand edit of panel.json (focus included) must not reach a reviewer prompt.
+	if err := checkHandEdits(reg); err != nil {
+		return in, err
+	}
 	found := false
 	for _, slot := range p.Roster {
 		if slot.Slot == slotID {
-			in.Slot, in.Family, in.Model, in.Lens = slot.Slot, slot.Family, slot.Model, slot.Lens
+			in.Slot, in.Family, in.Model, in.Lens, in.Focus = slot.Slot, slot.Family, slot.Model, slot.Lens, slot.Focus
 			found = true
 			break
 		}
@@ -118,7 +122,10 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 	if !ok {
 		return in, guard.NewFailure("slot family has no runner: "+termsafe.Escape(in.Family), "add a runner for the family to panel.runners")
 	}
-	in.Kind, in.Output, in.Focus = runner.Kind, runner.Output, cfg.Panel.Lenses[in.Lens]
+	in.Kind, in.Output = runner.Kind, runner.Output
+	if in.Focus == "" || in.Lens == "adversarial" {
+		in.Focus = cfg.Panel.Lenses[in.Lens]
+	}
 	layout, err := panel.NewSlotLayout(root, cfg.Panel.IsolationRoot, p.Spec, reg.Slug(), p.Round, slotID)
 	if err != nil {
 		return in, err

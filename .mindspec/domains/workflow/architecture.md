@@ -1792,3 +1792,36 @@ a passing retally also needs every finding covered by the current verify and an
 exact match to its pinned verdict file set and digests on disk. It supersedes the
 fix and passes on the review subject, or authorizes the scoped round if the
 judgment requires one. A later subject commit then needs its own judge.
+
+## Lens step
+
+Each authorized round starts with a lens step on its authorized subject.
+This includes final review and scoped rounds. The gate round names the current
+attempt in `lens`. Panel creation requires that attempt to be closed passed.
+The action document lists panel creation only after that close.
+
+A later authorization of the same round, or a subject move before registration,
+gets a new lens attempt. The new attempt names its predecessor in `mindspec_from`.
+An open predecessor closes superseded. A passed predecessor keeps its receipt.
+A new judgment retires the pending scoped round and its lens before it supplies
+another authorization. A lens retry becomes the round's current attempt.
+
+A scoped roster selects configured adversary slots first, up to its slot count.
+It fills the remaining positions from the first other configured slots.
+It then restores configured order and assigns contiguous slot names.
+Each selected slot keeps its configured family, model, and lens.
+
+The actor submits one nonempty lens for each selected slot except an adversary.
+The record has no unknown fields, duplicate slots, or extra slots.
+An adversary-only round requires an empty lenses list.
+The binary checks record shape, not the quality of the lens text.
+
+Before its receipt, each lens submit replaces the round's complete lenses list.
+Repair repeats this write. A lens has no closing pin. After an interrupted close,
+a new lease generation can replace the draft before it writes the receipt.
+A submit refused after a receipt changes no lens or receipt.
+
+Panel creation copies each drafted lens to its slot's optional `focus` field.
+An adversary slot has no drafted focus. The slot prompt uses the stored focus,
+or the configured lens text when focus is empty. It renders the focus on one
+escaped, labeled line. The managed acceptance header remains in every prompt.

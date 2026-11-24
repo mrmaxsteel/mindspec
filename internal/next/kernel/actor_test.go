@@ -300,7 +300,8 @@ func TestS134Lease_AtomicCASAndForeignIsolation(t *testing.T) {
 	// checking that all other rows, links and git state stay the same.
 	n, err := config.DefaultConfig().PanelGateExpectedReviewers("bead")
 	f.Must(err)
-	wantRound := kernel.GateRound{Round: 1, Subject: commit, SlotCount: n, Slots: []string{}}
+	// The pass after the close also points the round at its lens step.
+	wantRound := kernel.GateRound{Round: 1, Subject: commit, SlotCount: n, Slots: []string{}, Lens: gateID + ".r1.lens"}
 	for i := 1; i <= n; i++ {
 		wantRound.Slots = append(wantRound.Slots, fmt.Sprintf("%s.r1.R%d", gateID, i))
 	}
@@ -321,6 +322,20 @@ func TestS134Lease_AtomicCASAndForeignIsolation(t *testing.T) {
 	if !reflect.DeepEqual(gotValue, wantValue) {
 		t.Fatalf("unexpected gate write: got %s want %s", gotJSON, wantJSON)
 	}
+	// The same pass creates the round's lens step on the authorised subject.
+	lensRow, err := f.Store.Lookup(gateID + ".r1.lens")
+	f.Must(err)
+	if lensRow == nil || lensRow.Parent != gateBefore.ID || lensRow.Status != "open" {
+		t.Fatalf("authorised round has no open lens step under its gate: %+v", lensRow)
+	}
+	lensSubject, _, err := kernel.Decode[kernel.Subject](lensRow.Metadata, kernel.KeySubject)
+	f.Must(err)
+	lensRound, _, err := kernel.Decode[kernel.GateRound](lensRow.Metadata, kernel.KeyRound)
+	f.Must(err)
+	if lensSubject.Commit != commit || !reflect.DeepEqual(lensRound, kernel.LensAuthorization(wantRound)) {
+		t.Fatalf("lens step is not bound to the authorisation: %+v %+v", lensSubject, lensRound)
+	}
+	delete(f.Fake.Records, lensRow.ID)
 	f.Fake.Records[gateBefore.ID] = gateBefore
 	assertOnlyActorChanged(beforeSubmit, submitRow)
 	f.Fake.Records[gateBefore.ID] = gateAfter
@@ -482,13 +497,21 @@ func TestS134Submit_BadVerdictsAndFix(t *testing.T) {
 			case "bad-token":
 				lease.Token = "invalid-token"
 			case "unlisted-slot":
-				kerneltest.Authorise(f, f.Items[0]+".review", kernel.GateRound{Round: 1, Subject: subject, Slots: []string{"R2"}, SlotCount: 1})
+				f.Must(f.Store.WriteMetadata(f.Items[0]+".review", kernel.Metadata(kernel.KeyRound, kernel.GateRound{Round: 1, Subject: subject, Slots: []string{"R2"}, SlotCount: 1})))
+				// The verb's own pre-pass creates the new authorisation's lens step.
+				// Run it here, so the refusal below is checked at its fixed point.
+				_, err := kernel.PassExcept(kernel.Rules(), f.State(), true, id)
+				f.Must(err)
 			case "changed-blob":
 				f.Must(os.WriteFile(filepath.Join(f.Root, "verdict.json"), []byte(data+" "), 0644))
 			case "uncommitted":
 				f.Must(os.WriteFile(filepath.Join(f.Root, "new.json"), []byte(data), 0644))
 			case "stale-round":
-				kerneltest.Authorise(f, f.Items[0]+".review", kernel.GateRound{Round: 2, Subject: subject, Slots: []string{"R1"}, SlotCount: 1})
+				f.Must(f.Store.WriteMetadata(f.Items[0]+".review", kernel.Metadata(kernel.KeyRound, kernel.GateRound{Round: 2, Subject: subject, Slots: []string{"R1"}, SlotCount: 1})))
+				// The verb's own pre-pass creates the new authorisation's lens step.
+				// Run it here, so the refusal below is checked at its fixed point.
+				_, err := kernel.PassExcept(kernel.Rules(), f.State(), true, id)
+				f.Must(err)
 			case "stale-step-subject":
 				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: strings.Repeat("0", 40)})))
 			case "foreign-slot":

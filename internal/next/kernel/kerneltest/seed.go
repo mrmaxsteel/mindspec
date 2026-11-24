@@ -4,14 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/mrmaxsteel/mindspec/internal/config"
-	"github.com/mrmaxsteel/mindspec/internal/panel"
-	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"path/filepath"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -88,7 +88,29 @@ func closeRecord(f *Fixture, id string) {
 
 //nolint:misspell // Keep the public fixture name used by downstream producers.
 func Authorise(f *Fixture, gate string, round kernel.GateRound) {
+	if round.Lens == "" {
+		tuple, err := kernelid.Parse(gate)
+		f.Must(err)
+		round.Lens = fmt.Sprintf("%s.r%d.lens", tuple.Gate, round.Round)
+	}
 	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRound, round)))
+	cfg, err := config.Load(f.Root)
+	f.Must(err)
+	kind := "bead"
+	tuple, err := kernelid.Parse(gate)
+	f.Must(err)
+	if tuple.WorkItem == "" {
+		kind = "final_review"
+	}
+	roster, err := kernel.RoundReviewerSlots(cfg, kind, round)
+	f.Must(err)
+	lenses := []kernel.SlotLens{}
+	for _, slot := range roster {
+		if slot.Lens != "adversarial" {
+			lenses = append(lenses, kernel.SlotLens{Slot: slot.Slot, Lens: "Review " + slot.Lens + "."})
+		}
+	}
+	Lens(f, gate, kernel.LensRecord{Step: round.Lens, Lenses: lenses})
 }
 func OpenDecision(f *Fixture, gate, cause string, round int, options ...string) string {
 	id := fmt.Sprintf("%s.decide.%s.r%d", gate, cause, round)
@@ -136,12 +158,50 @@ func Register(f *Fixture, gate string, registration kernel.RegistrationRecord) {
 	}
 	cfg, err := config.Load(f.Root)
 	f.Must(err)
-	selected, err := cfg.PanelGateReviewerSlots(gateKind, len(registration.Slots))
+	round, hasRound, err := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	if !hasRound {
+		// Registration-only fixtures can deliberately lack authorization. Keep
+		// that absence while supplying the closed lens prerequisite as history.
+		round = kernel.GateRound{Round: registration.Round, Subject: registration.Subject, SlotCount: len(registration.Slots)}
+		id := fmt.Sprintf("%s.r%d.lens", tuple.Gate, round.Round)
+		f.Create(id, gate)
+		record := kernel.LensRecord{Step: id, Lenses: []kernel.SlotLens{}}
+		selected, err := kernel.RoundReviewerSlots(cfg, gateKind, round)
+		f.Must(err)
+		for _, slot := range selected {
+			if slot.Lens != "adversarial" {
+				record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: slot.Slot, Lens: "Review " + slot.Lens + "."})
+			}
+		}
+		data, err := json.Marshal(record)
+		f.Must(err)
+		f.Must(f.Store.WriteMetadata(id, map[string]any{
+			kernel.KeySubject: kernel.Subject{Commit: round.Subject}, kernel.KeyRound: kernel.LensAuthorization(round),
+			kernel.KeyRecord: string(data), kernel.KeyClose: kernel.Receipt{Kind: "passed", Generation: 1, RecordSHA256: fmt.Sprintf("%x", sha256.Sum256(data))},
+		}))
+		closeRecord(f, id)
+	} else if round.Lens == "" || f.State().Records[round.Lens].Status != "closed" {
+		Authorise(f, gate, round) //nolint:misspell // A registration fixture starts after lens close.
+		round, _, err = kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
+		f.Must(err)
+	}
+	rosterRound := round
+	rosterRound.SlotCount = len(registration.Slots)
+	selected, err := kernel.RoundReviewerSlots(cfg, gateKind, rosterRound)
 	f.Must(err)
 	roster := []panel.RosterSlot{}
 	for i, slot := range registration.Slots {
 		r := selected[i]
-		roster = append(roster, panel.RosterSlot{Slot: slot, Family: r.Family, Model: r.Model, Lens: r.Lens})
+		entry := panel.RosterSlot{Slot: slot, Family: r.Family, Model: r.Model, Lens: r.Lens}
+		if r.Lens != "adversarial" {
+			for _, lens := range round.Lenses {
+				if lens.Slot == slot {
+					entry.Focus = lens.Lens
+				}
+			}
+		}
+		roster = append(roster, entry)
 	}
 	target := "spec/" + f.SpecID
 	if beadID != nil {
@@ -156,8 +216,6 @@ func Register(f *Fixture, gate string, registration kernel.RegistrationRecord) {
 			f.Must(err)
 		}
 	}
-	round, _, err := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
-	f.Must(err)
 	snapshot := panel.Panel{Orchestrated: true, KernelGate: gate, Scope: round.Paths, VerdictSchema: 2, BeadID: beadID, Spec: f.SpecID, Target: target, Round: registration.Round, ExpectedReviewers: len(roster), ReviewerCountSource: "explicit", ReviewedHeadSHA: registration.Subject, SubjectDigest: digest, Gate: gateKind, Roster: roster, Telemetry: "required"}
 	event := panel.RoundRecord{Scope: snapshot.Scope, VerdictSchema: 2, Record: panel.RecordRound, Spec: f.SpecID, Panel: registration.Slug, Round: snapshot.Round, ReviewedHeadSHA: snapshot.ReviewedHeadSHA, SubjectDigest: snapshot.SubjectDigest, Target: snapshot.Target, Gate: snapshot.Gate, BeadID: beadID, Roster: roster, ExpectedReviewers: len(roster), ReviewerCountSource: "explicit", Telemetry: "required", Carried: panel.CarriedEntries{}, CreatedAt: kernel.Now().UTC().Format(time.RFC3339)}
 	data, err := json.Marshal(event)
@@ -218,10 +276,18 @@ func Lens(f *Fixture, gate string, record kernel.LensRecord) string {
 	f.Must(err)
 	data, err := json.Marshal(record)
 	f.Must(err)
-	f.Must(f.Store.WriteMetadata(record.Step, map[string]any{
-		kernel.KeySubject: kernel.Subject{Commit: round.Subject}, kernel.KeyRecord: string(data),
+	metadata := map[string]any{
+		kernel.KeySubject: kernel.Subject{Commit: round.Subject}, kernel.KeyRound: kernel.LensAuthorization(round), kernel.KeyRecord: string(data),
 		kernel.KeyClose: kernel.Receipt{Kind: "passed", Generation: 1, RecordSHA256: fmt.Sprintf("%x", sha256.Sum256(data))},
-	}))
+	}
+	if scope, has, err := kernel.Decode[kernel.RePanel](f.State().Records[gate].Metadata, kernel.KeyRePanel); err != nil {
+		f.Must(err)
+	} else if has {
+		metadata[kernel.KeyRePanel] = scope
+	}
+	f.Must(f.Store.WriteMetadata(record.Step, metadata))
+	round.Lens, round.Lenses = record.Step, record.Lenses
+	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRound, round)))
 	closeRecord(f, record.Step)
 	return record.Step
 }

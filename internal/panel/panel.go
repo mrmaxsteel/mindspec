@@ -143,6 +143,7 @@ type RosterSlot struct {
 	Family string `json:"family,omitempty"`
 	Model  string `json:"model"`
 	Lens   string `json:"lens"`
+	Focus  string `json:"focus,omitempty"`
 }
 
 // Deferral pins a finding to a follow-up bead. Gate-time checks belong to callers.

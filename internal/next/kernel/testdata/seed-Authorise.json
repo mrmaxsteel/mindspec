@@ -26,6 +26,13 @@
       ],
       "paths": [
         "app.go"
+      ],
+      "lens": "test-1.1.review.r2.lens",
+      "lenses": [
+        {
+          "slot": "R1",
+          "lens": "Review author-of-record."
+        }
       ]
     }
   }

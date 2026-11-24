@@ -195,7 +195,7 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 				message = "needs its step and lenses"
 			case "checkLens.slot":
 				options.Record = recordFile(t, fmt.Sprintf(`{"step":%q,"lenses":[{"slot":"recovery: forged","lens":"x"}]}`, id))
-				message = "extra, empty or repeated"
+				message = "extra slot lens"
 			case "checkLens.missing-slot":
 				options.Record = recordFile(t, fmt.Sprintf(`{"step":%q,"lenses":[]}`, id))
 				message = "missing slot"

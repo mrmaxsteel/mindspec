@@ -28,6 +28,7 @@ func TestS134Allowance_LimitAndContinue(t *testing.T) {
 		t.Fatalf("allowance=%d", got)
 	}
 	out := reduce(t, f, true)
+	out = panelAfterDraft(t, f, gate, out)
 	if !hasRun(out, "mindspec", "panel", "create", f.Items[0]) {
 		t.Fatalf("continuation did not release round: %+v", out)
 	}

@@ -146,6 +146,8 @@ func retryAttempts(s State) (Changes, error) {
 		// A retry keeps the subject and decision it must resolve, but no old lease or receipt.
 		keys := []string{KeySubject, KeyDecision, KeyRound, KeyRegistration}
 		switch t.Kind {
+		case "lens":
+			keys = append(keys, KeyRePanel)
 		case "fix":
 			keys = append(keys, KeyReproduced)
 		case "verify":

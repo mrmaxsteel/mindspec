@@ -32,7 +32,7 @@ func finalKernelBinary(t *testing.T) string {
 }
 
 // finalKernelFixture uses the built command and a serialized, isolated tracker.
-func finalKernelFixture(t *testing.T) *kernelE2E {
+func finalKernelFixture(t *testing.T, configs ...string) *kernelE2E {
 	t.Helper()
 	f := kerneltest.Enrolled(t, kerneltest.WithFake(false))
 	t.Setenv("MINDSPEC_TEST_FULL_BD", "1")
@@ -40,7 +40,12 @@ func finalKernelFixture(t *testing.T) *kernelE2E {
 	f.Must(os.MkdirAll(filepath.Join(f.Root, ".beads"), 0755))
 	f.Must(os.WriteFile(filepath.Join(f.Root, ".beads/config.yaml"), []byte("types.custom: gate,step\n"), 0600))
 	actorCmdStore(t, f)
-	e := newKernelE2EWithFixture(t, finalKernelBinary(t), f, 1)
+	var e *kernelE2E
+	if len(configs) == 0 {
+		e = newKernelE2EWithFixture(t, finalKernelBinary(t), f, 1)
+	} else {
+		e = newKernelE2EWithConfig(t, finalKernelBinary(t), f, ".mindspec", configs[0], 1)
+	}
 	item := e.f.Items[0]
 	e.write(e.cwd, ".mindspec/domains/workflow/OWNERSHIP.yaml", "paths:\n  - internal/widget/**\n")
 	e.write(e.cwd, ".mindspec/domains/workflow/architecture.md", "Workflow documentation.\n")
@@ -59,11 +64,18 @@ func TestS134Final_GateCloseNeedsPanelEvidence(t *testing.T) {
 			item := e.f.Items[0]
 			out := e.implement(0)
 			gate := item + ".review"
+			if mode != "final-only" {
+				// The authorised round's lens step is a child of the gate. Close
+				// it through its verbs, so only the gate close below is forged.
+				out = e.draftLenses(out)
+			}
 			if mode == "final-only" {
 				e.create(out)
 				e.review("APPROVE")
 				e.ok("complete", item)
 				gate = e.f.Epic + ".final"
+				// The final round's lens step is a child of the final gate.
+				e.draftLenses(e.apply())
 			}
 			head := e.git(e.cwd, "rev-parse", "HEAD")
 			path := ".mindspec/specs/001-x/spec.md"
@@ -282,7 +294,7 @@ func TestS134Final_CheckAndPrintedSubmit(t *testing.T) {
 			replay := e.ok(argv...)
 			var again kernel.Output
 			e.must(json.Unmarshal([]byte(replay), &again))
-			if len(again.Run) == 0 || again.Status != "work" {
+			if len(again.Actions) != 1 || again.Actions[0].Kind != "lens" || again.Status != "work" {
 				t.Fatalf("accepted retry misreports state: %s", replay)
 			}
 			e.create(submitted)

@@ -19,6 +19,7 @@ import (
 func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 	bin := buildMindspecBinary(t)
 	for _, producer := range []string{
+		"checkLens.unknown-field", "checkLens.nested-unknown", "checkLens.missing", "checkLens.extra", "checkLens.empty", "checkLens.repeated", "checkLens.adversarial", "checkLens.two-bad", "checkLens.nil", "checkLens.step", "panelCreate.lens",
 		"refuseHalt", "actorChildren.open", "checkVerify.deferral", "verifyCloseWrites.registration", "Answer.store-update",
 		"checkVerify.unknown-field", "checkVerify.empty", "checkVerify.missing", "checkVerify.repeated", "checkVerify.unknown",
 		"verifyCloseWrites.source", "recordCloseWrites.disposition", "refusedRound.empty", "recordCloseWrites.append", "recordCloseWrites.snapshot",
@@ -29,6 +30,10 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 		"judge.changed-paths", "judge.prior-read", "judge.prior-locate", "judge.round-read",
 	} {
 		t.Run(producer, func(t *testing.T) {
+			if strings.HasPrefix(producer, "checkLens.") || producer == "panelCreate.lens" {
+				binaryLensRefusal(t, bin, producer)
+				return
+			}
 
 			if producer == "judge.changed-paths" || producer == "judge.prior-read" || producer == "judge.prior-locate" || producer == "judge.round-read" {
 				if !judgeRefusalFault(t, producer) {

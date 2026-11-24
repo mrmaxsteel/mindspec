@@ -758,6 +758,12 @@ func judgeApply(s State) (Changes, error) {
 			return c, err
 		}
 		if scopedPending(g, round) {
+			for _, w := range retireLens(s, round.Lens) {
+				c.Writes = append(c.Writes, w)
+				if err := overlay(&s, w); err != nil {
+					return c, err
+				}
+			}
 			if round.Prior != nil {
 				round = *round.Prior
 				w := Write{Kind: "metadata", ID: gate, Metadata: Metadata(KeyRound, round)}

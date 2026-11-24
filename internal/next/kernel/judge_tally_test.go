@@ -391,6 +391,7 @@ func TestS134SeedMatch_AuthoriseVerifyRepanel(t *testing.T) {
 	}
 	scope, _, err := kernel.Decode[kernel.RePanel](record(t, b, gate).Metadata, kernel.KeyRePanel)
 	b.Must(err)
+	closeDraftLens(t, a, gate)
 	kerneltest.Authorise(b, gate, kernel.GateRound{Round: 2, Subject: v.Subject, SlotCount: 2, Paths: scope.Paths, Slots: []string{gate + ".r2.R1", gate + ".r2.R2"}, Prior: &prior})
 	if !jsonEqual(record(t, a, gate), record(t, b, gate)) {
 		t.Fatal("Authorise differs from verify re-panel producer")

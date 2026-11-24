@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
-	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 )
 
 func TestS134SubmitCmd_SafeRecordRefusal(t *testing.T) {
@@ -23,8 +22,11 @@ func TestS134SubmitCmd_SafeRecordRefusal(t *testing.T) {
 			id := gate + ".r1.lens"
 			subject := actorCmdGit(t, f, "rev-parse", "HEAD")
 			f.Create(id, gate)
-			kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: subject, SlotCount: 2, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}})
-			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: subject})))
+			// An authorised round names its open lens step. The seeder for
+			// authorisation closes the lens, so this test writes the round itself.
+			round := kernel.GateRound{Round: 1, Subject: subject, SlotCount: 2, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}, Lens: id}
+			f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRound, round)))
+			f.Must(f.Store.WriteMetadata(id, map[string]any{kernel.KeySubject: kernel.Subject{Commit: subject}, kernel.KeyRound: kernel.LensAuthorization(round)}))
 			store := actorCmdStore(t, f)
 			token := judgeCmdLease(t, f, bin, id)
 			cwd := f.Root

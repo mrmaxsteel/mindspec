@@ -375,6 +375,7 @@ func TestS134VerifyCmd_FrozenRoundCreate(t *testing.T) {
 	commit := actorCmdGit(t, f, "rev-parse", "HEAD")
 	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: fix, Lease: lease.Token, Commit: commit})
 	f.Must(err)
+	kernelPanelDraftLens(t, f, gate)
 	out, err = kernelPanelCreate(t, f, "1")
 	kernelPanelRequire(t, out, err)
 	round, _, err := kernel.Decode[kernel.GateRound](kernelPanelRecord(t, f, gate).Metadata, kernel.KeyRound)

@@ -30,6 +30,8 @@ func promptFixture(t *testing.T, schema int, cfg string) (string, paneltest.Fixt
 		{Slot: "R1", Family: "harness", Model: "m", Lens: "empirical-prober"},
 		{Slot: "R2", Family: "harness", Model: "other-model", Lens: "adversarial"},
 	}}
+	// panel.json matches its ledger round row, so panel prompt's hand-edit check passes.
+	p.VerdictSchema = schema
 	f := paneltest.Fixture{Dir: filepath.Join(root, ".mindspec/specs/test/reviews/p"), Panel: p}
 	if err := panel.WriteSnapshot(f.Dir, p); err != nil {
 		t.Fatal(err)
@@ -44,6 +46,14 @@ func promptFixture(t *testing.T, schema int, cfg string) (string, paneltest.Fixt
 		t.Cleanup(func() { _ = flag.Value.Set(old); flag.Changed = changed })
 	}
 	return root, f
+}
+
+// promptReround records the rewritten fixture roster in a later ledger round
+// row, as panel create would, so panel.json stays backed by its ledger.
+func promptReround(t *testing.T, f paneltest.Fixture) {
+	t.Helper()
+	p := f.Panel
+	paneltest.Seed(t, f.Dir, panel.RoundRecord{Record: panel.RecordRound, VerdictSchema: p.VerdictSchema, Spec: p.Spec, Panel: filepath.Base(f.Dir), Round: p.Round, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target, Gate: p.Gate, BeadID: p.BeadID, Roster: p.Roster, ExpectedReviewers: p.ExpectedReviewers, Telemetry: p.Telemetry, CreatedAt: "2026-10-21T00:00:01Z"})
 }
 
 func promptRun(t *testing.T, root, slot string) string {
@@ -129,6 +139,7 @@ func TestPanelPrompt_Render(t *testing.T) {
 		if err := panel.WriteSnapshot(f.Dir, f.Panel); err != nil {
 			t.Fatal(err)
 		}
+		promptReround(t, f)
 		out := promptRun(t, root, "R1")
 		var begin, end string
 		for _, line := range strings.Split(out, "\n") {
@@ -153,6 +164,7 @@ func TestPanelPrompt_Render(t *testing.T) {
 		if err := panel.WriteSnapshot(f.Dir, f.Panel); err != nil {
 			t.Fatal(err)
 		}
+		promptReround(t, f)
 		subjectCLIWrite(t, filepath.Join(root, ".mindspec-scratch/test/p/r1/R1/attempt-4"), "scratch", "old")
 		out := promptRun(t, root, "R1")
 		want := filepath.Join(root, ".mindspec-scratch/test/p/r1/R1/attempt-5/verdict.json")
@@ -174,6 +186,7 @@ func TestPanelPrompt_Render(t *testing.T) {
 		if err := panel.WriteSnapshot(f.Dir, f.Panel); err != nil {
 			t.Fatal(err)
 		}
+		promptReround(t, f)
 		out := promptRun(t, root, "R1")
 		if strings.ContainsRune(out, '\x1b') || !strings.Contains(out, "model\\x1b[31m") || !strings.Contains(out, "focus\\x1b[31m") {
 			t.Fatalf("unsafe prompt strings:\n%s", out)
@@ -272,7 +285,7 @@ func TestPanelPrompt_PriorRoundV1(t *testing.T) {
 				subjectCLIWrite(t, f.Dir, "R1-round-1.json", tc.file)
 			}
 			subjectCLIWrite(t, f.Dir, "R2-round-1.json", `{"verdict":"REQUEST_CHANGES","concrete_changes_required":["other slot"]}`)
-			f.Panel.Round = 2
+			f.Panel.Round, f.Panel.VerdictSchema = 2, 2
 			if err := panel.WriteSnapshot(f.Dir, f.Panel); err != nil {
 				t.Fatal(err)
 			}

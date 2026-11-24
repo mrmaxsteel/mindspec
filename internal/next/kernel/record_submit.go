@@ -150,18 +150,7 @@ func recordBytes(r Record) ([]byte, error) {
 	return []byte(text), nil
 }
 
-func checkLens(s State, r Record, _ Receipt) error {
-	data, err := recordBytes(r)
-	if err != nil {
-		return err
-	}
-	lens, err := strictRecord[LensRecord](data)
-	if err != nil {
-		return err
-	}
-	if lens.Step != r.Key() || lens.Lenses == nil {
-		return actorFailure("lens record needs its step and lenses")
-	}
+func checkLens(s State, r Record, _ Receipt) (err error) {
 	round, err := activeActorRound(s, r)
 	if err != nil {
 		return err
@@ -173,29 +162,61 @@ func checkLens(s State, r Record, _ Receipt) error {
 	}
 	cfg, err := config.Load(s.Root)
 	if err != nil {
-		return err
+		return pathFailure(err, "cannot resolve lens roster: ", "correct the panel reviewer configuration and retry")
 	}
-	roster, err := cfg.PanelGateReviewerSlots(gateKind, round.SlotCount)
+	roster, err := RoundReviewerSlots(cfg, gateKind, round)
 	if err != nil {
 		return err
 	}
-	expected := map[string]bool{}
+	slots := make([]string, len(roster))
+	expected, adversary := map[string]bool{}, map[string]bool{}
 	for i, slot := range roster {
-		if slot.Lens != "adversarial" {
-			expected[fmt.Sprintf("R%d", i+1)] = true
+		slots[i] = slot.Slot
+		if slot.Lens == "adversarial" {
+			adversary[slot.Slot] = true
+		} else {
+			expected[slot.Slot] = true
 		}
 	}
+	defer func() {
+		if err != nil {
+			err = termsafe.PrefixFailure(err, "lens record for slots "+strings.Join(slots, ", ")+": ")
+		}
+	}()
+	data, err := recordBytes(r)
+	if err != nil {
+		return err
+	}
+	lens, err := strictRecord[LensRecord](data)
+	if err != nil {
+		return err
+	}
+	if lens.Step != r.Key() || lens.Lenses == nil {
+		return actorFailure("lens record needs its step and lenses")
+	}
+	// Name every bad entry in one refusal, in record order, then the missing slots in roster order.
+	var bad []string
 	seen := map[string]bool{}
 	for _, entry := range lens.Lenses {
-		if !expected[entry.Slot] || strings.TrimSpace(entry.Lens) == "" || seen[entry.Slot] {
-			return actorFailure("lens record has an extra, empty or repeated slot lens: " + entry.Slot)
+		switch {
+		case adversary[entry.Slot]:
+			bad = append(bad, "adversary slot "+entry.Slot+" takes no lens")
+		case !expected[entry.Slot]:
+			bad = append(bad, "extra slot lens "+entry.Slot)
+		case seen[entry.Slot]:
+			bad = append(bad, "repeated slot lens "+entry.Slot)
+		case strings.TrimSpace(entry.Lens) == "":
+			bad = append(bad, "empty slot lens "+entry.Slot)
 		}
 		seen[entry.Slot] = true
 	}
-	for slot := range expected {
-		if !seen[slot] {
-			return actorFailure("lens record is missing slot " + slot)
+	for _, slot := range slots {
+		if expected[slot] && !seen[slot] {
+			bad = append(bad, "missing slot "+slot)
 		}
+	}
+	if len(bad) > 0 {
+		return actorFailure(strings.Join(bad, "; "))
 	}
 	return nil
 }
