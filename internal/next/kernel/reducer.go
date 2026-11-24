@@ -59,7 +59,8 @@ func activeGate(s State, base string) string {
 	best, attempt := base, 0
 	for _, id := range s.gateAttempts() {
 		t, _, _ := s.Records[id].Tuple()
-		if t.Gate == base && t.Attempt > attempt {
+		receipt, _, _ := Decode[Receipt](s.Records[id].Metadata, KeyClose)
+		if t.Gate == base && t.Attempt > attempt && !(s.Records[id].Status == "closed" && receipt.Kind == "superseded") {
 			best, attempt = id, t.Attempt
 		}
 	}
@@ -134,7 +135,9 @@ func recreate(s State) (Changes, error) {
 		}
 		for _, slot := range round.Slots {
 			if _, exists := s.Records[slot]; !exists {
-				c.Writes = append(c.Writes, createStep(slot, gate))
+				w := createStep(slot, gate)
+				w.Create.Metadata = Metadata(KeySubject, Subject{Commit: round.Subject})
+				c.Writes = append(c.Writes, w)
 			}
 		}
 	}
@@ -163,7 +166,7 @@ func roundOpen(s State) (Changes, error) {
 	for _, gate := range s.Gates {
 		g := s.Records[gate]
 		t, _, _ := g.Tuple()
-		if gate != activeGate(s, t.Gate) || g.Status == "closed" || gateDecision(s, t.Gate, false) {
+		if gate != activeGate(s, t.Gate) || g.Status == "closed" || gateDecision(s, t.Gate, false) || openGateJudge(s, t.Gate) {
 			continue
 		}
 		round, has, err := Decode[GateRound](g.Metadata, KeyRound)
@@ -192,6 +195,11 @@ func roundOpen(s State) (Changes, error) {
 			return c, err
 		}
 		if count >= Allowance(s, gate) {
+			// A scoped retally can stop after it writes the authorization but
+			// before it creates the replacement limit decision.
+			if scopedPending(g, round) && round.Prior != nil {
+				c.Writes = append(c.Writes, decisionWrite(s, gate, "limit", round.Prior.Round)...)
+			}
 			continue
 		}
 		reg, registered, err := Decode[RegistrationRecord](g.Metadata, KeyRegistration)
@@ -227,7 +235,10 @@ func roundOpen(s State) (Changes, error) {
 			}
 			round = GateRound{Round: wanted, Subject: head, SlotCount: n, Slots: []string{}}
 			if has {
-				prior = verifyPrior(s, prior)
+				prior, err = roundPrior(s, gate, prior)
+				if err != nil {
+					return c, err
+				}
 				round.Prior = &prior
 				for _, step := range s.Steps {
 					r := s.Records[step]
@@ -279,7 +290,9 @@ func slots(s State) (Changes, error) {
 			}
 			id := fmt.Sprintf("%s.r%d.%s", t.Gate, round.Round, slot)
 			if _, ok := s.Records[id]; !ok {
-				c.Writes = append(c.Writes, createStep(id, gate))
+				w := createStep(id, gate)
+				w.Create.Metadata = Metadata(KeySubject, Subject{Commit: round.Subject})
+				c.Writes = append(c.Writes, w)
 			}
 		}
 	}
@@ -340,6 +353,16 @@ func implement(s State) (Changes, error) {
 			sub = ""
 			if err == nil {
 				sub = s.Refs["refs/heads/"+branch]
+			}
+		}
+		if t.Kind == "review-slot" || t.Kind == "verify" || t.Kind == "fix" || t.Kind == "lens" {
+			round, _, err := Decode[GateRound](s.Records[activeGate(s, t.Gate)].Metadata, KeyRound)
+			if err != nil {
+				return c, err
+			}
+			sub = round.Subject
+			if t.Kind == "verify" || t.Kind == "fix" {
+				sub = reviewSubject(round)
 			}
 		}
 		if v, ok, _ := Decode[Subject](r.Metadata, KeySubject); ok {
@@ -412,7 +435,15 @@ func tally(s State) (Changes, error) {
 		if err != nil {
 			return c, err
 		}
-		if ok && head == accepted {
+		if ok && (head == accepted || VerifyApplied(s, gate, round)) {
+			if round.Judged != nil && round.Judged.Value == "re-panel" {
+				writes, err := scopedRoundWrites(s, gate, round)
+				if err != nil {
+					return c, err
+				}
+				c.Writes = append(c.Writes, writes...)
+				continue
+			}
 			receipt := Receipt{Kind: "passed", Subject: accepted, Retally: "passing-tally"}
 			c.Writes = append(c.Writes, Write{Kind: "close", ID: gate, Receipt: &receipt})
 		}

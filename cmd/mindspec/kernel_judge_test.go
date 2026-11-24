@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -190,7 +191,11 @@ func TestS134JudgeCmd_RepanelCreateSlots(t *testing.T) {
 				t.Fatalf("missing real change judge: %+v", out)
 			}
 			token := judgeCmdLease(t, f, bin, id)
-			artifact := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}}, slug)
+			paths := []string{".mindspec/config.yaml"}
+			if kind == "final" {
+				paths = append(paths, "final.go")
+			}
+			artifact := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: paths}, slug)
 			raw, code := actorCmdRun(t, f, bin, "submit", id, "--lease", token, "--record", artifact)
 			if code != 0 {
 				t.Fatalf("re-panel: %d %s", code, raw)
@@ -225,5 +230,54 @@ func TestS134JudgeCmd_RepanelCreateSlots(t *testing.T) {
 				t.Fatalf("expected only round-2 slots: %+v", out)
 			}
 		})
+	}
+}
+
+func TestS134JudgeCmd_PanelSkipsWithdrawnSuccessor(t *testing.T) {
+	bin := buildMindspecBinary(t)
+	f, gate, old, j := judgeCmdFixture(t)
+	store := actorCmdStore(t, f)
+	judgeCmdApply(t, f, bin)
+	token := judgeCmdLease(t, f, bin, gate+".judge.a1")
+	file := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: j, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}})
+	raw, code := actorCmdRun(t, f, bin, "submit", gate+".judge.a1", "--lease", token, "--record", file)
+	if code != 0 {
+		t.Fatalf("first judgement: %s", raw)
+	}
+	newest := judgeCmdCommit(t, f, "later.txt", "S")
+	judgeCmdApply(t, f, bin)
+	token = judgeCmdLease(t, f, bin, gate+".judge.a2")
+	file = judgeCmdArtifact(t, f, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "same behavior"})
+	raw, code = actorCmdRun(t, f, bin, "submit", gate+".judge.a2", "--lease", token, "--record", file)
+	if code != 0 {
+		t.Fatalf("second judgement: %s", raw)
+	}
+	successor := actorCmdRead(t, store, gate+".a2")
+	receipt, _, err := kernel.Decode[kernel.Receipt](successor.Metadata, kernel.KeyClose)
+	f.Must(err)
+	if successor.Status != "closed" || receipt.Kind != "superseded" {
+		t.Fatalf("successor not withdrawn: %+v", successor)
+	}
+	out, err := f.BinaryCommand(bin, "panel", "create", f.Items[0], "--spec", f.SpecID)
+	raw = string(out)
+	want := "Error: gate " + gate + " is closed\nrecovery: correct the panel arguments or registration, then retry the panel verb\n"
+	if err == nil || raw != want {
+		t.Fatalf("panel selected a withdrawn gate: %v %q, want %q", err, raw, want)
+	}
+	// The subprocess store is authoritative. Both selectors must use its base
+	// receipt after the successor was withdrawn.
+	base := actorCmdRead(t, store, gate)
+	state := f.State()
+	state.Records[gate], state.Records[gate+".a2"] = base, successor
+	state.Gates = append(state.Gates, gate+".a2")
+	accepted, err := kernel.AcceptedSubject(state, gate)
+	f.Must(err)
+	if selected := kernelPanelGate(state, panel.Panel{BeadID: &f.Items[0]}); selected != gate || accepted != newest {
+		t.Fatalf("panel/kernel gate selection differs: %s, accepted %s", selected, accepted)
+	}
+	receipt, _, err = kernel.Decode[kernel.Receipt](base.Metadata, kernel.KeyClose)
+	f.Must(err)
+	if len(receipt.CarryOvers) != 1 || receipt.CarryOvers[0].NewSubject != newest {
+		t.Fatalf("kernel did not carry the base gate: %+v (fixture accepted %s)", receipt, accepted)
 	}
 }

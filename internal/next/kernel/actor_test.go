@@ -724,6 +724,10 @@ func TestS134Submit_FinalFixBranch(t *testing.T) {
 			f.Create(id, gate)
 			kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: subject, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}, SlotCount: 2})
 			kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "panel", Round: 1, Subject: subject, Slots: []string{"R1", "R2"}})
+			finding := kernel.Finding{Slot: "R1", Round: 1, Finding: "ccr[0]", FindingSHA256: strings.Repeat("a", 64), Text: "fix this finding"}
+			verify := gate + ".r1.verify"
+			kerneltest.Verify(f, gate, kernel.VerifyRecord{Step: verify, Subject: subject, Returns: []kernel.VerifyReturn{{Slot: finding.Slot, Round: 1, Finding: finding.Finding, FindingSHA256: finding.FindingSHA256, Return: "reproduced"}}}, []kernel.Finding{finding}, map[string]string{})
+			f.Must(f.Store.WriteMetadata(id, map[string]any{kernel.KeySubject: kernel.Subject{Commit: subject}, kernel.KeyFrom: kernel.From(verify)}))
 			_, err := kernel.Pass(kernel.Rules(), f.State(), true)
 			f.Must(err)
 			lease := leaseActor(t, f, id, kernel.LeaseDeps{})

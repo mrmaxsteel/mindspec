@@ -233,6 +233,10 @@ func VerifyApplied(s State, gate string, round GateRound) bool {
 		return false
 	}
 	g := s.Records[gate]
+	current, _, _ := Decode[GateRound](g.Metadata, KeyRound)
+	if current.Round > round.Round && current.Prior != nil && current.Prior.Verify == round.Verify {
+		return true
+	}
 	if receipt, _, _ := Decode[Receipt](g.Metadata, KeyClose); g.Status == "closed" && receipt.Kind == "passed" && receipt.Retally == "verify" {
 		return true
 	}
@@ -287,10 +291,25 @@ func VerifyRetallyFits(s State, gate string, res *panel.Result) error {
 	if len(changed) != 0 {
 		return actorFailure("verify read set differs at: " + strings.Join(changed, ", "))
 	}
-	if !ok || !returnsCover(findings, returns) {
+	if !ok || !returnsContain(findings, returns) {
 		return actorFailure("verify returns do not cover the round findings")
 	}
 	return nil
+}
+
+// returnsContain covers the findings on disk; the frozen read-set check also
+// requires the original file set, so an extra pinned return cannot hide removal.
+func returnsContain(findings []Finding, returns []VerifyReturn) bool {
+	for _, f := range findings {
+		found := false
+		for _, r := range returns {
+			found = found || findingKey(f.Slot, f.Round, f.Finding, f.FindingSHA256) == findingKey(r.Slot, r.Round, r.Finding, r.FindingSHA256)
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func verifyPassed(s State, round GateRound) bool {
@@ -507,6 +526,14 @@ func verifyApply(s State) (Changes, error) {
 			}
 		}
 		if len(reproduced) == 0 {
+			if !hasOpenChild(s, gate) && round.Judged != nil && round.Judged.Value == "re-panel" {
+				writes, err := scopedRoundWrites(s, gate, round)
+				if err != nil {
+					return c, err
+				}
+				c.Writes = append(c.Writes, writes...)
+				continue
+			}
 			if !hasOpenChild(s, gate) {
 				c.Writes = append(c.Writes, Write{Kind: "close", ID: gate, Receipt: &Receipt{Kind: "passed", Retally: "verify", Subject: reviewSubject(round)}})
 			}
@@ -515,6 +542,34 @@ func verifyApply(s State) (Changes, error) {
 		count, err := RoundsForGate(s, gate)
 		if err != nil {
 			return c, err
+		}
+		if VerifyApplied(s, gate, round) {
+			// An answered limit may release the fix; other applied outcomes are final.
+			release := false
+			for id, answer := range s.Answers() {
+				d, _, _ := s.Records[id].Tuple()
+				release = release || d.Gate == t.Gate && d.Cause == "limit" && d.Round == round.Round && strings.HasPrefix(answer.Option, "continue:")
+			}
+			if !release {
+				// A crash can persist the fix before its paired reject decision.
+				// Finish that outcome only while the original fix is still open.
+				fix := s.Records[fmt.Sprintf("%s.r%d.fix", t.Gate, round.Round+1)]
+				from, _, _ := Decode[From](fix.Metadata, KeyFrom)
+				if fix.Status != "closed" && string(from) == round.Verify {
+					sources, _, _ := Decode[VerifyVerdictSources](s.Records[round.Verify].Metadata, KeyVerifyVerdicts)
+					for _, f := range reproduced {
+						if f.Finding == "veto" && sources[f.Slot].Verdict == panel.VerdictReject {
+							more := decisionWrite(s, gate, "reject", round.Round)
+							for i := range more {
+								more[i].Create.Metadata[KeyFrom] = From(round.Verify)
+							}
+							c.Writes = append(c.Writes, more...)
+							break
+						}
+					}
+				}
+				continue
+			}
 		}
 		var writes []Write
 		if count >= Allowance(s, gate) {

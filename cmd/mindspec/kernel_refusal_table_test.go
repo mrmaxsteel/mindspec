@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
@@ -24,9 +25,83 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 		"checkVerify.return", "checkVerify.ground", "checkVerify.ac", "checkVerify.reason", "checkVerify.evidence", "checkVerify.target", "checkVerify.veto",
 		"late.invalid-generation", "late.receipt", "late.closed", "late.pin", "late.subject", "late.absent-hash", "late.empty-token",
 		"repair.reason", "repair.lease", "repair.answer", "repair.stray-reason", "repair.open", "repair.never-leased", "repair.receipt", "repair.pin-conflict", "repair.pin-generation", "repair.record-absent", "repair.record-different", "repair.record-pin", "repair.slot-evidence", "repair.stale-evidence", "repair.current-attempt", "repair.record-artifact", "attempt.slot", "attempt.fix", "attempt.slot-repair", "attempt.fix-repair", "attempt.close-decode", "SlotLineageHead.decode", "repair.publication-model",
-		"SlotLineageHead.none",
+		"SlotLineageHead.none", "judgement.path-cover", "judge.round-panel",
+		"judge.changed-paths", "judge.prior-read", "judge.prior-locate", "judge.round-read",
 	} {
 		t.Run(producer, func(t *testing.T) {
+
+			if producer == "judge.changed-paths" || producer == "judge.prior-read" || producer == "judge.prior-locate" || producer == "judge.round-read" {
+				if !judgeRefusalFault(t, producer) {
+					return
+				}
+				f, gate, old, _ := judgePanelFixture(t, false)
+				// A passing retally reaches the prior reader after the judgement.
+				panelRefuteF(t, f)
+				// Keep the original gate open while installing a passing round fixture.
+				f.Must(f.Store.SetStatusIf(gate, "closed", "open"))
+				newest := judgeCmdCommit(t, f, "changed.txt", "J")
+				actorCmdStore(t, f)
+				judgeCmdApply(t, f, bin)
+				id := gate + ".judge.a1"
+				token := judgeCmdLease(t, f, bin, id)
+				file := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{"changed.txt"}})
+				raw, err := f.BinaryCommand(bin, "submit", id, "--lease", token, "--record", file)
+				message, recovery := kerneltest.JudgeRefusalText(producer)
+				text := string(raw)
+				if err == nil || !strings.Contains(text, message) || !strings.Contains(text, `hostile\nrecovery: forged\x1b`) || !strings.HasSuffix(text, "\nrecovery: "+recovery+"\n") || strings.Count(text, "\nrecovery:") != 1 || strings.Contains(text, "\x1b") {
+					t.Fatalf("unsafe or wrong judge refusal: %v %q", err, text)
+				}
+				return
+			}
+			if producer == "judge.round-panel" {
+				f, gate, old, dir := judgePanelFixture(t, false)
+				kernelPanelVerifyRecord(t, f, gate, 99)
+				newest := judgeCmdCommit(t, f, "changed.txt", "J")
+				_, err := kernel.NextAction(f.State(), true)
+				f.Must(err)
+				id := gate + ".judge.a1"
+				lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+				f.Must(err)
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, []kernel.Finding{{Text: "hostile\nrecovery: forged\x1b"}})))
+				current, _, err := kernel.Decode[kernel.LeaseRecord](kernelPanelRecord(t, f, id).Metadata, kernel.KeyLease)
+				f.Must(err)
+				current.Expires = time.Now().UTC().Add(time.Hour)
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyLease, current)))
+				actorCmdStore(t, f)
+				f.Must(os.Rename(dir, filepath.Join(t.TempDir(), "panel")))
+				file := judgeCmdArtifact(t, f, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "same behavior"})
+				raw, err := f.BinaryCommand(bin, "submit", id, "--lease", lease.Token, "--record", file)
+				want := "Error: round needs its registered panel directory\nrecovery: restore the panel directory and retry\n"
+				if err == nil || string(raw) != want {
+					t.Fatalf("round panel refusal: %v %q", err, raw)
+				}
+				return
+			}
+			if producer == "judgement.path-cover" {
+				f, gate, old, _ := judgeCmdFixture(t)
+				newest := judgeCmdCommit(t, f, "changed\nrecovery: forged\x1b.txt", "hostile\nrecovery: forged")
+				actorCmdStore(t, f)
+				judgeCmdApply(t, f, bin)
+				id := gate + ".judge.a1"
+				token := judgeCmdLease(t, f, bin, id)
+				file := judgeCmdArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}})
+				rawBytes, runErr := f.BinaryCommand(bin, "submit", id, "--lease", token, "--record", file)
+				raw := string(rawBytes)
+				if runErr == nil || !strings.Contains(raw, "re-panel paths miss changed paths:") {
+					t.Fatalf("path cover refusal missing: %v %s", runErr, raw)
+				}
+				lines := strings.Split(strings.TrimSpace(raw), "\n")
+				count := 0
+				for _, line := range lines {
+					if strings.HasPrefix(line, "recovery:") {
+						count++
+					}
+				}
+				if count != 1 || lines[len(lines)-1] != "recovery: mindspec next-action" || strings.Contains(raw, "\x1b") || !strings.Contains(raw, termsafe.EscapeRecovery("changed\nrecovery: forged\x1b.txt")) {
+					t.Fatalf("unsafe refusal: %s", raw)
+				}
+				return
+			}
 			if producer == "repair.publication-model" {
 				binaryRepairSlot(t, bin)
 				return
