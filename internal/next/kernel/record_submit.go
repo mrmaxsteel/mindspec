@@ -311,7 +311,7 @@ func recordEvidenceResolves(root, evidence string) bool {
 }
 
 // recordCloseWrites runs only for an attempt that has no valid receipt.
-func recordCloseWrites(s State, r Record, receipt Receipt) (Receipt, error) {
+func recordCloseWrites(s State, r Record, receipt Receipt, pending map[string]any) (Receipt, error) {
 	t, _, _ := r.Tuple()
 	if t.Kind == "verify" {
 		pin, has, err := Decode[Closing](r.Metadata, KeyClosing)
@@ -369,7 +369,7 @@ func recordCloseWrites(s State, r Record, receipt Receipt) (Receipt, error) {
 			return receipt, err
 		}
 	}
-	final := mergedMetadata(projected.Records[r.Key()].Metadata, Metadata(KeyClose, receipt))
+	final := mergedMetadata(mergedMetadata(projected.Records[r.Key()].Metadata, pending), Metadata(KeyClose, receipt))
 	if err := ValidReceipt(s.Root, receipt, final); err != nil {
 		return receipt, err
 	}

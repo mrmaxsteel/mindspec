@@ -219,11 +219,17 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					event := TakeReason{Via: "repair", Reason: options.Reason, At: s.At, Generation: lease.Generation, Subject: subject}
 					updates[KeyTakes] = append(history, event)
 				}
+				if receipt.SupersededGeneration != 0 {
+					lease.Ended = "superseded"
+					updates[KeyLease] = lease
+				}
 				if recordKind(tuple.Kind) {
-					receipt, err = recordCloseWrites(s, r, receipt)
+					receipt, err = recordCloseWrites(s, r, receipt, updates)
 					if err != nil {
 						return err
 					}
+				} else if _, err = CheckMetadataSize(r.Key(), mergedMetadata(mergedMetadata(r.Metadata, updates), Metadata(KeyClose, receipt))); err != nil {
+					return err
 				}
 				if options.BeforeClose != nil {
 					if err = options.BeforeClose(s, receipt); err != nil {
@@ -234,10 +240,6 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					return err
 				}
 
-				if receipt.SupersededGeneration != 0 {
-					lease.Ended = "superseded"
-					updates[KeyLease] = lease
-				}
 				// The receipt, repair event and superseded lease share one durable write.
 				updates[KeyClose] = receipt
 				if err = s.Store.WriteMetadata(r.Key(), updates); err != nil {
@@ -758,6 +760,12 @@ func answerLocked(s State, decision, option string) (Output, error) {
 				return actorFailure("answer must be a listed decision option")
 			}
 			answer := DecisionAnswer{Option: option, At: s.At}
+			if option == "halt" {
+				final := mergedMetadata(r.Metadata, map[string]any{KeyAnswer: answer, KeyClose: Receipt{Kind: "halted", HaltAnswer: r.Key(), Answer: &answer}})
+				if _, err = CheckMetadataSize(r.Key(), final); err != nil {
+					return err
+				}
+			}
 			if err = s.Store.WriteMetadata(r.Key(), map[string]any{KeyAnswer: answer, KeyClose: Receipt{Kind: "passed", Answer: &answer}}); err != nil {
 				return err
 			}
