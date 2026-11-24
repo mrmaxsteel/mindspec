@@ -230,7 +230,33 @@ func TestS134PanelPrompt_LensFocusHandEdit(t *testing.T) {
 	if !strings.Contains(raw, "panel registration differs from its ledger: roster") {
 		t.Fatalf("refusal does not name roster: %q", raw)
 	}
+	text := strings.TrimRight(raw, "\n")
+	if lines := strings.Split(text, "\n"); strings.Count(text, "recovery:") != 1 || lines[len(lines)-1] != "recovery: undo the hand edit of field roster in "+shellQuoteTarget(name)+"; the panel ledger holds its value" {
+		t.Fatalf("hand edit refusal wants one true recovery line, last: %q", raw)
+	}
 	if strings.Contains(raw, "forged focus") || strings.Contains(raw, "Focus:") {
+		t.Fatalf("refusal printed a prompt: %q", raw)
+	}
+}
+func TestS134PanelPrompt_LedgerUnreadable(t *testing.T) {
+	c := lensCLIFixture(t, buildMindspecBinary(t))
+	c.ok("submit", c.id, "--lease", c.lease(c.id), "--record", c.file(c.record(c.id, "drafted")))
+	c.ok("panel", "create", "1", "--spec", c.f.SpecID)
+	c.ok("panel", "prompt", "1", "--spec", c.f.SpecID, "--slot", "R1")
+	ledger := filepath.Join(c.f.SpecDir, "reviews", "1", "dispositions.jsonl")
+	data, err := os.ReadFile(ledger)
+	c.f.Must(err)
+	c.f.Must(os.WriteFile(ledger, append(data, []byte("{\"record\":\"round\",\n")...), 0600))
+	raw, err := c.run("panel", "prompt", "1", "--spec", c.f.SpecID, "--slot", "R1")
+	if err == nil {
+		t.Fatalf("prompt rendered from an unreadable ledger: %s", raw)
+	}
+	text := strings.TrimRight(raw, "\n")
+	lines := strings.Split(text, "\n")
+	if strings.Count(text, "recovery:") != 1 || !strings.HasPrefix(lines[len(lines)-1], "recovery: restore "+shellQuoteTarget(ledger)+" ") || !strings.HasSuffix(text, " to the records the panel verbs wrote, then retry") {
+		t.Fatalf("unreadable ledger refusal wants one recovery line, last: %q", raw)
+	}
+	if strings.Contains(raw, "Focus:") {
 		t.Fatalf("refusal printed a prompt: %q", raw)
 	}
 }

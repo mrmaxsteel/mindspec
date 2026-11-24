@@ -293,9 +293,42 @@ func TestPanelCheckout_Refusals(t *testing.T) {
 		if _, err := checkoutRegistration(f.dir); err == nil || !strings.Contains(err.Error(), "panel registration differs from its ledger: expected_reviewers") {
 			t.Fatalf("registration accepted changed reviewer count: %v", err)
 		}
-		checkoutRefused(t, "panel registration differs from its ledger: expected_reviewers", "--all")
+		refusal := checkoutRefused(t, "panel registration differs from its ledger: expected_reviewers", "--all")
+		want := "\nrecovery: undo the hand edit of field expected_reviewers in " + shellQuoteTarget(filepath.Join(f.dir, panel.FileName)) + "; the panel ledger holds its value"
+		if strings.Count(refusal, "recovery:") != 1 || !strings.HasSuffix(refusal, want) {
+			t.Fatalf("hand edit refusal wants one recovery %q, got %q", want, refusal)
+		}
 		if !reflect.DeepEqual(before, slotSnapshot(t, f.dir)) {
 			t.Fatal("registration refusal changed the panel")
+		}
+		// The recovery is true: undoing the hand edit restores the registration.
+		f.p.ExpectedReviewers--
+		if err := panel.WriteSnapshot(f.dir, f.p); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := checkoutRegistration(f.dir); err != nil {
+			t.Fatalf("hand edit recovery did not restore the registration: %v", err)
+		}
+	})
+	t.Run("ledger unreadable", func(t *testing.T) {
+		f := newCheckoutFixture(t, ".mindspec-scratch")
+		ledger := filepath.Join(f.dir, "dispositions.jsonl")
+		data, err := os.ReadFile(ledger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slotWrite(t, ledger, string(data)+"{\"record\":\"round\",\n")
+		_, err = checkoutRegistration(f.dir)
+		if err == nil {
+			t.Fatal("registration accepted an unreadable ledger")
+		}
+		want := "\nrecovery: restore " + shellQuoteTarget(ledger) + " to the records the panel verbs wrote, then retry"
+		if refusal := err.Error(); strings.Count(refusal, "recovery:") != 1 || !strings.HasSuffix(refusal, want) {
+			t.Fatalf("unreadable ledger refusal wants one recovery %q, got %q", want, refusal)
+		}
+		slotWrite(t, ledger, string(data))
+		if _, err := checkoutRegistration(f.dir); err != nil {
+			t.Fatalf("ledger recovery did not restore the registration: %v", err)
 		}
 	})
 	t.Run("held lock", func(t *testing.T) {

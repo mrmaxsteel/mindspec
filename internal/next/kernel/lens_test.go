@@ -98,6 +98,28 @@ func TestS134Lens_PassedThenSubjectMove(t *testing.T) {
 		t.Fatalf("untrue stale-lens refusal: %q", text)
 	}
 }
+func TestS134Lens_RoundRebindWithoutLens(t *testing.T) {
+	f, gate, id := lensFixture(t)
+	closeDraftLens(t, f, gate)
+	lensSubject, _, err := kernel.Decode[kernel.Subject](f.State().Records[id].Metadata, kernel.KeySubject)
+	f.Must(err)
+	// The round names the new branch tip, but its lens step recorded the old subject.
+	newest := newCommit(t, f, "bead/"+f.Items[0])
+	round := tallyRound(t, f, gate)
+	if round.Lens != id || lensSubject.Commit != round.Subject || newest == round.Subject {
+		t.Fatalf("control: lens=%q round=%+v lens subject=%q newest=%q", id, round, lensSubject.Commit, newest)
+	}
+	round.Subject = newest
+	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRound, round)))
+	err = kernel.CheckRoundLens(f.State(), tallyRound(t, f, gate))
+	if err == nil {
+		t.Fatal("lens step accepted for a round subject it did not see")
+	}
+	text := err.Error()
+	if !strings.Contains(text, "lens step "+id+" is closed passed, but the authorized subject moved after it") || !strings.HasSuffix(text, "\nrecovery: mindspec next-action") {
+		t.Fatalf("untrue rebound-round refusal: %q", text)
+	}
+}
 func TestS134Lens_AuthorizationAndSubjectMove(t *testing.T) {
 	f, gate, id := lensFixture(t)
 	first := leaseActor(t, f, id, kernel.LeaseDeps{})
@@ -310,7 +332,7 @@ func TestS134Lens_ScopedRoster(t *testing.T) {
 			cfgText := "panel: {}\n"
 			n := 3
 			if mode == "none" {
-				cfgText = "panel:\n  reviewers:\n    - {family: harness, model: test-model, lens: correctness, count: 5}\n"
+				cfgText = "panel:\n  reviewers:\n    - {family: harness, model: model-a, lens: correctness}\n    - {family: harness, model: model-b, lens: correctness}\n    - {family: harness, model: model-c, lens: correctness}\n    - {family: harness, model: model-d, lens: correctness}\n    - {family: harness, model: model-e, lens: correctness}\n"
 			}
 			if mode == "two" {
 				cfgText = "panel:\n  reviewers:\n    - {family: harness, model: test-model, lens: correctness}\n    - {family: harness, model: adversary-a, lens: adversarial}\n    - {family: harness, model: adversary-b, lens: adversarial}\n"
@@ -321,37 +343,44 @@ func TestS134Lens_ScopedRoster(t *testing.T) {
 			f.Must(err)
 			configured, err := cfg.PanelGateReviewerSlots("bead")
 			f.Must(err)
+			// Each scoped round keeps the selected slots in configured order,
+			// and each slot keeps its configured family, model and lens.
+			var want []config.ReviewerSlot
+			switch mode {
+			case "default":
+				if len(configured) < 4 || configured[3].Lens != "adversarial" {
+					t.Fatalf("default roster control changed: %+v", configured)
+				}
+				want = []config.ReviewerSlot{configured[0], configured[1], configured[3]}
+				for i := range want {
+					for j := range i {
+						a, b := want[i], want[j]
+						a.Slot, b.Slot = "", ""
+						if a == b {
+							t.Fatalf("default roster control has equal slots: %+v", configured)
+						}
+					}
+				}
+				for i := range want {
+					want[i].Slot = fmt.Sprintf("R%d", i+1)
+				}
+			case "none":
+				want = []config.ReviewerSlot{
+					{Slot: "R1", Family: "harness", Model: "model-a", Lens: "correctness"},
+					{Slot: "R2", Family: "harness", Model: "model-b", Lens: "correctness"},
+					{Slot: "R3", Family: "harness", Model: "model-c", Lens: "correctness"},
+				}
+			case "two":
+				want = []config.ReviewerSlot{
+					{Slot: "R1", Family: "harness", Model: "adversary-a", Lens: "adversarial"},
+					{Slot: "R2", Family: "harness", Model: "adversary-b", Lens: "adversarial"},
+				}
+			}
 			round := kernel.GateRound{Round: 2, Subject: reducerGit(t, f, "rev-parse", "HEAD"), SlotCount: n, Paths: []string{"source.go"}}
 			roster, err := kernel.RoundReviewerSlots(cfg, "bead", round)
 			f.Must(err)
-			if len(roster) != n {
-				t.Fatal(roster)
-			}
-			for i, slot := range roster {
-				if slot.Slot != fmt.Sprintf("R%d", i+1) {
-					t.Fatal(roster)
-				}
-			}
-			if mode == "default" {
-				want := configured[3]
-				want.Slot = "R3"
-				if roster[2] != want || roster[2].Lens != "adversarial" {
-					t.Fatalf("scoped roster dropped configured adversary: %+v", roster)
-				}
-			}
-			if mode == "none" {
-				for i := range roster {
-					if roster[i] != configured[i] {
-						t.Fatal("no-adversary roster changed", roster)
-					}
-				}
-			}
-			if mode == "two" {
-				for _, slot := range roster {
-					if slot.Lens != "adversarial" {
-						t.Fatal("did not retain both adversaries", roster)
-					}
-				}
+			if !reflect.DeepEqual(roster, want) {
+				t.Fatalf("scoped roster does not keep configured order and slots:\n got %+v\nwant %+v", roster, want)
 			}
 			gate := f.Items[0] + ".review"
 			f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRound, round)))
