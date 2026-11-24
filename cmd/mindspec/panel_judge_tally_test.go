@@ -312,9 +312,14 @@ func TestS134PanelRefute_JudgeHoldsOpenVerify(t *testing.T) {
 					kernelPanelRequire(t, out, err)
 				}
 				verify := kernelPanelRecord(t, f, v.Step)
-				receipt, _, _ := kernel.Decode[kernel.Receipt](verify.Metadata, kernel.KeyClose)
 				if verify.Status == "closed" {
-					t.Fatalf("held retally closed open verify: %+v", receipt)
+					t.Fatal("held retally closed open verify")
+				}
+				if _, has := verify.Metadata[kernel.KeyClose]; has {
+					t.Fatal("held retally receipted open verify")
+				}
+				if open && kernelPanelRecord(t, f, gate+".judge.a1").Status != "open" {
+					t.Fatal("held retally changed open judge status")
 				}
 				if kernelPanelRecord(t, f, gate).Status == "closed" {
 					t.Fatal("held retally closed gate")

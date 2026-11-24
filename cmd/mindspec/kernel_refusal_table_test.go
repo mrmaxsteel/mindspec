@@ -31,7 +31,7 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 		t.Run(producer, func(t *testing.T) {
 
 			if producer == "judge.changed-paths" || producer == "judge.prior-read" || producer == "judge.prior-locate" || producer == "judge.round-read" {
-				if !kerneltest.JudgeRefusalFault(t, "./cmd/mindspec", producer) {
+				if !judgeRefusalFault(t, producer) {
 					return
 				}
 				f, gate, old, _ := judgePanelFixture(t, false)

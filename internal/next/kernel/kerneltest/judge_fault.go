@@ -14,11 +14,17 @@ import (
 	"time"
 )
 
+// JudgeFault describes the source rewrite and the test that consumes it.
+// Callers keep producer-specific source text in their test files.
+type JudgeFault struct {
+	Package, Test, File, Expression, Replacement string
+}
+
 // JudgeRefusalFault runs one refusal-table row with a failed IO operation.
 // Only the IO expression is replaced: the production error branch, wrapping,
 // recovery and CLI rendering execute unchanged. No runtime fault hook is added.
 // It returns true in the child that must execute the row's fixture.
-func JudgeRefusalFault(t *testing.T, pkg, producer string) bool {
+func JudgeRefusalFault(t *testing.T, producer string, fault JudgeFault) bool {
 	t.Helper()
 	if os.Getenv("S134_JUDGE_FAULT") == producer {
 		return true
@@ -28,25 +34,6 @@ func JudgeRefusalFault(t *testing.T, pkg, producer string) bool {
 		t.Fatal("cannot locate fault fixture source")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(here), "../../../.."))
-	file, expression, fault := "judge_round.go", "", ""
-	cause := `fmt.Errorf("hostile\nrecovery: forged\x1b")`
-	switch producer {
-	case "judge.changed-paths":
-		file = "judge.go"
-		expression = `actorGitBytes(s.Root, "diff", "--no-renames", "--name-only", "-z", old, newest, "--")`
-		fault = `func() ([]byte, error) { return nil, ` + cause + ` }()`
-	case "judge.prior-read":
-		expression = `os.ReadFile(filepath.Join(res.Dir, panel.FileName))`
-		fault = `func() ([]byte, error) { _ = os.ReadFile; return nil, ` + cause + ` }()`
-	case "judge.prior-locate":
-		expression = `filepath.Rel(root, filepath.Join(res.Dir, panel.FileName))`
-		fault = `func(string, string) (string, error) { return "", ` + cause + ` }(root, filepath.Join(res.Dir, panel.FileName))`
-	case "judge.round-read":
-		expression = `panel.Tally(p.Dir)`
-		fault = `func() (*panel.Result, error) { return nil, ` + cause + ` }()`
-	default:
-		t.Fatalf("unknown judge fault %s", producer)
-	}
 	replacements := map[string]string{}
 	// Keep any caller's mutation overlay when this fixture adds its IO fault.
 	if name := os.Getenv("S134_SOURCE_OVERLAY"); name != "" {
@@ -62,7 +49,7 @@ func JudgeRefusalFault(t *testing.T, pkg, producer string) bool {
 			replacements[k] = v
 		}
 	}
-	target := filepath.Join(root, "internal/next/kernel", file)
+	target := filepath.Join(root, fault.File)
 	source := target
 	if replacement, ok := replacements[target]; ok {
 		source = replacement
@@ -71,12 +58,12 @@ func JudgeRefusalFault(t *testing.T, pkg, producer string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(data), expression) != 1 {
-		t.Fatalf("IO expression absent or ambiguous in %s: %s", source, expression)
+	if strings.Count(string(data), fault.Expression) != 1 {
+		t.Fatalf("IO expression absent or ambiguous in %s: %s", source, fault.Expression)
 	}
 	dir := t.TempDir()
-	copy := filepath.Join(dir, file)
-	if err := os.WriteFile(copy, []byte(strings.Replace(string(data), expression, fault, 1)), 0600); err != nil {
+	copy := filepath.Join(dir, filepath.Base(fault.File))
+	if err := os.WriteFile(copy, []byte(strings.Replace(string(data), fault.Expression, fault.Replacement, 1)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	replacements[target] = copy
@@ -88,20 +75,16 @@ func JudgeRefusalFault(t *testing.T, pkg, producer string) bool {
 	if err := os.WriteFile(overlay, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	name := "TestS134Submit_RefusalProducers"
-	if pkg == "./cmd/mindspec" {
-		name = "TestS134SubmitCmd_RefusalProducers"
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "test", "-overlay", overlay, "-count=1", pkg, "-run", "^"+name+"$/^"+regexp.QuoteMeta(producer)+"$", "-v")
+	cmd := exec.CommandContext(ctx, "go", "test", "-overlay", overlay, "-count=1", fault.Package, "-run", "^"+fault.Test+"$/^"+regexp.QuoteMeta(producer)+"$", "-v")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "S134_JUDGE_FAULT="+producer, "GOFLAGS="+os.Getenv("GOFLAGS")+" -overlay="+overlay, "TMPDIR="+t.TempDir())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("fault row %s: %v\n%s", producer, err, out)
 	}
-	if !strings.Contains(string(out), "--- PASS: "+name+"/"+producer) {
+	if !strings.Contains(string(out), "--- PASS: "+fault.Test+"/"+producer) {
 		t.Fatalf("fault row did not run: %s", out)
 	}
 	t.Logf("%s", out)
@@ -112,7 +95,7 @@ func JudgeRefusalFault(t *testing.T, pkg, producer string) bool {
 func JudgeRefusalText(producer string) (string, string) {
 	switch producer {
 	case "judge.changed-paths":
-		return "cannot read changed paths: ", "restore the subject commits and retry submit"
+		return "cannot read changed paths: ", "restore the subject commits, then run mindspec next-action"
 	case "judge.prior-read":
 		return "cannot read prior panel: ", "restore the panel directory and retry"
 	case "judge.prior-locate":

@@ -78,7 +78,7 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 		t.Run(producer, func(t *testing.T) {
 
 			if producer == "judge.changed-paths" || producer == "judge.prior-read" || producer == "judge.prior-locate" || producer == "judge.round-read" {
-				if !kerneltest.JudgeRefusalFault(t, "./internal/next/kernel", producer) {
+				if !judgeRefusalFault(t, producer) {
 					return
 				}
 				f, gate, old := tallyJudgeFixture(t, false)

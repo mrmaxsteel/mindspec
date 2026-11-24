@@ -694,7 +694,7 @@ func judgementGate(s State, g Record) Record {
 func subjectPaths(s State, gate, old, newest string) ([]string, error) {
 	data, err := actorGitBytes(s.Root, "diff", "--no-renames", "--name-only", "-z", old, newest, "--")
 	if err != nil {
-		return nil, pathFailure(err, "cannot read changed paths: ", "restore the subject commits and retry submit")
+		return nil, pathFailure(err, "cannot read changed paths: ", "restore the subject commits, then run mindspec next-action")
 	}
 	var paths []string
 	for _, name := range strings.Split(string(data), "\x00") {

@@ -535,9 +535,10 @@ func TestS134Judge_RepanelAfterSupersededSuccessor(t *testing.T) {
 // Persist every prefix of the replacement transition, then resume with the
 // normal reducer. A new attempt must never remain open without a round pointer.
 func TestS134Judge_VerifyReplacementCrashPrefixes(t *testing.T) {
-	for cut := 0; ; cut++ {
+	const maxCuts = 100
+	for cut := 0; cut < maxCuts; cut++ {
 		finished := false
-		t.Run(fmt.Sprint(cut), func(t *testing.T) {
+		passed := t.Run(fmt.Sprint(cut), func(t *testing.T) {
 			f, gate, old := tallyJudgeFixture(t, true)
 			reduce(t, f, true)
 			original := tallyRound(t, f, gate).Verify
@@ -589,16 +590,18 @@ func TestS134Judge_VerifyReplacementCrashPrefixes(t *testing.T) {
 				t.Fatal("replacement recovery did not converge")
 			}
 		})
-		if finished {
-			break
+		if !passed || finished {
+			return
 		}
 	}
+	t.Fatalf("crash-prefix probe exceeded %d cuts", maxCuts)
 }
 
 func TestS134Verify_ReproducedRejectCrashPrefixes(t *testing.T) {
-	for cut := 0; ; cut++ {
+	const maxCuts = 100
+	for cut := 0; cut < maxCuts; cut++ {
 		finished := false
-		t.Run(fmt.Sprint(cut), func(t *testing.T) {
+		passed := t.Run(fmt.Sprint(cut), func(t *testing.T) {
 			f := reducerFixture(t)
 			gate := f.Items[0] + ".review"
 			refusedPanel(t, f, gate, "review", 1, panel.VerdictReject)
@@ -635,8 +638,9 @@ func TestS134Verify_ReproducedRejectCrashPrefixes(t *testing.T) {
 				t.Fatal("reject outcome recovery did not converge")
 			}
 		})
-		if finished {
-			break
+		if !passed || finished {
+			return
 		}
 	}
+	t.Fatalf("crash-prefix probe exceeded %d cuts", maxCuts)
 }
