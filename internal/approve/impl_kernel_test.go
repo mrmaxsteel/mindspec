@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -199,12 +201,47 @@ func TestS134ImplApprove_AuditAndRerun(t *testing.T) {
 	item := f.Items[0]
 	gate := item + ".review"
 	f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyDefer, kernel.DeferRecord{Finding: "finding", To: "other", Reason: "defer", At: now})))
-	f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyTake, kernel.TakeReason{Reason: "take", Generation: 2, At: now})))
+	// One lease take and one repair event.
+	f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyTakes, []kernel.TakeReason{{Via: "lease", Reason: "take", Generation: 2, At: now}, {Via: "repair", Reason: "repair", Generation: 2, At: now}})))
 	decision := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
 	kerneltest.Answer(f, decision, "fix")
 	slot := s134Slot(f)
 	s134Close(t, f, slot, nil)
 	kerneltest.Repaired(f, slot, kernel.Receipt{Kind: "passed", Retally: "repair"})
+	// A receipt under a repair submit, and a late submission, each on its own slot.
+	for i, receipt := range []kernel.Receipt{
+		{Kind: "passed", Retally: "repair-submit", Via: "repair", Repaired: true, Generation: 2},
+		{Kind: "passed", Retally: "late", Generation: 1, SupersededGeneration: 2},
+	} {
+		id := f.Items[i+1] + ".review.r1.R1"
+		f.Must(f.Store.WriteMetadata(id, map[string]any{kernel.KeyClose: nil}))
+		f.Must(f.Store.SetStatusIf(id, "closed", "open"))
+		s134Close(t, f, id, &receipt)
+	}
+	// A verify with one return of each type; its deferred return writes the gate's deferral history.
+	head, err := f.Command("git", "rev-parse", "HEAD")
+	f.Must(err)
+	subject := strings.TrimSpace(string(head))
+	sha := strings.Repeat("a", 64)
+	returns := []kernel.VerifyReturn{
+		{Slot: "R1", Round: 1, Finding: "veto", FindingSHA256: sha, Return: "reproduced"},
+		{Slot: "R2", Round: 1, Finding: "ccr[0]", FindingSHA256: sha, Return: "refuted", Ground: "disproven", Reason: "checked", Evidence: "https://example.invalid/proof"},
+		{Slot: "R3", Round: 1, Finding: "ccr[0]", FindingSHA256: sha, Return: "deferred", Target: "follow"},
+	}
+	var findings []kernel.Finding
+	for _, r := range returns {
+		findings = append(findings, kernel.Finding{Slot: r.Slot, Round: 1, Finding: r.Finding, FindingSHA256: sha, Text: "finding"})
+	}
+	kerneltest.Verify(f, gate, kernel.VerifyRecord{Step: gate + ".r1.verify", Subject: subject, Returns: returns}, findings, map[string]string{})
+	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyDeferrals, []kernel.DeferRecord{{Finding: "ccr[0]", To: "follow", Reason: "verify", At: now}})))
+	// One lens attempt per gate round.
+	var lensLines []string
+	for _, g := range f.State().Gates {
+		lens := g + ".r1.lens"
+		kerneltest.Lens(f, g, kernel.LensRecord{Step: lens, Lenses: []kernel.SlotLens{{Slot: "R1", Lens: "paths"}}})
+		lensLines = append(lensLines, g+" r1: 1")
+	}
+	sort.Strings(lensLines)
 	accepted, err := kernel.AcceptedSubject(f.State(), gate)
 	f.Must(err)
 	receipt := kernel.Receipt{Kind: "passed", Subject: accepted, Retally: "passing-tally", CarryOvers: []kernel.CarryOver{{OldSubject: accepted, NewSubject: accepted, Judge: "judge", Receipt: &kernel.Receipt{Kind: "passed", Retally: "judgement"}}}}
@@ -216,16 +253,26 @@ func TestS134ImplApprove_AuditAndRerun(t *testing.T) {
 		if _, err := ApproveImpl(f.Root, f.SpecID, mock); err != nil {
 			t.Fatalf("run %d: %v", run, err)
 		}
-		for _, name := range []string{"--allow-doc-skew", "--override-adr", "--allow-not-ready", "--allow-net-deletion", "deferrals", "takeovers", "decision-answers", "raw-claims", "unreceipted-closes", "carry-overs", "re-panels"} {
-			matches := 0
-			for _, line := range strings.Split(out.String(), "\n") {
-				fields := strings.Split(line, " | ")
-				if len(fields) >= 2 && fields[0] == name && fields[1] == "1" {
-					matches++
+		want := map[string]string{"deferrals": "2", "takeovers": "2", "unreceipted-closes": "2", "lens-steps": strconv.Itoa(len(lensLines))}
+		for _, name := range []string{"--allow-doc-skew", "--override-adr", "--allow-not-ready", "--allow-net-deletion", "decision-answers", "raw-claims", "carry-overs", "re-panels", "verify-reproduced", "verify-refuted", "verify-deferred", "late-submissions", "repair-receipts"} {
+			want[name] = "1"
+		}
+		got := map[string]string{}
+		for _, line := range strings.Split(out.String(), "\n") {
+			fields := strings.Split(line, " | ")
+			if len(fields) >= 2 && fields[0] != "Event" && !strings.HasPrefix(fields[0], "Kernel audit") {
+				if _, dup := got[fields[0]]; dup {
+					t.Errorf("run %d: row %s printed twice", run, fields[0])
 				}
+				got[fields[0]] = fields[1]
 			}
-			if matches != 1 {
-				t.Errorf("run %d needs exactly one count 1 for %s:\n%s", run, name, out.String())
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("run %d audit counts:\n got %v\nwant %v\n%s", run, got, want, out.String())
+		}
+		for _, detail := range append([]string{"takeovers | 2 | lease 1, repair 1", "lens-steps | " + strconv.Itoa(len(lensLines)) + " | " + strings.Join(lensLines, " | ")}, "3 slots") {
+			if !strings.Contains(out.String(), detail) {
+				t.Errorf("run %d: missing %q:\n%s", run, detail, out.String())
 			}
 		}
 		if !strings.Contains(out.String(), "3 slots") || !strings.Contains(out.String(), decision+" fix ") {

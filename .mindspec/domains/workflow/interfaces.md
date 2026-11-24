@@ -1658,8 +1658,20 @@ The audit table shows the pinned policy and event counts on every approval run.
 Escape-hatch counts come from the local journal.
 The journal has no project identity, so these counts cover this machine.
 Typed metadata supplies deferrals, takeovers, timed answers, repaired closes,
-carry-overs and each re-panel's slot count.
+carry-overs, each re-panel's slot count, verify returns, late submissions and repair receipts.
+The lens-steps row comes from the ids of the lens steps.
 `mindspec_takes` retains takeover events by lease generation.
+The `takeovers` row counts every lease take and every repair event in `mindspec_takes`.
+Its details are `lease <n>, repair <m>`.
+The `unreceipted-closes` row counts valid receipts that set `repaired`.
+A completed retry without such a receipt adds no count.
+The `verify-reproduced`, `verify-refuted` and `verify-deferred` rows count the returns of that type
+in every verify attempt. A deferred return also writes a record to `mindspec_deferrals`.
+The `late-submissions` row counts valid receipts that name a superseded lease generation.
+The `repair-receipts` row counts valid receipts written by a repair submit.
+The `lens-steps` row counts the lens attempts of all gate rounds.
+Its details give one `<gate> r<N>: <k>` entry for each round.
+Details show store text in escaped form, so no line of the table can start a new header or recovery line.
 `mindspec_deferrals` retains distinct panel, round, slot, finding and target records.
 The latest `mindspec_take` and `mindspec_defer` records remain readable.
 An older latest record supplies one event when no history array exists.
