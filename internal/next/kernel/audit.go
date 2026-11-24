@@ -21,7 +21,7 @@ type AuditRow struct {
 // Audit reads typed records and the supplied local journal without writing.
 // Journal records have no project identity, so their counts are machine-local.
 func Audit(s State, events []journal.Record) ([]AuditRow, error) {
-	names := []string{"--allow-doc-skew", "--override-adr", "--allow-not-ready", "--allow-net-deletion", "deferrals", "takeovers", "decision-answers", "raw-claims", "unreceipted-closes", "carry-overs", "re-panels"}
+	names := []string{"--allow-doc-skew", "--override-adr", "--allow-not-ready", "--allow-net-deletion", "deferrals", "takeovers", "decision-answers", "raw-claims", "unreceipted-closes", "carry-overs", "re-panels", "verify-reproduced", "verify-refuted", "verify-deferred", "late-submissions", "repair-receipts", "lens-steps"}
 	rows := make([]AuditRow, len(names))
 	byName := map[string]*AuditRow{}
 	for i, name := range names {
@@ -40,6 +40,9 @@ func Audit(s State, events []journal.Record) ([]AuditRow, error) {
 		}
 	}
 	sort.Strings(ids)
+	leaseTakes, repairs := 0, 0
+	lensAttempts := map[lensRound]int{}
+	var lensRounds []lensRound
 	for _, id := range ids {
 		r := s.Records[id]
 		claims, _, err := Decode[[]RawClaim](r.Metadata, KeyRawClaims)
@@ -78,9 +81,13 @@ func Audit(s State, events []journal.Record) ([]AuditRow, error) {
 				takes = append(takes, old)
 			}
 		}
+		// Every take and repair event counts, whatever its generation.
 		for _, event := range takes {
-			if event.Generation > 0 {
-				byName["takeovers"].Count++
+			byName["takeovers"].Count++
+			if event.Via == "repair" {
+				repairs++
+			} else {
+				leaseTakes++
 			}
 		}
 		receipt, has, err := Decode[Receipt](r.Metadata, KeyClose)
@@ -94,12 +101,35 @@ func Audit(s State, events []journal.Record) ([]AuditRow, error) {
 				row.Details = append(row.Details, fmt.Sprintf("%s %s %s", id, receipt.Answer.Option, receipt.Answer.At.UTC().Format(time.RFC3339)))
 			}
 			byName["carry-overs"].Count += len(receipt.CarryOvers)
-			if receipt.Repaired && r.Status == "closed" {
+			if receipt.Repaired {
 				byName["unreceipted-closes"].Count++
 			}
+			if receipt.SupersededGeneration != 0 {
+				byName["late-submissions"].Count++
+			}
+			if receipt.Via == "repair" {
+				byName["repair-receipts"].Count++
+			}
 		}
-		if r.Status == "closed" && !validClose(s, r) && RepairedClose(s, id) {
-			byName["unreceipted-closes"].Count++
+		tuple, _, _ := r.Tuple()
+		switch tuple.Kind {
+		case "verify":
+			returns, _, err := Decode[[]VerifyReturn](r.Metadata, KeyReturns)
+			if err != nil {
+				return nil, err
+			}
+			// Each return type has its own row: reproduced, refuted or deferred.
+			for _, ret := range returns {
+				if row := byName["verify-"+ret.Return]; row != nil {
+					row.Count++
+				}
+			}
+		case "lens":
+			key := lensRound{tuple.Gate, tuple.Round}
+			if lensAttempts[key] == 0 {
+				lensRounds = append(lensRounds, key)
+			}
+			lensAttempts[key]++
 		}
 		repanel, has, err := Decode[RePanel](r.Metadata, KeyRePanel)
 		if err != nil {
@@ -116,7 +146,25 @@ func Audit(s State, events []journal.Record) ([]AuditRow, error) {
 		return nil, err
 	}
 	byName["raw-claims"].Count += len(claims.Flags)
+	byName["takeovers"].Details = []string{fmt.Sprintf("lease %d, repair %d", leaseTakes, repairs)}
+	sort.Slice(lensRounds, func(i, j int) bool {
+		if lensRounds[i].gate != lensRounds[j].gate {
+			return lensRounds[i].gate < lensRounds[j].gate
+		}
+		return lensRounds[i].round < lensRounds[j].round
+	})
+	lens := byName["lens-steps"]
+	for _, key := range lensRounds {
+		lens.Count += lensAttempts[key]
+		lens.Details = append(lens.Details, fmt.Sprintf("%s r%d: %d", key.gate, key.round, lensAttempts[key]))
+	}
 	return rows, nil
+}
+
+// lensRound identifies one gate round for the lens-steps details.
+type lensRound struct {
+	gate  string
+	round int
 }
 
 // PrintAudit prints stable counts; event details never control approval.
