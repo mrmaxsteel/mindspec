@@ -169,10 +169,12 @@ func checkLens(s State, r Record, _ Receipt) (err error) {
 		return err
 	}
 	slots := make([]string, len(roster))
-	expected := map[string]bool{}
+	expected, adversary := map[string]bool{}, map[string]bool{}
 	for i, slot := range roster {
 		slots[i] = slot.Slot
-		if slot.Lens != "adversarial" {
+		if slot.Lens == "adversarial" {
+			adversary[slot.Slot] = true
+		} else {
 			expected[slot.Slot] = true
 		}
 	}
@@ -192,17 +194,29 @@ func checkLens(s State, r Record, _ Receipt) (err error) {
 	if lens.Step != r.Key() || lens.Lenses == nil {
 		return actorFailure("lens record needs its step and lenses")
 	}
+	// Name every bad entry in one refusal, in record order, then the missing slots in roster order.
+	var bad []string
 	seen := map[string]bool{}
 	for _, entry := range lens.Lenses {
-		if !expected[entry.Slot] || strings.TrimSpace(entry.Lens) == "" || seen[entry.Slot] {
-			return actorFailure("lens record has an extra, empty or repeated slot lens: " + entry.Slot)
+		switch {
+		case adversary[entry.Slot]:
+			bad = append(bad, "adversary slot "+entry.Slot+" takes no lens")
+		case !expected[entry.Slot]:
+			bad = append(bad, "extra slot lens "+entry.Slot)
+		case seen[entry.Slot]:
+			bad = append(bad, "repeated slot lens "+entry.Slot)
+		case strings.TrimSpace(entry.Lens) == "":
+			bad = append(bad, "empty slot lens "+entry.Slot)
 		}
 		seen[entry.Slot] = true
 	}
 	for _, slot := range slots {
 		if expected[slot] && !seen[slot] {
-			return actorFailure("lens record is missing slot " + slot)
+			bad = append(bad, "missing slot "+slot)
 		}
+	}
+	if len(bad) > 0 {
+		return actorFailure(strings.Join(bad, "; "))
 	}
 	return nil
 }

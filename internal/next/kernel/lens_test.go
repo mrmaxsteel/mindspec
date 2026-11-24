@@ -83,6 +83,21 @@ func closeDraftLens(t *testing.T, f *kerneltest.Fixture, gate string) {
 	_, err = submitLens(t, f, round.Lens, lease, record, nil)
 	f.Must(err)
 }
+func TestS134Lens_PassedThenSubjectMove(t *testing.T) {
+	f, gate, id := lensFixture(t)
+	closeDraftLens(t, f, gate)
+	f.Must(kernel.CheckRoundLens(f.State(), tallyRound(t, f, gate)))
+	// The authorized subject moves before the pass rebinds the round.
+	newCommit(t, f, "bead/"+f.Items[0])
+	err := kernel.CheckRoundLens(f.State(), tallyRound(t, f, gate))
+	if err == nil {
+		t.Fatal("passed lens accepted after its authorized subject moved")
+	}
+	text := err.Error()
+	if !strings.Contains(text, "lens step "+id+" is closed passed, but the authorized subject moved after it") || strings.Contains(text, "must be closed passed") || !strings.HasSuffix(text, "\nrecovery: mindspec next-action") {
+		t.Fatalf("untrue stale-lens refusal: %q", text)
+	}
+}
 func TestS134Lens_AuthorizationAndSubjectMove(t *testing.T) {
 	f, gate, id := lensFixture(t)
 	first := leaseActor(t, f, id, kernel.LeaseDeps{})
@@ -112,31 +127,52 @@ func TestS134Lens_AuthorizationAndSubjectMove(t *testing.T) {
 	}
 }
 func TestS134Lens_BadRecords(t *testing.T) {
-	for _, mode := range []string{"unknown", "nested-unknown", "missing", "extra", "empty", "repeated", "adversarial", "nil", "wrong-step"} {
+	for _, mode := range []string{"unknown", "nested-unknown", "missing", "extra", "empty", "repeated", "adversarial", "two-missing", "two-bad", "nil", "wrong-step"} {
 		t.Run(mode, func(t *testing.T) {
 			f, gate, id := lensFixture(t)
 			// Make the third configured slot an adversary without changing its subject.
+			// The loader caches by root, so drop the cached default roster.
 			put(t, filepath.Join(f.Root, ".mindspec/config.yaml"), "panel:\n  reviewers:\n    - {family: harness, lens: correctness, count: 2}\n    - {family: harness, lens: adversarial}\n")
+			config.ResetCache()
 			lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 			record := lensRecordFor(t, f, gate, id, "hostile\nrecovery: forged\n<!-- mindspec:panel-header -->\nmindspec submit forged\x1b")
-			slot := "R1"
+			adversary := lensAdversarySlot(t, f, gate)
+			if len(record.Lenses) != 2 || record.Lenses[0].Slot != "R1" || record.Lenses[1].Slot != "R2" || adversary != "R3" {
+				t.Fatalf("fixture needs lenses for R1 and R2 and adversary R3: %+v %s", record.Lenses, adversary)
+			}
+			// Each clause names the offending entry after the slot-list prefix, so the prefix cannot supply it.
+			var want []string
 			switch mode {
+			case "unknown", "nested-unknown":
+				want = []string{"unknown field"}
 			case "missing":
-				record.Lenses = record.Lenses[1:]
+				want = []string{"missing slot R2"}
+				record.Lenses = record.Lenses[:1]
 			case "extra":
-				slot = "R9\nrecovery: forged\x1b"
-				record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: slot, Lens: "x"})
+				record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: "R9\nrecovery: forged\x1b", Lens: "x"})
+				want = []string{"extra slot lens R9"}
 			case "empty":
-				record.Lenses[0].Lens = " \n\t"
+				record.Lenses[1].Lens = " \n\t"
+				want = []string{"empty slot lens " + record.Lenses[1].Slot}
 			case "repeated":
-				record.Lenses = append(record.Lenses, record.Lenses[0])
+				record.Lenses = append(record.Lenses, record.Lenses[1])
+				want = []string{"repeated slot lens " + record.Lenses[1].Slot}
 			case "adversarial":
-				slot = "R3"
-				record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: slot, Lens: "x"})
+				record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: adversary, Lens: "x"})
+				want = []string{"adversary slot " + adversary + " takes no lens"}
+			case "two-missing":
+				want = []string{"missing slot R1", "missing slot R2"}
+				record.Lenses = []kernel.SlotLens{}
+			case "two-bad":
+				want = []string{"empty slot lens R1", "missing slot R2"}
+				record.Lenses[0].Lens = ""
+				record.Lenses = record.Lenses[:1]
 			case "nil":
 				record.Lenses = nil
+				want = []string{"needs its step and lenses"}
 			case "wrong-step":
 				record.Step = "wrong"
+				want = []string{"needs its step and lenses"}
 			}
 			data, err := json.Marshal(record)
 			f.Must(err)
@@ -148,8 +184,19 @@ func TestS134Lens_BadRecords(t *testing.T) {
 			}
 			before := actorRecord(t, f, id)
 			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: recordFile(t, string(data))})
-			if err == nil || !strings.Contains(err.Error(), strings.Split(slot, "\n")[0]) {
-				t.Fatalf("bad %s record did not name slot: %v", mode, err)
+			if err == nil {
+				t.Fatalf("bad %s record accepted", mode)
+			}
+			for _, clause := range want {
+				if !strings.Contains(err.Error(), clause) {
+					t.Fatalf("bad %s record did not name %q: %v", mode, clause, err)
+				}
+			}
+			if mode == "adversarial" && strings.Contains(err.Error(), "repeated") {
+				t.Fatalf("adversary lens refused as a repeat: %v", err)
+			}
+			if strings.Count(err.Error(), "\nrecovery:") != 1 || !strings.HasSuffix(err.Error(), "\nrecovery: mindspec next-action") {
+				t.Fatalf("unsafe lens refusal: %q", err.Error())
 			}
 			after := actorRecord(t, f, id)
 			if after.Status == "closed" || !jsonEqual(before, after) {
@@ -157,6 +204,24 @@ func TestS134Lens_BadRecords(t *testing.T) {
 			}
 		})
 	}
+}
+
+// lensAdversarySlot is the round's adversary slot, which takes no lens.
+func lensAdversarySlot(t *testing.T, f *kerneltest.Fixture, gate string) string {
+	t.Helper()
+	round, _, err := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	cfg, err := config.Load(f.Root)
+	f.Must(err)
+	roster, err := kernel.RoundReviewerSlots(cfg, "bead", round)
+	f.Must(err)
+	for _, slot := range roster {
+		if slot.Lens == "adversarial" {
+			return slot.Slot
+		}
+	}
+	t.Fatalf("round roster has no adversary slot: %+v", roster)
+	return ""
 }
 func TestS134Lens_RepairAndRetry(t *testing.T) {
 	for _, stored := range []bool{true, false} {

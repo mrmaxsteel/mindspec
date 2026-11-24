@@ -247,24 +247,28 @@ func lensCloseWrites(s State, r Record, _ Receipt) ([]Write, error) {
 
 // CheckRoundLens checks only the lens attempt explicitly named by the round.
 func CheckRoundLens(s State, round GateRound) error {
-	r := s.Records[round.Lens]
-	t, has, err := r.Tuple()
-	if round.Lens != "" && owned(s, round.Lens) && err == nil && has && t.Kind == "lens" && t.Round == round.Round && passed(s, r) {
-		subject, _, err := Decode[Subject](r.Metadata, KeySubject)
-		if err != nil {
-			return pathFailure(err, "cannot read lens subject: ", "mindspec next-action")
-		}
-		newest, err := effectiveSubject(s, activeGate(s, t.Gate))
-		if err != nil {
-			return pathFailure(err, "cannot read authorized subject: ", "mindspec next-action")
-		}
-		if subject.Commit == round.Subject && newest == round.Subject && !openGateJudge(s, t.Gate) {
-			return nil
-		}
-	}
 	id := round.Lens
 	if id == "" {
 		id = "the round's lens step"
 	}
-	return termsafe.NewFailure("lens step "+id+" must be closed passed before panel create", "mindspec next-action")
+	r := s.Records[round.Lens]
+	t, has, err := r.Tuple()
+	if round.Lens == "" || !owned(s, round.Lens) || err != nil || !has || t.Kind != "lens" || t.Round != round.Round || !passed(s, r) {
+		return termsafe.NewFailure("lens step "+id+" must be closed passed before panel create", "mindspec next-action")
+	}
+	subject, _, err := Decode[Subject](r.Metadata, KeySubject)
+	if err != nil {
+		return pathFailure(err, "cannot read lens subject: ", "mindspec next-action")
+	}
+	newest, err := effectiveSubject(s, activeGate(s, t.Gate))
+	if err != nil {
+		return pathFailure(err, "cannot read authorized subject: ", "mindspec next-action")
+	}
+	if subject.Commit != round.Subject || newest != round.Subject {
+		return termsafe.NewFailure("lens step "+id+" is closed passed, but the authorized subject moved after it", "mindspec next-action")
+	}
+	if openGateJudge(s, t.Gate) {
+		return termsafe.NewFailure("lens step "+id+" is closed passed, but a change judge of its gate is open", "mindspec next-action")
+	}
+	return nil
 }

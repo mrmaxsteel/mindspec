@@ -87,6 +87,12 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 		return in, reg.Err
 	}
 	p := reg.Panel
+	// A hand edit of panel.json (focus included) must not reach a reviewer prompt.
+	if field, err := panel.CheckHandEdits(reg.Dir, p); err != nil {
+		return in, err
+	} else if field != "" {
+		return in, checkoutFailure("panel registration differs from its ledger: "+field, "repair the panel registration with mindspec panel create")
+	}
 	found := false
 	for _, slot := range p.Roster {
 		if slot.Slot == slotID {

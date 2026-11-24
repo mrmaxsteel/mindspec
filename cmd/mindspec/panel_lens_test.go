@@ -124,6 +124,47 @@ func (c *lensCLI) assertFocus(record kernel.LensRecord) {
 		}
 	}
 }
+
+// assertLedgerFocus checks that the ledger round row carries each slot's
+// focus exactly as panel.json does, so a hand edit of focus is detectable.
+func (c *lensCLI) assertLedgerFocus() {
+	c.t.Helper()
+	dir := filepath.Join(c.f.SpecDir, "reviews", "1")
+	p := c.panel()
+	want := map[string]string{}
+	drafted := 0
+	for _, slot := range p.Roster {
+		want[slot.Slot] = slot.Focus
+		if slot.Focus != "" {
+			drafted++
+		}
+	}
+	if drafted == 0 {
+		c.t.Fatalf("panel.json has no drafted focus: %+v", p.Roster)
+	}
+	lines, err := panel.ReadLedger(dir)
+	c.f.Must(err)
+	rounds := 0
+	for _, line := range lines {
+		var row panel.RoundRecord
+		c.f.Must(json.Unmarshal(line, &row))
+		if row.Record != panel.RecordRound {
+			continue
+		}
+		rounds++
+		if len(row.Roster) != len(p.Roster) {
+			c.t.Fatalf("ledger round row roster has %d slots, panel.json %d: %s", len(row.Roster), len(p.Roster), line)
+		}
+		for _, slot := range row.Roster {
+			if slot.Focus != want[slot.Slot] {
+				c.t.Fatalf("ledger round row %s focus=%q, panel.json focus=%q", slot.Slot, slot.Focus, want[slot.Slot])
+			}
+		}
+	}
+	if rounds != 1 {
+		c.t.Fatalf("ledger has %d round rows, want 1", rounds)
+	}
+}
 func TestS134PanelCreate_LensBeforeRegistration(t *testing.T) {
 	c := lensCLIFixture(t, buildMindspecBinary(t))
 	raw, err := c.run("panel", "create", "1", "--spec", c.f.SpecID)
@@ -138,6 +179,7 @@ func TestS134PanelCreate_LensBeforeRegistration(t *testing.T) {
 	c.ok("submit", c.id, "--lease", token, "--record", c.file(record))
 	c.ok("panel", "create", "1", "--spec", c.f.SpecID)
 	c.assertFocus(record)
+	c.assertLedgerFocus()
 	for _, slot := range c.panel().Roster {
 		raw = c.ok("panel", "prompt", "1", "--spec", c.f.SpecID, "--slot", slot.Slot)
 		focus := "drafted " + slot.Slot
@@ -149,6 +191,47 @@ func TestS134PanelCreate_LensBeforeRegistration(t *testing.T) {
 		if !strings.Contains(raw, "Focus: "+focus) {
 			t.Fatalf("slot focus missing: %s", raw)
 		}
+	}
+}
+func TestS134PanelPrompt_LensFocusHandEdit(t *testing.T) {
+	c := lensCLIFixture(t, buildMindspecBinary(t))
+	c.ok("submit", c.id, "--lease", c.lease(c.id), "--record", c.file(c.record(c.id, "drafted")))
+	c.ok("panel", "create", "1", "--spec", c.f.SpecID)
+	c.ok("panel", "prompt", "1", "--spec", c.f.SpecID, "--slot", "R1")
+	name := filepath.Join(c.f.SpecDir, "reviews", "1", panel.FileName)
+	data, err := os.ReadFile(name)
+	c.f.Must(err)
+	var doc map[string]json.RawMessage
+	c.f.Must(json.Unmarshal(data, &doc))
+	var roster []map[string]json.RawMessage
+	c.f.Must(json.Unmarshal(doc["roster"], &roster))
+	edited := false
+	for _, slot := range roster {
+		if string(slot["slot"]) == `"R1"` {
+			if _, has := slot["focus"]; !has {
+				t.Fatalf("R1 has no drafted focus: %s", data)
+			}
+			slot["focus"] = json.RawMessage(`"forged focus"`)
+			edited = true
+		}
+	}
+	if !edited {
+		t.Fatalf("no R1 slot: %s", data)
+	}
+	doc["roster"], err = json.Marshal(roster)
+	c.f.Must(err)
+	data, err = json.MarshalIndent(doc, "", "  ")
+	c.f.Must(err)
+	c.f.Must(os.WriteFile(name, data, 0600))
+	raw, err := c.run("panel", "prompt", "1", "--spec", c.f.SpecID, "--slot", "R1")
+	if err == nil {
+		t.Fatalf("prompt rendered a hand-edited focus: %s", raw)
+	}
+	if !strings.Contains(raw, "panel registration differs from its ledger: roster") {
+		t.Fatalf("refusal does not name roster: %q", raw)
+	}
+	if strings.Contains(raw, "forged focus") || strings.Contains(raw, "Focus:") {
+		t.Fatalf("refusal printed a prompt: %q", raw)
 	}
 }
 func TestS134PanelPrompt_HostileLens(t *testing.T) {
@@ -170,27 +253,43 @@ func binaryLensRefusal(t *testing.T, bin, producer string) {
 	token := c.lease(c.id)
 	record := c.record(c.id, hostileLens)
 	args := []string{"submit", c.id, "--lease", token}
-	want := "R1"
+	// The roster is R1-R3 with lenses and adversary R4. Each clause names the
+	// offending entry after the slot-list prefix, so the prefix cannot supply it.
+	if len(record.Lenses) != 3 || record.Lenses[1].Slot != "R2" {
+		t.Fatalf("fixture needs lenses for R1-R3: %+v", record.Lenses)
+	}
+	var want []string
 	switch producer {
 	case "panelCreate.lens":
 		args = []string{"panel", "create", "1", "--spec", c.f.SpecID}
-		want = c.id
+		want = []string{c.id + " must be closed passed"}
+	case "checkLens.unknown-field", "checkLens.nested-unknown":
+		want = []string{"unknown field"}
 	case "checkLens.missing":
-		record.Lenses = record.Lenses[1:]
+		record.Lenses = append(record.Lenses[:1], record.Lenses[2:]...)
+		want = []string{"missing slot R2"}
 	case "checkLens.empty":
-		record.Lenses[0].Lens = " \n\t"
+		record.Lenses[1].Lens = " \n\t"
+		want = []string{"empty slot lens R2"}
 	case "checkLens.extra":
 		record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: "R9\nrecovery: forged\x1b", Lens: hostileLens})
-		want = "R9"
+		want = []string{"extra slot lens R9"}
 	case "checkLens.repeated":
-		record.Lenses = append(record.Lenses, record.Lenses[0])
+		record.Lenses = append(record.Lenses, record.Lenses[1])
+		want = []string{"repeated slot lens R2"}
 	case "checkLens.adversarial":
 		record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: "R4", Lens: hostileLens})
-		want = "R4"
+		want = []string{"adversary slot R4 takes no lens"}
+	case "checkLens.two-bad":
+		record.Lenses[0].Lens = ""
+		record.Lenses = record.Lenses[:2]
+		want = []string{"empty slot lens R1", "missing slot R3"}
 	case "checkLens.nil":
 		record.Lenses = nil
+		want = []string{"needs its step and lenses"}
 	case "checkLens.step":
 		record.Step = "wrong\nrecovery: forged\x1b"
+		want = []string{"needs its step and lenses"}
 	}
 	if producer != "panelCreate.lens" {
 		file := c.file(record)
@@ -208,8 +307,10 @@ func binaryLensRefusal(t *testing.T, bin, producer string) {
 	}
 	before := kernelPanelRecord(t, c.f, c.id)
 	raw, err := c.run(args...)
-	if err == nil || !strings.Contains(raw, want) {
-		t.Fatalf("%s did not refuse with slot/step: %v %s", producer, err, raw)
+	for _, clause := range want {
+		if err == nil || !strings.Contains(raw, clause) {
+			t.Fatalf("%s did not refuse naming %q: %v %s", producer, clause, err, raw)
+		}
 	}
 	lines := strings.Split(strings.TrimSpace(raw), "\n")
 	count := 0
@@ -462,6 +563,29 @@ func TestS134PanelCreate_LensTakeThenSubjectMove(t *testing.T) {
 	c.assertFocus(record)
 }
 
+func TestS134PanelCreate_LensPassedThenSubjectMove(t *testing.T) {
+	c := lensCLIFixture(t, buildMindspecBinary(t))
+	c.ok("submit", c.id, "--lease", c.lease(c.id), "--record", c.file(c.record(c.id, "old subject focus")))
+	rebindWrite(t, c.f.Root, "moved.txt", "new subject")
+	actorCmdGit(t, c.f, "add", "--", "moved.txt")
+	actorCmdGit(t, c.f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "subject move")
+	head := actorCmdGit(t, c.f, "rev-parse", "HEAD")
+	actorCmdGit(t, c.f, "update-ref", "refs/heads/bead/"+c.f.Items[0], head)
+	// No next-action runs, so the round still names the passed lens of the old subject.
+	raw, err := c.run("panel", "create", "1", "--spec", c.f.SpecID)
+	if err == nil {
+		t.Fatalf("panel create accepted a lens drafted for the old subject: %s", raw)
+	}
+	if !strings.Contains(raw, "lens step "+c.id+" is closed passed, but the authorized subject moved after it") || strings.Contains(raw, "must be closed passed") || !strings.HasSuffix(strings.TrimSpace(raw), "\nrecovery: mindspec next-action") || strings.Count(raw, "recovery:") != 1 {
+		t.Fatalf("untrue stale-lens refusal: %q", raw)
+	}
+	if len(c.f.State().Panels) != 0 {
+		t.Fatal("refused create registered a panel")
+	}
+	if _, err := os.Stat(filepath.Join(c.f.SpecDir, "reviews", "1", "panel.json")); !os.IsNotExist(err) {
+		t.Fatalf("refused create wrote panel.json: %v", err)
+	}
+}
 func TestS134PanelRepanel_RejudgeCurrentLens(t *testing.T) {
 	for _, closed := range []bool{false, true} {
 		t.Run(fmt.Sprint(closed), func(t *testing.T) {
