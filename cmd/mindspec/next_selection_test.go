@@ -1072,3 +1072,24 @@ func TestNextSelection_UsesProductionFlagRegistration(t *testing.T) {
 		}
 	}
 }
+
+// TestNextSelection_PositionalEmitOnly_MovedSkillPins pins the readiness
+// review lines that the implementation skill used to carry. The review in
+// `next <w> --emit-only` is now their one carrier.
+func TestNextSelection_PositionalEmitOnly_MovedSkillPins(t *testing.T) {
+	out, err := renderReadinessReview(next.BeadInfo{ID: "epic-129.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireText(t, out,
+		"Make zero commits until the review passes.",
+		"If a signal fails, make zero commits.",
+		"first line is exactly `NOT READY: epic-129.1`",
+		"numbered by ordinal",
+		"quote the span that is wrong or missing verbatim",
+		"A bare \"it is ready\" never resolves a reason",
+		"do your own SR-1 to SR-5 review first",
+		"The stored record is supporting evidence, not a closed list",
+		"Before you return, run `mindspec complete epic-129.1 --check`.",
+	)
+}

@@ -148,6 +148,10 @@ func TestPanelTally_NextBlockRoutes(t *testing.T) {
 					if (gate == "bead") != strings.Contains(create, "--bead "+beadID) {
 						t.Errorf("bead binding on gate %s: %s", gate, create)
 					}
+					// The skill text used to name the gate and target of the next round.
+					if !strings.Contains(create, " --gate ") || !strings.Contains(create, " --target ") {
+						t.Errorf("gate or target missing on gate %s: %s", gate, create)
+					}
 				}
 				if strings.Contains(text, "mindspec panel defer") {
 					switch gate {

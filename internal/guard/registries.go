@@ -1020,7 +1020,8 @@ const exemptionHollowObligation = "internal/lint's TestDestructiveGuidanceSweep_
 // live; bead 7 deletes that block outright (R5(e)) and exits all four
 // entries in the same commit (see the exit note at the end of this
 // slice literal) — ten live entries, ten total, is the state from bead
-// 7 onward. KnownSitesExemptionListLiveCount/
+// 7 onward. The six ms-bead-cycle entries then left with that skill's
+// merge text, so five live entries remain. KnownSitesExemptionListLiveCount/
 // KnownSitesExemptionListTotalCount below pin both halves so this
 // count can never drift silently a fourth time;
 // TestKnownSitesExemptionList_CountSentinel asserts
@@ -1029,42 +1030,9 @@ const exemptionHollowObligation = "internal/lint's TestDestructiveGuidanceSweep_
 var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 	{Surface: "project-docs/user/guides/merge-safety.md", Text: "git -C \"<spec worktree>\" checkout <merge> -- <paths>", Count: 1, Family: FamilyGitCheckoutPathspecDiscard, Rationale: "The restore is an explicit path-scoped choice in a clean spec worktree. It follows inspection of the named merge and paths.", Obligation: "TestKnownSitesExemptionList_MergeOnlyRestore pins the clean-worktree limit and restore-then-close order."},
 
-	// The ten LIVE entries — reconciled against this spec's
-	// Background inventory at quoted-string grain (the eight
-	// Background named) plus the two "ms-bead-cycle" skill-map-key
-	// entries below, found by running the scan.
-	{
-		Surface:    ".claude/skills/ms-bead-cycle/SKILL.md",
-		Text:       "Never merge a bead branch with raw `git merge bead/<id>`.",
-		Count:      1,
-		Family:     FamilyGitMerge,
-		Rationale:  "documented guidance PROHIBITING raw merge and directing the reader to `mindspec complete` instead — reviewed at spec time (R5a's Background inventory) as a known instance of the design principle that a guard on destructive guidance must not penalize the text that warns against the destructive act.",
-		Obligation: exemptionHollowObligation,
-	},
-	{
-		Surface:    ".claude/skills/ms-bead-cycle/SKILL.md",
-		Text:       "If a check stopped between bd-close and the actual git merge, recover it before another dispatch.",
-		Count:      1,
-		Family:     FamilyGitMerge,
-		Rationale:  "documented guidance DESCRIBING the partial-failure recovery path (mentions 'the actual git merge' in the course of explaining when to stop, never instructing a raw merge) — reviewed at spec time as a known descriptive instance.",
-		Obligation: exemptionHollowObligation,
-	},
-	{
-		Surface:    "plugins/mindspec/skills/ms-bead-cycle/SKILL.md",
-		Text:       "Never merge a bead branch with raw `git merge bead/<id>`.",
-		Count:      1,
-		Family:     FamilyGitMerge,
-		Rationale:  "the plugin-mirror copy of the tracked ms-bead-cycle SKILL.md prohibition above — same reviewed text, a distinct swept surface (plugins/*/skills/**).",
-		Obligation: exemptionHollowObligation,
-	},
-	{
-		Surface:    "plugins/mindspec/skills/ms-bead-cycle/SKILL.md",
-		Text:       "If a check stopped between bd-close and the actual git merge, recover it before another dispatch.",
-		Count:      1,
-		Family:     FamilyGitMerge,
-		Rationale:  "the plugin-mirror copy of the tracked ms-bead-cycle SKILL.md partial-failure description above — same reviewed text, a distinct swept surface.",
-		Obligation: exemptionHollowObligation,
-	},
+	// The live entries, reconciled against the scan at quoted-string
+	// grain. The six ms-bead-cycle entries left when that skill became
+	// a harness adapter that names no merge.
 	{
 		Surface:    ".claude/skills/ms-impl-approve/SKILL.md",
 		Text:       "bead branch already raw-`git merge`d and then `bd close`d,",
@@ -1079,22 +1047,6 @@ var KnownSitesExemptionList = []KnownSiteExemptionEntry{
 		Count:      1,
 		Family:     FamilyGitMerge,
 		Rationale:  "the canonical skill-map builder's copy of the same disclosed-residual line above (setup.CanonicalGuidanceSurfaces' \"ms-impl-approve\" key) — the evaluated Go-literal form of the tracked SKILL.md file's text, a distinct swept surface from the tracked file itself.",
-		Obligation: exemptionHollowObligation,
-	},
-	{
-		Surface:    "ms-bead-cycle",
-		Text:       "Never merge a bead branch with raw `git merge bead/<id>`.",
-		Count:      1,
-		Family:     FamilyGitMerge,
-		Rationale:  "one of the TWO entries this spec's own Background inventory missed (found by RUNNING the scan, not recall, H-r6-4's own lesson recurring): the canonical skill-map builder key \"ms-bead-cycle\" is NOT one of the four inlined lifecycle-gate skills in claude.go, so its setup.CanonicalGuidanceSurfaces() entry comes purely from the go:embed'd plugin source and mirrors plugins/mindspec/skills/ms-bead-cycle/SKILL.md byte-for-byte — but R5(c)'s canonical-surface leg sweeps skillFiles()'s FULL returned map, not only the four inlined entries, so this surface key needs its own entry.",
-		Obligation: exemptionHollowObligation,
-	},
-	{
-		Surface:    "ms-bead-cycle",
-		Text:       "If a check stopped between bd-close and the actual git merge, recover it before another dispatch.",
-		Count:      1,
-		Family:     FamilyGitMerge,
-		Rationale:  "the second of the two scan-found \"ms-bead-cycle\" skill-map entries above — same reasoning, the partial-failure description mirrored through the canonical builder.",
 		Obligation: exemptionHollowObligation,
 	},
 	{

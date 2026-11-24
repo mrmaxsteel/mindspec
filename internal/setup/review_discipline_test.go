@@ -73,15 +73,11 @@ type fragmentRow struct {
 var reviewDisciplineFragmentRows = []fragmentRow{
 	{ac: "AC-4", desc: "slot isolation", surface: "ms-panel-run", want: "panel.isolated-checkout"},
 	{ac: "AC-4", desc: "final isolation", surface: "ms-spec-final-review", want: "panel.isolated-checkout"},
-	{ac: "AC-5", desc: "reproduction", surface: "ms-bead-cycle", want: "review.reproduce"},
-	{ac: "AC-5", desc: "contested findings", surface: "ms-panel-tally", want: "review.reproduce"},
 	{ac: "AC-5", desc: "classifier redispatch", surface: "ms-panel-run", want: "review.classifier-redispatch"},
 	{ac: "AC-8", desc: "no vote", surface: "ms-panel-run", want: "review.no-vote"},
 	{ac: "AC-8", desc: "final no vote", surface: "ms-spec-final-review", want: "review.no-vote"},
 	{ac: "AC-9", desc: "slot scratch", surface: "ms-panel-run", want: "panel.scratch-in-slot"},
-	{ac: "AC-9", desc: "fixer scratch", surface: "ms-bead-fix", want: "panel.scratch-in-slot"},
 	{ac: "AC-9", desc: "final scratch", surface: "ms-spec-final-review", want: "panel.scratch-in-slot"},
-	{ac: "AC-9", desc: "clean completion", surface: "ms-bead-cycle", want: "git status --porcelain"},
 	{ac: "AC-13", desc: "rule lookup", surface: "ms-panel-run", want: "mindspec rules show <id>"},
 }
 
@@ -596,10 +592,6 @@ func TestReviewDiscipline_AC10NegativeUnusedAllowlistEntry(t *testing.T) {
 var reviewDisciplineBead3FragmentRows = []fragmentRow{
 	{ac: "AC-1", desc: "resolved roster", surface: "ms-panel-run", want: "mindspec panel verify <panel-slug> --json"},
 	{ac: "AC-1", desc: "run pass rule", surface: "ms-panel-run", want: "0 unresolved REQUEST_CHANGES"},
-	{ac: "AC-1", desc: "tally pass rule", surface: "ms-panel-tally", want: "0 unresolved REQUEST_CHANGES"},
-	{ac: "AC-1", desc: "cycle fanout", surface: "ms-bead-cycle", want: "then the configured reviewers fan out"},
-	{ac: "AC-1", desc: "autopilot fanout", surface: "ms-spec-autopilot", want: "across the configured panel reviewers + the impl subagent"},
-	{ac: "AC-1", desc: "autopilot report", surface: "ms-spec-autopilot", want: "<N>/<N> APPROVE"},
 	{ac: "AC-6", desc: "binary lenses", surface: "ms-panel-run", want: "The binary resolves the roster, lenses, acceptance question and verdict contract."},
 	{ac: "AC-7", desc: "binary prompt", surface: "ms-panel-run", want: "mindspec panel prompt"},
 }
@@ -1245,76 +1237,6 @@ func TestReviewDiscipline_AC1SweepGuardNegativeCategoricalHits(t *testing.T) {
 			}
 			if problems := acOneValidate(hits, nil, fixture); len(problems) == 0 {
 				t.Fatalf("expected the AC-1 sweep to RED on %q, but it found no problems", tc.inject)
-			}
-		})
-	}
-}
-
-// TestReviewDiscipline_AC1SweepGuardNegativeOrchestratorResiduals proves the
-// EXACT residual fixed-six instructions the round-1 panel (S2) found LIVE in
-// the two orchestrator skills RED if restored — each mutation applied to a
-// FIXTURE copy of the real surface (never the shipped file), restoring the
-// pre-sweep wording verbatim.
-func TestReviewDiscipline_AC1SweepGuardNegativeOrchestratorResiduals(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		surface  string
-		swept    string // the replacement wording now shipped (fixture precondition)
-		restored string // the pre-sweep fixed-six wording
-	}{
-		{
-			name:     "ms-bead-cycle sequence-diagram fan-out",
-			surface:  "ms-bead-cycle",
-			swept:    "then the configured reviewers fan out",
-			restored: "then 6 reviewers fan out",
-		},
-		{
-			name:     "ms-bead-cycle family-asymmetry headline",
-			surface:  "ms-bead-cycle",
-			swept:    "One family approves; another requests changes",
-			restored: "all three Claudes APPROVE",
-		},
-		{
-			name:     "ms-spec-autopilot parallelism note",
-			surface:  "ms-spec-autopilot",
-			swept:    "across the configured panel reviewers",
-			restored: "across the 6 reviewers",
-		},
-		{
-			name:     "ms-spec-autopilot 6/6 report tally",
-			surface:  "ms-spec-autopilot",
-			swept:    "<N>/<N> APPROVE",
-			restored: "6/6 APPROVE",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			surfaces := acOneSurfaces()
-			original, ok := surfaces[tc.surface]
-			if !ok {
-				t.Fatalf("fixture assumption broken: %s missing from acOneSurfaces()", tc.surface)
-			}
-			if !strings.Contains(original, tc.swept) {
-				t.Fatalf("fixture assumption broken: %s no longer carries the swept replacement wording %q", tc.surface, tc.swept)
-			}
-			mutated := strings.Replace(original, tc.swept, tc.restored, 1)
-			if mutated == original {
-				t.Fatal("fixture assumption broken: restore substitution had no effect")
-			}
-			surfaces[tc.surface] = mutated
-
-			hits := acOneScanSurfaces(surfaces)
-			problems := acOneValidate(hits, reviewDisciplineAC1Allowlist, surfaces)
-			if len(problems) == 0 {
-				t.Fatalf("expected restoring %q in %s to RED the AC-1 sweep guard", tc.restored, tc.surface)
-			}
-			found := false
-			for _, p := range problems {
-				if strings.Contains(p, tc.surface) && strings.Contains(p, "unallowlisted") {
-					found = true
-				}
-			}
-			if !found {
-				t.Errorf("expected an unallowlisted-hit problem naming %s; got: %v", tc.surface, problems)
 			}
 		})
 	}

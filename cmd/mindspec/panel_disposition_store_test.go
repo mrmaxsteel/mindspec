@@ -417,3 +417,22 @@ func TestPanelDispositionAppend_InvalidRowShowsShape(t *testing.T) {
 		}
 	}
 }
+
+// TestPanelDispositionAppend_RowShapeExcludesVerbKinds pins the row-shape
+// hint that the tally skill used to carry: the two verb-written kinds are
+// not hand-appended rows, and the hint names the verb for each.
+func TestPanelDispositionAppend_RowShapeExcludesVerbKinds(t *testing.T) {
+	head, _, _ := strings.Cut(dispositionRowShape, "\n(")
+	for _, want := range []string{"Use panel defer for confirmed-deferred", "panel refute for audited-refuted", "(one of confirmed-fixed, confirmed-scope-trim, deferred, false-contamination)"} {
+		if !strings.Contains(dispositionRowShape, want) {
+			t.Errorf("row-shape hint lacks %q", want)
+		}
+	}
+	_, kinds, _ := strings.Cut(dispositionRowShape, "(one of ")
+	kinds, _, _ = strings.Cut(kinds, ")")
+	for _, verbKind := range []string{"confirmed-deferred", "audited-refuted"} {
+		if strings.Contains(kinds, verbKind) || strings.Contains(head, verbKind) {
+			t.Errorf("row-shape hint offers verb kind %q as a hand-appended value", verbKind)
+		}
+	}
+}

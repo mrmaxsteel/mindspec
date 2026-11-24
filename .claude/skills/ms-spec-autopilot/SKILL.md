@@ -1,53 +1,44 @@
 ---
 name: ms-spec-autopilot
-description: Execute the binary's plan-approved spec workflow through final approval
+description: Run the binary's kernel loop for a plan-approved spec until the binary reports done
 ---
 
 # Spec Autopilot
 
-Use `/ms-bead-cycle` to execute the binary's workflow for an approved plan.
-The binary owns work selection, rounds, decisions and final approval readiness.
-Apply the repository's Bead-loop guardrails.
+The binary selects the work, checks the gates and prints each command.
+This skill runs that loop for the whole spec until `status` is `done`.
 
 ## Inputs
 
-- `spec-slug` (optional): select the spec. Ask the user when active specs are ambiguous.
+- `spec-slug` (optional): the spec. Ask the user when more than one spec is active.
+- `panel-slug` (optional): the panel, when the user starts this skill for a panel.
 
-## Sequence
+## Panel
 
-1. Run `/ms-bead-cycle` for the spec. It loops `mindspec next-action --apply`,
-   `lease`, dispatch, `submit` and each returned `run` command.
-2. Dispatch only returned actions. Parallelism is across the configured panel reviewers + the impl subagent.
-   Work items run serially. Preserve the binary's plan order.
-3. Return each open decision to the user. Show the listed options and the affected gate.
-   Submit the selected answer, then read the binary output again.
-4. Execute the final-review and `mindspec impl approve` entries when returned.
-   Use `/ms-spec-final-review` for review context and `/ms-impl-approve` for approval.
-   The cycle owns panel creation, leases, submissions and decisions.
-   Skip adapter commands that the current binary output has not authorised.
-5. Exit when the binary reports `done`. Report the publication result.
+When the user starts this skill for a panel, run `mindspec panel tally <panel-slug>`.
 
-## Conditions to return to the user
+- It exits non-zero and prints no `decision:` line: report the error to the user and stop.
+- It prints a `Next` block: run the lines of that block, then stop. Do not run `next-action --apply`.
+- It prints no `Next` block: go to the loop.
 
-| Condition | Action |
-|:----------|:-------|
-| Open decision | Show its options; keep other eligible work under binary control |
-| Failed merge | Preserve state and follow the completion recovery line |
-| Dependency mismatch | Stop dispatch and report the mismatch |
-| Binary reports `wait` | Report blockers and retry time; wait for the missing input |
-| Binary reports `halted` | Report the durable halt and affected spec |
-| Binary reports `indeterminate` | Surface the diagnostic and recovery line |
+## Loop
 
-A rejected panel holds its own gate. Only a submitted `halt` answer stops every work item.
+1. Run `mindspec next-action --apply <spec-slug> --json`.
+   If it refuses, run the commands that the refusal and `mindspec instruct` print.
+2. For each entry in `actions`, run its `claim` argv (`mindspec lease <step>`) and keep the token.
+   Run its `brief` argv. Start a fresh agent with that output as its prompt.
+   If the `brief` argv exits non-zero, start no agent and follow the `mindspec instruct` rules.
+   Renew a long lease with `mindspec lease <step> --renew <token>`.
+3. When the agent returns, run the action's `submit` argv with the token and the evidence:
+   `--commit <oid>` for an implement or fix step; `--record <path>` for a lens, verify or
+   change-judge step, at the record path that its brief names; `--artifact <path>` for a review slot.
+   If `submit` refuses, run its recovery line.
+4. Run each `run` entry's `argv` as printed.
+5. For each entry in `decisions`, follow the `mindspec instruct` rules.
+6. Read `status`:
+   - `work`: go to step 1.
+   - `wait`: report `waiting` and `retry_at` to the user, wait, then go to step 1.
+   - `done`: report the result to the user and stop.
+   - any other status: report it and each flag to the user, and stop.
 
-## Reporting
-
-After a merge, report the work item, merge SHA, tests and deviations.
-Report the panel outcome as printed. For example: `<N>/<N> APPROVE`.
-After final approval, report the completed spec and publication result.
-
-## Guardrails
-
-Agents do not merge or push their own work.
-The orchestrator publishes once at the end of the spec.
-Use the binary's returned commands for each transition.
+Run the `repair` line of each flag. Follow the orchestrator rules that `mindspec instruct` prints.

@@ -22,20 +22,33 @@ uses no extra round.
 
 Run `mindspec setup <agent>` after an upgrade. Setup refreshes unchanged shipped
 skills. It keeps user edits and reports them. Setup adds required Beads types
-and keeps existing custom types. Plans approved before enrolment was available
+and keeps existing custom types. Plans approved before enrollment was available
 finish through the existing lifecycle commands. They are not enrolled by a read
 or by a repeated plan approval.
 
 ## Execute the workflow
 
+The loop skills are thin adapters. They run the commands that the binary prints.
+The binary selects the work, checks each gate and writes each brief.
+
 1. Inspect with `mindspec next-action <spec> --json`. This command writes nothing.
-2. Run `mindspec next-action --apply <spec> --json` to create authorised steps.
+2. Run `mindspec next-action --apply <spec> --json` to create authorized steps.
 3. Read `actions`, `run`, `waiting`, `decisions`, `flags` and `status`.
-4. Execute each action's `claim` argv. `mindspec lease <step>` prints a token once.
-5. Dispatch an actor with the returned brief, subject, worktree and token.
-6. Submit the committed evidence with the action's `submit` argv.
-7. Execute each `run` entry's `argv` in order.
+4. Run each action's `claim` argv. `mindspec lease <step>` prints a token once.
+5. Run each action's `brief` argv. Give its output to a fresh agent as the prompt.
+   Use a new agent for each actor step.
+6. Submit the evidence with the action's `submit` argv and the token.
+7. Run each `run` entry's `argv` in order.
 8. Read the next action again after each submission or command.
+
+Renew a long lease with `mindspec lease <step> --renew <token>`. Release a lease
+that you do not use with `mindspec lease <step> --release <token>`.
+
+The brief of an implementation step points to `mindspec next <work-item> --emit-only`.
+That output contains the readiness review. The agent returns `NOT READY: <id>` with
+numbered reasons when the work item is not ready. The brief of a review slot points to
+`mindspec panel prompt`. The brief of a fix step lists the reproduced findings and the
+`mindspec complete <work-item> --check` command.
 
 For an implementation or fix, submit its commit:
 
@@ -43,13 +56,22 @@ For an implementation or fix, submit its commit:
 mindspec submit <step> --lease <token> --commit <oid>
 ```
 
-For a review or change judgement, submit its artifact:
+For a review slot, submit its committed artifact:
 
 ```bash
 mindspec submit <step> --lease <token> --artifact <path>
 ```
 
-Keep the evidence in git. The receipt binds its path, holding commit and blob.
+For a lens, verify or change-judge step, submit its record:
+
+```bash
+mindspec submit <step> --lease <token> --record <path>
+```
+
+The brief names the record path. That path is outside every worktree of the
+repository. Do not commit the record. The binary stores it with the step.
+
+Keep commits and artifacts in git. The receipt binds the artifact path, holding commit and blob.
 A separate evidence worktree can keep review files together. Evidence can also be
 committed on the subject branch. A commit that changes only directories registered
 to the gate does not move its subject. A commit that changes another path does.
@@ -83,7 +105,24 @@ A missing artifact, stale subject or invalid token leaves the step open.
 
 After a passing gate's subject changes, an actor judges the change. It can record
 `carry-over` with a reason or request `re-panel` with paths and a slot count.
-The binary checks the judgement and returns the authorised next commands.
+The binary checks the judgment and returns the authorized next commands.
+
+## Run a panel outside the kernel
+
+A plan approved before enrollment, and an adhoc panel, use `mindspec panel tally`.
+On such a gate, the tally prints a `Next` block. Run its lines in order.
+
+- A pass prints the next lifecycle command, for example `mindspec complete <bead>`.
+- A round with missing slots names each slot and its prompt command.
+- Unresolved findings print the refute and defer lines and the `fix:` lines.
+  The fix lines run the verify step, give the reproduced findings to one fresh fixer
+  agent, and open the next round with `panel create`.
+- A REJECT or a missing measurement artifact prints the operator-action line.
+- A stale subject prints the rebind and abandon lines with their conditions.
+- Other results print the halt line.
+
+A kernel gate prints no `Next` block. The kernel loop continues with
+`mindspec next-action --apply`.
 
 ## Share the Beads store
 

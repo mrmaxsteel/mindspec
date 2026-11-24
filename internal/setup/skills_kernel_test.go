@@ -16,75 +16,190 @@ import (
 
 var s134RemovedGuidance = regexp.MustCompile("(?i)max_rounds_per_bead|panel_deadlock_rounds|max_consecutive_impl_failures|gate_authority|Any bead REJECT|REJECT / HARD block|do not proceed to the next bead|on_reject|loop\\.halt|max-rounds|One halted bead|keep going after a halt|default .?3")
 
-func s134CycleError(body string) error {
-	// Require the dispatch sequence in its executable instructions, not a glossary.
-	last := -1
-	for _, instruction := range []string{
-		"1. Run `mindspec next-action --apply <spec-slug> --json`",
-		"2. For each selected action, execute its `claim` argv (`mindspec lease <step>`)",
-		"3. Dispatch by the returned kind:",
-		"4. Submit the evidence with the action's `submit` argv and current token.",
-		"5. Execute each `run` entry's `argv` as returned.",
-		"6. Return each open decision to the user with its listed options.",
-		"7. Run the loop again after each submission or command.",
-	} {
-		pos := strings.Index(body, instruction)
-		if pos < 0 || pos <= last {
-			return fmt.Errorf("missing or out-of-order instruction: %s", instruction)
-		}
-		last = pos
-	}
-	for _, want := range []string{
-		"`implement`", "`review-slot`", "`fix`", "`change-judge`",
-		"mindspec submit <step> --lease <token> --commit <oid>",
-		"mindspec submit <step> --lease <token> --artifact <path>",
-		"Other eligible work can continue.",
-		"Execute the action's `brief` argv",
-		"Skip adapter panel creation and automatic fix or halt routing.",
-		"Never merge a bead branch with raw `git merge bead/<id>`.",
-		"If a check stopped between bd-close and the actual git merge, recover it before another dispatch.",
-		"Stop on a failed merge or a dependency mismatch",
-	} {
-		if !strings.Contains(body, want) {
-			return fmt.Errorf("missing actor or recovery contract: %s", want)
-		}
-	}
-	if hit := s134RemovedGuidance.FindString(body); hit != "" {
-		return fmt.Errorf("removed guidance: %s", hit)
-	}
-	return nil
+// s134AdapterNames are the five loop skills that are harness adapters.
+// Each value is the line count of its SKILL.md at the spec base 371dc360.
+var s134AdapterNames = map[string]int{
+	"ms-bead-cycle":     166,
+	"ms-spec-autopilot": 83,
+	"ms-bead-impl":      163,
+	"ms-bead-fix":       47,
+	"ms-panel-tally":    59,
 }
 
-func TestS134Skills_CycleContract(t *testing.T) {
-	body := pluginmindspec.SkillFiles()["ms-bead-cycle"]
-	if err := s134CycleError(body); err != nil {
-		t.Fatal(err)
+// s134AdapterWords are the words that state a rule of order, a pick or a
+// halt. That logic belongs to the binary, so no adapter may contain them.
+var s134AdapterWords = regexp.MustCompile(`(?i)\b(must|never|only after|round|pick|order|halt|first|before)\b`)
+
+// s134AdapterVerb matches each mindspec verb that an adapter names, with
+// the word after it for the two panel verbs.
+var s134AdapterVerb = regexp.MustCompile(`mindspec\s+([a-z-]+)(?:\s+([a-z-]+))?`)
+
+var s134AllowedVerbs = map[string]bool{
+	"next-action": true, "lease": true, "submit": true, "brief": true,
+	"panel prompt": true, "panel tally": true, "instruct": true,
+}
+
+// s134AdapterProblems returns each way that body breaks the adapter
+// contract: line cap, base length, required verbs, verb allowlist, word
+// scan, removed guidance and the panel-before-loop sequence.
+func s134AdapterProblems(name, body string) []string {
+	var problems []string
+	lines := strings.Count(body, "\n")
+	if lines > 50 || lines > s134AdapterNames[name] {
+		problems = append(problems, fmt.Sprintf("%d lines; the cap is 50 and the base is %d", lines, s134AdapterNames[name]))
 	}
-	// Each wrong value must fail the same predicate that guards the shipped file.
-	for _, fragment := range []string{
-		"mindspec next-action --apply <spec-slug> --json",
-		"execute its `claim` argv (`mindspec lease <step>`)",
-		"Dispatch by the returned kind:",
-		"Submit the evidence with the action's `submit` argv and current token.",
-		"Execute each `run` entry's `argv` as returned.",
-		"Return each open decision to the user with its listed options.",
-		"Run the loop again after each submission or command.",
-		"`change-judge`", "Stop on a failed merge or a dependency mismatch",
-	} {
-		t.Run(fragment, func(t *testing.T) {
-			wrong := strings.Replace(body, fragment, "WRONG", 1)
-			if wrong == body || s134CycleError(wrong) == nil {
-				t.Fatal("wrong instruction passed the shipped contract check")
+	for _, verb := range []string{"next-action", "lease", "submit"} {
+		if !regexp.MustCompile(`\b` + verb + `\b`).MatchString(body) {
+			problems = append(problems, "does not name "+verb)
+		}
+	}
+	for _, m := range s134AdapterVerb.FindAllStringSubmatch(body, -1) {
+		verb := m[1]
+		if verb == "panel" {
+			verb += " " + m[2]
+		}
+		if !s134AllowedVerbs[verb] {
+			problems = append(problems, "names a verb outside the allowlist: mindspec "+verb)
+		}
+	}
+	for _, verb := range []string{"complete", "approve", "merge"} {
+		if regexp.MustCompile(`(?i)\b` + verb + `\b`).MatchString(body) {
+			problems = append(problems, "names a lifecycle verb outside the allowlist: "+verb)
+		}
+	}
+	if hit := s134AdapterWords.FindString(body); hit != "" {
+		problems = append(problems, "contains the word "+hit)
+	}
+	if hit := s134RemovedGuidance.FindString(body); hit != "" {
+		problems = append(problems, "removed guidance: "+hit)
+	}
+	tally := strings.Index(body, "mindspec panel tally")
+	apply := strings.Index(body, "next-action --apply")
+	if tally < 0 || apply < 0 || apply < tally {
+		problems = append(problems, "the panel tally step must come ahead of the next-action --apply loop")
+	}
+	return problems
+}
+
+func s134AdapterCopies(t *testing.T) map[string]string {
+	t.Helper()
+	root := repoRoot(t)
+	copies := map[string]string{}
+	for name := range s134AdapterNames {
+		for _, dir := range []string{"plugins/mindspec/skills", ".claude/skills"} {
+			raw, err := os.ReadFile(filepath.Join(root, dir, name, "SKILL.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			copies[dir+"/"+name] = string(raw)
+		}
+	}
+	return copies
+}
+
+// TestS134Skills_AdapterShape checks each copy of the five adapters against
+// the adapter contract and checks that the two copies of each are equal.
+func TestS134Skills_AdapterShape(t *testing.T) {
+	copies := s134AdapterCopies(t)
+	for key, body := range copies {
+		name := filepath.Base(key)
+		t.Run(key, func(t *testing.T) {
+			if problems := s134AdapterProblems(name, body); len(problems) != 0 {
+				t.Fatal(problems)
 			}
 		})
 	}
-	prior, err := historicalSkillsFS.ReadFile("historical_skills/ms-bead-cycle.pre134.md")
-	if err != nil {
-		t.Fatal(err)
+	for name := range s134AdapterNames {
+		if copies["plugins/mindspec/skills/"+name] != copies[".claude/skills/"+name] {
+			t.Errorf("%s: the .claude copy differs from the plugin copy", name)
+		}
+		if copies["plugins/mindspec/skills/"+name] != pluginmindspec.SkillFiles()[name] {
+			t.Errorf("%s: the embedded copy differs from the plugin file", name)
+		}
 	}
-	if s134CycleError(string(prior)) == nil {
-		t.Fatal("old independent selection rules passed")
+	cycle := copies["plugins/mindspec/skills/ms-bead-cycle"]
+	for mutation, body := range map[string]string{
+		"7-line adapter that names complete": "---\nname: ms-bead-cycle\n---\n\nRun `mindspec next-action --apply`, `mindspec lease` and `mindspec submit`.\nThen run `mindspec complete <id>`.\n\n",
+		"pick order":                         cycle + "Pick the step with the lowest order.\n",
+		"loop ahead of the panel tally":      strings.Replace(cycle, "## Panel", "Run `mindspec next-action --apply <spec-slug> --json` now.\n\n## Panel", 1),
+		"verb outside the allowlist":         cycle + "Run `mindspec panel create <panel-slug>`.\n",
+		"no submit":                          strings.ReplaceAll(cycle, "submit", "send"),
+		"over the base length":               cycle + strings.Repeat("\n", 7),
+		"removed guidance":                   cycle + "Set max_rounds_per_bead in the config.\n",
+	} {
+		t.Run("mutation/"+mutation, func(t *testing.T) {
+			if len(s134AdapterProblems("ms-bead-cycle", body)) == 0 {
+				t.Fatal("the mutation passed the adapter contract")
+			}
+		})
 	}
+	if len(s134AdapterProblems("ms-bead-fix", copies["plugins/mindspec/skills/ms-bead-fix"]+strings.Repeat("\n", 4))) == 0 {
+		t.Error("ms-bead-fix grew past its base length and passed")
+	}
+}
+
+// TestS134Skills_CycleContract checks that each adapter states the loop in
+// sequence: the panel tally and its routes, then the next-action loop with
+// lease, brief, fresh agent, submit by kind, run entries, decisions and
+// status. The old pre-kernel text fails the same check.
+func TestS134Skills_CycleContract(t *testing.T) {
+	for key, body := range s134AdapterCopies(t) {
+		t.Run(key, func(t *testing.T) {
+			if err := s134CycleError(body); err != nil {
+				t.Fatal(err)
+			}
+			for _, fragment := range s134CycleSequence {
+				wrong := strings.Replace(body, fragment, "WRONG", 1)
+				if wrong == body || s134CycleError(wrong) == nil {
+					t.Errorf("removing %q passed the contract check", fragment)
+				}
+			}
+		})
+	}
+	for _, old := range []string{"ms-bead-cycle.pre134.md", "ms-bead-cycle.pre134-kernel.md"} {
+		prior, err := historicalSkillsFS.ReadFile("historical_skills/" + old)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s134CycleError(string(prior)) == nil {
+			t.Errorf("%s passed the adapter contract", old)
+		}
+	}
+}
+
+var s134CycleSequence = []string{
+	"run `mindspec panel tally <panel-slug>`.",
+	"prints no `decision:` line: report the error to the user and stop.",
+	"It prints a `Next` block: run the lines of that block, then stop. Do not run `next-action --apply`.",
+	"It prints no `Next` block: go to the loop.",
+	"1. Run `mindspec next-action --apply <spec-slug> --json`.",
+	"If it refuses, run the commands that the refusal and `mindspec instruct` print.",
+	"run its `claim` argv (`mindspec lease <step>`) and keep the token.",
+	"Run its `brief` argv. Start a fresh agent with that output as its prompt.",
+	"If the `brief` argv exits non-zero, start no agent",
+	"run the action's `submit` argv with the token and the evidence:",
+	"`--commit <oid>` for an implement or fix step",
+	"`--record <path>` for a lens, verify or\n   change-judge step",
+	"`--artifact <path>` for a review slot.",
+	"If `submit` refuses, run its recovery line.",
+	"4. Run each `run` entry's `argv` as printed.",
+	"5. For each entry in `decisions`, follow the `mindspec instruct` rules.",
+	"- `work`: go to step 1.",
+	"- `done`: report the result to the user and stop.",
+	"any other status: report it and each flag to the user, and stop.",
+	"Run the `repair` line of each flag.",
+}
+
+func s134CycleError(body string) error {
+	last := -1
+	for _, fragment := range s134CycleSequence {
+		pos := strings.Index(body, fragment)
+		if pos < 0 || pos <= last {
+			return fmt.Errorf("missing or out-of-sequence instruction: %s", fragment)
+		}
+		last = pos
+	}
+	return nil
 }
 
 func TestS134Skills_CopiesAndDocs(t *testing.T) {

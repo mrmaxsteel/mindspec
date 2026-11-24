@@ -34,27 +34,21 @@ func requireAdapterText(t *testing.T, body string, wants ...string) {
 	}
 }
 
-func TestPanelSkills_AdapterShape(t *testing.T) {
+// TestPanelSkills_RunAndFinalReviewText pins the panel-run and final-review
+// skills. The five loop adapters have their own contract in
+// TestS134Skills_AdapterShape.
+func TestPanelSkills_RunAndFinalReviewText(t *testing.T) {
 	eachAdapterCopy(t, func(t *testing.T, name, body string) {
-		if strings.Contains(name, "ms-panel-") {
+		switch name {
+		case "ms-panel-run":
 			if n := strings.Count(body, "\n"); n > 80 {
 				t.Errorf("%d lines, limit 80", n)
 			}
-		}
-		switch name {
-		case "ms-panel-run":
 			requireAdapterText(t, body, "runner: claude-code-workflow", "`/ms-panel` once", "{slug, spec, gate, target, bead_id, round, brief_file}", "runner: claude-code-skills", "runner: external", "mindspec panel create", "mindspec panel verify <panel-slug> --json", "mindspec panel checkout <panel-slug> --slot <slot> --dispatch", "--replace", "mindspec panel prompt", "mindspec panel submit", "effective model", "cannot run that model, report", "model equals family", "harness default model", "verdict label", "after each process or agent ends", "On exit 0, invoke `/ms-panel-tally`")
-		case "ms-panel-tally":
-			requireAdapterText(t, body, "review.reproduce", "review.no-vote", "panel.artifact-gate", "--data - <<'JSON'", "mindspec panel disposition check", "replaced", "--json", "MINDSPEC_SKIP_PANEL=1", "mindspec panel rebind", "mindspec panel defer")
-			if strings.Contains(body, "confidence") {
-				t.Error("retired verdict field")
-			}
 		case "ms-spec-final-review":
 			requireAdapterText(t, body, "mindspec panel checkout <panel-slug> --slot <slot>", "review.ci-parity", "commands.ci", "commands.test")
-		case "ms-bead-cycle":
-			requireAdapterText(t, body, "review.reproduce", "review.no-vote", "panel.fix-after-final", "panel.one-fixer", "Use one panel slug", "for all rounds", "Set `--round <R>` to the next round.")
-		case "ms-bead-impl":
-			requireAdapterText(t, body, "sequence.bead-impl-prompt", "review.derive", "lifecycle.complete-by-orchestrator")
+		default:
+			return
 		}
 		canonical, err := os.ReadFile(filepath.Join(repoRoot(t), "plugins/mindspec/skills", name, "SKILL.md"))
 		if err != nil {
@@ -148,22 +142,6 @@ func TestSkills_NoFamilyNoTmp(t *testing.T) {
 			if len(adapterSurfaceProblems(body+"\n"+wrong)) == 0 {
 				t.Fatalf("scanner missed %q", wrong)
 			}
-		}
-	})
-}
-func TestBeadFix_FixerRules(t *testing.T) {
-	eachAdapterCopy(t, func(t *testing.T, name, body string) {
-		if name != "ms-bead-fix" {
-			return
-		}
-		requireAdapterText(t, body, "mindspec rules --scope fixer", "complete stdout as `fixer_rules`", "mindspec panel checkout <panel-slug> --fixer", "target's own worktree", "Never dispatch the fixer in a slot tree")
-		block := regexp.MustCompile("(?s)```text\\n(.*?)\\n```").FindStringSubmatch(body)
-		if len(block) != 2 {
-			t.Fatal("missing fixer prompt template")
-		}
-		requireAdapterText(t, block[1], "Fixer rules (verbatim stdout):\n<fixer_rules>", "Scratch directory: <absolute fixer directory>", "Target worktree: <absolute target worktree>")
-		if strings.Contains(block[1], "mindspec rules --scope fixer") {
-			t.Error("prompt contains command in place of rule output")
 		}
 	})
 }

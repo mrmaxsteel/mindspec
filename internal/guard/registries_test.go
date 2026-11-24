@@ -106,8 +106,9 @@ func TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation(t *testing.
 // Declared once and read three times below, rather than re-typed at
 // each assertion, so the three checks cannot silently drift apart from
 // one another even though the underlying "10" is still, unavoidably,
-// a hand-pinned sentinel value (that's what a sentinel is).
-const wantKnownSitesLiveCount = 11
+// a hand-pinned sentinel value (that's what a sentinel is). The six
+// ms-bead-cycle entries left when that skill became a harness adapter.
+const wantKnownSitesLiveCount = 5
 
 func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
 	if got, want := len(KnownSitesExemptionList), wantKnownSitesLiveCount; got != want {

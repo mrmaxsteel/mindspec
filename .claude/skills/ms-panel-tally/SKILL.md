@@ -1,59 +1,44 @@
 ---
 name: ms-panel-tally
-description: Read the panel decision, consolidate findings and report recovery actions
+description: Run the panel tally and the commands of its Next block
 ---
 
-# Tally Panel Verdicts
+# Panel Tally
 
-## Steps
+The binary decides the panel gate and prints the commands that come next.
+This skill runs `mindspec panel tally` and those commands.
 
-1. Run `mindspec panel tally <panel-slug>` or read its output from the workflow.
-The binary resolves the current round and roster.
-PASS requires a fresh and intact panel, all roster slots present, 0 REJECT, 0 hard_block, 0 INVALID and 0 unresolved REQUEST_CHANGES.
-`mindspec panel tally` writes the coverage manifest only when the panel passes.
-2. Consolidate `concrete_changes_required` by defect and criticality for `/ms-bead-fix`.
-Keep distinct asks and evidence. Save `<panel-dir>/consolidated-round-<N>.md`.
-Apply `review.reproduce` before fix dispatch or refutation. Apply `review.no-vote` and `panel.artifact-gate`.
-3. Append one disposition per distinct finding that no discharge verb captured.
-Use stdin from a quoted heredoc. Do not interpolate finding text into shell arguments.
-The `--spec` flag takes the full spec id. The JSON `spec` field takes its number.
-Do not supply an `id`. The verb derives it for an idempotent retry.
-```bash
-mindspec panel disposition append --spec <spec-id> --panel <panel-slug> --data - <<'JSON'
-{"record":"disposition","spec":"<number>","gate":"<gate>","panel":"<panel-slug>","reviewer":"<slot>","model":"<model>","severity":"<blocking|major|minor>","summary":"<summary>","convergent_with":[],"disposition":"<confirmed-fixed|confirmed-scope-trim|deferred|false-contamination>","evidence_ref":"<reference>","note":"<note>","created_at":"<RFC-3339>","backfilled":false}
-JSON
-```
-`reviewer` and each `convergent_with` value must match a roster slot id.
-Run `mindspec panel disposition check --spec <spec-id> --panel <panel-slug>` to check coverage.
-4. Report the tally decision and consolidated path to `/ms-bead-cycle`.
-Take family counts and `replaced` annotations from `mindspec panel verify <panel-slug> --json`.
-Apply `panel.fix-after-final` and `panel.one-fixer` before a fix dispatch.
+## Inputs
 
-## After a halt — recovery
+- `spec-slug` (optional): the spec. Ask the user when more than one spec is active.
+- `panel-slug` (optional): the panel, when the user starts this skill for a panel.
 
-`mindspec instruct --panel-state` lists the panel state.
-For a stale bead panel, run `mindspec panel create <slug> --spec <spec-id> --gate bead --target bead/<bead-id> --bead <bead-id> --round <N+1> --brief-file <absolute path to a fresh brief>`.
-For `spec_approve`, `plan_approve` and `final_review`, create the next round with `--target spec/<id>`.
-Use the recorded gate and target for other panels. Omit `--spec` for adhoc panels.
-`mindspec panel rebind <slug> --reason "<who>: <why>"` accepts a passing panel when changed paths need no new review.
-`mindspec panel abandon <panel-slug> --reason "<why>" --by "<name>"` records an audited exit from the panel flow.
-`mindspec panel refute <panel-slug> --slot <slot> --round N --finding 'ccr[0]' --ground disproven --reason "<why>" --evidence <reference> --by "<name>"` records a refutation.
-A REJECT or missing required measurement artifact needs operator action. A text edit does not supply an artifact.
+## Panel
 
-## Escape hatch
+When the user starts this skill for a panel, run `mindspec panel tally <panel-slug>`.
 
-Only a human can set `MINDSPEC_SKIP_PANEL=1` in the session environment before launch.
-An agent must not set it on a command line. Completion records the audited skip.
+- It exits non-zero and prints no `decision:` line: report the error to the user and stop.
+- It prints a `Next` block: run the lines of that block, then stop. Do not run `next-action --apply`.
+- It prints no `Next` block: go to the loop.
 
-## Defer a finding
+## Loop
 
-Run `mindspec panel defer <panel-slug> --slot <slot> --round N --finding 'ccr[0]' --bead <follow-up> --by "<name>"`.
-Omit `--finding` for the whole slot. Use an open follow-up outside the owning epic and its descendants, with a discovered-from edge and each finding in its description.
-For a spec-approval panel, use `--to-plan` instead of `--bead <follow-up>`.
-The plan must name each deferral id in its `## Resolutions` section before plan approval.
-Adhoc panels cannot defer. Use a fix or refutation. The verbs write their own disposition rows.
+1. Run `mindspec next-action --apply <spec-slug> --json`.
+   If it refuses, run the commands that the refusal and `mindspec instruct` print.
+2. For each entry in `actions`, run its `claim` argv (`mindspec lease <step>`) and keep the token.
+   Run its `brief` argv. Start a fresh agent with that output as its prompt.
+   If the `brief` argv exits non-zero, start no agent and follow the `mindspec instruct` rules.
+   Renew a long lease with `mindspec lease <step> --renew <token>`.
+3. When the agent returns, run the action's `submit` argv with the token and the evidence:
+   `--commit <oid>` for an implement or fix step; `--record <path>` for a lens, verify or
+   change-judge step, at the record path that its brief names; `--artifact <path>` for a review slot.
+   If `submit` refuses, run its recovery line.
+4. Run each `run` entry's `argv` as printed.
+5. For each entry in `decisions`, follow the `mindspec instruct` rules.
+6. Read `status`:
+   - `work`: go to step 1.
+   - `wait`: report `waiting` and `retry_at` to the user, wait, then go to step 1.
+   - `done`: report the result to the user and stop.
+   - any other status: report it and each flag to the user, and stop.
 
-## Then
-
-PASS with artifact gates clear: return to `/ms-bead-cycle` for completion.
-BLOCK with fixes: return to `/ms-bead-fix`. Otherwise halt and report the panel state.
+Run the `repair` line of each flag. Follow the orchestrator rules that `mindspec instruct` prints.
