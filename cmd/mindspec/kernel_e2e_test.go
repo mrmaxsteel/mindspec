@@ -70,9 +70,18 @@ func newKernelE2EWithFixture(t *testing.T, bin string, f *kerneltest.Fixture, si
 
 func newKernelE2EWithLayout(t *testing.T, bin string, f *kerneltest.Fixture, docs string, sizes ...int) *kernelE2E {
 	t.Helper()
-	return newKernelE2EWithConfig(t, bin, f, docs, "enforcement:\n  panel_gate: false\nauto_open_finalize_pr: false\npanel:\n  reviewers:\n    - family: harness\n      model: test-model\n      lens: correctness\n      count: 3\n", sizes...)
+	return newKernelE2EWithConfig(t, bin, f, docs, kernelE2EConfig, sizes...)
 }
+
+const kernelE2EConfig = "enforcement:\n  panel_gate: false\nauto_open_finalize_pr: false\npanel:\n  reviewers:\n    - family: harness\n      model: test-model\n      lens: correctness\n      count: 3\n"
+
 func newKernelE2EWithConfig(t *testing.T, bin string, f *kerneltest.Fixture, docs, panelConfig string, sizes ...int) *kernelE2E {
+	t.Helper()
+	return newKernelE2EWithPlan(t, bin, f, docs, panelConfig, nil, sizes...)
+}
+
+// newKernelE2EWithPlan lets a caller change the plan text before plan approval.
+func newKernelE2EWithPlan(t *testing.T, bin string, f *kerneltest.Fixture, docs, panelConfig string, editPlan func(string) string, sizes ...int) *kernelE2E {
 	t.Helper()
 	e := &kernelE2E{t: t, f: f, bin: bin}
 	root := f.Root
@@ -103,7 +112,11 @@ func newKernelE2EWithConfig(t *testing.T, bin string, f *kerneltest.Fixture, doc
 	e.git(root, "worktree", "add", e.cwd, branch)
 	f.SpecDir = filepath.Join(e.cwd, docs, "specs", f.SpecID)
 	e.write(e.cwd, filepath.Join(docs, "specs", f.SpecID, "spec.md"), "---\nstatus: Approved\n---\n# Example\n\n## Goal\nExercise the kernel.\n\n## Impacted Domains\n- workflow\n")
-	e.write(e.cwd, filepath.Join(docs, "specs", f.SpecID, "plan.md"), strings.Replace(kerneltest.EnrolmentPlan(f.SpecID, size), "version:", "adr_citations: [ADR-9001]\nversion:", 1))
+	plan := strings.Replace(kerneltest.EnrolmentPlan(f.SpecID, size), "version:", "adr_citations: [ADR-9001]\nversion:", 1)
+	if editPlan != nil {
+		plan = editPlan(plan)
+	}
+	e.write(e.cwd, filepath.Join(docs, "specs", f.SpecID, "plan.md"), plan)
 	e.git(e.cwd, "add", ".")
 	e.git(e.cwd, "commit", "-qm", "spec")
 	var epic kernel.Record
@@ -395,6 +408,44 @@ func (e *kernelE2E) verifyReproduced() kernel.Output {
 		v := kernel.VerifyRecord{Step: a.Step, Subject: a.Subject.Commit, Returns: []kernel.VerifyReturn{}}
 		for _, f := range findings {
 			v.Returns = append(v.Returns, kernel.VerifyReturn{Slot: f.Slot, Round: f.Round, Finding: f.Finding, FindingSHA256: f.FindingSHA256, Return: "reproduced"})
+		}
+		data, err := json.Marshal(v)
+		e.must(err)
+		path := filepath.Join(e.t.TempDir(), "verify.json")
+		e.must(os.WriteFile(path, data, 0600))
+		raw := e.ok("submit", a.Step, "--lease", e.lease(a.Step), "--record", path)
+		var verified kernel.Output
+		e.must(json.Unmarshal([]byte(raw), &verified))
+		return verified
+	}
+	e.t.Fatalf("no verify action: %+v", out)
+	return kernel.Output{}
+}
+
+// verifyEachReturn returns the first finding reproduced, the second refuted and
+// the third deferred to the follow-up.
+func (e *kernelE2E) verifyEachReturn(follow, evidence string) kernel.Output {
+	e.t.Helper()
+	out := e.apply()
+	for _, a := range out.Actions {
+		if a.Kind != "verify" {
+			continue
+		}
+		findings, _, err := kernel.Decode[[]kernel.Finding](e.row(a.Step).Metadata, kernel.KeyFindings)
+		e.must(err)
+		if len(findings) != 3 {
+			e.t.Fatalf("verify findings: %+v", findings)
+		}
+		v := kernel.VerifyRecord{Step: a.Step, Subject: a.Subject.Commit}
+		for i, f := range findings {
+			ret := kernel.VerifyReturn{Slot: f.Slot, Round: f.Round, Finding: f.Finding, FindingSHA256: f.FindingSHA256, Return: "reproduced"}
+			switch i {
+			case 1:
+				ret.Return, ret.Ground, ret.Reason, ret.Evidence = "refuted", "disproven", "The implementation covers the finding.", evidence
+			case 2:
+				ret.Return, ret.Reason, ret.Target = "deferred", "The follow-up owns the property.", follow
+			}
+			v.Returns = append(v.Returns, ret)
 		}
 		data, err := json.Marshal(v)
 		e.must(err)
@@ -872,7 +923,16 @@ func (e *kernelE2E) mixedReview(words []string, repair bool) {
 		if !ok {
 			e.t.Fatal("no registration")
 		}
-		if i == 1 {
+		if repair && i == 2 {
+			// A raw close of a leased step, then a repair receipt from its evidence.
+			e.tracker("close", kerneltest.ID(e.t, e.f, a.Step))
+			e.ok("submit", a.Step, "--repair", "--reason", "The slot was closed outside the kernel.", "--artifact", path)
+			receipt, ok, err := kernel.Decode[kernel.Receipt](e.row(a.Step).Metadata, kernel.KeyClose)
+			e.must(err)
+			if !ok || !receipt.Repaired || receipt.Via != "repair" {
+				e.t.Fatalf("repair receipt: %+v", receipt)
+			}
+		} else if i == 1 {
 			e.ok("panel", "submit", reg.Slug, "--spec", e.f.SpecID, "--slot", fmt.Sprintf("R%d", tuple.Slot), "--round", fmt.Sprint(tuple.Round), "--lease", token, "--file", path)
 		} else {
 			e.ok("submit", a.Step, "--lease", token, "--artifact", path)
@@ -898,21 +958,32 @@ func (e *kernelE2E) mixedReview(words []string, repair bool) {
 }
 func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
 	t.Parallel()
-	e := newKernelE2E(t, kernelE2EBinary(t), 2)
+	// One work item keeps the real-store run under the command time limit; the
+	// open foreign child of the epic owns the deferred documentation.
+	e := newKernelE2E(t, kernelE2EBinary(t), 1)
 	e.apply()
 	e.foreign()
 	item := e.f.Items[0]
 	step := item + ".impl.a1"
+	var follow kernel.Record
+	e.must(json.Unmarshal(e.tracker("create", "--title", "follow up", "--description", "fix the property", "--type", "task", "--json"), &follow))
+	e.tracker("dep", "add", follow.ID, e.f.Epic, "--type", "discovered-from")
 	raw := e.ok("next", "1", "--allow-not-ready=MF-1", "--evidence", filepath.Join(e.f.SpecDir, "spec.md"))
-	if !strings.Contains(raw, "generation 1") {
+	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	if !strings.Contains(raw, "generation 1") || len(lines) < 2 {
 		t.Fatalf("next did not lease: %s", raw)
 	}
-	token := e.lease(step, "--take", "--reason", "Replace the implementation actor.")
+	first := strings.TrimSpace(lines[len(lines)-1])
+	e.lease(step, "--take", "--reason", "Replace the implementation actor.")
 	head := e.commit(e.tree(item), "implementation.txt", "implemented\n")
-	e.ok("submit", step, "--lease", token, "--commit", head)
+	// The first actor returns after the take: a late submission on its revoked lease.
+	e.ok("submit", step, "--lease", first, "--commit", head)
+	if receipt, ok, err := kernel.Decode[kernel.Receipt](e.row(step).Metadata, kernel.KeyClose); err != nil || !ok || receipt.Generation != 1 || receipt.SupersededGeneration != 2 {
+		t.Fatalf("late submission receipt: %+v %v", receipt, err)
+	}
 	e.create(e.apply())
-	e.mixedReview([]string{"REJECT", "APPROVE", "APPROVE"}, false)
-	out := e.verifyReproduced()
+	e.mixedReview([]string{"REJECT", "REQUEST_CHANGES", "REQUEST_CHANGES"}, false)
+	out := e.verifyEachReturn(follow.ID, head)
 	if len(out.Decisions) != 1 {
 		t.Fatalf("no decision: %+v", out)
 	}
@@ -933,7 +1004,7 @@ func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
 	}
 	e.ok("submit", out.Decisions[0].Step, "--answer", "fix")
 	fix := item + ".review.r2.fix"
-	token = e.lease(fix)
+	token := e.lease(fix)
 	head = e.commit(e.tree(item), "fixed.txt", "fixed\n")
 	e.ok("submit", fix, "--lease", token, "--commit", head)
 	e.create(e.apply())
@@ -946,33 +1017,57 @@ func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
 	e.judge("re-panel", 3)
 	e.create(e.apply())
 	e.mixedReview([]string{"REQUEST_CHANGES", "REQUEST_CHANGES", "APPROVE"}, false)
-	var follow kernel.Record
-	e.must(json.Unmarshal(e.tracker("create", "--title", "follow up", "--description", "fix the property", "--type", "task", "--json"), &follow))
-	e.tracker("dep", "add", follow.ID, e.f.Epic, "--type", "discovered-from")
 	e.ok("panel", "defer", item, "--spec", e.f.SpecID, "--slot", "R1", "--round", "3", "--by", "operator", "--bead", follow.ID)
 	e.ok("panel", "refute", item, "--spec", e.f.SpecID, "--slot", "R2", "--round", "3", "--by", "operator", "--ground", "disproven", "--reason", "The implementation covers the finding.", "--evidence", head)
 	e.ok("complete", item, "--allow-net-deletion", "The implementation is retained.")
 	e.ok("complete", item, "--override-adr", "The accepted decision still applies.")
-	e.ok("complete", item, "--allow-doc-skew", "The documentation is current.", "--doc-owner", e.f.Items[1])
-	e.tracker("close", e.bug)
-	e.apply()
-	e.create(e.implement(1))
-	e.review("APPROVE")
-	e.ok("complete", e.f.Items[1])
+	e.ok("complete", item, "--allow-doc-skew", "The documentation is current.", "--doc-owner", e.note)
 	e.create(e.apply())
 	e.review("APPROVE")
 	e.refuse(e.note, "impl", "approve", e.f.SpecID)
 	e.tracker("close", e.note)
+	// The fixture's gate rounds: three review rounds of the item and one final round.
+	rounds := []string{item + ".review r1", item + ".review r2", item + ".review r3", e.f.Epic + ".final r1"}
+	// The local journal refuses a home inside a Git work tree, so the escape-hatch
+	// rows count only where the test home is outside one.
+	hatch := "1"
+	if tree := config.EnclosingGitTree(filepath.Dir(e.f.Root)); tree != "" {
+		hatch = "0"
+		t.Logf("journal disabled: the test home is inside the work tree at %s; escape-hatch rows expect 0", tree)
+	}
 	for i := 0; i < 2; i++ {
 		audit := e.ok("impl", "approve", e.f.SpecID)
-		for _, event := range []string{"--allow-not-ready", "--allow-doc-skew", "--override-adr", "--allow-net-deletion", "takeovers", "deferrals", "decision-answers", "unreceipted-closes", "carry-overs", "re-panels"} {
-			if !auditHasCount(audit, event, "1") {
-				t.Fatalf("audit %d missing one %s:\n%s", i, event, audit)
+		want := map[string]string{"takeovers": "2", "unreceipted-closes": "2", "deferrals": "2", "lens-steps": fmt.Sprint(len(rounds))}
+		for _, event := range []string{"decision-answers", "raw-claims", "carry-overs", "re-panels", "verify-reproduced", "verify-refuted", "verify-deferred", "late-submissions", "repair-receipts"} {
+			want[event] = "1"
+		}
+		for _, event := range []string{"--allow-not-ready", "--allow-doc-skew", "--override-adr", "--allow-net-deletion"} {
+			want[event] = hatch
+		}
+		for event, count := range want {
+			if !auditHasCount(audit, event, count) {
+				t.Fatalf("audit %d: %s is not %s:\n%s", i, event, count, audit)
 			}
 		}
+		lens := ""
 		for _, line := range strings.Split(audit, "\n") {
 			if strings.HasPrefix(line, "re-panels |") && !strings.Contains(line, "3 slots") {
 				t.Fatalf("re-panel slot count missing: %s", line)
+			}
+			if strings.HasPrefix(line, "takeovers |") && !strings.HasSuffix(line, " | lease 1, repair 1") {
+				t.Fatalf("takeover split: %s", line)
+			}
+			if strings.HasPrefix(line, "lens-steps |") {
+				lens = line
+			}
+		}
+		details := strings.Split(lens, " | ")
+		if len(details) != 2+len(rounds) {
+			t.Fatalf("lens-steps details %q, want one per round %v", lens, rounds)
+		}
+		for _, r := range rounds {
+			if !strings.Contains(lens+" | ", " | "+r+": 1 | ") {
+				t.Fatalf("lens-steps lacks %s: %s", r, lens)
 			}
 		}
 	}

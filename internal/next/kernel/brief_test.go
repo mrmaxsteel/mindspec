@@ -312,7 +312,10 @@ func TestS134Brief_FinalFixVerification(t *testing.T) {
 	body, err := kernel.Brief(f.State(), id)
 	f.Must(err)
 	briefContains(t, body, "reproduced final finding", "verification commands in the approved plan")
-	if strings.Contains(body, "mindspec complete") {
+	// The fixer rule rows name the verb in prose; the steps outside them must not.
+	head, rest, _ := strings.Cut(body, "\n## Rules (fixer)\n")
+	_, tail, _ := strings.Cut(rest, "\n\n")
+	if strings.Contains(head+tail, "mindspec complete") {
 		t.Fatalf("final fix names a nonexistent work item: %s", body)
 	}
 }
