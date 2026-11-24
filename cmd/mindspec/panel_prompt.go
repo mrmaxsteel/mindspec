@@ -124,7 +124,7 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 		return in, err
 	}
 	in.SlotDir, in.Tree = layout.Dir, layout.Tree
-	brief, err := panel.ReadFilledBrief(filepath.Join(reg.Dir, "BRIEF.md"))
+	brief, err := panel.ReadPanelBrief(reg.Dir, reg.Panel)
 	if err != nil {
 		return in, guard.NewFailure(err.Error(), fmt.Sprintf("fill %s, then run mindspec panel prompt %s --slot %s --spec %s", shellQuoteTarget(filepath.Join(reg.Dir, "BRIEF.md")), shellQuoteTarget(reg.Slug()), shellQuoteTarget(slotID), shellQuoteTarget(reg.Panel.Spec)))
 	}

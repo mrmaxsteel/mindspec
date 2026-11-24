@@ -396,6 +396,9 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		return nil, fmt.Errorf("read %s: %w", briefPath, readErr)
 	}
 	prior := "none recorded"
+	if in.BriefBody != "" && in.Round > 1 {
+		prior = "See Prior-Round Asks in the generated body below."
+	}
 	if in.BriefBody == "" {
 		priorData, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("consolidated-round-%d.md", in.Round-1)))
 		if err == nil {

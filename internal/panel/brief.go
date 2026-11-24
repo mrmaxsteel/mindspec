@@ -263,6 +263,16 @@ func scanMarkdownProse(s string, unclosedAsProse bool, fn func(int, string)) {
 
 // ReadFilledBrief refuses unfinished review instructions before dispatch.
 func ReadFilledBrief(file string) ([]byte, error) {
+	return readPanelBrief(file, false)
+}
+
+// ReadPanelBrief uses registration metadata to distinguish generated bodies from
+// authored instructions. Quoted source text cannot change this choice.
+func ReadPanelBrief(dir string, p Panel) ([]byte, error) {
+	return readPanelBrief(filepath.Join(dir, "BRIEF.md"), p.Orchestrated)
+}
+
+func readPanelBrief(file string, generated bool) ([]byte, error) {
 	f, err := openBriefFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read panel brief %s (must be a regular file): %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
@@ -279,7 +289,7 @@ func ReadFilledBrief(file string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read panel brief %s: %s", termsafe.Escape(file), termsafe.Escape(err.Error()))
 	}
-	if containsBriefStub(authoredBriefBody(string(data))) {
+	if !generated && containsBriefStub(authoredBriefBody(string(data))) {
 		return nil, fmt.Errorf("panel brief %s contains TODO(skill) stubs; fill it or pass --brief-file to mindspec panel create", termsafe.Escape(file))
 	}
 	return data, nil

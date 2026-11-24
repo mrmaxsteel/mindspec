@@ -1757,8 +1757,8 @@ from the merge base with the destination branch.
 
 A verify brief lists every pinned finding, including vetoes. A fix brief lists
 only reproduced findings and retains the concrete changes of a veto.
-A work-item fix ends with the content check command. A final fix uses the
-verification commands in the approved plan. A change judge gets the accepted and
+A work-item fix ends with the content check command. For a final gate, the fix
+brief tells the actor to run the verification commands in the approved plan before the return. A change judge gets the accepted and
 new subjects, their diff, and the slot ceiling. A lens gets the spec, plan,
 work context, and scope diff. Record briefs name the external record path for
 the current lease generation and the submission command. Rendering creates

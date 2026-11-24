@@ -262,7 +262,7 @@ func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
 	if err != nil {
 		return err
 	}
-	if _, err := panel.ReadFilledBrief(filepath.Join(reg.Dir, "BRIEF.md")); err != nil {
+	if _, err := panel.ReadPanelBrief(reg.Dir, reg.Panel); err != nil {
 		return checkoutFailure(err.Error(), "run panel create to render the brief")
 	}
 	replace, _ := cmd.Flags().GetBool("replace")

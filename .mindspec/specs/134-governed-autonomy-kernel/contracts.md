@@ -713,7 +713,7 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     and the diff of the files in scope at the authorised subject; a verify brief gives round N's findings (slot, finding, text) from `mindspec_findings` and the subject; a fix
     brief gives the findings in `mindspec_reproduced` (with the `ccr` texts of a `veto` verdict), the subject, the
     work-item context and the step `complete <w> --check` before the return; a change-judge brief
-    gives the accepted subject, the new subject, the diff between them and the slot ceiling (§13.2). The lens, verify
+    gives the accepted subject, the new subject, the diff between them and the slot ceiling (§13.2). For a final gate, the fix brief tells the actor to run the verification commands in the approved plan before the return. The lens, verify
     and change-judge briefs name the record path, `records/<step>.g<generation>.json` (the step's current lease
     generation) in the kernel temporary directory (§13.10), and
     the `submit --record` argv. **Lens step.**
