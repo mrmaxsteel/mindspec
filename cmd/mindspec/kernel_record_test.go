@@ -27,7 +27,7 @@ func TestS134JudgeCmd_RecordEvidence(t *testing.T) {
 			subject := actorCmdGit(t, f, "rev-parse", "HEAD")
 			id := gate + ".r1.lens"
 			f.Create(id, gate)
-			kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: subject, SlotCount: 2, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}})
+			f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRound, kernel.GateRound{Round: 1, Subject: subject, Lens: id, SlotCount: 2, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}})))
 			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: subject})))
 			store := actorCmdStore(t, f)
 			token := judgeCmdLease(t, f, bin, id)

@@ -13,7 +13,7 @@ func init() {
 	for _, r := range []struct {
 		name string
 		fn   Rule
-	}{{"refused-round", refusedRound}, {"verify-apply", verifyApply}, {"lens-create", pendingRecordRule}} {
+	}{{"refused-round", refusedRound}, {"verify-apply", verifyApply}} {
 		if err := RegisterRule(r.name, Ordinary, r.fn); err != nil {
 			panic(err)
 		}
@@ -67,8 +67,6 @@ func fixWrite(s State, gate string, round int, subject string) []Write {
 	w.Create.Metadata = Metadata(KeySubject, Subject{Commit: subject})
 	return []Write{w}
 }
-
-func pendingRecordRule(State) (Changes, error) { return Changes{}, nil }
 
 // refusedRound creates a verify only after a complete refused round. An
 // uncounted slot instead gets another attempt, bounded by a local decision.

@@ -150,18 +150,7 @@ func recordBytes(r Record) ([]byte, error) {
 	return []byte(text), nil
 }
 
-func checkLens(s State, r Record, _ Receipt) error {
-	data, err := recordBytes(r)
-	if err != nil {
-		return err
-	}
-	lens, err := strictRecord[LensRecord](data)
-	if err != nil {
-		return err
-	}
-	if lens.Step != r.Key() || lens.Lenses == nil {
-		return actorFailure("lens record needs its step and lenses")
-	}
+func checkLens(s State, r Record, _ Receipt) (err error) {
 	round, err := activeActorRound(s, r)
 	if err != nil {
 		return err
@@ -173,17 +162,35 @@ func checkLens(s State, r Record, _ Receipt) error {
 	}
 	cfg, err := config.Load(s.Root)
 	if err != nil {
-		return err
+		return pathFailure(err, "cannot resolve lens roster: ", "correct the panel reviewer configuration and retry")
 	}
-	roster, err := cfg.PanelGateReviewerSlots(gateKind, round.SlotCount)
+	roster, err := RoundReviewerSlots(cfg, gateKind, round)
 	if err != nil {
 		return err
 	}
+	slots := make([]string, len(roster))
 	expected := map[string]bool{}
 	for i, slot := range roster {
+		slots[i] = slot.Slot
 		if slot.Lens != "adversarial" {
-			expected[fmt.Sprintf("R%d", i+1)] = true
+			expected[slot.Slot] = true
 		}
+	}
+	defer func() {
+		if err != nil {
+			err = termsafe.PrefixFailure(err, "lens record for slots "+strings.Join(slots, ", ")+": ")
+		}
+	}()
+	data, err := recordBytes(r)
+	if err != nil {
+		return err
+	}
+	lens, err := strictRecord[LensRecord](data)
+	if err != nil {
+		return err
+	}
+	if lens.Step != r.Key() || lens.Lenses == nil {
+		return actorFailure("lens record needs its step and lenses")
 	}
 	seen := map[string]bool{}
 	for _, entry := range lens.Lenses {
@@ -192,8 +199,8 @@ func checkLens(s State, r Record, _ Receipt) error {
 		}
 		seen[entry.Slot] = true
 	}
-	for slot := range expected {
-		if !seen[slot] {
+	for _, slot := range slots {
+		if expected[slot] && !seen[slot] {
 			return actorFailure("lens record is missing slot " + slot)
 		}
 	}

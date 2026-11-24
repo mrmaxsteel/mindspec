@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
@@ -69,6 +70,10 @@ func newKernelE2EWithFixture(t *testing.T, bin string, f *kerneltest.Fixture, si
 
 func newKernelE2EWithLayout(t *testing.T, bin string, f *kerneltest.Fixture, docs string, sizes ...int) *kernelE2E {
 	t.Helper()
+	return newKernelE2EWithConfig(t, bin, f, docs, "enforcement:\n  panel_gate: false\nauto_open_finalize_pr: false\npanel:\n  reviewers:\n    - family: harness\n      model: test-model\n      lens: correctness\n      count: 3\n", sizes...)
+}
+func newKernelE2EWithConfig(t *testing.T, bin string, f *kerneltest.Fixture, docs, panelConfig string, sizes ...int) *kernelE2E {
+	t.Helper()
 	e := &kernelE2E{t: t, f: f, bin: bin}
 	root := f.Root
 	t.Logf("sandbox %s", root)
@@ -83,7 +88,7 @@ func newKernelE2EWithLayout(t *testing.T, bin string, f *kerneltest.Fixture, doc
 	e.git(root, "config", "core.hooksPath", "/dev/null")
 	e.git(root, "branch", "-M", "main")
 	e.write(root, ".gitignore", ".worktrees/\n.mindspec/phase.lock\n.beads/*\n!.beads/config.yaml\n!.beads/issues.jsonl\n")
-	e.write(root, ".mindspec/config.yaml", "enforcement:\n  panel_gate: false\nauto_open_finalize_pr: false\npanel:\n  reviewers:\n    - family: harness\n      model: test-model\n      lens: correctness\n      count: 3\n")
+	e.write(root, ".mindspec/config.yaml", panelConfig)
 	e.write(root, filepath.Join(docs, "adr", "ADR-9001.md"), "# ADR-9001: Fixture\n\n- **Status**: Accepted\n- **Domain(s)**: workflow\n\n## Decision\nExercise the local kernel.\n")
 	e.write(root, ".beads/issues.jsonl", "")
 	e.git(root, "add", "-f", ".beads/config.yaml", ".beads/issues.jsonl")
@@ -263,8 +268,65 @@ func (e *kernelE2E) implement(i int) kernel.Output {
 	e.must(json.Unmarshal([]byte(raw), &out))
 	return out
 }
+func (e *kernelE2E) draftLenses(out kernel.Output) kernel.Output {
+	e.t.Helper()
+	for _, action := range out.Actions {
+		if action.Kind != "lens" {
+			continue
+		}
+		token := e.lease(action.Step)
+		row := e.row(action.Step)
+		tuple, _, err := row.Tuple()
+		e.must(err)
+		var round kernel.GateRound
+		for _, r := range e.f.State().Records {
+			candidate, ok, _ := r.Tuple()
+			if ok && candidate.Gate == tuple.Gate && (candidate.Kind == "bead-gate" || candidate.Kind == "final-gate") {
+				value, has, err := kernel.Decode[kernel.GateRound](e.row(r.Key()).Metadata, kernel.KeyRound)
+				e.must(err)
+				if has && value.Lens == action.Step {
+					round = value
+				}
+			}
+		}
+		// Binary fixtures read their live store through tracker commands.
+		if round.Round == 0 {
+			var rows []kernel.Record
+			e.must(json.Unmarshal(e.tracker("list", "--all", "--json", "--limit", "0"), &rows))
+			for _, r := range rows {
+				value, has, err := kernel.Decode[kernel.GateRound](r.Metadata, kernel.KeyRound)
+				e.must(err)
+				if has && value.Lens == action.Step {
+					round = value
+				}
+			}
+		}
+		cfg, err := config.Load(e.cwd)
+		e.must(err)
+		kind := "bead"
+		if tuple.WorkItem == "" {
+			kind = "final_review"
+		}
+		roster, err := kernel.RoundReviewerSlots(cfg, kind, round)
+		e.must(err)
+		record := kernel.LensRecord{Step: action.Step, Lenses: []kernel.SlotLens{}}
+		for _, slot := range roster {
+			if slot.Lens != "adversarial" {
+				record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: slot.Slot, Lens: "Review " + slot.Lens + "."})
+			}
+		}
+		file := filepath.Join(e.t.TempDir(), "lens.json")
+		data, err := json.Marshal(record)
+		e.must(err)
+		e.must(os.WriteFile(file, data, 0600))
+		raw := e.ok("submit", action.Step, "--lease", token, "--record", file)
+		e.must(json.Unmarshal([]byte(raw), &out))
+	}
+	return out
+}
 func (e *kernelE2E) create(out kernel.Output) {
 	e.t.Helper()
+	out = e.draftLenses(out)
 	if len(out.Run) == 0 || len(out.Run[0].Argv) < 3 || out.Run[0].Argv[1] != "panel" {
 		e.t.Fatalf("no panel command: %+v", out)
 	}
@@ -574,6 +636,7 @@ func TestS134E2E_KernelPath(t *testing.T) {
 			e.apply()
 		}
 		out := e.implement(i)
+		out = e.draftLenses(out)
 		if len(out.Run) != 1 || !reflect.DeepEqual(out.Run[0].Argv, []string{"mindspec", "panel", "create", item}) {
 			t.Fatalf("run after implementation: %+v", out)
 		}
@@ -614,6 +677,7 @@ func TestS134E2E_KernelPath(t *testing.T) {
 		}
 	}
 	final := e.apply()
+	final = e.draftLenses(final)
 	if len(final.Run) != 1 || !reflect.DeepEqual(final.Run[0].Argv, []string{"mindspec", "panel", "create", e.f.SpecID}) {
 		t.Fatalf("final review command: %+v", final)
 	}

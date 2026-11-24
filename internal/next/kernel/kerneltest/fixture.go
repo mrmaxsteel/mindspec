@@ -3,6 +3,7 @@ package kerneltest
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -203,4 +204,10 @@ func EnrolmentPlan(specID string, n int) string {
 		text += fmt.Sprintf("\n## Bead %d: Item %d\n\n%s\n", i, i, EnrolmentBody())
 	}
 	return text
+}
+
+// RecordFile writes actor input outside the fixture repository for submit.
+func (f *Fixture) RecordFile(data []byte) (string, error) {
+	name := filepath.Join(f.t.TempDir(), "record.json")
+	return name, os.WriteFile(name, data, 0600)
 }

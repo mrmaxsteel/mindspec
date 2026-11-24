@@ -101,7 +101,7 @@ func TestS134Judge_CreateSupersedeAndStaleSubmit(t *testing.T) {
 	s := f.State()
 	sub, _, err := kernel.Decode[kernel.Subject](s.Records[gate+".judge.a2"].Metadata, kernel.KeySubject)
 	f.Must(err)
-	if len(s.Steps) != 6 || sub.Commit != newest { // implement, three slots, two judges
+	if len(s.Steps) != 7 || sub.Commit != newest { // implement, lens, three slots, two judges
 		t.Fatalf("judge attempts: %v subject %+v", s.Steps, sub)
 	}
 	artifact := judgeArtifact(t, f, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "same result"})
@@ -163,6 +163,7 @@ func TestS134Judge_RePanelValidationAndScope(t *testing.T) {
 			if string(from) != gate || scope.SlotCount != n || round.SlotCount != n || round.Round != 2 || round.Subject != newest || !reflect.DeepEqual(round.Paths, scope.Paths) || len(round.Slots) != n {
 				t.Fatalf("successor: %+v", successor)
 			}
+			out = panelAfterDraft(t, f, gate+".a2", out)
 			found := false
 			for _, entry := range out.Run {
 				found = found || (reflect.DeepEqual(entry.Argv, []string{"mindspec", "panel", "create", f.Items[0]}) && reflect.DeepEqual(entry.Paths, scope.Paths))
@@ -447,6 +448,7 @@ func TestS134SeedMatch_AuthoriseRepanel(t *testing.T) {
 	count, err := kernel.RoundsForGate(seed.State(), gate)
 	seed.Must(err)
 	round := kernel.GateRound{Round: count + 1, Subject: newest, SlotCount: 2, Paths: j.Paths, Slots: []string{fmt.Sprintf("%s.r%d.R1", gate, count+1), fmt.Sprintf("%s.r%d.R2", gate, count+1)}}
+	closeDraftLens(t, real, successor)
 	kerneltest.Authorise(seed, successor, round)
 	if !jsonEqual(actorRecord(t, real, successor), actorRecord(t, seed, successor)) {
 		t.Fatalf("Authorise differs: real %+v seed %+v", actorRecord(t, real, successor), actorRecord(t, seed, successor))

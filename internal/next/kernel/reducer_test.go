@@ -177,6 +177,7 @@ func TestS134Reducer_CorePositive(t *testing.T) {
 	gate := item + ".review"
 	closePass(t, f, item+".impl.a1")
 	out := reduce(t, f, true)
+	out = panelAfterDraft(t, f, gate, out)
 	if !hasRun(out, "mindspec", "panel", "create", item) {
 		t.Fatalf("no panel create: %+v", out)
 	}
@@ -197,6 +198,7 @@ func TestS134Reducer_CorePositive(t *testing.T) {
 	counted(t, f, 4)
 	closePass(t, f, item+".review.r5.fix")
 	out = reduce(t, f, true)
+	out = panelAfterDraft(t, f, item+".review", out)
 	if !hasRun(out, "mindspec", "panel", "create", item) {
 		t.Fatalf("fix did not open next round: %+v", out)
 	}
@@ -308,8 +310,8 @@ func TestS134Reducer_AuthorisedSlotsAndSubjectMove(t *testing.T) {
 		if len(out.Actions) != 0 {
 			t.Fatalf("registered unauthorised slots: %+v", out)
 		}
-		if len(f.State().Steps) != 0 {
-			t.Fatal("created unauthorised slots")
+		if len(f.State().Steps) != 1 || f.State().Steps[0] != f.Items[0]+".review.r1.lens" || f.State().Records[f.State().Steps[0]].Status != "closed" {
+			t.Fatal("created unauthorized slots or lost the seeded closed lens")
 		}
 	})
 	t.Run("subject-move", func(t *testing.T) {
@@ -325,7 +327,7 @@ func TestS134Reducer_AuthorisedSlotsAndSubjectMove(t *testing.T) {
 		round, _, _ := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
 		after, err := kernel.RoundsForGate(f.State(), gate)
 		f.Must(err)
-		if round.Round != 1 || round.Subject != head || count != after || len(out.Run) != 1 || !hasRun(out, "mindspec", "panel", "create", item) || len(out.Actions) != 0 {
+		if round.Round != 1 || round.Subject != head || count != after || len(out.Run) != 0 || len(out.Actions) != 1 || out.Actions[0].Step != gate+".r1.lens.a2" {
 			t.Fatalf("subject move contract: %+v round %+v", out, round)
 		}
 	})
@@ -474,6 +476,7 @@ func TestS134SeedMatch_Authorise(t *testing.T) {
 			closePass(t, real, id)
 			closePass(t, seed, id)
 			reduce(t, real, true)
+			closeDraftLens(t, real, real.Items[0]+".review")
 			authorise(t, seed, n)
 			gate := real.Items[0] + ".review"
 			a, b := real.State().Records[gate], seed.State().Records[gate]
@@ -583,8 +586,8 @@ func TestS134Reducer_SlotsNeedRegisteredSubject(t *testing.T) {
 	state.Records[gate] = r
 	result, err := kernel.Pass(kernel.Rules(), state, false)
 	f.Must(err)
-	if len(result.State.Steps) != 0 || len(result.Output.Actions) != 0 {
-		t.Fatalf("stale registration created slots: %v", result.State.Steps)
+	if len(result.State.Steps) != 1 || result.State.Steps[0] != gate+".r1.lens" || result.State.Records[result.State.Steps[0]].Status != "closed" || len(result.Output.Actions) != 0 {
+		t.Fatalf("stale registration created slots or lost its closed lens: %v", result.State.Steps)
 	}
 }
 

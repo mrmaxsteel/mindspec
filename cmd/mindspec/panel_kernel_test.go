@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
@@ -20,7 +22,14 @@ import (
 
 func kernelPanelFixture(t *testing.T) (*kerneltest.Fixture, string, string) {
 	t.Helper()
-	f := kerneltest.Enrolled(t, kerneltest.WithFake(true))
+	return kernelPanelFixtureIDs(t, true)
+}
+
+// kernelPanelFixtureIDs takes the store identity mode. A test in which the
+// binary creates records uses the binary's mode, so all rows share one grammar.
+func kernelPanelFixtureIDs(t *testing.T, native bool) (*kerneltest.Fixture, string, string) {
+	t.Helper()
+	f := kerneltest.Enrolled(t, kerneltest.WithFake(native))
 	withTestChdir(t, f.Root)
 	rebindWrite(t, f.Root, ".beads/config.yaml", "types.custom: gate,step\n")
 	rebindWrite(t, f.Root, ".gitignore", ".mindspec/phase.lock\n")
@@ -64,6 +73,90 @@ func kernelPanelAuthorise(f *kerneltest.Fixture, gate, head string, n, size int)
 		slots = append(slots, fmt.Sprintf("%s.r%d.R%d", base, n, i))
 	}
 	kerneltest.Authorise(f, gate, kernel.GateRound{Round: n, Subject: head, Slots: slots, SlotCount: size})
+	round, _, err := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	row := f.State().Records[round.Lens]
+	lease, _, err := kernel.Decode[kernel.LeaseRecord](row.Metadata, kernel.KeyLease)
+	f.Must(err)
+	if lease.Generation != 0 {
+		return
+	}
+	// Exercise the real lens receipt path during fixture setup. The caller owns
+	// round authorization here; no other reducer transition belongs to this setup.
+	data, _, err := kernel.Decode[string](row.Metadata, kernel.KeyRecord)
+	f.Must(err)
+	seeded := row
+	seeded.Metadata = maps.Clone(row.Metadata)
+	row.Metadata = maps.Clone(row.Metadata)
+	delete(row.Metadata, kernel.KeyClose)
+	delete(row.Metadata, kernel.KeyRecord)
+	row.Status = "open"
+	f.Fake.Records[row.ID] = row
+	restore := kernel.ReplaceRulesForTest(kernel.NewRegistry())
+	defer restore()
+	claimed, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: round.Lens}, kernel.LeaseDeps{})
+	if err != nil && strings.Contains(err.Error(), "step is held or blocked by ") {
+		// A work item behind an open upstream cannot lease its lens. Keep the
+		// seeded close, which matches a real lens close.
+		f.Fake.Records[row.ID] = seeded
+		return
+	}
+	f.Must(err)
+	file, err := f.RecordFile([]byte(data))
+	f.Must(err)
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: round.Lens, Lease: claimed.Token, Record: file})
+	f.Must(err)
+}
+
+// kernelPanelDraftLens closes the current round's lens step through lease and
+// submit, as an orchestrator does before panel create.
+func kernelPanelDraftLens(t *testing.T, f *kerneltest.Fixture, gate string) {
+	t.Helper()
+	_, err := kernel.NextAction(f.State(), true)
+	f.Must(err)
+	s := f.State()
+	base := gateBase(s, gate)
+	active, attempt := gate, 0
+	for _, id := range s.Gates {
+		tuple, _, _ := s.Records[id].Tuple()
+		receipt, _, _ := kernel.Decode[kernel.Receipt](s.Records[id].Metadata, kernel.KeyClose)
+		if tuple.Gate == base && tuple.Attempt > attempt && !(s.Records[id].Status == "closed" && receipt.Kind == "superseded") {
+			active, attempt = id, tuple.Attempt
+		}
+	}
+	round, _, err := kernel.Decode[kernel.GateRound](s.Records[active].Metadata, kernel.KeyRound)
+	f.Must(err)
+	row, ok := s.Records[round.Lens]
+	if !ok {
+		t.Fatalf("round names no lens step: %+v", round)
+	}
+	if row.Status == "closed" {
+		return
+	}
+	cfg, err := config.Load(f.Root)
+	f.Must(err)
+	tuple, _, err := s.Records[active].Tuple()
+	f.Must(err)
+	kind := "bead"
+	if tuple.WorkItem == "" {
+		kind = "final_review"
+	}
+	roster, err := kernel.RoundReviewerSlots(cfg, kind, round)
+	f.Must(err)
+	record := kernel.LensRecord{Step: round.Lens, Lenses: []kernel.SlotLens{}}
+	for _, slot := range roster {
+		if slot.Lens != "adversarial" {
+			record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: slot.Slot, Lens: "Review " + slot.Lens + "."})
+		}
+	}
+	claimed, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: round.Lens}, kernel.LeaseDeps{})
+	f.Must(err)
+	data, err := json.Marshal(record)
+	f.Must(err)
+	file, err := f.RecordFile(data)
+	f.Must(err)
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: round.Lens, Lease: claimed.Token, Record: file})
+	f.Must(err)
 }
 func kernelPanelRun(t *testing.T, cmd *cobra.Command, args ...string) (string, error) {
 	t.Helper()
@@ -552,6 +645,7 @@ func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
 					t.Fatal("continuation created a second fix", r)
 				}
 			}
+			kernelPanelDraftLens(t, f, gate)
 			out, e = create()
 			kernelPanelRequire(t, out, e)
 			kernelPanelVerdict(t, f, gate, head, "B", "R1", "REQUEST_CHANGES", 6)

@@ -187,11 +187,16 @@ func TestS134Reject_LimitAcrossPanels(t *testing.T) {
 			assertNoPanel(t, reduce(t, f, true), target)
 			fix := gate + ".r6.fix"
 			// A committed artifact is durable evidence for the passed fix.
-			commit := actorCommit(t, f, "fix-proof.txt", "fixed", ref)
+			// The fix commit descends from the branch tip, so merged items stay merged.
+			tip := reducerGit(t, f, "rev-parse", ref)
+			proof := actorCommit(t, f, "fix-proof.txt", "fixed", "")
+			commit := reducerGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit-tree", proof+"^{tree}", "-p", tip, "-m", "fix")
+			reducerGit(t, f, "update-ref", "refs/heads/"+ref, commit)
 			blob := reducerGit(t, f, "rev-parse", commit+":fix-proof.txt")
 			f.Must(f.Store.WriteReceipt(fix, kernel.Receipt{Kind: "passed", Path: "fix-proof.txt", Commit: commit, Blob: blob}))
 			f.Must(f.Store.SetStatusIf(fix, "open", "closed"))
 			out = reduce(t, f, true)
+			out = panelAfterDraft(t, f, gate, out)
 			round, _, _ := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
 			if round.Round != 6 || round.Subject != commit || !hasRun(out, "mindspec", "panel", "create", target) {
 				t.Fatalf("passed fix did not authorise sixth round: %+v %+v", round, out)
@@ -280,6 +285,7 @@ func TestS134Final_RequiresLastMerge(t *testing.T) {
 	assertNoPanel(t, out, f.SpecID)
 	f.Must(f.Store.WriteMetadata(last, map[string]any{kernel.KeyCompletion: head}))
 	out = reduce(t, f, true)
+	out = panelAfterDraft(t, f, f.Epic+".final", out)
 	round, _, _ := kernel.Decode[kernel.GateRound](record(t, f, f.Epic+".final").Metadata, kernel.KeyRound)
 	if round.Round != 1 || round.Subject != merge || !hasRun(out, "mindspec", "panel", "create", f.SpecID) {
 		t.Fatalf("missing final authorisation: %+v %+v", round, out)
@@ -336,6 +342,7 @@ func TestS134SeedMatch_AuthoriseFinal(t *testing.T) {
 	}
 	gate := real.Epic + ".final"
 	reduce(t, real, true)
+	closeDraftLens(t, real, gate)
 	kerneltest.Authorise(seed, gate, gateRound(t, seed, gate, 1, gateHead(t, seed, gate)))
 	if !jsonEqual(record(t, real, gate), record(t, seed, gate)) {
 		t.Fatalf("final authorisation differs from seeder: %+v %+v", record(t, real, gate), record(t, seed, gate))
@@ -478,6 +485,7 @@ func TestS134Submit_FixPreservesRound(t *testing.T) {
 	commit := actorCommit(t, f, "fix-proof.txt", "fixed", "bead/"+f.Items[0])
 	out, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: fix, Lease: lease.Token, Commit: commit})
 	f.Must(err)
+	out = panelAfterDraft(t, f, gate, out)
 	round, _, err := kernel.Decode[kernel.GateRound](record(t, f, gate).Metadata, kernel.KeyRound)
 	f.Must(err)
 	receipt, _, err := kernel.Decode[kernel.Receipt](record(t, f, fix).Metadata, kernel.KeyClose)

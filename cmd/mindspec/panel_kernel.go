@@ -384,6 +384,12 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 				return guard.NewFailure(fmt.Sprintf("slot %s is open", id), fmt.Sprintf("mindspec panel launch %s R%d --spec %s", shellQuoteTarget(slug), t.Slot, shellQuoteTarget(idrender.Spec(s.SpecID))))
 			}
 		}
+		if round.Lens == "" {
+			return guard.NewFailure(fmt.Sprintf("lens step %s.r%d.lens must be closed passed before panel create", gateBase(*s, gate), round.Round), "mindspec next-action")
+		}
+		if e = kernel.CheckRoundLens(*s, round); e != nil {
+			return e
+		}
 		size := round.SlotCount
 		if requested, _ := cmd.Flags().GetInt("reviewers"); cmd.Flags().Changed("reviewers") && requested != size {
 			return panelVerbFailure(fmt.Errorf("the authorized round requires %d reviewers", size))
@@ -392,7 +398,7 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 		if e != nil {
 			return e
 		}
-		selected, e := cfg.PanelGateReviewerSlots(p.Gate, size)
+		selected, e := kernel.RoundReviewerSlots(cfg, p.Gate, round)
 		if e != nil {
 			return e
 		}
@@ -400,6 +406,13 @@ func tryKernelPanelCreate(cmd *cobra.Command, slug, spec, kind string) (bool, er
 		slots := make([]string, len(selected))
 		for i, r := range selected {
 			roster[i] = panel.RosterSlot{Slot: r.Slot, Family: r.Family, Model: r.Model, Lens: r.Lens}
+			if r.Lens != "adversarial" {
+				for _, lens := range round.Lenses {
+					if lens.Slot == r.Slot {
+						roster[i].Focus = lens.Lens
+					}
+				}
+			}
 			slots[i] = r.Slot
 		}
 		panelRoot := workspace.TreeRootForSpecDir(s.SpecDir)

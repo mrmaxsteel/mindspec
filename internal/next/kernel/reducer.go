@@ -257,11 +257,6 @@ func roundOpen(s State) (Changes, error) {
 		if old, _, _ := Decode[GateRound](g.Metadata, KeyRound); !reflect.DeepEqual(old, round) {
 			c.Writes = append(c.Writes, Write{Kind: "metadata", ID: gate, Metadata: Metadata(KeyRound, round)})
 		}
-		target := t.WorkItem
-		if target == "" {
-			target = s.SpecID
-		}
-		c.Run = append(c.Run, Run{Actor: "binary", Argv: []string{"mindspec", "panel", "create", target}, Paths: round.Paths})
 	}
 	return c, nil
 }

@@ -230,6 +230,7 @@ func TestS134PanelRefute_LimitReattempt(t *testing.T) {
 	if fix, _ := f.Store.Lookup(gate + ".r2.fix"); fix != nil {
 		t.Fatal("scoped continuation created a fix")
 	}
+	kernelPanelDraftLens(t, f, gate)
 	out, err := kernelPanelCreate(t, f, "review", "--bead", f.Items[0], "--gate", "bead")
 	kernelPanelRequire(t, out, err)
 	r, _, err := kernel.Decode[kernel.GateRound](kernelPanelRecord(t, f, gate).Metadata, kernel.KeyRound)

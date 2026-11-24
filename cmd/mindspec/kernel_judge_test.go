@@ -155,6 +155,10 @@ func TestS134JudgeCmd_InvalidThenRepanel(t *testing.T) {
 			f.Must(err)
 			round, _, err := kernel.Decode[kernel.GateRound](row.Metadata, kernel.KeyRound)
 			f.Must(err)
+			if len(out.Run) != 0 || len(out.Actions) != 1 || out.Actions[0].Step != round.Lens {
+				t.Fatalf("re-panel skipped lens: %+v", out)
+			}
+			out = judgeCmdDraftLens(t, f, bin, store, out)
 			if string(from) != gate || round.Round != 2 || round.Subject != newest || round.SlotCount != n || !reflect.DeepEqual(round.Paths, paths) || len(out.Run) != 1 || !reflect.DeepEqual(out.Run[0].Paths, paths) || !reflect.DeepEqual(out.Run[0].Argv, []string{"mindspec", "panel", "create", f.Items[0]}) {
 				t.Fatalf("wrong re-panel authorisation: %+v %+v", row, out)
 			}
@@ -200,6 +204,9 @@ func TestS134JudgeCmd_RepanelCreateSlots(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("re-panel: %d %s", code, raw)
 			}
+			var authorized kernel.Output
+			f.Must(json.Unmarshal([]byte(raw), &authorized))
+			judgeCmdDraftLens(t, f, bin, store, authorized)
 			raw, code = actorCmdRun(t, f, bin, "panel", "create", target)
 			if code != 0 {
 				t.Fatalf("create re-panel: %d %s", code, raw)

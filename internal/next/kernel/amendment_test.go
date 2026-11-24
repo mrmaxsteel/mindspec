@@ -33,7 +33,7 @@ func recordFixture(t *testing.T, kind string) (*kerneltest.Fixture, string, kern
 	f := reducerFixture(t)
 	gate := f.Items[0] + ".review"
 	subject := reducerGit(t, f, "rev-parse", "HEAD")
-	kerneltest.Authorise(f, gate, kernel.GateRound{Round: 1, Subject: subject, SlotCount: 2, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}})
+	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRound, kernel.GateRound{Round: 1, Subject: subject, SlotCount: 2, Slots: []string{gate + ".r1.R1", gate + ".r1.R2"}})))
 	id := gate + ".r1." + kind
 	f.Create(id, gate)
 	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: subject})))
