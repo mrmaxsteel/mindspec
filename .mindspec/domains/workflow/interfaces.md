@@ -1511,10 +1511,15 @@ It stores the generation, expiry, token hash, and claim base in one status compa
 The command prints the generation and the new token.
 Renew and release require the current token.
 A take requires a reason and creates a new generation.
+It records the revoked token hash and the step subject in the take history.
 A live lease, a hold, a blocker, or an unanswered gate decision prevents another claim.
 Implementation claims use the worktree adapter and record the branch head as the claim base.
+The first claim fixes the attempt's claim base. Later generations keep it.
 
-`submit` requires the current token.
+`submit` accepts the current token. It also accepts a revoked token on an open
+step with the same subject, unless a newer generation has a receipt or closing pin.
+The receipt records the accepted and superseded generations. The newer lease
+ends `superseded`. A refused revoked token changes no pin or receipt.
 Implement and fix steps use a commit. Review slots use a committed verdict.
 Lens, verify, and change-judge steps use an external record. Do not commit the record.
 Implementation commits must follow the claim base on the work branch.
@@ -1532,6 +1537,15 @@ A status conflict permits one fresh read and retry.
 The same evidence can finish a receipt left open by a crash.
 A closed receipt accepts the same evidence without a write.
 Valid evidence can repair a raw close with the current token.
+Without a token, use `submit <step> --repair --reason <text>` on an unreceipted
+closed step that was leased. Record steps use their stored bytes. An optional
+`--record` must contain the same bytes. Slots require `--artifact`; implementation
+and fix steps require `--commit`. All evidence must fit the kind and subject.
+Repair runs the kind's close writes before its receipt. It records a repair event
+with the current generation and no revoked token hash. It issues no generation.
+The pass lists that repair command when evidence fits and creates no retry.
+Otherwise a retry keeps its subject and kind-specific context. The gate round
+points to a lens or verify retry.
 
 `submit --answer` records a listed decision option without a token.
 The answer remains effective if an open child prevents the close.

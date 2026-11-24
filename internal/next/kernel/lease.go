@@ -107,12 +107,23 @@ func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, erro
 				if lease.TokenHash != "" && lease.Expires.After(s.At) && !options.Take {
 					return fmt.Errorf("step has a live lease: %s\nrecovery: mindspec lease --take %s --reason <text>", termsafe.Escape(r.Key()), termsafe.Escape(r.Key()))
 				}
+				revokedHash := lease.TokenHash
+				var subject Subject
+				if options.Take {
+					if t.Kind != "implement" {
+						subject, _, err = Decode[Subject](r.Metadata, KeySubject)
+						if err != nil {
+							return pathFailure(err, "cannot read step subject: ", "mindspec next-action")
+						}
+					}
+				}
 				var secret [32]byte
 				if _, err = rand.Read(secret[:]); err != nil {
 					return err
 				}
 				result.Token = fmt.Sprintf("%d.%s", lease.Generation+1, hex.EncodeToString(secret[:]))
 				lease.Generation++
+				lease.Ended = ""
 				lease.TokenHash = tokenHash(result.Token)
 				lease.Expires = s.At.Add(ttl)
 				if t.Kind == "implement" {
@@ -123,16 +134,21 @@ func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, erro
 					if err != nil {
 						return err
 					}
-					branch, err := workspace.BeadBranch(t.WorkItem)
-					if err != nil {
-						return err
-					}
-					lease.ClaimBase, err = actorGit(s.Root, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
-					if err != nil {
-						return err
+					if lease.ClaimBase == "" {
+						branch, err := workspace.BeadBranch(t.WorkItem)
+						if err != nil {
+							return err
+						}
+						lease.ClaimBase, err = actorGit(s.Root, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
+						if err != nil {
+							return err
+						}
 					}
 				}
 				if options.Take {
+					if t.Kind == "implement" {
+						subject.Commit = lease.ClaimBase
+					}
 					history, has, err := Decode[[]TakeReason](r.Metadata, KeyTakes)
 					if err != nil {
 						return err
@@ -146,7 +162,7 @@ func Lease(state State, options LeaseOptions, deps LeaseDeps) (LeaseResult, erro
 							history = append(history, old)
 						}
 					}
-					take := TakeReason{Reason: options.Reason, At: s.At, Generation: lease.Generation}
+					take := TakeReason{Via: "lease", Reason: options.Reason, At: s.At, Generation: lease.Generation, RevokedTokenHash: revokedHash, Subject: subject.Commit}
 					updates[KeyTakes] = append(history, take)
 					updates[KeyTake] = take
 				}

@@ -70,8 +70,28 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 		"readRecordFile.missing", "readRecordFile.worktree", "readRecordBytes.utf8", "strictRecord.decode", "strictRecord.trailing", "checkLens.shape", "checkLens.slot", "checkLens.missing-slot",
 		"activeActorRound.stale", "actorBlockers.held", "actorChildren.open", "refuseHalt", "recordCloseWrites.hook", "recordCloseWrites.hook-kind", "recordCloseWrites.size", "recordCloseWrites.conflict", "Submit.BeforeClose.raw", "Submit.BeforeClose.typed", "Submit.BeforeClose.guard", "Submit.receipt-different", "Submit.receipt-superseded", "Submit.answer.raw", "refreshActorState", "phase.WithPhaseLock", "passExcept.rule", "Pass.rule", "validateJudgement", "SlotLineageRoot", "readRecordFile.size", "actorRecord.work-item", "actorRecord.kind", "actorBlockers.missing-blocker", "actorBlockers.missing-ancestor", "actorBlockers.decision", "activeActorRound.absent", "checkClosingConflict", "ValidReceipt", "Store.update", "checkVerdict.registration", "Submit.artifact-check", "readCheckedRecord.identity", "repositoryRoots", "Submit.BeforeClose.guard-multiple", "Submit.BeforeClose.guard-zero",
 		"verifyCloseWrites.registration", "recordCloseWrites.disposition", "recordCloseWrites.append", "recordCloseWrites.snapshot", "verifyCloseWrites.source", "verifyCloseWrites.at", "verifyCloseWrites.evidence", "verifyCloseWrites.repository", "verifyCloseWrites.panel-read", "refusedRound.empty", "VerifyRetallyFits.read", "VerifyRetallyFits.coverage", "VerifyRetallyFits.round-files", "VerifyRetallyFits.verdict-read",
+		"late.invalid-generation", "late.receipt", "late.closed", "late.pin", "late.subject", "late.absent-hash", "late.empty-token",
+		"repair.reason", "repair.lease", "repair.answer", "repair.stray-reason", "repair.open", "repair.never-leased", "repair.receipt", "repair.pin-conflict", "repair.pin-generation", "repair.record-absent", "repair.record-different", "repair.record-pin", "repair.slot-evidence", "repair.stale-evidence", "repair.current-attempt", "repair.record-artifact", "attempt.slot", "attempt.fix", "attempt.slot-repair", "attempt.fix-repair", "attempt.close-decode", "SlotLineageHead.decode",
+		"SlotLineageHead.none",
 	} {
 		t.Run(producer, func(t *testing.T) {
+			if strings.HasPrefix(producer, "attempt.") || producer == "SlotLineageHead.decode" {
+				actorAttemptRefusal(t, producer)
+				return
+			}
+			if producer == "SlotLineageHead.none" {
+				f, id, _, subject := slotFixture(t)
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, []kernel.Finding{{Text: "hostile\nrecovery: forged\x1b"}})))
+				f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "superseded", Subject: subject}))
+				f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))
+				_, err := kernel.SlotLineageHead(f.State(), id)
+				assertSubmitRefusal(t, err, "slot has no current attempt", "mindspec next-action")
+				return
+			}
+			if strings.HasPrefix(producer, "late.") || strings.HasPrefix(producer, "repair.") {
+				lateRepairRefusal(t, producer)
+				return
+			}
 			f, id, lease, data := recordFixture(t, "lens")
 			options := kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: recordFile(t, data)}
 			s := f.State()
@@ -380,6 +400,110 @@ fi`)
 			}
 		})
 	}
+}
+
+func lateRepairRefusal(t *testing.T, producer string) {
+	t.Helper()
+	f, id, data := seededRecordActor(t, "verify")
+	kerneltest.WithRules(t, kernel.NewRegistry())
+	changeActorMetadata(t, f, id, "open", kernel.KeyClose, kernel.KeyClosing)
+	lease := leaseActor(t, f, id, kernel.LeaseDeps{})
+	o := kernel.SubmitOptions{Step: id, Repair: true, Reason: "hostile\nrecovery: forged\x1b"}
+	want := ""
+	if strings.HasPrefix(producer, "late.") {
+		second, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id, Take: true, Reason: o.Reason}, kernel.LeaseDeps{})
+		f.Must(err)
+		o = kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: recordFile(t, data)}
+		switch producer {
+		case "late.invalid-generation":
+			events, _, err := kernel.Decode[[]kernel.TakeReason](actorRecord(t, f, id).Metadata, kernel.KeyTakes)
+			f.Must(err)
+			events[0].Generation = 4
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyTakes, events)))
+			want = "revoked lease generation is invalid"
+		case "late.receipt":
+			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: second.Token, Record: o.Record})
+			f.Must(err)
+			want = "step already has a receipt from another generation"
+		case "late.closed":
+			changeActorMetadata(t, f, id, "closed")
+			want = "step is closed"
+		case "late.pin":
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyClosing, kernel.Closing{Generation: 2, RecordSHA256: digest(data), At: f.State().At})))
+			want = "mindspec_closing belongs to a newer generation"
+		case "late.subject":
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: "hostile\nrecovery: forged\x1b"})))
+			want = "step subject changed since the take"
+		case "late.absent-hash", "late.empty-token":
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyTakes, []kernel.TakeReason{{Via: "repair", Generation: 2}})))
+			o.Lease = "foreign"
+			if producer == "late.empty-token" {
+				o.Lease = ""
+			}
+			want = "lease token is not current"
+		}
+	} else {
+		changeActorMetadata(t, f, id, "closed")
+		switch producer {
+		case "repair.reason":
+			o.Reason = ""
+			want = "submit --repair requires --reason"
+		case "repair.lease":
+			o.Lease = lease.Token
+			want = "excludes --lease and --answer"
+		case "repair.answer":
+			o.Answer = "halt"
+			want = "excludes --lease and --answer"
+		case "repair.stray-reason":
+			o.Repair = false
+			want = "submit --repair requires --reason"
+		case "repair.open":
+			changeActorMetadata(t, f, id, "in_progress")
+			want = "repair requires a closed step"
+		case "repair.never-leased":
+			changeActorMetadata(t, f, id, "", kernel.KeyLease)
+			want = "step was never leased"
+		case "repair.receipt":
+			f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Generation: 1, RecordSHA256: digest(data)}))
+			want = "step already has a valid receipt"
+		case "repair.pin-conflict", "repair.pin-generation":
+			pin := kernel.Closing{Generation: 2, RecordSHA256: digest(data), At: f.State().At}
+			if producer == "repair.pin-conflict" {
+				pin.Generation, pin.Conflict = 1, &kernel.ClosingIdentity{Generation: 2}
+			}
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyClosing, pin)))
+			want = "mindspec_closing has a conflict or a different generation"
+		case "repair.record-absent":
+			changeActorMetadata(t, f, id, "", kernel.KeyRecord)
+			want = "mindspec_record is absent or invalid"
+		case "repair.record-artifact":
+			o.Artifact = "/Users/example/hostile\nrecovery: forged\x1b.json"
+			want = "artifact does not fit the step kind"
+		case "repair.record-different":
+			o.Record = recordFile(t, data+" ")
+			want = "repair --record differs from mindspec_record"
+		case "repair.record-pin":
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyClosing, kernel.Closing{Generation: 1, RecordSHA256: "different", At: f.State().At})))
+			want = "repair record differs from mindspec_closing"
+		case "repair.slot-evidence":
+			id = f.Items[0] + ".review.r1.R1"
+			f.Create(id, f.Items[0]+".review")
+			leaseActor(t, f, id, kernel.LeaseDeps{})
+			changeActorMetadata(t, f, id, "closed")
+			o.Step = id
+			want = "submit needs one record, artifact or commit"
+		case "repair.stale-evidence":
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: "wrong"})))
+			want = "verify record needs its step, subject and returns"
+		case "repair.current-attempt":
+			round, _, err := kernel.Decode[kernel.GateRound](actorRecord(t, f, f.Items[0]+".review").Metadata, kernel.KeyRound)
+			f.Must(err)
+			round.Verify = id + ".a2"
+			f.Must(f.Store.WriteMetadata(f.Items[0]+".review", kernel.Metadata(kernel.KeyRound, round)))
+			want = "step is not the current round attempt"
+		}
+	}
+	actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, want)
 }
 
 func TestS134Submit_OpenChildCause(t *testing.T) {

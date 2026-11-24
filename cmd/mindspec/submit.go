@@ -24,6 +24,8 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 	}
 	options := kernel.SubmitOptions{Step: args[0]}
 	options.Lease, _ = cmd.Flags().GetString("lease")
+	options.Repair, _ = cmd.Flags().GetBool("repair")
+	options.Reason, _ = cmd.Flags().GetString("reason")
 	options.Record, _ = cmd.Flags().GetString("record")
 	options.Artifact, _ = cmd.Flags().GetString("artifact")
 	for _, path := range []*string{&options.Record, &options.Artifact} {
@@ -38,15 +40,12 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 	}
 	options.Commit, _ = cmd.Flags().GetString("commit")
 	options.Answer, _ = cmd.Flags().GetString("answer")
-	var out kernel.Output
-	if options.Answer != "" {
-		out, err = kernel.Answer(state, options.Step, options.Answer)
-	} else {
+	if options.Answer == "" {
 		options.BeforeClose = func(fresh kernel.State, receipt kernel.Receipt) error {
 			return publishSubmittedReview(fresh, options.Step, receipt)
 		}
-		out, err = kernel.Submit(state, options)
 	}
+	out, err := kernel.Submit(state, options)
 	if err != nil {
 		return err
 	}
@@ -82,6 +81,8 @@ func init() {
 	submitCmd.Flags().String("artifact", "", "Artifact path held by a commit")
 	submitCmd.Flags().String("commit", "", "Commit that holds the implementation or fix")
 	submitCmd.Flags().String("answer", "", "Listed option for a decision")
+	submitCmd.Flags().Bool("repair", false, "Receipt an unreceipted closed step with fitting evidence")
+	submitCmd.Flags().String("reason", "", "Reason for repairing a closed step")
 	submitCmd.MarkFlagsMutuallyExclusive("record", "artifact", "commit", "answer")
 	rootCmd.AddCommand(submitCmd)
 }

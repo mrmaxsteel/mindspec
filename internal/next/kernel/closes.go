@@ -109,6 +109,26 @@ func retryAttempts(s State) (Changes, error) {
 			return c, err
 		}
 		if _, exists := s.Records[next]; exists {
+			from, has, err := Decode[From](s.Records[next].Metadata, KeyFrom)
+			if err != nil {
+				return c, err
+			}
+			if has && string(from) == id && owned(s, next) {
+				update, err := retryRoundPointer(s, t, id, next)
+				if err != nil {
+					return c, err
+				}
+				if update != nil {
+					c.Writes = append(c.Writes, *update)
+					if err := overlay(&s, *update); err != nil {
+						return c, err
+					}
+				}
+			}
+			continue
+		}
+		if options, err := repairEvidence(s, r); err == nil {
+			c.Run = append(c.Run, repairRun(options))
 			continue
 		}
 		parent := r.Parent
@@ -124,7 +144,14 @@ func retryAttempts(s State) (Changes, error) {
 		}
 		w.Create.Metadata = Metadata(KeyFrom, From(id))
 		// A retry keeps the subject and decision it must resolve, but no old lease or receipt.
-		for _, key := range []string{KeySubject, KeyDecision, KeyRound, KeyRegistration} {
+		keys := []string{KeySubject, KeyDecision, KeyRound, KeyRegistration}
+		switch t.Kind {
+		case "fix":
+			keys = append(keys, KeyReproduced)
+		case "verify":
+			keys = append(keys, KeyFindings, KeyRead, KeyVerifyVerdicts)
+		}
+		for _, key := range keys {
 			if value, ok := r.Metadata[key]; ok {
 				w.Create.Metadata[key] = value
 			}
@@ -132,6 +159,16 @@ func retryAttempts(s State) (Changes, error) {
 		c.Writes = append(c.Writes, w)
 		if err := overlay(&s, w); err != nil {
 			return c, err
+		}
+		update, err := retryRoundPointer(s, t, id, next)
+		if err != nil {
+			return c, err
+		}
+		if update != nil {
+			c.Writes = append(c.Writes, *update)
+			if err := overlay(&s, *update); err != nil {
+				return c, err
+			}
 		}
 		created[next] = true
 	}
@@ -152,6 +189,30 @@ func retryAttempts(s State) (Changes, error) {
 		}
 	}
 	return c, nil
+}
+
+func retryRoundPointer(s State, t Tuple, id, next string) (*Write, error) {
+	if t.Kind != "lens" && t.Kind != "verify" {
+		return nil, nil
+	}
+	gate := activeGate(s, t.Gate)
+	round, _, err := Decode[GateRound](s.Records[gate].Metadata, KeyRound)
+	if err != nil {
+		return nil, err
+	}
+	current := &round
+	if round.Round != t.Round && round.Prior != nil && round.Prior.Round == t.Round {
+		current = round.Prior
+	}
+	pointer := &current.Lens
+	if t.Kind == "verify" {
+		pointer = &current.Verify
+	}
+	if current.Round != t.Round || *pointer != id {
+		return nil, nil
+	}
+	*pointer = next
+	return &Write{Kind: "metadata", ID: gate, Metadata: Metadata(KeyRound, round)}, nil
 }
 
 func unreceiptedFlags(s State) (Changes, error) {
@@ -256,14 +317,25 @@ func SlotLineageHead(s State, root string) (Record, error) {
 	if !exists {
 		return Record{}, actorFailure("registered slot is absent")
 	}
+	var current Record
 	for {
+		receipt, _, err := Decode[Receipt](r.Metadata, KeyClose)
+		if err != nil {
+			return Record{}, pathFailure(err, "cannot read slot receipt: ", "mindspec next-action")
+		}
+		if r.Status != "closed" || receipt.Kind != "superseded" {
+			current = r
+		}
 		next, err := nextAttempt(r.Key())
 		if err != nil {
 			return Record{}, err
 		}
 		candidate, exists := s.Records[next]
 		if !exists {
-			return r, nil
+			if current.Key() == "" {
+				return Record{}, actorFailure("slot has no current attempt")
+			}
+			return current, nil
 		}
 		verified, err := SlotLineageRoot(s, next)
 		if err != nil || verified != root {
