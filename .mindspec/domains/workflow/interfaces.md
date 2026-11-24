@@ -1658,7 +1658,8 @@ The audit table shows the pinned policy and event counts on every approval run.
 Escape-hatch counts come from the local journal.
 The journal has no project identity, so these counts cover this machine.
 Typed metadata supplies deferrals, takeovers, timed answers, repaired closes,
-carry-overs, each re-panel's slot count, verify returns, late submissions, repair receipts and lens steps.
+carry-overs, each re-panel's slot count, verify returns, late submissions and repair receipts.
+The lens-steps row comes from the ids of the lens steps.
 `mindspec_takes` retains takeover events by lease generation.
 The `takeovers` row counts every lease take and every repair event in `mindspec_takes`.
 Its details are `lease <n>, repair <m>`.

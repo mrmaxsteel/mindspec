@@ -234,3 +234,67 @@ func TestS134Audit_HostileDetailsStayOnOneLine(t *testing.T) {
 		t.Fatalf("detail text added lines:\n%q", out.String())
 	}
 }
+
+// TestS134Audit_CountRules pins how each new row counts, with literal expected values.
+func TestS134Audit_CountRules(t *testing.T) {
+	f := reducerFixture(t)
+	item := f.Items[0]
+	gate := item + ".review"
+	reduce(t, f, true)
+	// Lens: round 1 has two attempts, rounds 2 and 10 have one each. Ids sort r10 before r2.
+	for _, id := range []string{gate + ".r1.lens", gate + ".r1.lens.a2", gate + ".r2.lens", gate + ".r10.lens"} {
+		f.Create(id, gate)
+	}
+	// Verify: two attempts; the first holds two returns of one type.
+	verify := gate + ".r1.verify"
+	f.Create(verify, gate)
+	f.Must(f.Store.WriteMetadata(verify, kernel.Metadata(kernel.KeyReturns, []kernel.VerifyReturn{{Slot: "R1", Return: "reproduced"}, {Slot: "R2", Return: "reproduced"}, {Slot: "R3", Return: "refuted"}})))
+	retry := verify + ".a2"
+	f.Create(retry, gate)
+	f.Must(f.Store.WriteMetadata(retry, kernel.Metadata(kernel.KeyReturns, []kernel.VerifyReturn{{Slot: "R1", Return: "reproduced"}, {Slot: "R2", Return: "deferred"}})))
+	// Takes: a generation 0 event counts like any other.
+	f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyTakes, []kernel.TakeReason{{Via: "lease", Generation: 0, At: fixedTime}, {Via: "lease", Generation: 2, At: fixedTime}, {Via: "repair", Generation: 1, At: fixedTime}})))
+	// One valid receipt with each property, and one receipt that fails validation with the same properties.
+	valid := kernel.Receipt{Kind: "passed", Retally: "repair-submit", Via: "repair", Repaired: true, Generation: 3, SupersededGeneration: 2}
+	seedClosed(t, f, gate+".r1.R1", &valid)
+	invalid := kernel.Receipt{Kind: "passed", Via: "repair", Repaired: true, Generation: 3, SupersededGeneration: 2}
+	seedClosed(t, f, gate+".r1.R2", &invalid)
+	if kernel.ValidReceipt(f.Root, invalid, f.State().Records[gate+".r1.R2"].Metadata) == nil {
+		t.Fatal("fixture receipt must fail validation")
+	}
+	// An invalid close whose linked retry completed without Repaired adds no count.
+	seedClosed(t, f, gate+".r1.R3", nil)
+	seedClosed(t, f, gate+".r1.R3.a2", &kernel.Receipt{Kind: "passed", Retally: "retry"})
+	f.Must(f.Store.WriteMetadata(gate+".r1.R3.a2", kernel.Metadata(kernel.KeyFrom, kernel.From(gate+".r1.R3"))))
+	if !kernel.RepairedClose(f.State(), gate+".r1.R3") {
+		t.Fatal("fixture retry must repair the invalid close")
+	}
+
+	rows, err := kernel.Audit(f.State(), nil)
+	f.Must(err)
+	got := map[string]rowView{}
+	for _, row := range rows {
+		got[row.Event] = rowView{row.Count, row.Details}
+	}
+	want := map[string]rowView{
+		"takeovers":          {3, []string{"lease 2, repair 1"}},
+		"unreceipted-closes": {1, nil},
+		"late-submissions":   {1, nil},
+		"repair-receipts":    {1, nil},
+		"verify-reproduced":  {3, nil},
+		"verify-refuted":     {1, nil},
+		"verify-deferred":    {1, nil},
+		"lens-steps":         {4, []string{gate + " r1: 2", gate + " r2: 1", gate + " r10: 1"}},
+	}
+	for name, w := range want {
+		if !reflect.DeepEqual(got[name], w) {
+			t.Errorf("%s: got %+v, want %+v", name, got[name], w)
+		}
+	}
+}
+
+// rowView is the count and details of one audit row.
+type rowView struct {
+	Count   int
+	Details []string
+}
