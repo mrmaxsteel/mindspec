@@ -218,7 +218,10 @@ func refusedRound(s State) (Changes, error) {
 }
 
 func retireVerify(s State, id string) []Write {
-	r := s.Records[id]
+	r, exists := s.Records[id]
+	if !exists {
+		return nil
+	}
 	if r.Status == "closed" || hasOpenChild(s, id) || hasOpenBlocker(s, id) {
 		return nil
 	}

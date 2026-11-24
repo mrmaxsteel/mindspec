@@ -58,7 +58,7 @@ func assertSubmitRefusal(t *testing.T, err error, message, recovery string) {
 			}
 		}
 	}
-	if count != 1 || strings.Contains(text, `\nrecovery:`) || strings.Contains(text, `\\x1b`) {
+	if count != 1 || strings.Contains(text, "\nrecovery: forged") || strings.Contains(text, `\\x1b`) {
 		t.Fatalf("refusal invariant: %q", text)
 	}
 }
@@ -73,8 +73,27 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 		"late.invalid-generation", "late.receipt", "late.closed", "late.pin", "late.subject", "late.absent-hash", "late.empty-token",
 		"repair.reason", "repair.lease", "repair.answer", "repair.stray-reason", "repair.open", "repair.never-leased", "repair.receipt", "repair.pin-conflict", "repair.pin-generation", "repair.record-absent", "repair.record-different", "repair.record-pin", "repair.slot-evidence", "repair.stale-evidence", "repair.current-attempt", "repair.record-artifact", "attempt.slot", "attempt.fix", "attempt.slot-repair", "attempt.fix-repair", "attempt.close-decode", "SlotLineageHead.decode",
 		"SlotLineageHead.none", "judgement.path-cover", "judge.round-panel",
+		"judge.changed-paths", "judge.prior-read", "judge.prior-locate", "judge.round-read",
 	} {
 		t.Run(producer, func(t *testing.T) {
+
+			if producer == "judge.changed-paths" || producer == "judge.prior-read" || producer == "judge.prior-locate" || producer == "judge.round-read" {
+				if !kerneltest.JudgeRefusalFault(t, "./internal/next/kernel", producer) {
+					return
+				}
+				f, gate, old := tallyJudgeFixture(t, false)
+				newest := judgeCommit(t, f, "changed.txt", "J")
+				reduce(t, f, true)
+				id := gate + ".judge.a1"
+				lease := leaseActor(t, f, id, kernel.LeaseDeps{})
+				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{"changed.txt"}})})
+				message, recovery := kerneltest.JudgeRefusalText(producer)
+				assertSubmitRefusal(t, err, message, recovery)
+				if err == nil || !strings.Contains(err.Error(), `hostile\nrecovery: forged\x1b`) {
+					t.Fatalf("hostile cause missing or unsafe: %v", err)
+				}
+				return
+			}
 			if producer == "judge.round-panel" {
 				f, gate, old := tallyJudgeFixture(t, true)
 				reduce(t, f, true)
@@ -85,19 +104,19 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 				lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 				f.Must(os.Rename(filepath.Join(f.SpecDir, "reviews/review"), filepath.Join(t.TempDir(), "panel")))
 				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: judgeArtifact(t, f, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "same behavior"})})
-				assertSubmitRefusal(t, err, "round needs its registered panel directory", "mindspec next-action")
+				assertSubmitRefusal(t, err, "round needs its registered panel directory", "restore the panel directory and retry")
 				return
 			}
 			if producer == "judgement.path-cover" {
 				f, gate, old := tallyJudgeFixture(t, false)
-				name := "changed\n recovery: forged\x1b.txt"
+				name := "changed\nrecovery: forged\x1b.txt"
 				newest := judgeCommit(t, f, name, "change")
 				reduce(t, f, true)
 				id := gate + ".judge.a1"
 				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFindings, []kernel.Finding{{Text: "hostile\nrecovery: forged\x1b"}})))
 				lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{"other.txt"}})})
-				assertSubmitRefusal(t, err, "re-panel paths miss changed paths:", "mindspec next-action")
+				assertSubmitRefusal(t, err, "re-panel paths miss changed paths: "+termsafe.EscapeRecovery(name), "mindspec next-action")
 				return
 			}
 			if strings.HasPrefix(producer, "attempt.") || producer == "SlotLineageHead.decode" {

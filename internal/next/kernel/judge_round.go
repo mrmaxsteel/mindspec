@@ -37,7 +37,7 @@ func roundResult(s State, gate string, round GateRound) (*panel.Result, error) {
 			return result, nil
 		}
 	}
-	return nil, actorFailure("round needs its registered panel directory")
+	return nil, pathFailure(fmt.Errorf("round needs its registered panel directory"), "", "restore the panel directory and retry")
 }
 
 func replaceJudgedVerify(s State, gate string, round GateRound) ([]Write, error) {
@@ -69,8 +69,11 @@ func replaceJudgedVerify(s State, gate string, round GateRound) ([]Write, error)
 			sources[verdict.Slot] = VerifyVerdictSource{Verdict: verdict.Verdict, FileSHA256: verdict.FileSHA256}
 		}
 		w.Create.Metadata = map[string]any{KeyFrom: From(old), KeySubject: Subject{Commit: reviewSubject(round)}, KeyFindings: findings, KeyRead: read, KeyVerifyVerdicts: sources}
-		writes = append(writes, w)
 		round.Verify = id
+		// Publish the identity before creation so a pass can recreate an absent
+		// attempt after a crash without leaving an unreferenced open verify.
+		writes = append(writes, Write{Kind: "metadata", ID: gate, Metadata: Metadata(KeyRound, round)}, w)
+		return writes, nil
 	}
 	return append(writes, Write{Kind: "metadata", ID: gate, Metadata: Metadata(KeyRound, round)}), nil
 }

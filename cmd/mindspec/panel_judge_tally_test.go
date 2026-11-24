@@ -287,3 +287,92 @@ func TestS134JudgeCmd_OpenTallyOutcomes(t *testing.T) {
 		})
 	}
 }
+
+func TestS134PanelRefute_JudgeHoldsOpenVerify(t *testing.T) {
+	for _, verb := range []string{"refute", "defer"} {
+		for _, open := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/open=%v", verb, open), func(t *testing.T) {
+				f, gate, _, _ := judgePanelFixture(t, false)
+				v := kernelPanelVerifyRecord(t, f, gate, 99)
+				judgeCmdCommit(t, f, "changed.txt", "J")
+				if open {
+					_, err := kernel.NextAction(f.State(), true)
+					f.Must(err)
+					if j, _ := f.Store.Lookup(gate + ".judge.a1"); j == nil {
+						t.Fatal("setup: no judge")
+					}
+				}
+				if verb == "refute" {
+					panelRefuteF(t, f)
+				} else {
+					fake := fakeDeferralBD(t)
+					rebindWrite(t, fake, "epics.json", fmt.Sprintf(`[{"id":%q,"issue_type":"epic","metadata":{"spec_id":%q}}]`, f.Epic, f.SpecID))
+					rebindWrite(t, fake, "follow-up.json", fmt.Sprintf(`[{"id":"follow-up","status":"open","description":"missing test","dependencies":[{"id":%q,"dependency_type":"discovered-from"}]}]`, f.Epic))
+					out, err := kernelPanelRun(t, panelDeferCmd, "review", "--spec", f.SpecID, "--slot", "R5", "--round", "1", "--finding", "ccr[0]", "--bead", "follow-up", "--by", "operator")
+					kernelPanelRequire(t, out, err)
+				}
+				verify := kernelPanelRecord(t, f, v.Step)
+				receipt, _, _ := kernel.Decode[kernel.Receipt](verify.Metadata, kernel.KeyClose)
+				if verify.Status == "closed" {
+					t.Fatalf("held retally closed open verify: %+v", receipt)
+				}
+				if kernelPanelRecord(t, f, gate).Status == "closed" {
+					t.Fatal("held retally closed gate")
+				}
+			})
+		}
+	}
+}
+
+func TestS134PanelRefute_LimitReattemptCrashRecovery(t *testing.T) {
+	for _, interrupted := range []bool{false, true} {
+		t.Run(fmt.Sprint(interrupted), func(t *testing.T) {
+			f, gate, old, _ := judgePanelFixture(t, false)
+			policy := f.State().Policy
+			policy.RoundLimit = 1
+			f.Must(f.Store.WriteMetadata(f.Epic, kernel.Metadata(kernel.KeyRun, policy)))
+			newest := judgeCmdCommit(t, f, "changed.txt", "J")
+			panelJudgeSubmit(t, f, gate, old, newest, "re-panel", 2, []string{"changed.txt"})
+			kernelPanelReproduce(t, f, gate)
+			first := gate + ".decide.limit.r1"
+			if kernelPanelRecord(t, f, first).Status != "open" {
+				t.Fatal("missing first limit decision")
+			}
+			restore := kernel.ReplaceRulesForTest(kernel.NewRegistry())
+			panelRefuteF(t, f)
+			restore()
+			probe, err := kernel.Pass(kernel.Rules(), f.State(), false)
+			f.Must(err)
+			cut := false
+			for _, w := range probe.Writes {
+				if w.Kind == "create" && w.ID == first+".a2" {
+					cut = true
+					break
+				}
+				if w.Kind != "metadata" {
+					t.Fatalf("unexpected pre-cut write: %+v", w)
+				}
+				if interrupted {
+					f.Must(f.Store.WriteMetadata(w.ID, w.Metadata))
+				}
+			}
+			if !cut {
+				t.Fatal("positive control: pass did not propose replacement limit decision")
+			}
+			_, err = kernel.Pass(kernel.Rules(), f.State(), true)
+			f.Must(err)
+			_, err = kernel.Pass(kernel.Rules(), f.State(), true)
+			f.Must(err)
+			r, _, err := kernel.Decode[kernel.GateRound](kernelPanelRecord(t, f, gate).Metadata, kernel.KeyRound)
+			f.Must(err)
+			if r.Round != 2 {
+				t.Fatalf("scoped authorization missing: %+v", r)
+			}
+			decision, err := f.Store.Lookup(first + ".a2")
+			f.Must(err)
+			if decision == nil {
+				t.Fatal("resume lost replacement limit decision after scoped retally authorization")
+			}
+		})
+	}
+}

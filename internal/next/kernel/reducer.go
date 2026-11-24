@@ -195,6 +195,11 @@ func roundOpen(s State) (Changes, error) {
 			return c, err
 		}
 		if count >= Allowance(s, gate) {
+			// A scoped retally can stop after it writes the authorization but
+			// before it creates the replacement limit decision.
+			if scopedPending(g, round) && round.Prior != nil {
+				c.Writes = append(c.Writes, decisionWrite(s, gate, "limit", round.Prior.Round)...)
+			}
 			continue
 		}
 		reg, registered, err := Decode[RegistrationRecord](g.Metadata, KeyRegistration)

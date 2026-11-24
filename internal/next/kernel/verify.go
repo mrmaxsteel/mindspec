@@ -551,6 +551,23 @@ func verifyApply(s State) (Changes, error) {
 				release = release || d.Gate == t.Gate && d.Cause == "limit" && d.Round == round.Round && strings.HasPrefix(answer.Option, "continue:")
 			}
 			if !release {
+				// A crash can persist the fix before its paired reject decision.
+				// Finish that outcome only while the original fix is still open.
+				fix := s.Records[fmt.Sprintf("%s.r%d.fix", t.Gate, round.Round+1)]
+				from, _, _ := Decode[From](fix.Metadata, KeyFrom)
+				if fix.Status != "closed" && string(from) == round.Verify {
+					sources, _, _ := Decode[VerifyVerdictSources](s.Records[round.Verify].Metadata, KeyVerifyVerdicts)
+					for _, f := range reproduced {
+						if f.Finding == "veto" && sources[f.Slot].Verdict == panel.VerdictReject {
+							more := decisionWrite(s, gate, "reject", round.Round)
+							for i := range more {
+								more[i].Create.Metadata[KeyFrom] = From(round.Verify)
+							}
+							c.Writes = append(c.Writes, more...)
+							break
+						}
+					}
+				}
 				continue
 			}
 		}

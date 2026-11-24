@@ -8,9 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"crypto/sha256"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
+	"os"
 )
 
 func tallyJudgeFixture(t *testing.T, refused bool) (*kerneltest.Fixture, string, string) {
@@ -106,6 +109,16 @@ func TestS134Judge_OpenRePanelOutcomes(t *testing.T) {
 			if record(t, f, gate).Status == "closed" || r.Round != 2 || r.Subject != newest || r.SlotCount != 2 || !reflect.DeepEqual(r.Paths, []string{"changed.txt"}) || r.Prior == nil || r.Prior.Round != 1 {
 				t.Fatalf("re-panel did not authorize a scoped round on open gate: %+v", r)
 			}
+			if !refused {
+				name := filepath.Join(f.SpecDir, "reviews/panel", panel.FileName)
+				data, err := os.ReadFile(name)
+				f.Must(err)
+				rel, err := filepath.Rel(f.Root, name)
+				f.Must(err)
+				if got, ok := r.Prior.Read[filepath.ToSlash(rel)]; !ok || got != fmt.Sprintf("%x", sha256.Sum256(data)) {
+					t.Fatalf("tally prior panel.json digest = %q (present %v), want digest of %s", got, ok, rel)
+				}
+			}
 			if refused && r.Prior.Verify == "" {
 				t.Fatal("verify authorization lost prior.verify")
 			}
@@ -144,6 +157,11 @@ func TestS134Judge_VerifyAcrossJudgement(t *testing.T) {
 			r := tallyRound(t, f, gate)
 			if r.Verify != id+".a2" || record(t, f, gate).Status == "closed" {
 				t.Fatalf("verify not retired: %+v", r)
+			}
+			subject, _, err := kernel.Decode[kernel.Subject](record(t, f, id+".a2").Metadata, kernel.KeySubject)
+			f.Must(err)
+			if subject.Commit != newest {
+				t.Fatalf("replacement verify subject = %s, want %s", subject.Commit, newest)
 			}
 			receipt := actorReceipt(t, f, id)
 			if receipted && receipt.Kind != "passed" || !receipted && receipt.Kind != "superseded" {
@@ -201,12 +219,35 @@ func TestS134Judge_WithdrawAuthorisedRound(t *testing.T) {
 	if r.Round != 1 || r.Verify != id+".a2" {
 		t.Fatalf("withdraw did not restore prior and create one verify: %+v", r)
 	}
+	subject, _, err := kernel.Decode[kernel.Subject](record(t, f, id+".a2").Metadata, kernel.KeySubject)
+	f.Must(err)
+	if subject.Commit != newest {
+		t.Fatalf("withdrawn round verify subject = %s, want %s", subject.Commit, newest)
+	}
 	next, v := verifyRecord(t, f, gate, 0)
 	_, err = submitVerify(t, f, v, leaseActor(t, f, next, kernel.LeaseDeps{}), nil)
 	f.Must(err)
 	r = tallyRound(t, f, gate)
 	if r.Round != 2 || r.Subject != newest || r.SlotCount != 3 || !reflect.DeepEqual(r.Paths, []string{"later.txt"}) || r.Prior.Verify != next || record(t, f, gate).Status == "closed" {
 		t.Fatalf("reverify closed gate or lost latest scope: %+v", r)
+	}
+	kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "round-two", Round: 2, Subject: newest, Slots: []string{"R1", "R2", "R3"}})
+	for i, id := range r.Slots {
+		v := paneltest.Verdict("APPROVE")
+		v.Slot, v.Round, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i+1), 2, newest, "test-model"
+		_, err := panel.Submit(panel.SubmitTarget{Dir: filepath.Join(f.SpecDir, "reviews/round-two"), Spec: f.SpecID, Panel: "round-two", Slot: v.Slot, Round: 2}, paneltest.Bytes(t, v), func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
+			return panel.SubmitResolution{Family: "harness", Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
+		})
+		f.Must(err)
+		f.Create(id, gate)
+		closePass(t, f, id)
+	}
+	reduce(t, f, true)
+	if record(t, f, gate).Status != "closed" {
+		t.Fatal("withdrawn round did not pass after round two")
+	}
+	if receipt := actorReceipt(t, f, gate); receipt.Kind != "passed" || receipt.Subject != newest {
+		t.Fatalf("withdrawn round did not pass after round two: %+v", receipt)
 	}
 }
 
@@ -439,5 +480,163 @@ func TestS134Judge_IncompleteRetirementCreatesNoVerify(t *testing.T) {
 	}
 	if next, _ := f.Store.Lookup(gate + ".r1.R2.a2"); next == nil {
 		t.Fatal("incomplete tally created no slot retry")
+	}
+}
+
+// P1: the path cover excludes the gate's panel directories (plan Bead 16 step 5).
+func TestS134Judge_CoverExcludesPanelDir(t *testing.T) {
+	f, gate, old := tallyJudgeFixture(t, false)
+	put(t, filepath.Join(f.SpecDir, "reviews/panel/note.txt"), "evidence")
+	reducerGit(t, f, "add", "--", filepath.ToSlash(filepath.Join(".mindspec/specs", f.SpecID, "reviews/panel/note.txt")))
+	newest := judgeCommit(t, f, "changed.txt", "change")
+	reduce(t, f, true)
+	id := gate + ".judge.a1"
+	lease := leaseActor(t, f, id, kernel.LeaseDeps{})
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 2, Paths: []string{"changed.txt"}})})
+	if err != nil {
+		t.Fatalf("re-panel covering every non-panel path refused: %v", err)
+	}
+}
+
+// P2: a re-panel after a superseded successor gets a fresh attempt id.
+func TestS134Judge_RepanelAfterSupersededSuccessor(t *testing.T) {
+	f, gate, old := judgeFixture(t)
+	j := judgeChange(t, f)
+	reduce(t, f, true)
+	judgeSubmit(t, f, gate, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: j, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}})
+	s1 := judgeCommit(t, f, "later.txt", "S")
+	reduce(t, f, true)
+	judgeAttemptSubmit(t, f, gate, 2, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: s1, Reason: "same behavior"})
+	if actorReceipt(t, f, gate+".a2").Kind != "superseded" {
+		t.Fatal("setup: a2 not superseded")
+	}
+	s2 := judgeCommit(t, f, "third.txt", "T")
+	out := reduce(t, f, true)
+	if !action(out, gate+".judge.a3") {
+		t.Fatalf("no third judge: %+v", out)
+	}
+	accepted, err := kernel.AcceptedSubject(f.State(), gate)
+	f.Must(err)
+	judgeAttemptSubmit(t, f, gate, 3, kernel.Judgement{Value: "re-panel", OldSubject: accepted, NewSubject: s2, SlotCount: 2, Paths: []string{"third.txt"}})
+	a3 := record(t, f, gate+".a3")
+	if a3.Status == "closed" {
+		t.Fatalf("a3 closed: %+v", a3)
+	}
+	round, _, err := kernel.Decode[kernel.GateRound](a3.Metadata, kernel.KeyRound)
+	f.Must(err)
+	if round.Subject != s2 || fmt.Sprint(round.Paths) != "[third.txt]" {
+		t.Fatalf("a3 round wrong: %+v", round)
+	}
+	if actorReceipt(t, f, gate+".a2").Kind != "superseded" {
+		t.Fatal("a2 receipt changed")
+	}
+}
+
+// Persist every prefix of the replacement transition, then resume with the
+// normal reducer. A new attempt must never remain open without a round pointer.
+func TestS134Judge_VerifyReplacementCrashPrefixes(t *testing.T) {
+	for cut := 0; ; cut++ {
+		finished := false
+		t.Run(fmt.Sprint(cut), func(t *testing.T) {
+			f, gate, old := tallyJudgeFixture(t, true)
+			reduce(t, f, true)
+			original := tallyRound(t, f, gate).Verify
+			newest := judgeCommit(t, f, "changed.txt", "J")
+			reduce(t, f, true)
+			restore := kernel.ReplaceRulesForTest(kernel.NewRegistry())
+			judgeAttemptSubmit(t, f, gate, 1, kernel.Judgement{Value: "carry-over", OldSubject: old, NewSubject: newest, Reason: "same behavior"})
+			restore()
+			probe, err := kernel.Pass(kernel.Rules(), f.State(), false)
+			f.Must(err)
+			finished = cut == len(probe.Writes)
+			for _, w := range probe.Writes[:cut] {
+				switch w.Kind {
+				case "metadata":
+					f.Must(f.Store.WriteMetadata(w.ID, w.Metadata))
+				case "create":
+					_, err := f.Store.Create(*w.Create)
+					f.Must(err)
+				case "close":
+					row := record(t, f, w.ID)
+					f.Must(f.Store.WriteReceipt(w.ID, *w.Receipt))
+					f.Must(f.Store.SetStatusIf(w.ID, row.Status, "closed"))
+				default:
+					t.Fatalf("unexpected replacement write: %+v", w)
+				}
+			}
+			reduce(t, f, true)
+			reduce(t, f, true)
+			r := tallyRound(t, f, gate)
+			if r.Verify != original+".a2" {
+				t.Fatalf("crash left an orphan verify or advanced its attempt: %s", r.Verify)
+			}
+			subject, _, err := kernel.Decode[kernel.Subject](record(t, f, r.Verify).Metadata, kernel.KeySubject)
+			f.Must(err)
+			if subject.Commit != newest {
+				t.Fatalf("replacement subject = %s, want %s", subject.Commit, newest)
+			}
+			state := f.State()
+			for _, id := range state.Steps {
+				row := state.Records[id]
+				tuple, _, _ := row.Tuple()
+				if tuple.Kind == "verify" && tuple.Gate == gate && row.Status != "closed" && id != r.Verify {
+					t.Fatalf("orphan open verify: %s", id)
+				}
+			}
+			before := kerneltest.Snapshot(t, f)
+			reduce(t, f, true)
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("replacement recovery did not converge")
+			}
+		})
+		if finished {
+			break
+		}
+	}
+}
+
+func TestS134Verify_ReproducedRejectCrashPrefixes(t *testing.T) {
+	for cut := 0; ; cut++ {
+		finished := false
+		t.Run(fmt.Sprint(cut), func(t *testing.T) {
+			f := reducerFixture(t)
+			gate := f.Items[0] + ".review"
+			refusedPanel(t, f, gate, "review", 1, panel.VerdictReject)
+			reduce(t, f, true)
+			id, v := verifyRecord(t, f, gate, 99)
+			lease := leaseActor(t, f, id, kernel.LeaseDeps{})
+			restore := kernel.ReplaceRulesForTest(kernel.NewRegistry())
+			_, err := submitVerify(t, f, v, lease, nil)
+			restore()
+			f.Must(err)
+			probe, err := kernel.Pass(kernel.Rules(), f.State(), false)
+			f.Must(err)
+			finished = cut == len(probe.Writes)
+			for _, w := range probe.Writes[:cut] {
+				if w.Kind != "create" {
+					t.Fatalf("unexpected reject outcome write: %+v", w)
+				}
+				_, err := f.Store.Create(*w.Create)
+				f.Must(err)
+			}
+			reduce(t, f, true)
+			reduce(t, f, true)
+			decision, err := f.Store.Lookup(gate + ".decide.reject.r1")
+			f.Must(err)
+			if decision == nil || decision.Status != "open" {
+				t.Fatal("resume lost reject decision after fix creation")
+			}
+			if record(t, f, gate+".r2.fix").Status != "open" {
+				t.Fatal("reject recovery lost the original fix")
+			}
+			before := kerneltest.Snapshot(t, f)
+			reduce(t, f, true)
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("reject outcome recovery did not converge")
+			}
+		})
+		if finished {
+			break
+		}
 	}
 }
