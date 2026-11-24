@@ -150,6 +150,10 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 			}
 		}
 	}
+	if p.Orchestrated {
+		in.DurablePrior = true
+		return in, nil
+	}
 	in.PriorItems, err = panel.PriorRoundItems(reg.Dir, slotID, p.Round)
 	return in, err
 }

@@ -148,6 +148,7 @@ func TestCeremonyNonInflation_HelpFlags(t *testing.T) {
 			want: setOf("--allow-doc-skew", "--allow-net-deletion", "--help", "--override-adr", "--resolve-merge", "--supersede-adr", "--trace"),
 		},
 
+		{name: "mindspec brief", path: []string{"brief"}, want: setOf("--help", "--trace")},
 		{name: "mindspec next-action", path: []string{"next-action"}, want: setOf("--apply", "--json", "--help", "--trace")},
 		{name: "mindspec lease", path: []string{"lease"}, want: setOf("--renew", "--release", "--take", "--reason", "--help", "--trace")},
 		{name: "mindspec panel submit", path: []string{"panel", "submit"}, want: setOf("--lease", "--file", "--slot", "--round", "--spec", "--help", "--trace")},

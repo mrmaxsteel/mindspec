@@ -15,19 +15,20 @@ import (
 // PromptInput is resolved by the adapter. Launch supplies a fresh Nonce and its
 // new attempt; the harness prompt uses the latest dispatched attempt.
 type PromptInput struct {
-	Brief      string
-	Slot       string
-	Family     string
-	Model      string
-	Lens       string
-	Focus      string
-	SlotDir    string
-	Tree       string
-	Kind       string
-	Output     string
-	Nonce      string
-	Attempt    int
-	PriorItems PriorItemsResult
+	Brief        string
+	Slot         string
+	Family       string
+	Model        string
+	Lens         string
+	Focus        string
+	SlotDir      string
+	Tree         string
+	Kind         string
+	Output       string
+	Nonce        string
+	Attempt      int
+	PriorItems   PriorItemsResult
+	DurablePrior bool
 }
 
 // PriorItemsResult holds verified items or a warning about unavailable evidence.
@@ -78,15 +79,17 @@ func RenderSlotPrompt(in PromptInput) string {
 	} else {
 		b.WriteString("Use mindspec panel checkout with --slot and --dispatch. Then run mindspec panel prompt again for the submission command.\n")
 	}
-	b.WriteString("\n## Prior-round items\n\n")
-	if in.PriorItems.Warning != "" {
-		b.WriteString(termsafe.Escape(in.PriorItems.Warning) + "\n")
-	} else if len(in.PriorItems.Items) == 0 {
-		b.WriteString("no prior-round items\n")
-	} else {
-		b.WriteString("Grade each item ADDRESSED, PARTIAL, MISSED or NEW_ISSUE.\n")
-		for i, item := range in.PriorItems.Items {
-			fmt.Fprintf(&b, "%d. %s\n", i+1, termsafe.Escape(item))
+	if !in.DurablePrior {
+		b.WriteString("\n## Prior-round items\n\n")
+		if in.PriorItems.Warning != "" {
+			b.WriteString(termsafe.Escape(in.PriorItems.Warning) + "\n")
+		} else if len(in.PriorItems.Items) == 0 {
+			b.WriteString("no prior-round items\n")
+		} else {
+			b.WriteString("Grade each item ADDRESSED, PARTIAL, MISSED or NEW_ISSUE.\n")
+			for i, item := range in.PriorItems.Items {
+				fmt.Fprintf(&b, "%d. %s\n", i+1, termsafe.Escape(item))
+			}
 		}
 	}
 	b.WriteString("\nWrite scratch only in the slot directory. Use absolute paths within it.\n")

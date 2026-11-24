@@ -433,7 +433,7 @@ func TestS134Final_FixBrief(t *testing.T) {
 	fix := gate + ".r6.fix"
 	for _, a := range out.Actions {
 		if a.Step == fix {
-			want := []string{"mindspec", "next", fix, "--emit-only"}
+			want := []string{"mindspec", "brief", fix}
 			if !reflect.DeepEqual(a.Brief, want) {
 				t.Fatalf("final fix brief = %q, want %q", a.Brief, want)
 			}

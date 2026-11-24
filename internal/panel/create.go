@@ -53,6 +53,7 @@ type CreateInput struct {
 	Scope             []string
 	BriefRegions      BriefRegions
 	BriefFile         string
+	BriefBody         string
 	BeadID            *string
 	Spec              string
 	Target            string
@@ -395,21 +396,25 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		return nil, fmt.Errorf("read %s: %w", briefPath, readErr)
 	}
 	prior := "none recorded"
-	priorData, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("consolidated-round-%d.md", in.Round-1)))
-	if err == nil {
-		prior = termsafe.Escape(string(priorData))
-		// Quoted prose must not become region syntax or toggle fence scanning.
-		trimmed := strings.TrimSpace(prior)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") || markerLookalikeRE.MatchString(trimmed) ||
-			trimmed == "<!-- mindspec:prior-round -->" || trimmed == "<!-- /mindspec:prior-round -->" {
-			prior = "> " + prior
+	if in.BriefBody == "" {
+		priorData, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("consolidated-round-%d.md", in.Round-1)))
+		if err == nil {
+			prior = termsafe.Escape(string(priorData))
+			// Quoted prose must not become region syntax or toggle fence scanning.
+			trimmed := strings.TrimSpace(prior)
+			if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") || markerLookalikeRE.MatchString(trimmed) ||
+				trimmed == "<!-- mindspec:prior-round -->" || trimmed == "<!-- /mindspec:prior-round -->" {
+				prior = "> " + prior
+			}
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read prior round: %w", err)
 		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("read prior round: %w", err)
 	}
 	header := renderCreateBriefHeader(filepath.Base(dir), p, prior, in.BriefRegions)
 	var newBrief string
-	if in.BriefFile != "" {
+	if in.BriefBody != "" {
+		newBrief = header + "\n\n" + in.BriefBody
+	} else if in.BriefFile != "" {
 		newBrief = header + "\n\n" + string(suppliedBrief)
 	} else if briefExists {
 		newBrief, err = spliceBriefHeader(string(existing), header)

@@ -29,6 +29,7 @@ func kernelPanelFixture(t *testing.T) (*kerneltest.Fixture, string, string) {
 	actorCmdGit(t, f, "add", ".")
 	actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "fixture")
 	head := actorCmdGit(t, f, "rev-parse", "HEAD")
+	actorCmdGit(t, f, "update-ref", "refs/heads/main", head)
 	actorCmdGit(t, f, "branch", "spec/"+f.SpecID)
 	for _, item := range f.Items {
 		actorCmdGit(t, f, "branch", "bead/"+item)
@@ -36,6 +37,7 @@ func kernelPanelFixture(t *testing.T) (*kerneltest.Fixture, string, string) {
 	impl := f.Items[0] + ".impl.a1"
 	f.Create(impl, f.Items[0])
 	kernelPanelClose(t, f, impl, head)
+	f.Must(f.Store.WriteMetadata(impl, kernel.Metadata(kernel.KeyLease, kernel.LeaseRecord{Generation: 1, ClaimBase: head})))
 	old := panelKernelStateFn
 	panelKernelStateFn = func(_, _ string) (*kernel.State, error) { s := f.State(); return &s, nil }
 	t.Cleanup(func() { panelKernelStateFn = old })
@@ -821,7 +823,7 @@ func TestS134PanelCreate_KeepsBindingAndBriefRefusals(t *testing.T) {
 				word = "requires a recorded work item"
 			case "blank-brief":
 				args = append(args, "--brief-file", "")
-				word = "absolute path"
+				word = "--brief-file is not accepted"
 			}
 			before := kerneltest.Snapshot(t, f)
 			out, e := kernelPanelRun(t, panelCreateCmd, args...)

@@ -52,7 +52,7 @@ func TestS134Setup_PlainSetupAddsStep(t *testing.T) {
 	}
 }
 func TestS134VerbStub_HelpGolden(t *testing.T) {
-	for _, name := range []string{"next-action", "lease", "submit"} {
+	for _, name := range []string{"next-action", "lease", "submit", "brief"} {
 		cmd := resolveCommand(t, name)
 		if cmd.Hidden {
 			t.Fatalf("%s hidden", name)
@@ -67,7 +67,7 @@ func TestS134VerbStub_HelpGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"next-action", "lease", "submit"} {
+	for _, name := range []string{"next-action", "lease", "submit", "brief"} {
 		if !containsToken(string(out), name) {
 			t.Errorf("help missing %s", name)
 		}

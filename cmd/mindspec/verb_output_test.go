@@ -128,6 +128,7 @@ var mutatingVerbAliases = map[string]string{
 // epic's mindspec_phase cache) — every entry here either mutates nothing
 // or mutates something else entirely.
 var nonMutatingAllowlist = map[string]string{
+	"mindspec brief":       "read-only: renders the enrolled actor brief; writes no tracker record, Git object, or temporary file",
 	"mindspec next-action": "reads or creates kernel steps; no lifecycle-phase state",
 	"mindspec lease":       "leases a kernel step; no lifecycle-phase state",
 	"mindspec submit":      "records kernel evidence or an answer; no lifecycle-phase state",

@@ -96,6 +96,7 @@ var CommandTokens = map[string]struct{}{
 	"next-action": {},
 	"lease":       {},
 	"submit":      {},
+	"brief":       {},
 
 	"":          {},
 	"adr":       {},

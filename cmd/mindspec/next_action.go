@@ -56,7 +56,7 @@ func kernelCommandState(spec, target string) (kernel.State, error) {
 	store := kernel.NewStore(root, "", nil)
 	records, err := store.All()
 	if err != nil {
-		return kernel.State{}, fmt.Errorf("read store: %s\nrecovery: mindspec state show", termsafe.Escape(err.Error()))
+		return kernel.State{}, termsafe.NewWrappedFailure(err, "read store: "+err.Error(), "mindspec state show")
 	}
 	epicID := ""
 	if target != "" {
@@ -73,7 +73,7 @@ func kernelCommandState(spec, target string) (kernel.State, error) {
 			}
 		}
 		if epicID == "" {
-			return kernel.State{}, fmt.Errorf("step is not a kernel identity\nrecovery: use mindspec next, mindspec complete and mindspec impl approve")
+			return kernel.State{}, termsafe.NewFailure("step is not a kernel identity", "use mindspec next, mindspec complete and mindspec impl approve")
 		}
 	}
 	candidates := []kernel.Record{}
@@ -94,7 +94,7 @@ func kernelCommandState(spec, target string) (kernel.State, error) {
 		candidates = append(candidates, r)
 	}
 	if len(candidates) != 1 {
-		return kernel.State{}, fmt.Errorf("select one active spec\nrecovery: mindspec state show")
+		return kernel.State{}, termsafe.NewFailure("select one active spec", "mindspec state show")
 	}
 	epic := candidates[0]
 	spec, err = phase.ResolveSpec(phase.EpicInfo{ID: epic.ID, Title: epic.Title, Metadata: epic.Metadata})
@@ -112,7 +112,7 @@ func kernelCommandState(spec, target string) (kernel.State, error) {
 		if errors.As(err, &failure) {
 			return state, termsafe.PrefixFailure(err, "read kernel state: ")
 		}
-		return state, fmt.Errorf("read kernel state: %s\nrecovery: mindspec state show", termsafe.Escape(err.Error()))
+		return state, termsafe.NewWrappedFailure(err, "read kernel state: "+err.Error(), "mindspec state show")
 	}
 	return state, nil
 }
