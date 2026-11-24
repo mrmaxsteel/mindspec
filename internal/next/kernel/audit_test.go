@@ -254,6 +254,23 @@ func TestS134Audit_CountRules(t *testing.T) {
 	f.Must(f.Store.WriteMetadata(retry, kernel.Metadata(kernel.KeyReturns, []kernel.VerifyReturn{{Slot: "R1", Return: "reproduced"}, {Slot: "R2", Return: "deferred"}})))
 	// Takes: a generation 0 event counts like any other.
 	f.Must(f.Store.WriteMetadata(item, kernel.Metadata(kernel.KeyTakes, []kernel.TakeReason{{Via: "lease", Generation: 0, At: fixedTime}, {Via: "lease", Generation: 2, At: fixedTime}, {Via: "repair", Generation: 1, At: fixedTime}})))
+	// Legacy take: a step with only mindspec_take counts it once. A step with both counts only mindspec_takes.
+	legacyOnly := gate + ".r2.R1"
+	f.Create(legacyOnly, gate)
+	f.Must(f.Store.WriteMetadata(legacyOnly, kernel.Metadata(kernel.KeyTake, kernel.TakeReason{Via: "repair", Generation: 1, At: fixedTime})))
+	legacyBoth := gate + ".r2.R2"
+	f.Create(legacyBoth, gate)
+	f.Must(f.Store.WriteMetadata(legacyBoth, map[string]any{
+		kernel.KeyTakes: []kernel.TakeReason{{Via: "lease", Generation: 1, At: fixedTime}},
+		kernel.KeyTake:  kernel.TakeReason{Via: "repair", Generation: 1, At: fixedTime},
+	}))
+	// A valid repaired receipt on a step that is not closed still counts as an unreceipted close.
+	openRepaired := gate + ".r2.R3"
+	f.Create(openRepaired, gate)
+	f.Must(f.Store.WriteReceipt(openRepaired, kernel.Receipt{Kind: "passed", Retally: "repair-submit", Repaired: true}))
+	// A judge step is not a lens step.
+	judgeStep := gate + ".judge.a1"
+	f.Create(judgeStep, gate)
 	// One valid receipt with each property, and one receipt that fails validation with the same properties.
 	valid := kernel.Receipt{Kind: "passed", Retally: "repair-submit", Via: "repair", Repaired: true, Generation: 3, SupersededGeneration: 2}
 	seedClosed(t, f, gate+".r1.R1", &valid)
@@ -269,6 +286,18 @@ func TestS134Audit_CountRules(t *testing.T) {
 	if !kernel.RepairedClose(f.State(), gate+".r1.R3") {
 		t.Fatal("fixture retry must repair the invalid close")
 	}
+	state := f.State()
+	if r := state.Records[openRepaired]; r.Status == "closed" || kernel.ValidReceipt(f.Root, kernel.Receipt{Kind: "passed", Retally: "repair-submit", Repaired: true}, r.Metadata) != nil {
+		t.Fatalf("fixture %s must be open with a valid repaired receipt, status %q", openRepaired, r.Status)
+	}
+	for _, id := range []string{legacyOnly, legacyBoth} {
+		if _, has, err := kernel.Decode[kernel.TakeReason](state.Records[id].Metadata, kernel.KeyTake); err != nil || !has {
+			t.Fatalf("fixture %s must hold mindspec_take: %v", id, err)
+		}
+	}
+	if judge, _, _ := state.Records[judgeStep].Tuple(); judge.Kind != "change-judge" {
+		t.Fatalf("fixture judge step has kind %q", judge.Kind)
+	}
 
 	rows, err := kernel.Audit(f.State(), nil)
 	f.Must(err)
@@ -277,8 +306,8 @@ func TestS134Audit_CountRules(t *testing.T) {
 		got[row.Event] = rowView{row.Count, row.Details}
 	}
 	want := map[string]rowView{
-		"takeovers":          {3, []string{"lease 2, repair 1"}},
-		"unreceipted-closes": {1, nil},
+		"takeovers":          {5, []string{"lease 3, repair 2"}},
+		"unreceipted-closes": {2, nil},
 		"late-submissions":   {1, nil},
 		"repair-receipts":    {1, nil},
 		"verify-reproduced":  {3, nil},
