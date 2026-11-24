@@ -120,6 +120,7 @@ func TestS134Brief_FrozenPrior(t *testing.T) {
 	reducerGit(t, f, "symbolic-ref", "HEAD", "refs/heads/bead/"+f.Items[0])
 	reducerGit(t, f, "add", "-f", "--", filepath.Join(dir, "R1-round-1.json"), filepath.Join(dir, "R9-round-1.json"))
 	reducerGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "edit pinned verdict and add stray")
+	actorCommit(t, f, "mid-fix.go", "intermediate fix", "bead/"+f.Items[0])
 	commit := actorCommit(t, f, "fixed.txt", "fixed", "bead/"+f.Items[0])
 	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: fix, Lease: fl.Token, Commit: commit})
 	f.Must(err)
@@ -127,9 +128,9 @@ func TestS134Brief_FrozenPrior(t *testing.T) {
 	f.Must(err)
 	briefContains(t, body, "late requirement: retain full text", long, "finding-2", "finding-3", "Return: reproduced", "Return: refuted", "Evidence: https://example.invalid/evidence", "Paths changed since the prior round subject", "fixed.txt", "Do not raise a refuted or deferred finding again without new evidence")
 	scope := briefSection(t, body, "Files in Scope")
-	briefContains(t, scope, "before-round-one.go", "fixed.txt")
+	briefContains(t, scope, "before-round-one.go", "mid-fix.go", "fixed.txt")
 	changed := briefSection(t, body, "Paths changed since the prior round subject")
-	briefContains(t, changed, "fixed.txt")
+	briefContains(t, changed, "mid-fix.go", "fixed.txt")
 	if strings.Contains(changed, "before-round-one.go") {
 		t.Fatalf("changed-since list includes a path from before round one: %s", changed)
 	}
