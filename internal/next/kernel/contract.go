@@ -9,7 +9,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
-var ErrPreKernel error = termsafe.NewFailure("this spec uses the existing lifecycle; use mindspec next, mindspec complete and mindspec impl approve", "mindspec next")
+var ErrPreKernel error = termsafe.NewFailure("this spec uses the existing lifecycle; run its cycle in this order: mindspec next, mindspec panel create, mindspec panel tally, mindspec complete, mindspec impl approve", "mindspec next")
 
 type Subject struct {
 	Commit string `json:"commit"`

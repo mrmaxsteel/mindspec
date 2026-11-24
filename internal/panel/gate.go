@@ -69,11 +69,35 @@ const (
 // Warn and short-circuit paths do not apply discharges. Callers compare
 // Action and Message rather than comparing Decision directly (it has a slice).
 type Decision struct {
-	Action             GateAction
+	Action GateAction
+	// Leg names the leg of panelGateDecision that decided. Callers route
+	// on Leg, never on Message. A Block with an unset Leg is a halted panel.
+	Leg                DecisionLeg
 	Message            string
 	AppliedRefutations []Refutation
 	AppliedDeferrals   []Deferral
 }
+
+// DecisionLeg names the leg of panelGateDecision that returned a Decision.
+type DecisionLeg string
+
+// The legs of panelGateDecision, in evaluation order.
+const (
+	LegSkip          DecisionLeg = "skip"
+	LegNoPanel       DecisionLeg = "no_panel"
+	LegUnreadable    DecisionLeg = "unreadable"
+	LegRegistration  DecisionLeg = "registration"
+	LegAbandoned     DecisionLeg = "abandoned"
+	LegRoundMismatch DecisionLeg = "round_mismatch"
+	LegMissingRef    DecisionLeg = "missing_ref"
+	LegGitError      DecisionLeg = "git_error"
+	LegStale         DecisionLeg = "stale"
+	LegDirty         DecisionLeg = "dirty"
+	LegIncomplete    DecisionLeg = "incomplete"
+	LegOperator      DecisionLeg = "operator"
+	LegUnresolved    DecisionLeg = "unresolved"
+	LegPass          DecisionLeg = "pass"
+)
 
 // RawMergeFence is appended to every Block message (Spec 093 Req 12 / G3-1,
 // ADR-0037 §8). Once the gate blocks `mindspec complete`, a raw
@@ -207,13 +231,13 @@ func panelGateDecision(f GateFacts) Decision {
 	// Block (this is a Warn/Allow path, so HC-7 is moot here, but we still
 	// keep the message hatch-name-free except for this legitimate audit).
 	if f.SkipEnv {
-		return Decision{Action: Warn, Message: fmt.Sprintf(
+		return Decision{Action: Warn, Leg: LegSkip, Message: fmt.Sprintf(
 			"panel gate skipped via %s for %s", SkipPanelEnv, termsafe.Escape(f.BeadID))}
 	}
 
 	// (1) Fail-open: no registered panel for the bead.
 	if f.Reg == nil || f.Res == nil {
-		return Decision{Action: Allow}
+		return Decision{Action: Allow, Leg: LegNoPanel}
 	}
 
 	// slug is escaped once here (Spec 116 R2): it is a disk directory name
@@ -225,7 +249,7 @@ func panelGateDecision(f GateFacts) Decision {
 	// (2) A panel.json exists but could not be parsed — registered but
 	// malformed. It must NOT read as "no panel".
 	if f.Res.PanelErr != nil || f.Res.Panel == nil {
-		return Decision{Action: Block, Message: fmt.Sprintf(
+		return Decision{Action: Block, Leg: LegUnreadable, Message: fmt.Sprintf(
 			"panel %s registration (panel.json) is unreadable — fix or remove it before completing%s",
 			slug, RawMergeFence(f.BeadID))}
 	}
@@ -236,7 +260,7 @@ func panelGateDecision(f GateFacts) Decision {
 	}
 
 	if err := f.Res.intactError(); err != nil {
-		return Decision{Action: Block, Message: fmt.Sprintf("panel %s registration: %s%s", slug, err, RawMergeFence(f.BeadID))}
+		return Decision{Action: Block, Leg: LegRegistration, Message: fmt.Sprintf("panel %s registration: %s%s", slug, err, RawMergeFence(f.BeadID))}
 	}
 
 	// (3) Abandoned — legitimate exit, audited on bead metadata at complete
@@ -249,14 +273,14 @@ func panelGateDecision(f GateFacts) Decision {
 		} else {
 			reason = termsafe.Escape(reason)
 		}
-		return Decision{Action: Warn, Message: fmt.Sprintf(
+		return Decision{Action: Warn, Leg: LegAbandoned, Message: fmt.Sprintf(
 			"panel %s round %d abandoned: %s — completing per the recorded abandonment", slug, round, reason)}
 	}
 
 	// (4) Round mismatch — panel.json.round disagrees with the
 	// filename-derived latest round in either direction (Req 11).
 	if f.Res.RoundMismatch {
-		return Decision{Action: Block, Message: fmt.Sprintf(
+		return Decision{Action: Block, Leg: LegRoundMismatch, Message: fmt.Sprintf(
 			"panel %s: panel.json round (%d) out of date vs verdict files (round %d) — re-run /ms-panel-run step 0%s",
 			slug, p.Round, f.Res.LatestRound, RawMergeFence(f.BeadID))}
 	}
@@ -269,7 +293,7 @@ func panelGateDecision(f GateFacts) Decision {
 	// internal/panel a leaf (no internal/workspace import).
 	if f.MissingRef {
 		escBeadID := termsafe.Escape(f.BeadID)
-		return Decision{Action: Warn, Message: fmt.Sprintf(
+		return Decision{Action: Warn, Leg: LegMissingRef, Message: fmt.Sprintf(
 			"panel for %s references branch bead/%s, which no longer exists — assuming the merge already landed; "+
 				"deferring to mindspec complete's own handling", escBeadID, escBeadID)}
 	}
@@ -283,7 +307,7 @@ func panelGateDecision(f GateFacts) Decision {
 	// genuine deletion) without false-blocking a legitimate completion.
 	if f.GitErr != nil {
 		escBeadID := termsafe.Escape(f.BeadID)
-		return Decision{Action: Warn, Message: fmt.Sprintf(
+		return Decision{Action: Warn, Leg: LegGitError, Message: fmt.Sprintf(
 			"panel for %s: could not verify branch bead/%s (transient git error: %s) — staleness check skipped; "+
 				"proceeding per the gate's fail-open posture, but this is NOT a confirmed merge",
 			escBeadID, escBeadID, termsafe.Escape(f.GitErr.Error()))}
@@ -296,7 +320,7 @@ func panelGateDecision(f GateFacts) Decision {
 		if f.SubjectErr != nil {
 			message = fmt.Sprintf("panel %s: could not verify subject tree: %s — bump round and re-panel (/ms-panel-run step 0)", slug, termsafe.Escape(f.SubjectErr.Error()))
 		}
-		return Decision{Action: Block, Message: fmt.Sprintf("%s%s", message, RawMergeFence(f.BeadID))}
+		return Decision{Action: Block, Leg: LegStale, Message: fmt.Sprintf("%s%s", message, RawMergeFence(f.BeadID))}
 	}
 
 	// (7) Dirty tree — uncommitted USER edits would be MATERIALIZED into a
@@ -321,7 +345,7 @@ func panelGateDecision(f GateFacts) Decision {
 			fmt.Fprintf(&b, "\n  %s", termsafe.Escape(d))
 		}
 		b.WriteString(RawMergeFence(f.BeadID))
-		return Decision{Action: Block, Message: b.String()}
+		return Decision{Action: Block, Leg: LegDirty, Message: b.String()}
 	}
 
 	// (8) Incomplete — fewer valid verdicts than expected reviewers. Name
@@ -331,7 +355,7 @@ func panelGateDecision(f GateFacts) Decision {
 	n := p.ExpectedReviewers
 	if !f.Res.Complete() {
 		present := presentVerdictFiles(f.Res)
-		return Decision{Action: Block, Message: fmt.Sprintf(
+		return Decision{Action: Block, Leg: LegIncomplete, Message: fmt.Sprintf(
 			"panel %s round %d incomplete: %d/%d verdicts present (%s) — finish /ms-panel-run or tally first%s",
 			slug, round, len(f.Res.Verdicts), n, present, RawMergeFence(f.BeadID))}
 	}
@@ -348,7 +372,7 @@ func panelGateDecision(f GateFacts) Decision {
 			}
 			detail += fmt.Sprintf(", hard_block from %s", strings.Join(hardBlocks, ", "))
 		}
-		return Decision{Action: Block, Message: fmt.Sprintf(
+		return Decision{Action: Block, Leg: LegOperator, Message: fmt.Sprintf(
 			"panel %s round %d: %s — %s recorded — halt path, see /ms-panel-tally%s",
 			slug, round, detail, f.Res.vetoSummary(), RawMergeFence(f.BeadID))}
 	}
@@ -357,13 +381,13 @@ func panelGateDecision(f GateFacts) Decision {
 	if !f.Res.PassRule(true) {
 		details := f.Res.UnresolvedNames() + f.ArtifactDetails
 		if f.BeadID == "" && !p.IsBead() {
-			return Decision{Action: Block, Message: fmt.Sprintf("panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s", slug, round, details)}
+			return Decision{Action: Block, Leg: LegUnresolved, Message: fmt.Sprintf("panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s", slug, round, details)}
 		}
-		return Decision{Action: Block, Message: fmt.Sprintf(
+		return Decision{Action: Block, Leg: LegUnresolved, Message: fmt.Sprintf(
 			"panel %s round %d: unresolved REQUEST_CHANGES / non-APPROVE verdict(s) from %s — %d/%d APPROVE. Run /ms-bead-fix with %s, then re-panel%s",
 			slug, round, details, f.Res.Approves, n, ConsolidatedName(round), RawMergeFence(f.BeadID))}
 	}
-	return Decision{Action: Allow, AppliedRefutations: f.Res.AppliedRefutations(), AppliedDeferrals: f.Res.EffectiveDeferrals()}
+	return Decision{Action: Allow, Leg: LegPass, AppliedRefutations: f.Res.AppliedRefutations(), AppliedDeferrals: f.Res.EffectiveDeferrals()}
 }
 
 // presentVerdictFiles renders the present-verdict-file list for the
@@ -633,7 +657,7 @@ func isArtifactPath(p string, specDir ...string) bool {
 // staleness ignored. Abandonment remains a refusal, never an escape hatch.
 func RebindDecision(reg Registration, res *Result) Decision {
 	if res == nil || res.Panel == nil {
-		return Decision{Action: Block, Message: "panel registration is unreadable"}
+		return Decision{Action: Block, Leg: LegUnreadable, Message: "panel registration is unreadable"}
 	}
 	f := GateFacts{Reg: &reg, Res: res, HeadSHA: res.Panel.ReviewedHeadSHA, WorktreeAbsent: true}
 	if res.Panel.IsBead() {

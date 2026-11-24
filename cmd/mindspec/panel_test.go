@@ -748,26 +748,30 @@ func TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds(t *testing.T) {
 	}
 	recovery := err.Error()
 
-	// The Block recovery must also name the bead to complete concretely —
-	// the pre-fix text emitted a literal `<bead>` placeholder.
-	if !strings.Contains(recovery, "mindspec complete") || !strings.Contains(recovery, beadID) {
-		t.Errorf("recovery does not name `mindspec complete <the real bead>`: %v", err)
+	// The Next block names the bead concretely: a `<bead-id>` or
+	// `<N+1>` placeholder cannot be copied as-is.
+	if !strings.Contains(recovery, "--bead "+beadID) {
+		t.Errorf("Next block does not name `--bead <the real bead>`: %v", err)
 	}
-	if strings.Contains(recovery, "<bead>") || strings.Contains(recovery, "<N+1>") {
-		t.Errorf("recovery still carries an uninstantiated placeholder (it cannot be copied as-is): %v", err)
+	if strings.Contains(recovery, "<bead-id>") || strings.Contains(recovery, "<N+1>") {
+		t.Errorf("Next block still carries an uninstantiated placeholder (it cannot be copied as-is): %v", err)
 	}
 
-	// Extract the create invocation exactly as printed.
+	// Extract the create invocation exactly as printed: one Next line.
 	start := strings.Index(recovery, "mindspec panel create")
 	if start < 0 {
 		t.Fatalf("recovery does not contain a `mindspec panel create` invocation: %v", err)
 	}
 	rest := recovery[start:]
-	end := strings.Index(rest, "), then")
+	end := strings.Index(rest, "\n")
 	if end < 0 {
 		t.Fatalf("could not delimit the create invocation in the recovery: %q", rest)
 	}
-	createCmd := rest[:end]
+	briefFile := filepath.Join(t.TempDir(), "brief.md")
+	if err := os.WriteFile(briefFile, []byte("Filled authored review body."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	createCmd := strings.ReplaceAll(rest[:end], "<absolute path>", briefFile)
 
 	tokens := splitPosixSingleQuoted(t, createCmd)
 	if len(tokens) < 3 || tokens[0] != "mindspec" || tokens[1] != "panel" || tokens[2] != "create" {

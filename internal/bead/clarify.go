@@ -12,6 +12,8 @@
 package bead
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -201,4 +203,80 @@ func validateAttemptRecord(record AttemptRecord) error {
 // a report entry may cite.
 var validSRSignals = map[string]bool{
 	"SR-1": true, "SR-2": true, "SR-3": true, "SR-4": true, "SR-5": true,
+}
+
+// ParseAttemptRecord reads a stored MetaKeyReadinessAttempt value for the
+// readiness review. It refuses a value that is not one JSON object with the
+// two known fields, an empty report, a bad report entry, and a clarification
+// that does not pair with exactly one report entry by ordinal and verbatim
+// reason. A report entry without a clarification is valid: the review renders
+// it as not clarified. A JSON string holding the object is decoded first.
+func ParseAttemptRecord(raw any) (AttemptRecord, error) {
+	var data []byte
+	if text, ok := raw.(string); ok {
+		data = []byte(text)
+	} else {
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return AttemptRecord{}, fmt.Errorf("the record is not JSON")
+		}
+		data = encoded
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+		return AttemptRecord{}, fmt.Errorf("the record is not a JSON object")
+	}
+	var record AttemptRecord
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&record); err != nil {
+		return AttemptRecord{}, fmt.Errorf("the record has an unknown or mistyped field")
+	}
+	if len(record.Report) == 0 {
+		return AttemptRecord{}, fmt.Errorf("the report is empty")
+	}
+	reasons := map[int]string{}
+	for _, e := range record.Report {
+		if e.Ordinal <= 0 {
+			return AttemptRecord{}, fmt.Errorf("a report entry has a non-positive ordinal %d", e.Ordinal)
+		}
+		if _, dup := reasons[e.Ordinal]; dup {
+			return AttemptRecord{}, fmt.Errorf("report ordinal %d appears more than once", e.Ordinal)
+		}
+		if !validSRSignals[e.Signal] {
+			return AttemptRecord{}, fmt.Errorf("report ordinal %d has a signal outside SR-1..SR-5", e.Ordinal)
+		}
+		if strings.TrimSpace(e.Reason) == "" {
+			return AttemptRecord{}, fmt.Errorf("report ordinal %d has an empty reason", e.Ordinal)
+		}
+		reasons[e.Ordinal] = e.Reason
+	}
+	clarified := map[int]bool{}
+	for _, c := range record.Clarifications {
+		reason, ok := reasons[c.Ordinal]
+		if !ok {
+			return AttemptRecord{}, fmt.Errorf("a clarification cites ordinal %d, which is not in the report", c.Ordinal)
+		}
+		if clarified[c.Ordinal] {
+			return AttemptRecord{}, fmt.Errorf("ordinal %d has more than one clarification", c.Ordinal)
+		}
+		clarified[c.Ordinal] = true
+		if c.Reason != reason {
+			return AttemptRecord{}, fmt.Errorf("the clarification of ordinal %d does not repeat its report reason", c.Ordinal)
+		}
+		if strings.TrimSpace(c.Answer) == "" || strings.TrimSpace(c.Span) == "" {
+			return AttemptRecord{}, fmt.Errorf("the clarification of ordinal %d has no answer or no span", c.Ordinal)
+		}
+	}
+	return record, nil
+}
+
+// Clarification returns the clarification paired with ordinal, if any.
+func (r AttemptRecord) Clarification(ordinal int) (ClarificationEntry, bool) {
+	for _, c := range r.Clarifications {
+		if c.Ordinal == ordinal {
+			return c, true
+		}
+	}
+	return ClarificationEntry{}, false
 }

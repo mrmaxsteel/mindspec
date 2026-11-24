@@ -710,16 +710,16 @@ func TestOpaqueOperandRegistry_RecoveryCommandTemplatesAgainstFloor(t *testing.T
 }
 
 // TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor is the
-// named obligation for cmd/mindspec/panel.go's tallyExitActionNonBead
-// (bead-2 rework): representative renderings of its own `"re-run the
-// panel: " + "mindspec panel create %s --round <N+1> --spec <id>"`
-// template, with and without the optional `--target`/`--gate`
-// fragments, checked against the classifier.
+// named obligation for cmd/mindspec/panel.go's tallyNextBlockExit:
+// representative renderings of its tally re-run recovery line and of the
+// Next block create line, checked against the classifier.
 func TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor(t *testing.T) {
 	renderings := []string{
-		`re-run the panel: mindspec panel create bead-127.2 --round <N+1> --spec <id>`,
-		`re-run the panel: mindspec panel create bead-127.2 --round <N+1> --spec <id> --target main`,
-		`re-run the panel: mindspec panel create bead-127.2 --round <N+1> --spec <id> --target main --gate impl`,
+		`mindspec panel tally 'bead-127.2'   (after the Next steps above)`,
+		`mindspec panel tally <panel-slug>   (after the Next steps above)`,
+		`mindspec panel create 'demo' --gate 'adhoc' --target 'main' --round 2 --brief-file <absolute path>`,
+		`mindspec panel create 'demo' --spec '901-demo' --gate 'final_review' --target 'main' --round <N+1> --brief-file <absolute path>`,
+		`mindspec panel create 'demo' --spec '901-demo' --gate 'bead' --target 'bead/mindspec-ab01.2' --bead mindspec-ab01.2 --round 3 --brief-file <absolute path>`,
 	}
 	for _, r := range renderings {
 		if matches := FindFloorMatches(r); len(matches) > 0 {

@@ -368,10 +368,10 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 	},
 	{
 		File:       "cmd/mindspec/panel.go",
-		Func:       "tallyExitActionNonBead",
+		Func:       "tallyNextBlockExit",
 		Detail:     "arg1:unprovable",
-		Rationale:  "`\"re-run the panel: \" + cmd.String()`, where cmd is a strings.Builder assembled from this function's own `mindspec panel create %s --round <N+1>` template plus a recorded `--spec %s` for non-adhoc panels plus optional `--target %s`/`--gate %s` fragments — a mindspec verb, never git/bd/rm-led, but the Builder value itself is unresolved by this file's fold rules.",
-		Obligation: "registries_test.go's TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor checks representative renderings of this exact template shape.",
+		Rationale:  "`tallyRerunRecovery(f.Slug)`: the literal `mindspec panel tally ` plus the shell-quoted slug plus a literal note. A mindspec verb, never git/bd/rm-led, but this file's fold rules do not resolve the helper call.",
+		Obligation: "registries_test.go's TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor checks representative renderings of this recovery line and of the Next block create line.",
 	},
 
 	// The 38 entries below are new in bead-2's SECOND rework round (spec
@@ -448,7 +448,7 @@ var OpaqueOperandRegistry = []OpaqueOperandEntry{
 		File:       "cmd/mindspec/panel.go",
 		Func:       "tallyExitAction",
 		Detail:     "arg1:unprovable",
-		Rationale:  "Recovery uses mindspec panel create, complete, or next-action templates. Spec and bead operands use idrender; dynamic slug, target, and gate operands use shell quoting.",
+		Rationale:  "Recovery uses the mindspec next-action template on a kernel gate. The spec operand uses idrender.",
 		Obligation: mindspecVerbTemplateObligation,
 	},
 	{

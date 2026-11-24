@@ -34,6 +34,11 @@ func TestRuleTable_MinimumSet(t *testing.T) {
 		"lifecycle.no-probe-complete":        {[]string{"orchestrator"}, "advisory"},
 		"lifecycle.complete-by-orchestrator": {[]string{"implementer", "fixer"}, "submit"},
 		"sequence.bead-impl-prompt":          {[]string{"orchestrator"}, "advisory"},
+		"dispatch.fresh-agent":               {[]string{"orchestrator"}, "advisory"},
+		"decision.operator-answer":           {[]string{"orchestrator"}, "advisory"},
+		"loop.stop-on-failed-run":            {[]string{"orchestrator"}, "advisory"},
+		"readiness.not-ready-route":          {[]string{"orchestrator"}, "advisory"},
+		"panel.no-self-skip":                 {[]string{"orchestrator"}, "advisory"},
 	}
 	loaded, err := Load()
 	if err != nil {

@@ -505,8 +505,25 @@ func runEmitOnly(root, specFlag string, pick int, args []string) error {
 			// byte-identical, a malformed/hostile one is force-quoted.
 			return fmt.Errorf("fetching bead %s: %w", idrender.Bead(args[0]), err)
 		}
-		fmt.Println("emit-only: bead fetched by ID; readiness not checked.")
-		return emitOnlyPrimer(info)
+		// The read-only check of `bead ready-check` runs before any brief.
+		// An item that is not ready, or not plan-form, exits non-zero with
+		// that check's report and no brief.
+		if err := beadReadyCheckCmd.RunE(beadReadyCheckCmd, []string{info.ID}); err != nil {
+			var failure *guard.Failure
+			if errors.As(err, &failure) {
+				return err
+			}
+			return guard.NewFailure(err.Error(), "bd ready   (pick a listed plan item and re-run)")
+		}
+		review, err := renderReadinessReview(info)
+		if err != nil {
+			return err
+		}
+		if err := emitOnlyPrimer(info); err != nil {
+			return err
+		}
+		fmt.Print(review)
+		return nil
 	}
 
 	// Query ready work and select, via the SAME shared construction the
