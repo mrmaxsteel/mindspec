@@ -329,6 +329,7 @@ func (e *kernelE2E) passedRepanelThenCommit(first, second int, lensPassed bool) 
 	}
 	a3 := gate + ".a3"
 	e.absent(a3, "an ordinary commit gave a new gate before the judge")
+	e.judgeBriefRange(judges[0], accepted, later, "scoped.txt", "later.txt")
 	step, token, path := e.judgement("re-panel", second, func(j *kernel.Judgement) {
 		if j.OldSubject != accepted || j.NewSubject != later {
 			e.t.Fatalf("judge %s..%s, want %s..%s", j.OldSubject, j.NewSubject, accepted, later)
@@ -494,5 +495,43 @@ func TestS134E2E_CriterionNoJudgeAfterOpenRepanel(t *testing.T) {
 	e.noNewJudge(e.apply(), gate, "the round 2 tally")
 	if r := e.receipt(gate); r.Kind != "passed" || r.Subject != j {
 		t.Fatalf("gate receipt %+v, want passed on %s", r, j)
+	}
+}
+
+// judgeBriefRange runs the change judge's printed brief command through the
+// binary and checks that the brief starts at the accepted subject, ends at the
+// newest subject, and that its changed paths and diff hold every named file
+// changed since the accepted subject, with the other judge brief fields.
+func (e *kernelE2E) judgeBriefRange(judge kernel.Action, accepted, newest string, files ...string) {
+	e.t.Helper()
+	if len(judge.Brief) < 2 {
+		e.t.Fatalf("judge %s prints no brief command: %+v", judge.Step, judge)
+	}
+	body := e.ok(judge.Brief[1:]...)
+	want := []string{
+		"## change-judge\n",
+		"Step: " + judge.Step + "\n",
+		"Subject: " + newest + "\n",
+		"Accepted subject: " + accepted + "\n",
+		"New subject: " + newest + "\n",
+		"Slot ceiling: ",
+		"## Changed paths\n",
+		"## Diff\n",
+		"Diff text: ",
+		"Return carry-over with a reason, or re-panel with slot_count and paths covering every changed path.",
+	}
+	for _, f := range files {
+		want = append(want, "- Path: "+f+"\n")
+	}
+	for _, w := range want {
+		if !strings.Contains(body, w) {
+			e.t.Fatalf("judge brief lacks %q (accepted %s, newest %s):\n%s", w, accepted, newest, body)
+		}
+	}
+	_, diff, _ := strings.Cut(body, "Diff text: ")
+	for _, f := range files {
+		if !strings.Contains(diff, "b/"+f) {
+			e.t.Fatalf("judge brief diff lacks the change to %s (accepted %s, newest %s):\n%s", f, accepted, newest, body)
+		}
 	}
 }
