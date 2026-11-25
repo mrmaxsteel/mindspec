@@ -104,7 +104,9 @@ func refusedRound(s State) (Changes, error) {
 			continue
 		}
 		// A superseded slot cannot supply a refused tally on a later pass.
-		ready := len(round.Slots) > 0
+		// The step a verb omits is still open: its lineage head falls back to
+		// a closed predecessor, so its round is not complete in this pass.
+		ready := len(round.Slots) > 0 && !omitsRoundSlot(s, t.Gate, round.Round)
 		for _, slot := range round.Slots {
 			r, err := SlotLineageHead(s, slot)
 			ready = ready && err == nil && passed(s, r)
@@ -213,6 +215,15 @@ func refusedRound(s State) (Changes, error) {
 		}
 	}
 	return c, nil
+}
+
+// omitsRoundSlot reports whether the pass omits a slot step of the round.
+func omitsRoundSlot(s State, gate string, round int) bool {
+	if s.ExcludedStep == nil {
+		return false
+	}
+	t, has, err := s.ExcludedStep.Tuple()
+	return err == nil && has && t.Kind == "review-slot" && t.Gate == gate && t.Round == round
 }
 
 func retireVerify(s State, id string) []Write {

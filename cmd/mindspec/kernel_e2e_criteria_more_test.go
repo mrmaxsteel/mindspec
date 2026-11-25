@@ -111,8 +111,9 @@ func kernelE2ECrashBinary(t *testing.T) string {
 }
 
 // submitAttempt leases one slot attempt and submits the word for it from a
-// verdict file named for the attempt, so a repeated word is a new file.
-func (e *kernelE2E) submitAttempt(a kernel.Action, word string) {
+// verdict file named for the attempt, so a repeated word is a new file. It
+// returns the submit output.
+func (e *kernelE2E) submitAttempt(a kernel.Action, word string) string {
 	e.t.Helper()
 	token := e.lease(a.Step)
 	r := e.row(a.Step)
@@ -134,7 +135,7 @@ func (e *kernelE2E) submitAttempt(a kernel.Action, word string) {
 	}
 	path := filepath.Join(".mindspec/specs", e.f.SpecID, "reviews", reg.Slug, fmt.Sprintf("verdict-%d-%s-%s.json", a.Round, v.Slot, a.Step[strings.LastIndex(a.Step, ".")+1:]))
 	e.commit(e.proof, path, string(paneltest.Bytes(e.t, v)))
-	e.ok("submit", a.Step, "--lease", token, "--artifact", filepath.Join(e.proof, path))
+	return e.ok("submit", a.Step, "--lease", token, "--artifact", filepath.Join(e.proof, path))
 }
 
 // refusedRound implements the first item and submits the words for its three
@@ -264,17 +265,20 @@ func TestS134E2E_CriterionMalformedVerifyRecords(t *testing.T) {
 	}
 }
 
-// AC19: slot R1 VOID on attempts 1, 2 and 3, with R2 and R3 APPROVE, gives
-// no verify and the next attempt after each VOID, then one uncounted-slot
-// decision that lists R1 at attempt 3 and no counted slot. Redispatch gives
-// attempt 4 of R1 alone; VOID on it gives attempt 5, not a decision; APPROVE on
-// attempt 5 closes the gate passed.
+// AC19: slots R1 and R2 VOID on attempts 1, 2 and 3, with R3 APPROVE, give
+// no verify and the next attempt of both slots after each VOID pair, then one
+// uncounted-slot decision that lists R1 and R2 at attempt 3 and no counted
+// slot. Each printed slot step is leased by its submit; while the decision is
+// open, no slot, verify or fix step is printed. Redispatch gives
+// attempt 4 of both; VOID on both gives attempt 5 of both, not a decision;
+// APPROVE on attempt 5 closes the gate passed. Each pair is submitted with no
+// pass between the two submits, so the submit pre-pass runs between them.
 func TestS134E2E_CriterionVoidAttemptsAndUncountedDecision(t *testing.T) {
 	t.Parallel()
 	e := newKernelE2E(t, kernelE2EBinary(t), 1)
 	gate := e.f.Items[0] + ".review"
-	e.refusedRound("VOID", "APPROVE", "APPROVE")
-	only := func(want string) kernel.Action {
+	e.refusedRound("VOID", "VOID", "APPROVE")
+	pair := func(attempt int) []kernel.Action {
 		t.Helper()
 		out := e.apply()
 		var slots []kernel.Action
@@ -286,15 +290,30 @@ func TestS134E2E_CriterionVoidAttemptsAndUncountedDecision(t *testing.T) {
 				slots = append(slots, a)
 			}
 		}
-		if len(slots) != 1 || slots[0].Step != want || len(out.Decisions) != 0 {
-			t.Fatalf("pass %+v, want only the slot attempt %s", out, want)
+		want := []string{fmt.Sprintf("%s.r1.R1.a%d", gate, attempt), fmt.Sprintf("%s.r1.R2.a%d", gate, attempt)}
+		if len(slots) != 2 || slots[0].Step != want[0] || slots[1].Step != want[1] || len(out.Decisions) != 0 {
+			t.Fatalf("pass %+v, want only the slot attempts %v", out, want)
 		}
-		return slots[0]
+		return slots
 	}
-	e.submitAttempt(only(gate+".r1.R1.a2"), "VOID")
-	e.submitAttempt(only(gate+".r1.R1.a3"), "VOID")
-	out := e.apply()
+	submitPair := func(slots []kernel.Action, word string) kernel.Output {
+		t.Helper()
+		var raw string
+		for _, a := range slots {
+			raw = e.submitAttempt(a, word)
+		}
+		var out kernel.Output
+		e.must(json.Unmarshal([]byte(strings.Split(raw, "\n")[0]), &out))
+		return out
+	}
+	submitPair(pair(2), "VOID")
+	opened := submitPair(pair(3), "VOID")
 	decision := gate + ".decide.uncounted.r1"
+	// The output that opens the decision lists it.
+	if len(opened.Decisions) != 1 || opened.Decisions[0].Step != decision {
+		t.Fatalf("the submit that opened the decision does not list it: %+v", opened)
+	}
+	out := e.apply()
 	for _, a := range out.Actions {
 		if a.Kind == "review-slot" || a.Kind == "verify" || a.Kind == "fix" {
 			t.Fatalf("attempt 3 VOID gave %s, want only the decision: %+v", a.Step, out)
@@ -305,13 +324,15 @@ func TestS134E2E_CriterionVoidAttemptsAndUncountedDecision(t *testing.T) {
 	}
 	record, _, err := kernel.Decode[kernel.DecisionRecord](e.row(decision).Metadata, kernel.KeyDecision)
 	e.must(err)
-	if len(record.Slots) != 1 || record.Slots[0].Slot != "R1" || record.Slots[0].Attempt != 3 {
-		t.Fatalf("decision slots %+v, want R1 at attempt 3 only", record.Slots)
+	if len(record.Slots) != 2 || record.Slots[0] != (kernel.DecisionSlot{Slot: "R1", Attempt: 3}) || record.Slots[1] != (kernel.DecisionSlot{Slot: "R2", Attempt: 3}) {
+		t.Fatalf("decision slots %+v, want R1 and R2 at attempt 3", record.Slots)
 	}
 	e.ok("submit", decision, "--answer", "redispatch")
-	e.submitAttempt(only(gate+".r1.R1.a4"), "VOID")
-	e.submitAttempt(only(gate+".r1.R1.a5"), "APPROVE")
-	e.apply()
+	submitPair(pair(4), "VOID")
+	submitPair(pair(5), "APPROVE")
+	if out := e.apply(); len(out.Decisions) != 0 {
+		t.Fatalf("a reset count gave a decision: %+v", out)
+	}
 	if r := e.receipt(gate); r.Kind != "passed" {
 		t.Fatalf("gate receipt %+v, want passed", r)
 	}

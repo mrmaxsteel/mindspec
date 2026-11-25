@@ -18,7 +18,7 @@ This skill leases the fix step, starts one fresh agent with that brief and submi
 When the user starts this skill for a panel, run `mindspec panel tally <panel-slug>`.
 
 - It exits non-zero and prints no `decision:` line: report the error to the user and stop.
-- It prints a `Next` block: run the lines of that block, then stop. Do not run `next-action --apply`.
+- It prints a `Next` block: run the lines of that block above `For the operator, run one of these:`, then stop. Do not run `next-action --apply`.
 - It prints no `Next` block, which only a kernel gate does: go to the loop.
 
 ## Loop

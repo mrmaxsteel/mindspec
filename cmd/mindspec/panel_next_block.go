@@ -91,7 +91,11 @@ func newNextBlockOperands(f tallyRecoveryFacts) nextBlockOperands {
 		o.spec = shellQuoteTarget(idrender.Spec(f.SpecID))
 	}
 	if f.BeadID != "" {
+		// A valid id prints bare; a rendered id is quoted for the shell.
 		o.bead = idrender.Bead(f.BeadID)
+		if o.bead != f.BeadID {
+			o.bead = shellQuoteTarget(o.bead)
+		}
 		if o.gate == "" {
 			o.gate = "bead"
 		}

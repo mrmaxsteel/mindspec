@@ -422,8 +422,11 @@ func TestS134E2E_AdhocGateOnEnrolledSpec(t *testing.T) {
 			p.run(e.cwd, argv...)
 		case strings.Contains(action, "run the lines of that block"):
 			for _, line := range tallyNextBlock(pass) {
+				if line == "For the operator, run one of these:" {
+					break
+				}
 				i := strings.Index(line, "mindspec ")
-				if i < 0 || strings.Contains(line[:i], "operator") {
+				if i < 0 {
 					continue
 				}
 				command := line[i:]

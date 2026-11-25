@@ -22,7 +22,7 @@ uses no extra round.
 
 Run `mindspec setup <agent>` after an upgrade. Setup refreshes unchanged shipped
 skills. It keeps user edits and reports them. Setup adds required Beads types
-and keeps existing custom types. Plans approved before enrollment was available
+and keeps existing custom types. Plans approved before enrolment was available
 finish through the existing lifecycle commands. They are not enrolled by a read
 or by a repeated plan approval.
 
@@ -32,7 +32,7 @@ The loop skills are thin adapters. They run the commands that the binary prints.
 The binary selects the work, checks each gate and writes each brief.
 
 1. Inspect with `mindspec next-action <spec> --json`. This command writes nothing.
-2. Run `mindspec next-action --apply <spec> --json` to create authorized steps.
+2. Run `mindspec next-action --apply <spec> --json` to create authorised steps.
 3. Read `actions`, `run`, `waiting`, `decisions`, `flags` and `status`.
 4. Run each action's `claim` argv. `mindspec lease <step>` prints a token once.
 5. Run each action's `brief` argv. Give its output to a fresh agent as the prompt.
@@ -105,11 +105,11 @@ A missing artifact, stale subject or invalid token leaves the step open.
 
 After a passing gate's subject changes, an actor judges the change. It can record
 `carry-over` with a reason or request `re-panel` with paths and a slot count.
-The binary checks the judgment and returns the authorized next commands.
+The binary checks the judgement and returns the authorised next commands.
 
 ## Run a panel outside the kernel
 
-A plan approved before enrollment, and an adhoc panel, use `mindspec panel tally`.
+A plan approved before enrolment, and an adhoc panel, use `mindspec panel tally`.
 On such a gate, the tally prints a `Next` block. Run its lines in order.
 
 - A pass prints the next lifecycle command, for example `mindspec complete <bead>`.

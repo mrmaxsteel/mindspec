@@ -170,7 +170,7 @@ func TestS134Skills_CycleContract(t *testing.T) {
 var s134CycleSequence = []string{
 	"run `mindspec panel tally <panel-slug>`.",
 	"prints no `decision:` line: report the error to the user and stop.",
-	"It prints a `Next` block: run the lines of that block, then stop. Do not run `next-action --apply`.",
+	"It prints a `Next` block: run the lines of that block above `For the operator, run one of these:`, then stop. Do not run `next-action --apply`.",
 	"It prints no `Next` block, which only a kernel gate does: go to the loop.",
 	"1. Run `mindspec next-action --apply <spec-slug> --json`.",
 	"If it refuses, run the commands that the refusal and `mindspec instruct` print.",

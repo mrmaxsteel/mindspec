@@ -98,16 +98,11 @@ func TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation(t *testing.
 // sees them fail loudly if a future edit to the slice's structure
 // (e.g. renaming the seed-only surface, or a leftover orchestrator
 // entry surviving the exit) silently changes what "live" means.
-// wantKnownSitesLiveCount is the ONE hand-typed number this sentinel
-// pins (bead-7 fix round 1, G1's brief-error correction): eight
-// Background-cited entries plus two background-justified widening
-// entries (spec.md R5(c)), with the four seed-only orchestrator-block
-// entries already exited by bead 7 — so live and total coincide.
-// Declared once and read three times below, rather than re-typed at
-// each assertion, so the three checks cannot silently drift apart from
-// one another even though the underlying "10" is still, unavoidably,
-// a hand-pinned sentinel value (that's what a sentinel is). The six
-// ms-bead-cycle entries left when that skill became a harness adapter.
+// wantKnownSitesLiveCount is the one hand-typed number this sentinel
+// pins: the entries of KnownSitesExemptionList that are live. Every entry
+// is live, so the live count and the total count are the same. It is
+// declared once and read three times below, so the three checks cannot
+// drift apart from one another.
 const wantKnownSitesLiveCount = 5
 
 func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
@@ -129,7 +124,7 @@ func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
 // orchestrator-block entry (or a reintroduced one) ever exists in
 // KnownSitesExemptionList, this REDs — independent of the derived
 // count sentinel above, so a future edit that removes one seed-only
-// entry AND adds one unrelated live one (keeping len() at 10 by
+// entry AND adds one unrelated live one (keeping len() the same by
 // coincidence) is still caught.
 func TestKnownSitesExemptionList_NoOrchestratorSeedSurvives(t *testing.T) {
 	for _, e := range KnownSitesExemptionList {
