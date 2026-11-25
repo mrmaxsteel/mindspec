@@ -228,7 +228,11 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 		}
 		step = head.Key()
 		if token == "" {
-			return guard.NewFailure("--lease is required for this slot", "mindspec lease "+step)
+			argv := "mindspec panel submit --file -"
+			if file != "-" {
+				argv = "mindspec panel submit --file " + shellQuoteTarget(file)
+			}
+			return guard.NewFailure("--lease is required for this slot", argv+" --lease <token> (the token that mindspec lease "+shellQuoteTarget(step)+" printed)")
 		}
 		if file == "-" {
 			return panelVerbFailure(fmt.Errorf("use a committed verdict file for this slot"))

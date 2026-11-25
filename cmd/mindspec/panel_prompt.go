@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/rules"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -157,6 +158,21 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 			}
 		}
 	}
+	if p.Gate == "bead" || p.Gate == "final_review" {
+		// A prompt is read-only. Without a kernel state it keeps the panel command.
+		if state, err := panelKernelStateFn(root, p.Spec); err == nil && state != nil {
+			if step, err := kernelSlotStep(*state, p, slotID); err == nil {
+				in.LeaseStep = step
+				spec := ""
+				if p.Spec != "" {
+					spec = " --spec " + shellQuoteTarget(p.Spec)
+				}
+				target := shellQuoteTarget(reg.Slug()) + spec + " --slot " + shellQuoteTarget(slotID)
+				in.Checkout = "mindspec panel checkout " + target + " --dispatch"
+				in.Prompt = "mindspec panel prompt " + target
+			}
+		}
+	}
 	if p.Orchestrated {
 		in.DurablePrior = true
 		return in, nil
@@ -169,4 +185,24 @@ func init() {
 	panelPromptCmd.Flags().String("slot", "", "Roster slot to review")
 	panelPromptCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
 	panelCmd.AddCommand(panelPromptCmd)
+}
+
+// kernelSlotStep returns the current kernel step of a roster slot.
+func kernelSlotStep(state kernel.State, p panel.Panel, slot string) (string, error) {
+	index := -1
+	for i, reviewer := range p.Roster {
+		if reviewer.Slot == slot {
+			index = i
+			break
+		}
+	}
+	if index < 0 || slot != fmt.Sprintf("R%d", index+1) {
+		return "", guard.NewFailure("slot identity differs from its roster position", "select a slot from the panel roster")
+	}
+	gate := kernelPanelGate(state, p)
+	head, err := kernel.SlotLineageHead(state, fmt.Sprintf("%s.r%d.R%d", gateBase(state, gate), p.Round, index+1))
+	if err != nil {
+		return "", err
+	}
+	return head.Key(), nil
 }

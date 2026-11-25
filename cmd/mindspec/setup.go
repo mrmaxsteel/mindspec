@@ -6,16 +6,20 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/setup"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
 var setupCmd = &cobra.Command{
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := os.Getwd()
+		cwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
+		// bd reads the beads config of a linked worktree from the main
+		// repository, so setup writes that copy.
+		root := workspace.MainWorktreeRoot(cwd)
 		if !bead.HasBeadsDir(root) {
 			return cmd.Help()
 		}

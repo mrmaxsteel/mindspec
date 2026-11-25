@@ -336,3 +336,19 @@ func TestPanelPrompt_UnfilledBriefRecovery(t *testing.T) {
 		t.Fatalf("brief recovery crossed the command floor: %+v", matches)
 	}
 }
+
+// A kernel slot prompt prints the leased submit command, or the exact attempt
+// and prompt commands when the slot has no attempt.
+func TestPanelPrompt_KernelSlotCommands(t *testing.T) {
+	slotDir := filepath.Join(t.TempDir(), "R1")
+	out := panel.RenderSlotPrompt(panel.PromptInput{Kind: "harness", SlotDir: slotDir, Attempt: 2, LeaseStep: "kernel-1.1.review.r1.R1"})
+	want := "Submit the verdict JSON through this command:\nmindspec panel submit --file '" + filepath.Join(slotDir, "attempt-2", "verdict.json") + "' --lease <token>\nReplace <token> with the token that mindspec lease 'kernel-1.1.review.r1.R1' printed.\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("leased submit command missing:\n%s\nwant:\n%s", out, want)
+	}
+	out = panel.RenderSlotPrompt(panel.PromptInput{Kind: "harness", SlotDir: slotDir, LeaseStep: "kernel-1.1.review.r1.R1", Checkout: "mindspec panel checkout 'p' --spec 'test' --slot 'R1' --dispatch", Prompt: "mindspec panel prompt 'p' --spec 'test' --slot 'R1'"})
+	want = "Make the slot attempt through this command:\nmindspec panel checkout 'p' --spec 'test' --slot 'R1' --dispatch\nThen run this command for the submission command:\nmindspec panel prompt 'p' --spec 'test' --slot 'R1'\n"
+	if !strings.Contains(out, want) || strings.Contains(out, "Use mindspec panel checkout with --slot") {
+		t.Fatalf("attempt commands missing:\n%s\nwant:\n%s", out, want)
+	}
+}

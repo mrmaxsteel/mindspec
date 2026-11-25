@@ -277,29 +277,39 @@ func RegisteredPanelPaths(s State, gate string) []string {
 			continue
 		}
 		reg, ok, err := Decode[RegistrationRecord](s.Records[id].Metadata, KeyRegistration)
-		if err != nil || !ok || reg.Slug == "" || reg.Slug == "." || reg.Slug == ".." || filepath.Base(reg.Slug) != reg.Slug {
+		if err != nil || !ok {
 			continue
 		}
-		dirs := reg.Directories
-		if len(dirs) == 0 {
-			if rel, ok := lexicalPanelPath(s, filepath.Join(s.SpecDir, "reviews", reg.Slug)); ok {
-				paths = append(paths, filepath.ToSlash(rel)+"/")
-			}
+		paths = append(paths, registrationPaths(s, reg)...)
+	}
+	return paths
+}
+
+// registrationPaths returns the repository-relative directories of one registration.
+func registrationPaths(s State, reg RegistrationRecord) []string {
+	paths := []string{}
+	if reg.Slug == "" || reg.Slug == "." || reg.Slug == ".." || filepath.Base(reg.Slug) != reg.Slug {
+		return paths
+	}
+	dirs := reg.Directories
+	if len(dirs) == 0 {
+		if rel, ok := lexicalPanelPath(s, filepath.Join(s.SpecDir, "reviews", reg.Slug)); ok {
+			paths = append(paths, filepath.ToSlash(rel)+"/")
+		}
+		return paths
+	}
+	for _, dir := range dirs {
+		if dir == "." || filepath.IsAbs(dir) || filepath.ToSlash(filepath.Clean(dir)) != dir || dir == ".." || strings.HasPrefix(dir, "../") {
 			continue
 		}
-		for _, dir := range dirs {
-			if dir == "." || filepath.IsAbs(dir) || filepath.ToSlash(filepath.Clean(dir)) != dir || dir == ".." || strings.HasPrefix(dir, "../") {
-				continue
+		root := s.Root
+		if specRoot, ok := specPanelRoot(s); ok {
+			if specRel, err := filepath.Rel(specRoot, s.SpecDir); err == nil && strings.HasPrefix(dir, filepath.ToSlash(specRel)+"/") {
+				root = specRoot
 			}
-			root := s.Root
-			if specRoot, ok := specPanelRoot(s); ok {
-				if specRel, err := filepath.Rel(specRoot, s.SpecDir); err == nil && strings.HasPrefix(dir, filepath.ToSlash(specRel)+"/") {
-					root = specRoot
-				}
-			}
-			if rel, ok := lexicalPanelPath(s, filepath.Join(root, filepath.FromSlash(dir))); ok {
-				paths = append(paths, filepath.ToSlash(rel)+"/")
-			}
+		}
+		if rel, ok := lexicalPanelPath(s, filepath.Join(root, filepath.FromSlash(dir))); ok {
+			paths = append(paths, filepath.ToSlash(rel)+"/")
 		}
 	}
 	return paths

@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"github.com/mrmaxsteel/mindspec/internal/rules"
 )
 
@@ -124,7 +125,8 @@ func (p *printedLoop) act(a kernel.Action, verdict func(kernel.Action) string) {
 		if !strings.Contains(brief, a.Subject.Commit) {
 			p.t.Fatalf("slot brief lacks its subject %s: %s", a.Subject.Commit, brief)
 		}
-		fill["<path>"] = p.verdict(a, verdict(a))
+		p.slot(a, brief, verdict(a), fill)
+		return
 	case "lens":
 		path := p.recordPath(brief)
 		record := kernel.LensRecord{Step: a.Step, Lenses: []kernel.SlotLens{}}
@@ -150,6 +152,93 @@ func (p *printedLoop) act(a kernel.Action, verdict func(kernel.Action) string) {
 		p.t.Fatalf("unexpected actor %s: %+v", a.Kind, a)
 	}
 	p.submit(a, fill)
+}
+
+// printedLine returns the line after the label line in a printed text.
+func printedLine(text, label string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if line == label && i+1 < len(lines) {
+			return lines[i+1]
+		}
+	}
+	return ""
+}
+
+// shellWords splits a printed command line with single-quoted words.
+func shellWords(t *testing.T, line string) []string {
+	t.Helper()
+	var words []string
+	var word strings.Builder
+	in, quoted := false, false
+	for i := 0; i < len(line); i++ {
+		switch c := line[i]; {
+		case c == '\'':
+			in, quoted = !in, true
+		case c == ' ' && !in:
+			if word.Len() > 0 || quoted {
+				words = append(words, word.String())
+			}
+			word.Reset()
+			quoted = false
+		case c == '\\' && !in && i+1 < len(line):
+			i++
+			word.WriteByte(line[i])
+		default:
+			word.WriteByte(c)
+		}
+	}
+	if in {
+		t.Fatalf("unclosed quote in printed command: %q", line)
+	}
+	if word.Len() > 0 || quoted {
+		words = append(words, word.String())
+	}
+	return words
+}
+
+// slot runs only the commands that the slot prompt prints: the attempt
+// command when the slot has no attempt, then the submit command. The verdict
+// goes to the path that the submit command names. No commit is made by hand.
+func (p *printedLoop) slot(a kernel.Action, prompt, word string, fill map[string]string) {
+	p.t.Helper()
+	run := func(line string) string {
+		argv := shellWords(p.t, line)
+		p.printed[strings.Join(argv, "\x00")] = true
+		return p.do(argv, fill)
+	}
+	if checkout := printedLine(prompt, "Make the slot attempt through this command:"); checkout != "" {
+		run(checkout)
+		prompt = run(printedLine(prompt, "Then run this command for the submission command:"))
+	}
+	line := printedLine(prompt, "Submit the verdict JSON through this command:")
+	argv := shellWords(p.t, line)
+	if len(argv) != 7 || strings.Join(argv[:4], " ") != "mindspec panel submit --file" || argv[5] != "--lease" || argv[6] != "<token>" {
+		p.t.Fatalf("slot prompt prints no leased submit command: %q\n%s", line, prompt)
+	}
+	tuple, _, err := p.row(a.Step).Tuple()
+	p.must(err)
+	v := paneltest.Verdict(word)
+	v.Slot = fmt.Sprintf("R%d", tuple.Slot)
+	v.Round = a.Round
+	v.ReviewedSHA = a.Subject.Commit
+	v.Model = "test-model"
+	p.must(os.WriteFile(argv[4], paneltest.Bytes(p.t, v), 0600))
+	if !strings.Contains(prompt, "Replace <token> with the token that mindspec lease '"+a.Step+"' printed.") {
+		p.t.Fatalf("slot prompt does not name the lease step %s:\n%s", a.Step, prompt)
+	}
+	if p.kinds["review-slot"] == 1 {
+		// Without the token the refusal prints the submit command to run.
+		out, code := p.run(argv[1:5]...)
+		want := "\nrecovery: mindspec panel submit --file '" + argv[4] + "' --lease <token> (the token that mindspec lease '" + a.Step + "' printed)"
+		if code == 0 || !strings.HasSuffix(strings.TrimRight(out, "\n"), want) || strings.Count(out, "recovery:") != 1 {
+			p.t.Fatalf("submit without a token: exit %d\n%s\nwant suffix %q", code, out, want)
+		}
+	}
+	run(line)
+	if status := p.row(a.Step).Status; status != "closed" {
+		p.t.Fatalf("printed slot submit left %s %s", a.Step, status)
+	}
 }
 
 // lensSlots names the non-adversarial slots of the round that the lens step drafts.
@@ -222,6 +311,12 @@ func (p *printedLoop) drive(verdict func(kernel.Action) string) []string {
 func TestS134E2E_PrintedCommandLoop(t *testing.T) {
 	t.Parallel()
 	p := newPrintedLoop(newKernelE2EWithPlan(t, kernelE2EBinary(t), kerneltest.EmptyRepo(t), ".mindspec", kernelE2EConfig, readyPlan, 1))
+	// A set-up repository ignores the panel isolation root, where slot attempts live.
+	exclude, err := os.ReadFile(filepath.Join(p.f.Root, ".git", "info", "exclude"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	p.write(p.f.Root, ".git/info/exclude", string(exclude)+"\n.mindspec-scratch\n")
 	item := p.f.Items[0]
 	refused := false
 	ran := p.drive(func(a kernel.Action) string {

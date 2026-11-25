@@ -116,6 +116,16 @@ func resolveWorktreeRoot(dir string) string {
 	return ""
 }
 
+// MainWorktreeRoot returns the main repository root when dir is a linked git
+// worktree, and dir otherwise. bd finds the beads directory of a linked
+// worktree in the main repository through the git common directory.
+func MainWorktreeRoot(dir string) string {
+	if resolved := resolveWorktreeRoot(dir); resolved != "" {
+		return resolved
+	}
+	return dir
+}
+
 // FindLocalRoot walks up from startDir looking for .mindspec/ or .git at each level.
 // Unlike FindRoot, it does NOT resolve worktrees back to the main repo.
 // When CWD is inside a worktree, this returns the worktree directory itself.

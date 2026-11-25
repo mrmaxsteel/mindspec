@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
@@ -159,7 +160,13 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 			if recordKind(tuple.Kind) {
 				receipt = Receipt{Kind: "passed", RecordSHA256: recordDigest([]byte(record))}
 			} else {
-				receipt, err = resolveArtifact(s, options)
+				evidence := options
+				if tuple.Kind == "review-slot" && options.Artifact != "" {
+					if evidence, err = slotEvidence(s, r, tuple, options); err != nil {
+						return err
+					}
+				}
+				receipt, err = resolveArtifact(s, evidence)
 				if err != nil {
 					return err
 				}
@@ -691,7 +698,11 @@ func checkVerdict(s State, r Record, receipt Receipt) error {
 		return err
 	}
 	if exists && !registeredPanelArtifact(s, t.Gate, receipt.Path) {
-		return actorFailure("verdict must be in its registered panel directory")
+		message := "verdict must be in its registered panel directory"
+		if path, err := slotVerdictPath(s, t); err == nil {
+			message += ": " + termsafe.Escape(path)
+		}
+		return termsafe.NewFailure(message, slotRecovery(s, t))
 	}
 	return nil
 }

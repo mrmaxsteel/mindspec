@@ -385,7 +385,9 @@ fi`)
 				kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "panel", Round: 1, Subject: subject, Slots: []string{"R1", "R2"}})
 				actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
 				options = kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: "verdict.json"}
-				message = "verdict must be in its registered panel directory"
+				// The refusal names the registered path and the command that prints the submit command.
+				message = "verdict must be in its registered panel directory: .mindspec/specs/" + f.SpecID + "/reviews/panel/R1-round-1.json"
+				recovery = "mindspec panel prompt 'panel' --slot R1 --spec '" + f.SpecID + "', then write the verdict to the path it names and run the submit command it prints"
 			case "SlotLineageRoot":
 				var subject string
 				f, id, lease, subject = slotFixture(t)

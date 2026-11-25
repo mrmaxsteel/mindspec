@@ -29,6 +29,11 @@ type PromptInput struct {
 	Attempt      int
 	PriorItems   PriorItemsResult
 	DurablePrior bool
+	// LeaseStep is the kernel step of a slot that needs a lease token.
+	// Checkout and Prompt are the exact commands for that slot.
+	LeaseStep string
+	Checkout  string
+	Prompt    string
 }
 
 // PriorItemsResult holds verified items or a warning about unavailable evidence.
@@ -74,8 +79,16 @@ func RenderSlotPrompt(in PromptInput) string {
 			b.WriteString("Cannot render the submission command: the verdict path contains a non-printable character or invalid UTF-8.\n")
 		} else {
 			b.WriteString("Submit the verdict JSON through this command:\n")
-			b.WriteString("mindspec panel submit --file " + promptShellQuote(verdictPath) + "\n")
+			if in.LeaseStep != "" {
+				b.WriteString("mindspec panel submit --file " + promptShellQuote(verdictPath) + " --lease <token>\n")
+				b.WriteString("Replace <token> with the token that mindspec lease " + promptShellQuote(termsafe.Escape(in.LeaseStep)) + " printed.\n")
+			} else {
+				b.WriteString("mindspec panel submit --file " + promptShellQuote(verdictPath) + "\n")
+			}
 		}
+	} else if in.Checkout != "" && in.Prompt != "" {
+		b.WriteString("Make the slot attempt through this command:\n" + termsafe.Escape(in.Checkout) + "\n")
+		b.WriteString("Then run this command for the submission command:\n" + termsafe.Escape(in.Prompt) + "\n")
 	} else {
 		b.WriteString("Use mindspec panel checkout with --slot and --dispatch. Then run mindspec panel prompt again for the submission command.\n")
 	}
