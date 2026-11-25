@@ -314,11 +314,11 @@ blocks Y" = Y waits for X.
   restored), retires the verify, opens one `.verify.a2` on S, and an all-`refuted` a2 authorises round 2 again on S, with
   the latest judgement's slot count and scope and a fresh lens attempt; the gate stays open until that round passes
   (mutation: the gate closes after a2). After a passed-gate `re-panel` and before `panel create`, an ordinary commit:
-  the pass closes `<2>.review.a2` and its lens step `superseded` and creates a judge on the newest commit whose brief
-  diff starts at the accepted subject; no full round is authorised; its `re-panel` creates `<2>.review.a3` and the lens
-  step `.a2`, which `mindspec_round.lens` names. When the lens step of `<2>.review.a2` had closed `passed`, it keeps
-  its receipt and is retired the same way; a `re-panel` with another slot count gives a lens attempt with that count's
-  entries. No judge follows a closed judgement, on each loop path: after a
+  the pass creates a judge on the newest commit whose brief diff starts at the accepted subject, authorises no full
+  round, and leaves `<2>.review.a2` and its lens step as they are; when that judge's `re-panel` is applied, the pass
+  closes `<2>.review.a2` and an open lens step `superseded` (a passed lens step keeps its receipt and is retired), and
+  creates `<2>.review.a3` and the lens step `.a2`, which `mindspec_round.lens` names; a `re-panel` with another slot
+  count gives a lens attempt with that count's entries. No judge follows a closed judgement, on each loop path: after a
   passed-gate `re-panel`, the scoped round's authorisation, its passing tally and `complete 2` create no judge; on an
   open gate, a refused tally on a moved subject creates the judge and no verify until it closes; after its `re-panel`,
   the verify retally with no reproduced return, the scoped round 2's authorisation and its tally create no judge.

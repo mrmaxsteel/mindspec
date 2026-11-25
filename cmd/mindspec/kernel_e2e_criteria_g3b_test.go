@@ -259,12 +259,13 @@ func (e *kernelE2E) lensAction(out kernel.Output) kernel.Action {
 // passedRepanelThenCommit passes the first gate, commits, judges a re-panel of
 // first slots, and, when lensPassed, closes its lens step. Then an ordinary
 // commit before panel create: the pass authorises no review slot or panel
-// create and opens a judge on the newest commit whose old subject is the
-// accepted subject. The judge's re-panel of second slots closes the a2 gate
-// superseded, retires an open lens step superseded and keeps a passed lens
-// receipt, and creates the a3 gate and lens attempt a2, which its round
-// names; the lens accepts only the entries of second slots. It returns the
-// a3 gate.
+// create, opens exactly one judge, on the newest commit, whose old subject is
+// the accepted subject, and leaves the a2 gate and its lens step as they are.
+// The pass that applies the judge's re-panel of second slots closes the a2
+// gate superseded, closes an open lens step superseded or keeps the receipt
+// of a passed one and retires it, and creates the a3 gate and lens attempt
+// a2, which its round names; the lens accepts only the entries of second
+// slots. It returns the a3 gate.
 func (e *kernelE2E) passedRepanelThenCommit(first, second int, lensPassed bool) string {
 	e.t.Helper()
 	item := e.f.Items[0]
@@ -288,22 +289,44 @@ func (e *kernelE2E) passedRepanelThenCommit(first, second int, lensPassed bool) 
 	}
 	later := e.commit(e.tree(item), "later.txt", "later\n")
 	out := e.apply()
-	judged := false
+	var judges []kernel.Action
 	for _, a := range out.Actions {
 		if a.Kind == "review-slot" {
 			e.t.Fatalf("an ordinary commit authorised a round: %+v", out)
 		}
-		judged = judged || a.Kind == "change-judge" && a.Subject.Commit == later
+		if a.Kind == "change-judge" {
+			judges = append(judges, a)
+		}
 	}
 	for _, r := range out.Run {
 		if len(r.Argv) > 2 && r.Argv[1] == "panel" {
 			e.t.Fatalf("an ordinary commit authorised a round: %+v", out)
 		}
 	}
-	if !judged {
-		e.t.Fatalf("no judge on the newest commit %s: %+v", later, out)
+	if len(judges) != 1 || judges[0].Subject.Commit != later {
+		e.t.Fatalf("judges %+v, want exactly one on the newest commit %s: %+v", judges, later, out)
 	}
-	e.t.Logf("after the commit pass: %s is %s, lens %s is %s", a2, e.row(a2).Status, lens.Step, e.row(lens.Step).Status)
+	var open []string
+	for id, r := range e.f.State().Records {
+		if t, _, err := r.Tuple(); err == nil && t.Kind == "change-judge" && r.Status != "closed" {
+			open = append(open, id)
+		}
+	}
+	if len(open) != 1 || open[0] != judges[0].Step {
+		e.t.Fatalf("open judges %v, want only %s", open, judges[0].Step)
+	}
+	// The commit pass leaves the scoped round as it is: the judge rules first.
+	e.unclosed(a2, "the commit pass")
+	if r := e.gateRound(a2); r.Lens != lens.Step || r.SlotCount != first {
+		e.t.Fatalf("after the commit pass, %s round %+v, want lens %s and %d slots", a2, r, lens.Step, first)
+	}
+	if lensPassed {
+		if r := e.receipt(lens.Step); r.Kind != "passed" {
+			e.t.Fatalf("after the commit pass, lens %s receipt %+v, want passed", lens.Step, r)
+		}
+	} else {
+		e.unclosed(lens.Step, "the commit pass")
+	}
 	a3 := gate + ".a3"
 	e.absent(a3, "an ordinary commit gave a new gate before the judge")
 	step, token, path := e.judgement("re-panel", second, func(j *kernel.Judgement) {
@@ -312,7 +335,7 @@ func (e *kernelE2E) passedRepanelThenCommit(first, second int, lensPassed bool) 
 		}
 	})
 	e.ok("submit", step, "--lease", token, "--record", path)
-	next := e.lensAction(e.apply())
+	// The pass that applies the re-panel retires the scoped round.
 	if r := e.receipt(a2); r.Kind != "superseded" {
 		e.t.Fatalf("%s receipt %+v, want superseded", a2, r)
 	}
@@ -324,6 +347,12 @@ func (e *kernelE2E) passedRepanelThenCommit(first, second int, lensPassed bool) 
 		e.t.Fatalf("lens %s receipt %+v, want %s", lens.Step, r, want)
 	}
 	round := e.gateRound(a3)
+	if round.Lens != lens.Step+".a2" || round.SlotCount != second {
+		e.t.Fatalf("when the re-panel is applied, %s round %+v, want lens %s.a2 and %d slots", a3, round, lens.Step, second)
+	}
+	e.unclosed(round.Lens, "the re-panel pass")
+	next := e.lensAction(e.apply())
+	round = e.gateRound(a3)
 	if next.Step != lens.Step+".a2" || round.Lens != next.Step || round.SlotCount != second {
 		e.t.Fatalf("lens %s, round %+v, want lens %s.a2 named by a round of %d slots", next.Step, round, lens.Step, second)
 	}
@@ -346,10 +375,11 @@ func (e *kernelE2E) passedRepanelThenCommit(first, second int, lensPassed bool) 
 }
 
 // AC20: after a passed-gate re-panel and before panel create, an ordinary
-// commit: the pass closes the a2 gate and its open lens step superseded and
-// creates a judge on the newest commit whose diff starts at the accepted
-// subject; no round is authorised; its re-panel with another slot count
-// creates the a3 gate and lens attempt a2 with that count's entries.
+// commit: the pass creates a judge on the newest commit whose diff starts at
+// the accepted subject, authorises no round, and leaves the a2 gate and its
+// open lens step as they are; when the judge's re-panel with another slot
+// count is applied, the pass closes both superseded and creates the a3 gate
+// and lens attempt a2 with that count's entries.
 func TestS134E2E_CriterionPassedRepanelOrdinaryCommit(t *testing.T) {
 	t.Parallel()
 	e := newKernelE2E(t, kernelE2EBinary(t), 1)
@@ -357,11 +387,23 @@ func TestS134E2E_CriterionPassedRepanelOrdinaryCommit(t *testing.T) {
 }
 
 // AC20: as the test above, but the lens step of the a2 gate had closed passed:
-// it keeps its receipt and is retired the same way.
+// the commit pass leaves it as it is, and when the re-panel is applied it
+// keeps its receipt and is retired.
 func TestS134E2E_CriterionPassedRepanelPassedLens(t *testing.T) {
 	t.Parallel()
 	e := newKernelE2E(t, kernelE2EBinary(t), 1)
 	e.passedRepanelThenCommit(2, 2, true)
+}
+
+// unclosed fails when the record id is closed or holds a close receipt.
+func (e *kernelE2E) unclosed(id, when string) {
+	e.t.Helper()
+	r := e.row(id)
+	_, ok, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
+	e.must(err)
+	if r.Status == "closed" || ok {
+		e.t.Fatalf("after %s, %s is %s (receipt %v), want open with no receipt", when, id, r.Status, ok)
+	}
 }
 
 // noNewJudge fails when the pass offers a judge or the store holds a judge
