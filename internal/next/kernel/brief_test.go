@@ -312,7 +312,10 @@ func TestS134Brief_FinalFixVerification(t *testing.T) {
 	body, err := kernel.Brief(f.State(), id)
 	f.Must(err)
 	briefContains(t, body, "reproduced final finding", "verification commands in the approved plan")
-	if strings.Contains(body, "mindspec complete") {
+	// The fixer rule rows name the verb in prose; the steps outside them must not.
+	head, rest, _ := strings.Cut(body, "\n## Rules (fixer)\n")
+	_, tail, _ := strings.Cut(rest, "\n\n")
+	if strings.Contains(head+tail, "mindspec complete") {
 		t.Fatalf("final fix names a nonexistent work item: %s", body)
 	}
 }
@@ -326,4 +329,37 @@ func briefSection(t *testing.T, body, title string) string {
 	}
 	section, _, _ := strings.Cut(rest, "\n## ")
 	return section
+}
+
+// After a passed gate's re-panel opens a scoped round and a later commit lands
+// before that round registers, the judge brief starts at the gate's accepted
+// subject, not at the scoped round's subject, so its diff holds both changes.
+func TestS134Brief_JudgeAfterPendingRepanel(t *testing.T) {
+	f, gate, accepted := judgeFixture(t)
+	scoped := judgeChange(t, f)
+	reduce(t, f, true)
+	judgeSubmit(t, f, gate, kernel.Judgement{Value: "re-panel", OldSubject: accepted, NewSubject: scoped, SlotCount: 2, Paths: []string{".mindspec/config.yaml"}})
+	reduce(t, f, true)
+	round, _, err := kernel.Decode[kernel.GateRound](f.State().Records[gate+".a2"].Metadata, kernel.KeyRound)
+	f.Must(err)
+	if round.Subject != scoped || len(round.Paths) == 0 {
+		t.Fatalf("scoped round %+v, want subject %s with paths", round, scoped)
+	}
+	later := judgeCommit(t, f, "later.go", "package later\n")
+	reduce(t, f, true)
+	var judges []string
+	for id, r := range f.State().Records {
+		if tuple, has, err := r.Tuple(); err == nil && has && tuple.Kind == "change-judge" && r.Status != "closed" {
+			judges = append(judges, id)
+		}
+	}
+	if len(judges) != 1 {
+		t.Fatalf("open judges %v, want one", judges)
+	}
+	body, err := kernel.Brief(f.State(), judges[0])
+	f.Must(err)
+	briefContains(t, body, "Accepted subject: "+accepted+"\n", "New subject: "+later+"\n", "- Path: .mindspec/config.yaml\n", "- Path: later.go\n", "lease_ttl: 3h", "+package later")
+	if strings.Contains(body, "Accepted subject: "+scoped+"\n") {
+		t.Fatalf("judge brief starts at the scoped round subject %s: %s", scoped, body)
+	}
 }

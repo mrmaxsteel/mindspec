@@ -741,11 +741,13 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     pre-kernel spec, the spec and plan gates, `--gate adhoc` on any spec) keeps the BRIEF stub and `--brief-file`. On
     such a gate `panel tally` prints a `Next` block after its decision, with argv and placeholders, by the leg of
     `panelGateDecision` (`internal/panel/gate.go`) that decided:
-    - PASS: the gate's verb (none on adhoc).
+    - PASS: the gate's verb. Adhoc has no verb: the line "The review passed. Report the result to the user and
+      stop.", with no command.
     - Incomplete round: for each slot that is not final, `panel checkout --slot <R> --dispatch` and `panel prompt`,
-      then `panel tally` again. It prints no fix step.
+      then `panel tally` again; the halt lines follow, after "If that tally still blocks:". When the slot status
+      cannot be read, the error and `panel tally` replace the slot lines. It prints no fix step.
     - Unresolved REQUEST_CHANGES with no missing measurement artifact: one `panel disposition append` per finding that
-      no verb captured, `panel refute`, `panel defer` (`--to-plan` on `spec_approve`; none on adhoc), and the fix steps
+      no verb captured (none on adhoc, which has no spec), `panel refute`, `panel defer` (`--to-plan` on `spec_approve`; none on adhoc), and the fix steps
       (`panel verify`, `panel checkout --fixer`, `rules --scope fixer`, one fixer, on a bead gate `complete <w>
       --check`, one commit, the next `panel create` round with the gate's flags: `--target spec/<id>` on a spec, plan
       or final gate, no `--spec` on adhoc).
@@ -759,11 +761,12 @@ foreign user does with bd makes mindspec advance, lose, double or corrupt a step
     - Halted panel (each other Block: an unreadable or changed registration, a round mismatch, a dirty tree, an unset
       leg; and each Warn): the halt lines. It prints no fix step.
     On a Block these lines replace the one re-run recovery that `panel tally` prints today for every Block.
-    The halt lines are "Otherwise halt and report the panel state." and the recovery lines, marked for the operator.
+    The halt lines are "Halt and report the panel state." and the recovery lines, marked for the operator.
     On a kernel gate
     `panel tally` prints no `Next` block; `next-action` decides. The `next-action` refusal of a pre-kernel spec (§8)
     names today's cycle in order: `next`, `panel create`, `panel tally`, `complete`, `impl approve`. An adapter started
     for a panel runs `panel tally`; when that fails with no decision, the adapter stops and reports the error; when
     that prints a `Next` block, the adapter runs that block and does not run
-    `next-action --apply`; otherwise it loops on `next-action --apply`. On a `next-action` refusal it runs what the
+    `next-action --apply`; when it prints no `Next` block, which a kernel gate alone does, it loops on
+    `next-action --apply`. On a `next-action` refusal it runs what the
     refusal and `instruct` print (`spec.md` R12).

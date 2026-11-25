@@ -467,6 +467,11 @@ Panel creation resolves work-item and final-review targets from its approved pla
 Run `mindspec next-action <spec> --apply --json` to create authorised steps.
 Lease each returned actor step with `mindspec lease <step>`.
 Keep the printed token for its evidence submission.
+Run the action's `brief` argv and give its output to a fresh agent.
+The loop skills do only these steps. They run the printed commands and
+follow the orchestrator rules that `mindspec instruct` prints.
+Renew a long lease with `mindspec lease <step> --renew <token>`.
+Release an unused lease with `mindspec lease <step> --release <token>`.
 Use `mindspec next <work-item>` to lease its current implementation step.
 The command prints the lease generation and token.
 The first implementation lease advances the phase to implementation.
@@ -483,6 +488,9 @@ A separate evidence worktree is useful for keeping review files together.
 You can also commit evidence on the subject branch. A commit that changes only
 directories registered to that gate does not move the review subject.
 Submit its artifact path with the slot lease token.
+Submit a lens, verify or change-judge step with `--record <path>`.
+Its brief names that path. The path is outside every worktree of the
+repository. Do not commit the record; the binary stores it with the step.
 The submission publishes the committed verdict before it closes the slot.
 Answer an open decision before leasing its fix.
 Submit the fix commit before opening the next round.
@@ -506,3 +514,14 @@ A completion retry of a merged item writes nothing.
 The pass after a merge creates each newly authorised implementation step.
 Foreign items and links stay unchanged.
 Remove a foreign cycle link with the tracker before retrying apply.
+
+A gate that is not a kernel gate prints a `Next` block from `mindspec panel tally`.
+This applies to an older approved plan and to an adhoc panel.
+The block selects its lines from the decision leg, not from the message text.
+A pass prints the next lifecycle command. An adhoc pass prints a line to report and stop.
+Missing slots print their prompt lines.
+Unresolved findings print the refute, defer and `fix:` lines; a bead gate adds
+`mindspec complete <bead> --check` before the one fix commit.
+A REJECT, a `hard_block` or a missing measurement artifact prints the operator-action line.
+A stale subject prints the create, rebind and abandon lines. Other results print the halt line.
+A kernel gate prints no `Next` block.

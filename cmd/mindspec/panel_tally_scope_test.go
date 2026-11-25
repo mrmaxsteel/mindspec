@@ -1,12 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
-	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 )
 
 // An ad hoc tally keeps its own recovery when a sibling spec is enrolled.
@@ -59,5 +63,45 @@ func TestS134PanelTally_PreKernelTrackerFailure(t *testing.T) {
 	out, err = kernelPanelRun(t, panelTallyCmd, "legacy", "--spec", f.SpecID)
 	if calls != 1 || err == nil || !strings.Contains(err.Error(), "mindspec panel create") || strings.Contains(err.Error(), "tracker unavailable") || strings.Contains(err.Error(), "next-action") {
 		t.Fatalf("legacy recovery lost on tracker failure: calls=%d out=%s err=%v", calls, out, err)
+	}
+}
+
+// An orchestrated bead or final gate whose tracker cannot be read keeps the
+// exit of an Allow decision: it prints no Next block and exits 0.
+func TestS134PanelTally_OrchestratedTrackerFailureKeepsAllow(t *testing.T) {
+	f, head := panelPreKernelFixture(t)
+	old := panelKernelStateFn
+	t.Cleanup(func() { panelKernelStateFn = old })
+	panelKernelStateFn = func(_, _ string) (*kernel.State, error) { return nil, nil }
+	out, err := kernelPanelRun(t, panelCreateCmd, "orch", "--spec", f.SpecID, "--gate", "final_review", "--target", "spec/"+f.SpecID)
+	kernelPanelRequire(t, out, err)
+	dir := filepath.Join(f.SpecDir, "reviews", "orch")
+	for _, slot := range []string{"R1", "R2"} {
+		v := paneltest.Verdict(panel.VerdictApprove)
+		v.Slot, v.Round, v.ReviewedSHA, v.Model = slot, 1, head, "test-model"
+		file := filepath.Join(dir, slot+"-round-1.json")
+		f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0o644))
+		out, err = kernelPanelRun(t, panelSubmitCmd, "orch", "--spec", f.SpecID, "--slot", slot, "--round", "1", "--file", file)
+		kernelPanelRequire(t, out, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "panel.json"))
+	f.Must(err)
+	var doc map[string]any
+	f.Must(json.Unmarshal(raw, &doc))
+	doc["orchestrated"] = true
+	raw, err = json.Marshal(doc)
+	f.Must(err)
+	f.Must(os.WriteFile(filepath.Join(dir, "panel.json"), raw, 0o644))
+	calls := 0
+	panelKernelStateFn = func(_, _ string) (*kernel.State, error) { calls++; return nil, errors.New("tracker unavailable") }
+	out, err = kernelPanelRun(t, panelTallyCmd, "orch", "--spec", f.SpecID)
+	if calls == 0 {
+		t.Fatalf("the tally did not read the tracker: %s", out)
+	}
+	if err != nil {
+		t.Fatalf("an Allow tally on an unreadable tracker exited non-zero: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "Next:") {
+		t.Fatalf("an orchestrated gate printed a Next block:\n%s", out)
 	}
 }

@@ -70,9 +70,18 @@ func newKernelE2EWithFixture(t *testing.T, bin string, f *kerneltest.Fixture, si
 
 func newKernelE2EWithLayout(t *testing.T, bin string, f *kerneltest.Fixture, docs string, sizes ...int) *kernelE2E {
 	t.Helper()
-	return newKernelE2EWithConfig(t, bin, f, docs, "enforcement:\n  panel_gate: false\nauto_open_finalize_pr: false\npanel:\n  reviewers:\n    - family: harness\n      model: test-model\n      lens: correctness\n      count: 3\n", sizes...)
+	return newKernelE2EWithConfig(t, bin, f, docs, kernelE2EConfig, sizes...)
 }
+
+const kernelE2EConfig = "enforcement:\n  panel_gate: false\nauto_open_finalize_pr: false\npanel:\n  reviewers:\n    - family: harness\n      model: test-model\n      lens: correctness\n      count: 3\n"
+
 func newKernelE2EWithConfig(t *testing.T, bin string, f *kerneltest.Fixture, docs, panelConfig string, sizes ...int) *kernelE2E {
+	t.Helper()
+	return newKernelE2EWithPlan(t, bin, f, docs, panelConfig, nil, sizes...)
+}
+
+// newKernelE2EWithPlan lets a caller change the plan text before plan approval.
+func newKernelE2EWithPlan(t *testing.T, bin string, f *kerneltest.Fixture, docs, panelConfig string, editPlan func(string) string, sizes ...int) *kernelE2E {
 	t.Helper()
 	e := &kernelE2E{t: t, f: f, bin: bin}
 	root := f.Root
@@ -103,7 +112,11 @@ func newKernelE2EWithConfig(t *testing.T, bin string, f *kerneltest.Fixture, doc
 	e.git(root, "worktree", "add", e.cwd, branch)
 	f.SpecDir = filepath.Join(e.cwd, docs, "specs", f.SpecID)
 	e.write(e.cwd, filepath.Join(docs, "specs", f.SpecID, "spec.md"), "---\nstatus: Approved\n---\n# Example\n\n## Goal\nExercise the kernel.\n\n## Impacted Domains\n- workflow\n")
-	e.write(e.cwd, filepath.Join(docs, "specs", f.SpecID, "plan.md"), strings.Replace(kerneltest.EnrolmentPlan(f.SpecID, size), "version:", "adr_citations: [ADR-9001]\nversion:", 1))
+	plan := strings.Replace(kerneltest.EnrolmentPlan(f.SpecID, size), "version:", "adr_citations: [ADR-9001]\nversion:", 1)
+	if editPlan != nil {
+		plan = editPlan(plan)
+	}
+	e.write(e.cwd, filepath.Join(docs, "specs", f.SpecID, "plan.md"), plan)
 	e.git(e.cwd, "add", ".")
 	e.git(e.cwd, "commit", "-qm", "spec")
 	var epic kernel.Record
@@ -275,54 +288,67 @@ func (e *kernelE2E) draftLenses(out kernel.Output) kernel.Output {
 			continue
 		}
 		token := e.lease(action.Step)
-		row := e.row(action.Step)
-		tuple, _, err := row.Tuple()
-		e.must(err)
-		var round kernel.GateRound
-		for _, r := range e.f.State().Records {
-			candidate, ok, _ := r.Tuple()
-			if ok && candidate.Gate == tuple.Gate && (candidate.Kind == "bead-gate" || candidate.Kind == "final-gate") {
-				value, has, err := kernel.Decode[kernel.GateRound](e.row(r.Key()).Metadata, kernel.KeyRound)
-				e.must(err)
-				if has && value.Lens == action.Step {
-					round = value
-				}
-			}
-		}
-		// Binary fixtures read their live store through tracker commands.
-		if round.Round == 0 {
-			var rows []kernel.Record
-			e.must(json.Unmarshal(e.tracker("list", "--all", "--json", "--limit", "0"), &rows))
-			for _, r := range rows {
-				value, has, err := kernel.Decode[kernel.GateRound](r.Metadata, kernel.KeyRound)
-				e.must(err)
-				if has && value.Lens == action.Step {
-					round = value
-				}
-			}
-		}
-		cfg, err := config.Load(e.cwd)
-		e.must(err)
-		kind := "bead"
-		if tuple.WorkItem == "" {
-			kind = "final_review"
-		}
-		roster, err := kernel.RoundReviewerSlots(cfg, kind, round)
-		e.must(err)
-		record := kernel.LensRecord{Step: action.Step, Lenses: []kernel.SlotLens{}}
-		for _, slot := range roster {
-			if slot.Lens != "adversarial" {
-				record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: slot.Slot, Lens: "Review " + slot.Lens + "."})
-			}
-		}
-		file := filepath.Join(e.t.TempDir(), "lens.json")
-		data, err := json.Marshal(record)
-		e.must(err)
-		e.must(os.WriteFile(file, data, 0600))
+		file := e.lensFile(e.lensRecord(action))
 		raw := e.ok("submit", action.Step, "--lease", token, "--record", file)
 		e.must(json.Unmarshal([]byte(raw), &out))
 	}
 	return out
+}
+
+// lensRecord drafts a lens for each non-adversary slot of the lens step's round.
+func (e *kernelE2E) lensRecord(action kernel.Action) kernel.LensRecord {
+	e.t.Helper()
+	row := e.row(action.Step)
+	tuple, _, err := row.Tuple()
+	e.must(err)
+	var round kernel.GateRound
+	for _, r := range e.f.State().Records {
+		candidate, ok, _ := r.Tuple()
+		if ok && candidate.Gate == tuple.Gate && (candidate.Kind == "bead-gate" || candidate.Kind == "final-gate") {
+			value, has, err := kernel.Decode[kernel.GateRound](e.row(r.Key()).Metadata, kernel.KeyRound)
+			e.must(err)
+			if has && value.Lens == action.Step {
+				round = value
+			}
+		}
+	}
+	// Binary fixtures read their live store through tracker commands.
+	if round.Round == 0 {
+		var rows []kernel.Record
+		e.must(json.Unmarshal(e.tracker("list", "--all", "--json", "--limit", "0"), &rows))
+		for _, r := range rows {
+			value, has, err := kernel.Decode[kernel.GateRound](r.Metadata, kernel.KeyRound)
+			e.must(err)
+			if has && value.Lens == action.Step {
+				round = value
+			}
+		}
+	}
+	cfg, err := config.Load(e.cwd)
+	e.must(err)
+	kind := "bead"
+	if tuple.WorkItem == "" {
+		kind = "final_review"
+	}
+	roster, err := kernel.RoundReviewerSlots(cfg, kind, round)
+	e.must(err)
+	record := kernel.LensRecord{Step: action.Step, Lenses: []kernel.SlotLens{}}
+	for _, slot := range roster {
+		if slot.Lens != "adversarial" {
+			record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: slot.Slot, Lens: "Review " + slot.Lens + "."})
+		}
+	}
+	return record
+}
+
+// lensFile writes a lens record to a new file and returns its path.
+func (e *kernelE2E) lensFile(record kernel.LensRecord) string {
+	e.t.Helper()
+	file := filepath.Join(e.t.TempDir(), "lens.json")
+	data, err := json.Marshal(record)
+	e.must(err)
+	e.must(os.WriteFile(file, data, 0600))
+	return file
 }
 func (e *kernelE2E) create(out kernel.Output) {
 	e.t.Helper()
@@ -353,6 +379,13 @@ func (e *kernelE2E) verdict(a kernel.Action, word string) string {
 }
 func (e *kernelE2E) review(word string) kernel.Output {
 	e.t.Helper()
+	return e.reviewSlots(word, 3)
+}
+
+// reviewSlots submits the word for each open slot of the round and expects
+// want slots.
+func (e *kernelE2E) reviewSlots(word string, want int) kernel.Output {
+	e.t.Helper()
 	out := e.apply()
 	n := 0
 	var latest kernel.Output
@@ -376,8 +409,8 @@ func (e *kernelE2E) review(word string) kernel.Output {
 		}
 		n++
 	}
-	if n != 3 {
-		e.t.Fatalf("review slots %d: %+v", n, out)
+	if n != want {
+		e.t.Fatalf("review slots %d, want %d: %+v", n, want, out)
 	}
 	return latest
 }
@@ -409,7 +442,53 @@ func (e *kernelE2E) verifyReproduced() kernel.Output {
 	return kernel.Output{}
 }
 
+// verifyEachReturn returns the first finding reproduced, the second refuted and
+// the third deferred to the follow-up.
+func (e *kernelE2E) verifyEachReturn(follow, evidence string) kernel.Output {
+	e.t.Helper()
+	out := e.apply()
+	for _, a := range out.Actions {
+		if a.Kind != "verify" {
+			continue
+		}
+		findings, _, err := kernel.Decode[[]kernel.Finding](e.row(a.Step).Metadata, kernel.KeyFindings)
+		e.must(err)
+		if len(findings) != 3 {
+			e.t.Fatalf("verify findings: %+v", findings)
+		}
+		v := kernel.VerifyRecord{Step: a.Step, Subject: a.Subject.Commit}
+		for i, f := range findings {
+			ret := kernel.VerifyReturn{Slot: f.Slot, Round: f.Round, Finding: f.Finding, FindingSHA256: f.FindingSHA256, Return: "reproduced"}
+			switch i {
+			case 1:
+				ret.Return, ret.Ground, ret.Reason, ret.Evidence = "refuted", "disproven", "The implementation covers the finding.", evidence
+			case 2:
+				ret.Return, ret.Reason, ret.Target = "deferred", "The follow-up owns the property.", follow
+			}
+			v.Returns = append(v.Returns, ret)
+		}
+		data, err := json.Marshal(v)
+		e.must(err)
+		path := filepath.Join(e.t.TempDir(), "verify.json")
+		e.must(os.WriteFile(path, data, 0600))
+		raw := e.ok("submit", a.Step, "--lease", e.lease(a.Step), "--record", path)
+		var verified kernel.Output
+		e.must(json.Unmarshal([]byte(raw), &verified))
+		return verified
+	}
+	e.t.Fatalf("no verify action: %+v", out)
+	return kernel.Output{}
+}
+
 func (e *kernelE2E) judge(value string, n int) {
+	e.t.Helper()
+	step, token, path := e.judgement(value, n, nil)
+	e.ok("submit", step, "--lease", token, "--record", path)
+}
+
+// judgement leases the open change judge and writes its record; edit, when
+// set, changes the record before it is written.
+func (e *kernelE2E) judgement(value string, n int, edit func(*kernel.Judgement)) (step, token, path string) {
 	e.t.Helper()
 	out := e.apply()
 	var action kernel.Action
@@ -427,7 +506,7 @@ func (e *kernelE2E) judge(value string, n int) {
 	e.must(err)
 	old, err := kernel.AcceptedSubject(s, tuple.Gate)
 	e.must(err)
-	token := e.lease(action.Step)
+	token = e.lease(action.Step)
 	_, ok, err := kernel.Decode[kernel.RegistrationRecord](s.Records[tuple.Gate].Metadata, kernel.KeyRegistration)
 	e.must(err)
 	if !ok {
@@ -454,11 +533,14 @@ func (e *kernelE2E) judge(value string, n int) {
 		}
 		j.Reason = ""
 	}
+	if edit != nil {
+		edit(&j)
+	}
 	data, err := json.Marshal(j)
 	e.must(err)
-	path := filepath.Join(e.t.TempDir(), "judgement-"+value+".json")
+	path = filepath.Join(e.t.TempDir(), "judgement-"+value+".json")
 	e.must(os.WriteFile(path, data, 0600))
-	e.ok("submit", action.Step, "--lease", token, "--record", path)
+	return action.Step, token, path
 }
 func (e *kernelE2E) foreign() {
 	e.t.Helper()
@@ -627,7 +709,9 @@ func (e *kernelE2E) protectedSnapshot() string {
 }
 func TestS134E2E_KernelPath(t *testing.T) {
 	t.Parallel()
-	e := newKernelE2E(t, kernelE2EBinary(t))
+	// Two work items keep the real-store run under the command time limit. Each
+	// per-item assertion runs on both, and the foreign bug blocks the second.
+	e := newKernelE2E(t, kernelE2EBinary(t), 2)
 	e.apply()
 	e.foreign()
 	for i, item := range e.f.Items {
@@ -727,24 +811,51 @@ func TestS134E2E_PinnedPolicyAndRoundLimit(t *testing.T) {
 		t.Fatal("no slot")
 	}
 	before := time.Now().UTC()
-	e.lease(first.Step)
+	token := e.lease(first.Step)
 	after := time.Now().UTC()
 	lease, ok, err := kernel.Decode[kernel.LeaseRecord](e.row(first.Step).Metadata, kernel.KeyLease)
 	e.must(err)
 	if !ok || lease.Expires.Before(before.Add(2*time.Hour)) || lease.Expires.After(after.Add(2*time.Hour)) {
 		t.Fatalf("lease not pinned: %+v; issue interval %v..%v", lease, before, after)
 	}
-	for n := 2; n <= 5; n++ {
-		e.commit(e.tree(e.f.Items[0]), fmt.Sprintf("round-%d.txt", n), "new subject\n")
-		e.create(e.apply())
+	// A subject commit never ends a round by itself: each round's last verdict
+	// makes the change judge, and its re-panel authorises the next round.
+	item := e.f.Items[0]
+	gate := item + ".review"
+	for n := 1; n <= 5; n++ {
+		tree := e.tree(item)
+		moved := e.commit(tree, fmt.Sprintf("round-%d.txt", n+1), "new subject\n")
+		if n == 1 {
+			// The slot leased under the pinned policy submits with its token.
+			e.ok("submit", first.Step, "--lease", token, "--artifact", e.verdict(first, "APPROVE"))
+		}
+		e.reviewSlots("APPROVE", 2)
+		judge := fmt.Sprintf("%s.judge.a%d", gate, n)
+		e.apply()
+		if r := e.row(judge); r.Status != "open" {
+			t.Fatalf("round %d: no judge after a moved subject: %+v", n, r)
+		}
+		if g := e.row(gate); g.Status != "open" {
+			t.Fatalf("round %d: the gate closed before the judgement: %+v", n, g)
+		}
+		e.judge("re-panel", 2)
+		if n == 1 {
+			round, ok, err := kernel.Decode[kernel.GateRound](e.row(gate).Metadata, kernel.KeyRound)
+			e.must(err)
+			if !ok || round.Round != 2 || round.SlotCount != 2 || round.Subject != moved || strings.Join(round.Paths, ",") != "round-2.txt" {
+				t.Fatalf("re-panel did not authorise round 2 of 2 slots on the gate: %+v", round)
+			}
+		}
+		if n < 5 {
+			e.create(e.apply())
+		}
 	}
-	e.commit(e.tree(e.f.Items[0]), "round-6.txt", "new subject\n")
 	out := e.apply()
 	if out.Policy.RoundLimit != 5 || out.Policy.LeaseTTL != "2h" || len(out.Decisions) != 1 || len(out.Run) != 0 {
 		t.Fatalf("unpinned limit: %+v", out)
 	}
-	e.refuse("limit", "panel", "create", e.f.Items[0])
-	rounds, err := panel.RoundsForGate(panel.Scan(e.f.SpecDir), e.f.SpecID, "bead", e.f.Items[0])
+	e.refuse("limit", "panel", "create", item)
+	rounds, err := panel.RoundsForGate(panel.Scan(e.f.SpecDir), e.f.SpecID, "bead", item)
 	e.must(err)
 	if rounds != 5 {
 		t.Fatalf("sixth round registered: %d", rounds)
@@ -872,7 +983,16 @@ func (e *kernelE2E) mixedReview(words []string, repair bool) {
 		if !ok {
 			e.t.Fatal("no registration")
 		}
-		if i == 1 {
+		if repair && i == 2 {
+			// A raw close of a leased step, then a repair receipt from its evidence.
+			e.tracker("close", kerneltest.ID(e.t, e.f, a.Step))
+			e.ok("submit", a.Step, "--repair", "--reason", "The slot was closed outside the kernel.", "--artifact", path)
+			receipt, ok, err := kernel.Decode[kernel.Receipt](e.row(a.Step).Metadata, kernel.KeyClose)
+			e.must(err)
+			if !ok || !receipt.Repaired || receipt.Via != "repair" {
+				e.t.Fatalf("repair receipt: %+v", receipt)
+			}
+		} else if i == 1 {
 			e.ok("panel", "submit", reg.Slug, "--spec", e.f.SpecID, "--slot", fmt.Sprintf("R%d", tuple.Slot), "--round", fmt.Sprint(tuple.Round), "--lease", token, "--file", path)
 		} else {
 			e.ok("submit", a.Step, "--lease", token, "--artifact", path)
@@ -896,23 +1016,113 @@ func (e *kernelE2E) mixedReview(words []string, repair bool) {
 		e.t.Fatalf("slot count %d, want %d", i, len(words))
 	}
 }
-func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
-	t.Parallel()
-	e := newKernelE2E(t, kernelE2EBinary(t), 2)
+
+// auditE2E builds the shared start of the audit fixtures: one work item, the
+// foreign records and an open follow-up of the epic. One work item keeps each
+// real-store run under the command time limit; the open foreign child of the
+// epic owns the deferred documentation.
+func auditE2E(t *testing.T) (*kernelE2E, string) {
+	t.Helper()
+	e := newKernelE2E(t, kernelE2EBinary(t), 1)
+	// The escape-hatch rows come from the local journal, which refuses a home
+	// inside a Git work tree. Such a TMPDIR cannot give those rows, so the test
+	// fails: a missing prerequisite is not a pass. (-short skips first, in
+	// kernelE2EBinary.)
+	if tree := config.EnclosingGitTree(filepath.Dir(e.f.Root)); tree != "" {
+		t.Fatalf("this test needs TMPDIR to be a home outside any Git work tree: the test home is inside the Git work tree at %s, which disables the local journal", tree)
+	}
 	e.apply()
 	e.foreign()
+	var follow kernel.Record
+	e.must(json.Unmarshal(e.tracker("create", "--title", "follow up", "--description", "fix the property", "--type", "task", "--json"), &follow))
+	e.tracker("dep", "add", follow.ID, e.f.Epic, "--type", "discovered-from")
+	return e, follow.ID
+}
+
+// completeWithHatches completes the item once with each completion escape
+// hatch. The journal records one hatch for each run.
+func (e *kernelE2E) completeWithHatches(item string) {
+	e.t.Helper()
+	e.ok("complete", item, "--allow-net-deletion", "The implementation is retained.")
+	e.ok("complete", item, "--override-adr", "The accepted decision still applies.")
+	e.ok("complete", item, "--allow-doc-skew", "The documentation is current.", "--doc-owner", e.note)
+}
+
+// auditFinish runs the final gate and `impl approve` twice. Each run must print
+// every audit row with the count in want, one lens-steps detail per round, and
+// each verb in verbs must have a foreign snapshot.
+func (e *kernelE2E) auditFinish(rounds []string, want map[string]string, verbs []string) {
+	t := e.t
+	t.Helper()
+	e.create(e.apply())
+	e.review("APPROVE")
+	e.refuse(e.note, "impl", "approve", e.f.SpecID)
+	e.tracker("close", e.note)
+	want["lens-steps"] = fmt.Sprint(len(rounds))
+	events := []string{"--allow-doc-skew", "--override-adr", "--allow-not-ready", "--allow-net-deletion", "deferrals", "takeovers", "decision-answers", "raw-claims", "unreceipted-closes", "carry-overs", "re-panels", "verify-reproduced", "verify-refuted", "verify-deferred", "late-submissions", "repair-receipts", "lens-steps"}
+	if len(want) != len(events) {
+		t.Fatalf("want names %d rows, the audit has %d", len(want), len(events))
+	}
+	for i := 0; i < 2; i++ {
+		audit := e.ok("impl", "approve", e.f.SpecID)
+		for _, event := range events {
+			if !auditHasCount(audit, event, want[event]) {
+				t.Fatalf("audit %d: %s is not %s:\n%s", i, event, want[event], audit)
+			}
+		}
+		lens := ""
+		for _, line := range strings.Split(audit, "\n") {
+			if want["re-panels"] != "0" && strings.HasPrefix(line, "re-panels |") && !strings.Contains(line, "3 slots") {
+				t.Fatalf("re-panel slot count missing: %s", line)
+			}
+			if want["takeovers"] == "2" && strings.HasPrefix(line, "takeovers |") && !strings.HasSuffix(line, " | lease 1, repair 1") {
+				t.Fatalf("takeover split: %s", line)
+			}
+			if strings.HasPrefix(line, "lens-steps |") {
+				lens = line
+			}
+		}
+		details := strings.Split(lens, " | ")
+		if len(details) != 2+len(rounds) {
+			t.Fatalf("lens-steps details %q, want one per round %v", lens, rounds)
+		}
+		for _, r := range rounds {
+			if !strings.Contains(lens+" | ", " | "+r+": 1 | ") {
+				t.Fatalf("lens-steps lacks %s: %s", r, lens)
+			}
+		}
+	}
+	for _, verb := range verbs {
+		if !e.seen[verb] {
+			t.Errorf("missing snapshot for %s", verb)
+		}
+	}
+}
+
+// The item loop gives the rows of the take, the late submission, the
+// decision answer, each verify return, both unreceipted closes and both
+// deferrals. It also checks the foreign snapshot of each verb it runs.
+func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
+	t.Parallel()
+	e, follow := auditE2E(t)
 	item := e.f.Items[0]
 	step := item + ".impl.a1"
 	raw := e.ok("next", "1", "--allow-not-ready=MF-1", "--evidence", filepath.Join(e.f.SpecDir, "spec.md"))
-	if !strings.Contains(raw, "generation 1") {
+	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	if !strings.Contains(raw, "generation 1") || len(lines) < 2 {
 		t.Fatalf("next did not lease: %s", raw)
 	}
-	token := e.lease(step, "--take", "--reason", "Replace the implementation actor.")
+	first := strings.TrimSpace(lines[len(lines)-1])
+	e.lease(step, "--take", "--reason", "Replace the implementation actor.")
 	head := e.commit(e.tree(item), "implementation.txt", "implemented\n")
-	e.ok("submit", step, "--lease", token, "--commit", head)
+	// The first actor returns after the take: a late submission on its revoked lease.
+	e.ok("submit", step, "--lease", first, "--commit", head)
+	if receipt, ok, err := kernel.Decode[kernel.Receipt](e.row(step).Metadata, kernel.KeyClose); err != nil || !ok || receipt.Generation != 1 || receipt.SupersededGeneration != 2 {
+		t.Fatalf("late submission receipt: %+v %v", receipt, err)
+	}
 	e.create(e.apply())
-	e.mixedReview([]string{"REJECT", "APPROVE", "APPROVE"}, false)
-	out := e.verifyReproduced()
+	e.mixedReview([]string{"REJECT", "REQUEST_CHANGES", "REQUEST_CHANGES"}, false)
+	out := e.verifyEachReturn(follow, head)
 	if len(out.Decisions) != 1 {
 		t.Fatalf("no decision: %+v", out)
 	}
@@ -933,11 +1143,35 @@ func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
 	}
 	e.ok("submit", out.Decisions[0].Step, "--answer", "fix")
 	fix := item + ".review.r2.fix"
-	token = e.lease(fix)
+	token := e.lease(fix)
 	head = e.commit(e.tree(item), "fixed.txt", "fixed\n")
 	e.ok("submit", fix, "--lease", token, "--commit", head)
 	e.create(e.apply())
-	e.mixedReview([]string{"APPROVE", "APPROVE", "APPROVE"}, true)
+	e.mixedReview([]string{"REQUEST_CHANGES", "REQUEST_CHANGES", "APPROVE"}, true)
+	e.ok("panel", "defer", item, "--spec", e.f.SpecID, "--slot", "R1", "--round", "2", "--by", "operator", "--bead", follow)
+	e.ok("panel", "refute", item, "--spec", e.f.SpecID, "--slot", "R2", "--round", "2", "--by", "operator", "--ground", "disproven", "--reason", "The implementation covers the finding.", "--evidence", head)
+	e.ok("complete", item, "--override-adr", "The accepted decision still applies.")
+	want := map[string]string{"takeovers": "2", "unreceipted-closes": "2", "deferrals": "2", "carry-overs": "0", "re-panels": "0", "--allow-doc-skew": "0", "--allow-net-deletion": "0"}
+	for _, event := range []string{"decision-answers", "raw-claims", "verify-reproduced", "verify-refuted", "verify-deferred", "late-submissions", "repair-receipts", "--allow-not-ready", "--override-adr"} {
+		want[event] = "1"
+	}
+	// The fixture's gate rounds: two review rounds of the item and one final round.
+	rounds := []string{item + ".review r1", item + ".review r2", e.f.Epic + ".final r1"}
+	e.auditFinish(rounds, want, []string{"next-action", "lease", "submit", "next", "panel create", "panel submit", "panel refute", "panel defer", "complete", "impl approve"})
+}
+
+// The change judges give the carry-over and the 3-slot re-panel rows after a
+// passing round of 3 slots; a defer resolves the re-panel round. The three
+// completion escape hatches give one row each. The foreign snapshot of each
+// verb is checked by TestS134E2E_AuditProducersAndReplay, not here.
+func TestS134E2E_AuditChangeJudgesAndReplay(t *testing.T) {
+	t.Parallel()
+	e, follow := auditE2E(t)
+	e.seen = nil
+	item := e.f.Items[0]
+	e.implement(0)
+	e.create(e.apply())
+	e.review("APPROVE")
 	cfg, err := os.ReadFile(filepath.Join(e.tree(item), ".mindspec/config.yaml"))
 	e.must(err)
 	e.commit(e.tree(item), ".mindspec/config.yaml", string(cfg)+"  lease_ttl: 3h\n")
@@ -945,42 +1179,16 @@ func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
 	e.commit(e.tree(item), ".mindspec/config.yaml", string(cfg)+"  lease_ttl: 4h\n")
 	e.judge("re-panel", 3)
 	e.create(e.apply())
-	e.mixedReview([]string{"REQUEST_CHANGES", "REQUEST_CHANGES", "APPROVE"}, false)
-	var follow kernel.Record
-	e.must(json.Unmarshal(e.tracker("create", "--title", "follow up", "--description", "fix the property", "--type", "task", "--json"), &follow))
-	e.tracker("dep", "add", follow.ID, e.f.Epic, "--type", "discovered-from")
-	e.ok("panel", "defer", item, "--spec", e.f.SpecID, "--slot", "R1", "--round", "3", "--by", "operator", "--bead", follow.ID)
-	e.ok("panel", "refute", item, "--spec", e.f.SpecID, "--slot", "R2", "--round", "3", "--by", "operator", "--ground", "disproven", "--reason", "The implementation covers the finding.", "--evidence", head)
-	e.ok("complete", item, "--allow-net-deletion", "The implementation is retained.")
-	e.ok("complete", item, "--override-adr", "The accepted decision still applies.")
-	e.ok("complete", item, "--allow-doc-skew", "The documentation is current.", "--doc-owner", e.f.Items[1])
-	e.tracker("close", e.bug)
-	e.apply()
-	e.create(e.implement(1))
-	e.review("APPROVE")
-	e.ok("complete", e.f.Items[1])
-	e.create(e.apply())
-	e.review("APPROVE")
-	e.refuse(e.note, "impl", "approve", e.f.SpecID)
-	e.tracker("close", e.note)
-	for i := 0; i < 2; i++ {
-		audit := e.ok("impl", "approve", e.f.SpecID)
-		for _, event := range []string{"--allow-not-ready", "--allow-doc-skew", "--override-adr", "--allow-net-deletion", "takeovers", "deferrals", "decision-answers", "unreceipted-closes", "carry-overs", "re-panels"} {
-			if !auditHasCount(audit, event, "1") {
-				t.Fatalf("audit %d missing one %s:\n%s", i, event, audit)
-			}
-		}
-		for _, line := range strings.Split(audit, "\n") {
-			if strings.HasPrefix(line, "re-panels |") && !strings.Contains(line, "3 slots") {
-				t.Fatalf("re-panel slot count missing: %s", line)
-			}
-		}
+	e.mixedReview([]string{"REQUEST_CHANGES", "APPROVE", "APPROVE"}, false)
+	e.ok("panel", "defer", item, "--spec", e.f.SpecID, "--slot", "R1", "--round", "2", "--by", "operator", "--bead", follow)
+	e.completeWithHatches(item)
+	want := map[string]string{"carry-overs": "1", "re-panels": "1", "deferrals": "1", "raw-claims": "1", "--allow-doc-skew": "1", "--override-adr": "1", "--allow-net-deletion": "1"}
+	for _, event := range []string{"takeovers", "unreceipted-closes", "decision-answers", "verify-reproduced", "verify-refuted", "verify-deferred", "late-submissions", "repair-receipts", "--allow-not-ready"} {
+		want[event] = "0"
 	}
-	for _, verb := range []string{"next-action", "lease", "submit", "next", "panel create", "panel submit", "panel refute", "panel defer", "complete", "impl approve"} {
-		if !e.seen[verb] {
-			t.Errorf("missing snapshot for %s", verb)
-		}
-	}
+	// The fixture's gate rounds: the passing round, the re-panel round and one final round.
+	rounds := []string{item + ".review r1", item + ".review r2", e.f.Epic + ".final r1"}
+	e.auditFinish(rounds, want, nil)
 }
 func TestS134E2E_SharedReadyViews(t *testing.T) {
 	t.Parallel()

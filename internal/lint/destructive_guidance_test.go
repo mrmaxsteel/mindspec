@@ -2959,11 +2959,10 @@ type backgroundExpectedExemption struct {
 // managed-block guardrails line ... (const claudeMDManagedBlock,
 // claude.go:947), and the AGENTS.md managed-block prohibition ...
 // (const agentsMDBlockTemplate, internal/setup/codex.go:351)").
+//
+// The four ms-bead-cycle sites left when that skill became a harness
+// adapter that names no merge.
 var backgroundExpectedExemptions = []backgroundExpectedExemption{
-	{"plugins/mindspec/skills/ms-bead-cycle/SKILL.md", "Never merge a bead branch with raw `git merge bead/<id>`"},
-	{".claude/skills/ms-bead-cycle/SKILL.md", "Never merge a bead branch with raw `git merge bead/<id>`"},
-	{"plugins/mindspec/skills/ms-bead-cycle/SKILL.md", "stopped between bd-close and the actual git merge"},
-	{".claude/skills/ms-bead-cycle/SKILL.md", "stopped between bd-close and the actual git merge"},
 	{".claude/skills/ms-impl-approve/SKILL.md", "bead branch already raw-`git merge`d"},
 	{"ms-impl-approve", "bead branch already raw-`git merge`d"},
 	{"claudeMDManagedBlock", "never raw `git merge bead/<id>`"},
@@ -2999,10 +2998,11 @@ var backgroundExpectedExemptions = []backgroundExpectedExemption{
 // both the list and its sentinel together still lands. See
 // TestBootstrapManifest_BackgroundReconciliation's own doc comment for
 // what fixture (α) can and cannot claim as a result.
+//
+// The two ms-bead-cycle canonical-literal entries left with the skill
+// text when that skill became a harness adapter.
 var backgroundJustifiedWideningExemptions = []backgroundExpectedExemption{
 	{"project-docs/user/guides/merge-safety.md", "git -C \"<spec worktree>\" checkout <merge> -- <paths>"},
-	{"ms-bead-cycle", "Never merge a bead branch with raw `git merge bead/<id>`"},
-	{"ms-bead-cycle", "stopped between bd-close and the actual git merge"},
 }
 
 // TestBackgroundJustifiedWideningExemptions_CountSentinel pins this
@@ -3012,7 +3012,7 @@ var backgroundJustifiedWideningExemptions = []backgroundExpectedExemption{
 // registries_test.go's TestKnownSitesExemptionList_CountSentinel
 // already applies one layer up), rather than being invisible.
 func TestBackgroundJustifiedWideningExemptions_CountSentinel(t *testing.T) {
-	if got, want := len(backgroundJustifiedWideningExemptions), 3; got != want {
+	if got, want := len(backgroundJustifiedWideningExemptions), 1; got != want {
 		t.Errorf("len(backgroundJustifiedWideningExemptions) = %d, want %d", got, want)
 	}
 }

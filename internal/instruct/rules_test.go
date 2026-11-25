@@ -33,9 +33,9 @@ func TestInstruct_RulesSection(t *testing.T) {
 				}
 				ids = append(ids, id)
 			}
-			want := []string{"panel.verbs-only", "panel.fix-after-final", "panel.one-fixer", "panel.artifact-gate", "panel.clean-before-complete", "review.reproduce", "review.no-vote", "review.classifier-redispatch", "lifecycle.no-probe-complete", "sequence.bead-impl-prompt"}
+			want := []string{"panel.verbs-only", "panel.fix-after-final", "panel.one-fixer", "panel.artifact-gate", "panel.clean-before-complete", "review.reproduce", "review.no-vote", "review.classifier-redispatch", "lifecycle.no-probe-complete", "sequence.bead-impl-prompt", "dispatch.fresh-agent", "decision.operator-answer", "loop.stop-on-failed-run", "readiness.not-ready-route", "panel.no-self-skip"}
 			if mode == state.ModeImplement {
-				want = []string{"panel.verbs-only", "panel.fix-after-final", "panel.one-fixer", "panel.artifact-gate", "panel.clean-before-complete", "review.reproduce", "review.no-vote", "review.classifier-redispatch", "review.derive", "lifecycle.no-probe-complete", "lifecycle.complete-by-orchestrator", "sequence.bead-impl-prompt"}
+				want = []string{"panel.verbs-only", "panel.fix-after-final", "panel.one-fixer", "panel.artifact-gate", "panel.clean-before-complete", "review.reproduce", "review.no-vote", "review.classifier-redispatch", "review.derive", "lifecycle.no-probe-complete", "lifecycle.complete-by-orchestrator", "sequence.bead-impl-prompt", "dispatch.fresh-agent", "decision.operator-answer", "loop.stop-on-failed-run", "readiness.not-ready-route", "panel.no-self-skip"}
 			}
 			if !reflect.DeepEqual(ids, want) {
 				t.Fatalf("%s rule ids = %v, want %v", mode, ids, want)
@@ -55,5 +55,28 @@ func TestInstruct_RulesSection(t *testing.T) {
 				t.Fatalf("JSON guidance differs from markdown: %v", err)
 			}
 		})
+	}
+}
+
+// The readiness.not-ready-route row tells the orchestrator what to do when
+// `mindspec next <w> --emit-only` exits non-zero, in every mode.
+func TestInstruct_NotReadyRouteNamesEmitOnlyExit(t *testing.T) {
+	for _, mode := range []string{state.ModeIdle, state.ModeSpec, state.ModePlan, state.ModeImplement, state.ModeReview, state.ModeIndeterminate} {
+		out, err := Render(&Context{Mode: mode, IndeterminateReason: "fixture"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, section, _ := strings.Cut(out, "## Rules\n\n")
+		var row string
+		for _, line := range strings.Split(section, "\n") {
+			if strings.HasPrefix(line, "- readiness.not-ready-route: ") {
+				row = line
+			}
+		}
+		for _, want := range []string{"mindspec next <w> --emit-only exits non-zero", "On a non-zero exit of mindspec next <w> --emit-only", "--allow-not-ready=<signals> --evidence <path>"} {
+			if !strings.Contains(row, want) {
+				t.Errorf("%s: readiness.not-ready-route does not name %q: %q", mode, want, row)
+			}
+		}
 	}
 }

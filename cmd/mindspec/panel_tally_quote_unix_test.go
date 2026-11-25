@@ -15,41 +15,59 @@ import (
 func TestPanelTally_RecoveryPreservesSlug(t *testing.T) {
 	for _, slug := range []string{"panel review", "panel's review", "p;printf INJECTED;#"} {
 		for _, bead := range []bool{false, true} {
-			name := "nonbead/" + slug
-			if bead {
-				name = "bead/" + slug
-			}
-			t.Run(name, func(t *testing.T) {
-				d := panel.Decision{Action: panel.Block, Message: "blocked"}
-				var err error
-				var want []string
+			for _, leg := range []panel.DecisionLeg{panel.LegUnresolved, panel.LegStale, ""} {
+				name := "nonbead/" + string(leg) + "/" + slug
 				if bead {
-					err = tallyExitAction(d, tallyRecoveryFacts{Slug: slug, BeadID: "mindspec-test", NextRound: 2, Gate: "bead"})
-					want = []string{slug, "--bead", "mindspec-test", "--round", "2", "--gate", "bead"}
-				} else {
-					err = tallyExitActionNonBead(d, slug, "main", "adhoc", "")
-					want = []string{slug, "--round", "2", "--target", "main", "--gate", "adhoc"}
+					name = "bead/" + string(leg) + "/" + slug
 				}
-				if err == nil {
-					t.Fatal("blocked decision must refuse")
-				}
-				_, command, ok := strings.Cut(err.Error(), "mindspec panel create ")
-				if !ok {
-					t.Fatalf("missing recovery command: %v", err)
-				}
-				if bead {
-					command, _, ok = strings.Cut(command, "), then ")
-					if !ok {
-						t.Fatal("missing command suffix")
+				t.Run(name, func(t *testing.T) {
+					d := panel.Decision{Action: panel.Block, Leg: leg, Message: "blocked"}
+					var err error
+					var want []string
+					if bead {
+						err = tallyExitAction(d, tallyRecoveryFacts{Slug: slug, SpecID: "900-demo", Target: "main", BeadID: "mindspec-test", NextRound: 2, Gate: "bead"})
+						want = []string{slug, "--spec", "900-demo", "--gate", "bead", "--target", "main", "--bead", "mindspec-test", "--round", "2", "--brief-file", "/tmp/brief.md"}
+					} else {
+						err = tallyExitActionNonBead(d, tallyRecoveryFacts{Slug: slug, Target: "main", Gate: "adhoc", NextRound: 2})
+						want = []string{slug, "--gate", "adhoc", "--target", "main", "--round", "2", "--brief-file", "/tmp/brief.md"}
 					}
-				}
-				command = strings.ReplaceAll(command, "<N+1>", "2")
-				got, shellErr := exec.Command("/bin/sh", "-c", `capture() { printf '%s\000' "$@"; }; capture `+command).CombinedOutput()
-				expected := strings.Join(want, "\x00") + "\x00"
-				if shellErr != nil || string(got) != expected {
-					t.Fatalf("recovery=%q got=%q want=%q error=%v", command, got, expected, shellErr)
-				}
-			})
+					if err == nil {
+						t.Fatal("blocked decision must refuse")
+					}
+					// Every panel create line of the Next block keeps the slug as one argument.
+					rest := err.Error()
+					found := 0
+					for {
+						var command string
+						var ok bool
+						_, rest, ok = strings.Cut(rest, "mindspec panel create ")
+						if !ok {
+							break
+						}
+						found++
+						command, _, _ = strings.Cut(rest, "\n")
+						command = strings.ReplaceAll(command, "<absolute path>", "/tmp/brief.md")
+						got, shellErr := exec.Command("/bin/sh", "-c", `capture() { printf '%s\000' "$@"; }; capture `+command).CombinedOutput()
+						expected := strings.Join(want, "\x00") + "\x00"
+						if shellErr != nil || string(got) != expected {
+							t.Fatalf("recovery=%q got=%q want=%q error=%v", command, got, expected, shellErr)
+						}
+					}
+					if found == 0 {
+						t.Fatalf("missing panel create command: %v", err)
+					}
+					// The one recovery line re-runs the tally of the same slug.
+					_, command, ok := strings.Cut(err.Error(), "recovery: mindspec panel tally ")
+					if !ok {
+						t.Fatalf("missing tally recovery: %v", err)
+					}
+					command, _, _ = strings.Cut(command, "   (")
+					got, shellErr := exec.Command("/bin/sh", "-c", `capture() { printf '%s\000' "$@"; }; capture `+command).CombinedOutput()
+					if shellErr != nil || string(got) != slug+"\x00" {
+						t.Fatalf("tally recovery=%q got=%q error=%v", command, got, shellErr)
+					}
+				})
+			}
 		}
 	}
 }

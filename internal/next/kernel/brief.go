@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/rules"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
@@ -39,6 +40,9 @@ func Brief(s State, step string) (body string, err error) {
 	switch t.Kind {
 	case "implement":
 		fmt.Fprintf(&b, "Read the work-item brief:\nmindspec next %s --emit-only\n", briefQuote(t.WorkItem))
+		if err := renderBriefRules(&b, "implementer"); err != nil {
+			return "", err
+		}
 	case "review-slot":
 		reg, _, err := Decode[RegistrationRecord](s.Records[activeGate(s, t.Gate)].Metadata, KeyRegistration)
 		if err != nil {
@@ -68,6 +72,9 @@ func Brief(s State, step string) (body string, err error) {
 		}
 		b.WriteString("\nFix these reproduced findings.\n")
 		renderFindings(&b, findings)
+		if err := renderBriefRules(&b, "fixer"); err != nil {
+			return "", err
+		}
 		if t.WorkItem == "" {
 			b.WriteString("\nBefore returning, run the verification commands in the approved plan.\n")
 		} else {
@@ -198,6 +205,17 @@ func ReviewSlotBody(s State, gate string) (body string, err error) {
 	}
 	b.WriteString("\nDo not raise a refuted or deferred finding again without new evidence.\n")
 	return b.String(), nil
+}
+
+// renderBriefRules prints the conduct rules of one actor scope from the one
+// section that rules.Section renders, so a fresh agent gets them from its brief.
+func renderBriefRules(b *strings.Builder, scope string) error {
+	section, err := rules.Section(scope)
+	if err != nil {
+		return err
+	}
+	b.WriteString(section)
+	return nil
 }
 
 func renderFindings(b *strings.Builder, findings []Finding) {

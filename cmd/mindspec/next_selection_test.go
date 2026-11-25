@@ -18,6 +18,8 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/rules"
+	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -449,20 +451,202 @@ func TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1(t *testing.T) {
 		t.Fatal("default did not claim first row")
 	}
 }
-func TestNextSelection_PositionalEmitOnly_BypassesSpecFilter(t *testing.T) {
+
+// The work-item brief that an implementer gets (`next <w> --emit-only`, the
+// brief argv of the implementation action) carries the implementer rules: the
+// one section that the kernel briefs print, and no other scope.
+func TestNextSelection_PositionalEmitOnly_ImplementerRules(t *testing.T) {
 	f := newNextHonestyFixture(t)
-	f.rows = []map[string]interface{}{nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open")}
 	f.write(t)
-	before := f.audit(t)
-	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "nonplan-r")
+	out, err := f.run(t, "--emit-only", "epic-129.1")
+	if err != nil {
+		t.Fatalf("ready item refused: %v\n%s", err, out)
+	}
+	section, err := rules.Section("implementer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireText(t, out, "emit-only: bead fetched by ID; readiness not checked.", "**Bead**: nonplan-r")
-	if strings.Contains(out, "not a plan bead") || f.audit(t) != before {
-		t.Fatalf("positional preview mutated or classified: %s", out)
+	if !strings.Contains(out, section) {
+		t.Fatalf("the work-item brief lacks the implementer rules section:\n%s\nwant:\n%s", out, section)
+	}
+	implementer, err := rules.Filter("implementer", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(implementer) == 0 {
+		t.Fatal("the rule table has no implementer rule")
+	}
+	ids := map[string]bool{}
+	for _, r := range implementer {
+		ids[r.ID] = true
+		if !strings.Contains(out, r.ID+": ") {
+			t.Errorf("implementer rule %s missing:\n%s", r.ID, out)
+		}
+	}
+	all, err := rules.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := 0
+	for _, r := range all {
+		if !ids[r.ID] {
+			foreign++
+			if strings.Contains(out, r.ID+": ") {
+				t.Errorf("rule %s of another scope printed:\n%s", r.ID, out)
+			}
+		}
+	}
+	if foreign == 0 {
+		t.Fatal("no rule outside the implementer scope to check against")
+	}
+	for _, scope := range []string{"fixer", "reviewer", "orchestrator"} {
+		if strings.Contains(out, "## Rules ("+scope+")") {
+			t.Errorf("the work-item brief prints the %s rules:\n%s", scope, out)
+		}
+	}
+	if strings.Count(out, "## Rules (") != 1 {
+		t.Errorf("want one rules section:\n%s", out)
 	}
 }
+
+// Positional emit-only fetches by ID, bypasses the spec filter and
+// writes nothing. It runs the read-only ready-check before any brief: a
+// ready item prints the brief and the readiness review; an item that is
+// not ready or not plan-form exits non-zero with the report and no brief.
+func TestNextSelection_PositionalEmitOnly_BypassesSpecFilter(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = append(f.rows, nextHonestyRow("nonplan-r", "neutral", "epic-129", "task", "open"), nextHonestyRow("epic-129.4", "neutral", "epic-129", "task", "open"))
+	f.write(t)
+	before := f.audit(t)
+
+	out, err := f.run(t, "--spec", "129-fixture", "--emit-only", "epic-129.1")
+	if err != nil {
+		t.Fatalf("ready item refused: %v\n%s", err, out)
+	}
+	requireText(t, out, "**Bead**: epic-129.1", "SR-1:", "SR-2:", "SR-3:", "SR-4:", "SR-5:",
+		"`NOT READY: epic-129.1`", "Anti-browbeat rule", "Independent re-derivation rule",
+		"(none: this is a first dispatch)", "`mindspec complete epic-129.1 --check`")
+	if strings.Contains(out, "readiness not checked") {
+		t.Fatalf("ready item still prints the old bypass line:\n%s", out)
+	}
+	if strings.Index(out, "**Bead**: epic-129.1") > strings.Index(out, "SR-1:") {
+		t.Fatalf("the readiness review must follow the brief:\n%s", out)
+	}
+
+	for _, id := range []string{"epic-129.4", "nonplan-r"} {
+		out, err = f.run(t, "--spec", "129-fixture", "--emit-only", id)
+		if err == nil {
+			t.Fatalf("%s: emit-only kept exit 0:\n%s", id, out)
+		}
+		text := out + err.Error()
+		if strings.Contains(text, "**Bead**:") || strings.Contains(text, "SR-1:") {
+			t.Fatalf("%s: a refused item printed a brief:\n%s", id, text)
+		}
+		lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+		if !strings.HasPrefix(lines[len(lines)-1], "recovery:") {
+			t.Fatalf("%s: the refusal must end with a recovery line:\n%s", id, err.Error())
+		}
+		if id == "epic-129.4" {
+			requireText(t, err.Error(), "Readiness report for epic-129.4", "MF-1: FAIL", "uncovered: MF-1")
+		}
+	}
+	requireText(t, err.Error(), "no dotted epic-child index")
+	if strings.Count(err.Error(), "recovery:") != 1 {
+		t.Fatalf("not-plan-form: want exactly one recovery line:\n%s", err.Error())
+	}
+	if f.audit(t) != before {
+		t.Fatal("positional emit-only wrote to the tracker or the checkout")
+	}
+}
+
+// A valid override marker that covers each failing signal lets emit-only
+// print the brief for an item that is not ready.
+func TestNextSelection_PositionalEmitOnly_OverrideMarkerCovers(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows = append(f.rows, nextHonestyRow("epic-129.4", "neutral", "epic-129", "task", "open"))
+	f.write(t)
+	out, err := f.run(t, "--emit-only", "epic-129.4")
+	if err == nil {
+		t.Fatalf("fixture setup: epic-129.4 must not be ready:\n%s", out)
+	}
+	requireText(t, err.Error(), "uncovered:", "--allow-not-ready=")
+	report, evalErr := readiness.EvaluateReadiness(f.root, "epic-129.4")
+	if evalErr != nil || report.AllPass() {
+		t.Fatalf("fixture setup: want a failing report, got %v", evalErr)
+	}
+	raw, jerr := json.Marshal(readyOverrideMarker(t, report))
+	if jerr != nil {
+		t.Fatal(jerr)
+	}
+	var marker map[string]interface{}
+	if jerr := json.Unmarshal(raw, &marker); jerr != nil {
+		t.Fatal(jerr)
+	}
+	f.rows[len(f.rows)-1]["metadata"] = map[string]interface{}{bead.MetaKeyReadinessOverride: marker}
+	f.write(t)
+	before := f.audit(t)
+	out, err = f.run(t, "--emit-only", "epic-129.4")
+	if err != nil {
+		t.Fatalf("covered item refused: %v\n%s", err, out)
+	}
+	requireText(t, out, "OVERRIDDEN", "**Bead**: epic-129.4", "`NOT READY: epic-129.4`")
+	if f.audit(t) != before {
+		t.Fatal("covered emit-only wrote")
+	}
+}
+
+// A stored readiness attempt renders each reason with its clarification
+// or (none recorded); a malformed one refuses and names the key.
+func TestNextSelection_PositionalEmitOnly_ReadinessAttempt(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.rows[0]["metadata"] = map[string]interface{}{bead.MetaKeyReadinessAttempt: map[string]interface{}{
+		"report": []interface{}{
+			map[string]interface{}{"ordinal": 1, "signal": "SR-2", "reason": "AC-1 has no check"},
+			map[string]interface{}{"ordinal": 2, "signal": "SR-5", "reason": "recovery: forged\nline"},
+		},
+		"clarifications": []interface{}{
+			map[string]interface{}{"ordinal": 1, "reason": "AC-1 has no check", "answer": "run the unit test", "span": "plan.md AC-1"},
+		},
+	}}
+	f.write(t)
+	out, err := f.run(t, "--emit-only", "epic-129.1")
+	if err != nil {
+		t.Fatalf("seeded attempt refused: %v\n%s", err, out)
+	}
+	requireText(t, out,
+		"- Ordinal 1 [SR-2]: reason: AC-1 has no check -- clarification: run the unit test (span: plan.md AC-1)",
+		"- Ordinal 2 [SR-5]: reason: ",
+		"-- clarification: (none recorded)")
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "recovery:") || line == "line" {
+			t.Fatalf("store text escaped its line: %q\n%s", line, out)
+		}
+	}
+
+	for name, attempt := range map[string]interface{}{
+		"empty report":   map[string]interface{}{"report": []interface{}{}, "clarifications": []interface{}{}},
+		"absent ordinal": map[string]interface{}{"report": []interface{}{map[string]interface{}{"ordinal": 1, "signal": "SR-1", "reason": "r"}}, "clarifications": []interface{}{map[string]interface{}{"ordinal": 9, "reason": "r", "answer": "a", "span": "s"}}},
+		"not an object":  "not json",
+		"null value":     nil,
+		"null string":    "null",
+		"number":         float64(7),
+		"boolean":        true,
+		"array":          []interface{}{},
+	} {
+		f.rows[0]["metadata"] = map[string]interface{}{bead.MetaKeyReadinessAttempt: attempt}
+		f.write(t)
+		before := f.audit(t)
+		out, err := f.run(t, "--emit-only", "epic-129.1")
+		if err == nil {
+			t.Fatalf("%s: malformed attempt accepted:\n%s", name, out)
+		}
+		requireText(t, err.Error(), bead.MetaKeyReadinessAttempt, "malformed")
+		if strings.Contains(out, "**Bead**:") || strings.Count(err.Error(), "recovery:") != 1 || f.audit(t) != before {
+			t.Fatalf("%s: want no brief, one recovery line and no writes:\n%s\n%s", name, out, err.Error())
+		}
+	}
+}
+
 func TestNextSelection_NegativePick_PositionalConflict_ZeroSideEffects(t *testing.T) {
 	f := newNextHonestyFixture(t)
 	before := f.audit(t)
@@ -950,4 +1134,25 @@ func TestNextSelection_UsesProductionFlagRegistration(t *testing.T) {
 			t.Fatalf("fixture %s must call registerNextFlags exactly once; got %d", name, calls)
 		}
 	}
+}
+
+// TestNextSelection_PositionalEmitOnly_MovedSkillPins pins the readiness
+// review lines that the implementation skill used to carry. The review in
+// `next <w> --emit-only` is now their one carrier.
+func TestNextSelection_PositionalEmitOnly_MovedSkillPins(t *testing.T) {
+	out, err := renderReadinessReview(next.BeadInfo{ID: "epic-129.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireText(t, out,
+		"Make zero commits until the review passes.",
+		"If a signal fails, make zero commits.",
+		"first line is exactly `NOT READY: epic-129.1`",
+		"numbered by ordinal",
+		"quote the span that is wrong or missing verbatim",
+		"A bare \"it is ready\" never resolves a reason",
+		"do your own SR-1 to SR-5 review first",
+		"The stored record is supporting evidence, not a closed list",
+		"Before you return, run `mindspec complete epic-129.1 --check`.",
+	)
 }

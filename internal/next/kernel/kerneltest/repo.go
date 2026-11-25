@@ -108,12 +108,13 @@ func gitRepo(t testing.TB) string {
 	if err := os.Mkdir(root, 0755); err != nil {
 		t.Fatal(err)
 	}
-	CleanupTemp(t, root)
 	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "--allow-empty", "-qm", "initial"}} {
 		if out, err := command(t, root, "git", args...); err != nil {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
 	}
+	// The kernel directory resolves through the repository, so it follows init.
+	CleanupTemp(t, root)
 	return root
 }
 

@@ -1420,8 +1420,14 @@ Selectors are checked before empty-set handling. A positional near-miss
 gets its reason even when no members exist. An N4 with lineage E can
 reach the readiness gate deliberately; a no-lineage N4 refuses before the
 gate. An unlinked globally ready positional names that fact and its parent.
-Positional emit-only still fetches by ID and prints
-`emit-only: bead fetched by ID; readiness not checked.`
+Positional emit-only still fetches by ID. It then runs the read-only
+check of `bead ready-check`. An item that is not ready, or not plan-form,
+exits non-zero with that report and no brief. A ready item prints the
+brief and then the readiness review: SR-1..SR-5, the `NOT READY: <w>`
+return form, the anti-browbeat and re-derivation rules, each stored
+readiness-attempt reason with its clarification or `(none recorded)`, and
+`mindspec complete <w> --check` before the return. A malformed stored
+attempt exits non-zero and names `mindspec_readiness_attempt`.
 
 Without a selector, an empty scoped set prints the lifecycle child tally,
 stored and child-derived phase, and the emptiness rule before acting:

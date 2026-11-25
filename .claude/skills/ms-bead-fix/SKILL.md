@@ -1,47 +1,44 @@
 ---
 name: ms-bead-fix
-description: Dispatch one fixer with the consolidated panel findings and fixer rules
+description: Give a fix step to one fresh agent with the brief that the binary prints
 ---
 
-# Fix Subagent Dispatch
+# Fix Dispatch
+
+The binary prints the fix brief: the reproduced findings, the subject and the checks.
+This skill leases the fix step, starts one fresh agent with that brief and submits its commit.
 
 ## Inputs
 
-Use the bead id, target worktree, panel slug, round and consolidated findings path.
-For final review, use the spec worktree as the target worktree.
+- `spec-slug` (optional): the spec. Ask the user when more than one spec is active.
+- `panel-slug` (optional): the panel, when the user starts this skill for a panel.
 
-## Steps
+## Panel
 
-1. Run `mindspec panel verify <panel-slug>`. Proceed only on exit 0 (`panel.fix-after-final`).
-2. Run `mindspec panel checkout <panel-slug> --fixer`. Capture the absolute fixer directory.
-3. Run `mindspec rules --scope fixer`. Capture its complete stdout as `fixer_rules`.
-4. Compose the fixer prompt with this structure. Insert the captured output, not the command name, in the rules block.
+When the user starts this skill for a panel, run `mindspec panel tally <panel-slug>`.
 
-```text
-Target worktree: <absolute target worktree>
-Scratch directory: <absolute fixer directory>
-Bead, branch and current HEAD: <identity>
-Files in scope and shared helpers: <plan paths and imports>
-Consolidated findings: <grouped asks and evidence>
-Fixer rules (verbatim stdout):
-<fixer_rules>
-Repository guardrails: read AGENTS.md, Bead-loop guardrails.
-Return one commit SHA, test results and deviations.
-If an item cannot be fixed in scope, report its reason under Deviations:.
-```
+- It exits non-zero and prints no `decision:` line: report the error to the user and stop.
+- It prints a `Next` block: run the lines of that block above `For the operator, run one of these:`, then stop. Do not run `next-action --apply`.
+- It prints no `Next` block, which only a kernel gate does: go to the loop.
 
-5. Dispatch one agent in the target's own worktree (`panel.one-fixer`). Never dispatch the fixer in a slot tree.
-Apply `panel.scratch-in-slot`: use the absolute fixer directory, never a relative path.
-Apply `panel.artifact-gate`: keep a missing artifact finding open until the artifact exists.
-Apply `review.derive` and `lifecycle.complete-by-orchestrator` from the captured rules.
-6. Capture the SHA, test results and deviations for the next BRIEF.
+## Loop
 
-## Commit
+1. Run `mindspec next-action --apply <spec-slug> --json`.
+   If it refuses, run the commands that the refusal and `mindspec instruct` print.
+2. For each entry in `actions`, run its `claim` argv (`mindspec lease <step>`) and keep the token.
+   Run its `brief` argv. Start a fresh agent with that output as its prompt.
+   If the `brief` argv exits non-zero, start no agent and follow the `mindspec instruct` rules.
+   Renew a long lease with `mindspec lease <step> --renew <token>`.
+3. When the agent returns, run the action's `submit` argv with the token and the evidence:
+   `--commit <oid>` for an implement or fix step; `--record <path>` for a lens, verify or
+   change-judge step, at the record path that its brief names; `--artifact <path>` for a review slot.
+   If `submit` refuses, run its recovery line.
+4. Run each `run` entry's `argv` as printed.
+5. For each entry in `decisions`, follow the `mindspec instruct` rules.
+6. Read `status`:
+   - `work`: go to step 1.
+   - `wait`: report `waiting` and `retry_at` to the user, wait, then go to step 1.
+   - `done`: report the result to the user and stop.
+   - any other status: report it and each flag to the user, and stop.
 
-Make one follow-up commit on the target branch. Keep the original implementation commit.
-End the message with `Deviations: <list or none>`.
-For final-review fixes on the spec branch, use the commit escape hatch in `/ms-spec-final-review`.
-
-## Then
-
-Return to `/ms-bead-cycle` for the next `/ms-panel-run` round.
+Run the `repair` line of each flag. Follow the orchestrator rules that `mindspec instruct` prints.

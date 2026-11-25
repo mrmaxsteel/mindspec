@@ -880,7 +880,22 @@ func TestReadyCheck_CycleSkillCopiesMatch(t *testing.T) {
 	if strings.Contains(string(source), "--allow-not-ready"+string(rune(96))) {
 		t.Fatal("cycle skill still offers bare override")
 	}
-	requireText(t, string(source), "--allow-not-ready=<ids> --evidence <path>")
+	// The cycle adapter no longer names the override. The
+	// readiness.not-ready-route rule that mindspec instruct prints
+	// carries the evidence-backed form, and the bead ready-check report
+	// prints the exact command.
+	rulesYAML, err := os.ReadFile("../../internal/rules/rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, route, ok := strings.Cut(string(rulesYAML), "id: readiness.not-ready-route")
+	if !ok {
+		t.Fatal("rules.yaml lacks readiness.not-ready-route")
+	}
+	if next := strings.Index(route, "\n- id: "); next >= 0 {
+		route = route[:next]
+	}
+	requireText(t, route, "--allow-not-ready=<signals> --evidence <path>")
 }
 
 func TestReadyCheck_ReadinessDocContracts(t *testing.T) {

@@ -137,6 +137,10 @@ func (s *Store) SetStatusMetadataIf(key, from, to string, updates map[string]any
 		for k, v := range updates {
 			metadata[k] = v
 		}
+		// The lease writer grants through this path, so it keeps the claim it replaces.
+		if e := retainRawClaim(r, updates, metadata); e != nil {
+			return e
+		}
 		arg, cleanup, e := s.metadataArg(key, metadata)
 		if e != nil {
 			return e
@@ -150,6 +154,20 @@ func (s *Store) SetStatusMetadataIf(key, from, to string, updates map[string]any
 		return ErrCASMismatch
 	}
 	return err
+}
+
+// retainRawClaim records a raw claim when a lease replaces it. Flag rules stay read-only.
+func retainRawClaim(r *Record, updates, metadata map[string]any) error {
+	newLease, granting, leaseErr := Decode[LeaseRecord](updates, KeyLease)
+	oldLease, leased, oldErr := Decode[LeaseRecord](r.Metadata, KeyLease)
+	if granting && leaseErr == nil && newLease.Generation > 0 && newLease.TokenHash != "" && r.Status == "in_progress" && (oldErr != nil || !leased || oldLease.Generation < 1 || oldLease.TokenHash == "") {
+		claims, _, err := Decode[[]RawClaim](r.Metadata, KeyRawClaims)
+		if err != nil {
+			return err
+		}
+		metadata[KeyRawClaims] = append(claims, RawClaim{At: Now().UTC()})
+	}
+	return nil
 }
 
 // WithCASRetry rereads and reruns once after a compare-and-set mismatch.
@@ -221,15 +239,8 @@ func (s *Store) WriteMetadata(key string, updates map[string]any) error {
 	for k, v := range updates {
 		metadata[k] = v
 	}
-	// Retain a raw claim when a lease replaces it. Flag rules stay read-only.
-	newLease, granting, leaseErr := Decode[LeaseRecord](updates, KeyLease)
-	oldLease, leased, oldErr := Decode[LeaseRecord](r.Metadata, KeyLease)
-	if granting && leaseErr == nil && newLease.Generation > 0 && newLease.TokenHash != "" && r.Status == "in_progress" && (oldErr != nil || !leased || oldLease.Generation < 1 || oldLease.TokenHash == "") {
-		claims, _, err := Decode[[]RawClaim](r.Metadata, KeyRawClaims)
-		if err != nil {
-			return err
-		}
-		metadata[KeyRawClaims] = append(claims, RawClaim{At: Now().UTC()})
+	if err := retainRawClaim(r, updates, metadata); err != nil {
+		return err
 	}
 	arg, cleanup, err := s.metadataArg(key, metadata)
 	if err != nil {

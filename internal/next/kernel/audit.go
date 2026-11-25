@@ -41,6 +41,7 @@ func Audit(s State, events []journal.Record) ([]AuditRow, error) {
 	}
 	sort.Strings(ids)
 	leaseTakes, repairs := 0, 0
+	repanels := map[string]bool{}
 	lensAttempts := map[lensRound]int{}
 	var lensRounds []lensRound
 	for _, id := range ids {
@@ -135,7 +136,11 @@ func Audit(s State, events []journal.Record) ([]AuditRow, error) {
 		if err != nil {
 			return nil, err
 		}
-		if has {
+		// The gate attempt and its lens step carry the same judged scope; count the judgement once.
+		if has && (repanel.Judge == "" || !repanels[repanel.Judge]) {
+			if repanel.Judge != "" {
+				repanels[repanel.Judge] = true
+			}
 			row := byName["re-panels"]
 			row.Count++
 			row.Details = append(row.Details, fmt.Sprintf("%s: %d slots", id, repanel.SlotCount))

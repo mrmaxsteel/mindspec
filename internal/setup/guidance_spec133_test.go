@@ -92,55 +92,6 @@ func TestS133Guidance_RefreshAndPreserve(t *testing.T) {
 	}
 }
 
-func s133CycleOrderError(body string) error {
-	sequenceStart := strings.Index(body, "## Sequence\n")
-	if sequenceStart < 0 {
-		return fmt.Errorf("missing sequence")
-	}
-	sequenceEnd := strings.Index(body[sequenceStart:], "\n```\n\n")
-	if sequenceEnd < 0 {
-		return fmt.Errorf("missing sequence end")
-	}
-	sequence := body[sequenceStart : sequenceStart+sequenceEnd]
-	// Both the initial implementation and each fix must be checked before review.
-	rounds := strings.Split(sequence, "/ms-panel-run")
-	if len(rounds) != 3 {
-		return fmt.Errorf("expected initial and fix panel rounds")
-	}
-	for _, round := range rounds[:2] {
-		commit := strings.LastIndex(round, "implementation commit SHA")
-		check := strings.LastIndex(round, "mindspec complete <bead> --check")
-		if commit < 0 || check <= commit {
-			return fmt.Errorf("content check must follow commit and precede panel")
-		}
-	}
-	for _, required := range []string{"send all\n   failing gates and recovery lines to the implementer or fixer", "panel reviews the fixed diff"} {
-		if !strings.Contains(body, required) {
-			return fmt.Errorf("missing failure routing: %s", required)
-		}
-	}
-	return nil
-}
-
-func TestS133Guidance_ContentCheckOrder(t *testing.T) {
-	body := skillFiles()["ms-bead-cycle"]
-	if err := s133CycleOrderError(body); err != nil {
-		t.Fatal(err)
-	}
-	// Keep --check present, but put it after the panel. A presence-only pin misses this.
-	wrong := strings.Replace(body, "mindspec complete <bead> --check\n  ↓ content gates PASS\nmindspec submit <step> --lease <token> --commit <oid>\n  ↓ next-action --apply → execute panel create from run\n/ms-panel-run", "/ms-panel-run\nmindspec complete <bead> --check", 1)
-	if wrong == body || !strings.Contains(wrong, "--check") {
-		t.Fatal("order mutation did not fire")
-	}
-	if err := s133CycleOrderError(wrong); err == nil {
-		t.Fatal("check-after-panel passed")
-	}
-	wrong = strings.Replace(body, "  ↓ new implementation commit SHA + flagged deviations\nmindspec complete <bead> --check\n  ↓ content gates PASS", "  ↓ new implementation commit SHA + flagged deviations", 1)
-	if wrong == body || s133CycleOrderError(wrong) == nil {
-		t.Fatal("unchecked fix round passed")
-	}
-}
-
 func TestS133Guidance_ApprovalContracts(t *testing.T) {
 	files := skillFiles()
 	for _, tc := range []struct{ name, gate, verb string }{
@@ -168,19 +119,18 @@ func TestS133Guidance_ApprovalContracts(t *testing.T) {
 			}
 		})
 	}
-	for _, name := range []string{"ms-panel-run", "ms-panel-tally"} {
-		body := files[name]
-		if !strings.Contains(body, "For `spec_approve`, `plan_approve` and `final_review`,") || !strings.Contains(body, "--target spec/<id>") {
-			t.Fatalf("%s lacks lifecycle gate targets", name)
-		}
+	// The ms-panel-tally adapter runs the Next block of panel tally, which
+	// prints the gate target and the --to-plan deferral itself.
+	body := files["ms-panel-run"]
+	if !strings.Contains(body, "For `spec_approve`, `plan_approve` and `final_review`,") || !strings.Contains(body, "--target spec/<id>") {
+		t.Fatal("ms-panel-run lacks lifecycle gate targets")
 	}
 	for _, required := range []string{"older live registration with another target blocks", "new round", "abandoned with a reason", "older binary"} {
 		if !strings.Contains(files["ms-panel-run"], required) {
 			t.Fatalf("missing target recovery %q", required)
 		}
 	}
-	tally := files["ms-panel-tally"]
-	if strings.Contains(tally, "Spec approval and adhoc panels cannot defer") || !strings.Contains(tally, "--to-plan") || !strings.Contains(tally, "## Resolutions") {
+	if strings.Contains(files["ms-panel-tally"], "Spec approval and adhoc panels cannot defer") {
 		t.Fatal("stale spec deferral guidance")
 	}
 }

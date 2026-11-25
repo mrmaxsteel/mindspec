@@ -123,6 +123,10 @@ the new `bead ready-check`/`bead clarify` verbs).
 The `rebind`, `refute`, `abandon` and `defer` panel verbs register telemetry tokens in `internal/redact/redact.go`.
 
 `rules` is registered in `internal/redact.CommandTokens`.
+`next-action` is registered in `internal/redact.CommandTokens`.
+`lease` is registered in `internal/redact.CommandTokens`.
+`submit` is registered in `internal/redact.CommandTokens`.
+`brief` (for `mindspec brief`) is registered in `internal/redact.CommandTokens`.
 Redaction keeps this verb name in accepted journal events.
 
 `internal/redact.SubcommandTokens` also contains `schema`, `submit`, `checkout`,

@@ -270,6 +270,29 @@ func TestS134Contract_PreKernelEntryPoints(t *testing.T) {
 		t.Fatal("pre-kernel entry wrote")
 	}
 }
+
+// The next-action refusal of a pre-kernel spec names the existing cycle in
+// order and ends with exactly one recovery line.
+func TestS134Contract_PreKernelNamesCycleInOrder(t *testing.T) {
+	f := kerneltest.PreKernelSpec(t, kerneltest.WithFake(false))
+	_, err := kernel.NextAction(f.State(), false)
+	if !errors.Is(err, kernel.ErrPreKernel) {
+		t.Fatalf("wrong refusal %v", err)
+	}
+	msg := err.Error()
+	at := 0
+	for _, verb := range []string{"mindspec next,", "mindspec panel create,", "mindspec panel tally,", "mindspec complete,", "mindspec impl approve"} {
+		i := strings.Index(msg[at:], verb)
+		if i < 0 {
+			t.Fatalf("refusal does not name %q after offset %d: %s", verb, at, msg)
+		}
+		at += i + len(verb)
+	}
+	lines := strings.Split(strings.TrimRight(msg, "\n"), "\n")
+	if strings.Count(msg, "recovery:") != 1 || !strings.HasPrefix(lines[len(lines)-1], "recovery:") {
+		t.Fatalf("want exactly one final recovery line: %s", msg)
+	}
+}
 func TestS134Contract_Registry(t *testing.T) {
 	reg := kernel.NewRegistry("first", "second")
 	noop := func(kernel.State) (kernel.Changes, error) { return kernel.Changes{}, nil }
