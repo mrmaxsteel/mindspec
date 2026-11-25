@@ -257,20 +257,26 @@ func TestS134E2E_PreKernelPrintedCommands(t *testing.T) {
 	}
 }
 
-// adapterPanelCommands returns the commands, in order, that an installed
-// adapter names for a run started for a panel.
-func adapterPanelCommands(t *testing.T, root, adapter string) []string {
+// adapterSection returns the text of one "## " section of an installed adapter.
+func adapterSection(t *testing.T, root, adapter, heading string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, ".claude", "skills", adapter, "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, section, ok := strings.Cut(string(data), "\n## Panel\n")
+	_, section, ok := strings.Cut(string(data), "\n## "+heading+"\n")
 	if !ok {
-		t.Fatalf("%s has no Panel section", adapter)
+		t.Fatalf("%s has no %s section", adapter, heading)
 	}
 	section, _, _ = strings.Cut(section, "\n## ")
-	for _, line := range strings.Split(section, "\n") {
+	return section
+}
+
+// adapterPanelCommands returns the commands, in order, that an installed
+// adapter names for a run started for a panel.
+func adapterPanelCommands(t *testing.T, root, adapter string) []string {
+	t.Helper()
+	for _, line := range strings.Split(adapterSection(t, root, adapter, "Panel"), "\n") {
 		if strings.HasPrefix(line, "When the user starts this skill for a panel") {
 			var out []string
 			for _, m := range regexp.MustCompile("`(mindspec [^`]+)`").FindAllStringSubmatch(line, -1) {
@@ -281,6 +287,66 @@ func adapterPanelCommands(t *testing.T, root, adapter string) []string {
 	}
 	t.Fatalf("%s names no command for a panel", adapter)
 	return nil
+}
+
+// adapterTallyRoute is one bullet of the Panel section: the tally result it
+// applies to and what the adapter does then.
+type adapterTallyRoute struct {
+	condition, action string
+}
+
+// adapterTallyRoutes returns every bullet of the Panel section. A bullet that
+// this test cannot classify fails the test.
+func adapterTallyRoutes(t *testing.T, root, adapter string) []adapterTallyRoute {
+	t.Helper()
+	var routes []adapterTallyRoute
+	for _, line := range strings.Split(adapterSection(t, root, adapter, "Panel"), "\n") {
+		rest, ok := strings.CutPrefix(line, "- It ")
+		if !ok {
+			continue
+		}
+		condition, action, ok := strings.Cut(rest, ": ")
+		if !ok {
+			t.Fatalf("%s: tally route %q has no action", adapter, line)
+		}
+		routes = append(routes, adapterTallyRoute{condition: condition, action: action})
+	}
+	if len(routes) == 0 {
+		t.Fatalf("%s states no tally route", adapter)
+	}
+	return routes
+}
+
+// applies reports whether the route's condition holds for a tally output.
+func (r adapterTallyRoute) applies(t *testing.T, out string, ok bool) bool {
+	t.Helper()
+	hasNext := regexp.MustCompile(`(?m)^Next:$`).MatchString(out)
+	switch {
+	case strings.HasPrefix(r.condition, "exits non-zero and prints no `decision:` line"):
+		return !ok && !strings.Contains(out, "decision:")
+	case strings.HasPrefix(r.condition, "prints a `Next` block"):
+		return hasNext
+	case strings.HasPrefix(r.condition, "prints no `Next` block"):
+		return !hasNext
+	}
+	t.Fatalf("unknown tally route condition %q", r.condition)
+	return false
+}
+
+// tallyNextBlock returns the lines of the Next block of a tally output.
+func tallyNextBlock(out string) []string {
+	_, block, ok := strings.Cut(out, "\nNext:\n")
+	if !ok {
+		return nil
+	}
+	var lines []string
+	for _, line := range strings.Split(block, "\n") {
+		if !strings.HasPrefix(line, "  ") {
+			break
+		}
+		lines = append(lines, strings.TrimPrefix(line, "  "))
+	}
+	return lines
 }
 
 func TestS134E2E_AdhocGateOnEnrolledSpec(t *testing.T) {
@@ -327,27 +393,54 @@ func TestS134E2E_AdhocGateOnEnrolledSpec(t *testing.T) {
 			t.Fatalf("adhoc panel create:\n%s", out)
 		}
 		commands := adapterPanelCommands(t, e.f.Root, adapter)
-		if len(commands) == 0 {
-			t.Fatalf("%s names no command for a panel", adapter)
+		if len(commands) != 1 || !strings.HasPrefix(commands[0], "mindspec panel tally ") {
+			t.Fatalf("%s names %q for a panel, want one panel tally", adapter, commands)
 		}
-		passed := false
-		for _, command := range commands {
-			switch {
-			case strings.HasPrefix(command, "mindspec panel tally "):
-				p.printed = append(p.printed, command)
-				pass := p.review(e.cwd, slug)
-				passed = strings.Contains(pass, "decision: PASS")
-			case strings.HasPrefix(command, "mindspec next-action "):
-				p.run(e.cwd, "next-action", e.f.SpecID, "--apply", "--json")
-			default:
-				t.Fatalf("%s names an unknown panel command %q", adapter, command)
+		p.printed = append(p.printed, commands[0])
+		pass := p.review(e.cwd, slug)
+		if !strings.Contains(pass, "decision: PASS") {
+			t.Fatalf("%s did not pass the adhoc panel:\n%s", adapter, pass)
+		}
+		// Follow every route of the adapter for this tally output.
+		var taken []adapterTallyRoute
+		for _, r := range adapterTallyRoutes(t, e.f.Root, adapter) {
+			if r.applies(t, pass, true) {
+				taken = append(taken, r)
 			}
 		}
-		if !passed {
-			t.Fatalf("%s did not pass the adhoc panel", adapter)
+		if len(taken) != 1 {
+			t.Fatalf("%s: %d tally routes apply to a passing adhoc tally, want 1: %+v", adapter, len(taken), taken)
+		}
+		action := taken[0].action
+		switch {
+		case strings.Contains(action, "go to the loop"):
+			loop := regexp.MustCompile("(?m)^1\\. Run `(mindspec [^`]+)`").FindStringSubmatch(adapterSection(t, e.f.Root, adapter, "Loop"))
+			if loop == nil {
+				t.Fatalf("%s: the loop has no first command", adapter)
+			}
+			argv := strings.Fields(strings.ReplaceAll(strings.TrimPrefix(loop[1], "mindspec "), "<spec-slug>", e.f.SpecID))
+			p.run(e.cwd, argv...)
+		case strings.Contains(action, "run the lines of that block"):
+			for _, line := range tallyNextBlock(pass) {
+				i := strings.Index(line, "mindspec ")
+				if i < 0 || strings.Contains(line[:i], "operator") {
+					continue
+				}
+				command := line[i:]
+				if strings.Contains(command, "<") {
+					t.Fatalf("%s: a passing adhoc Next block names a placeholder: %q", adapter, line)
+				}
+				p.run(e.cwd, strings.Fields(strings.ReplaceAll(strings.TrimPrefix(command, "mindspec "), "'", ""))...)
+			}
+		case strings.Contains(action, "report the error"):
+		default:
+			t.Fatalf("%s: unknown tally route action %q", adapter, action)
 		}
 		if after := rows(); after != before {
 			t.Fatalf("%s: the adhoc panel wrote kernel state\nbefore: %s\nafter: %s", adapter, before, after)
+		}
+		if block := tallyNextBlock(pass); len(block) == 0 || strings.Contains(strings.Join(block, "\n"), "mindspec") {
+			t.Fatalf("%s: a passing adhoc tally must print a Next block with no command:\n%s", adapter, pass)
 		}
 	}
 	authorised("--apply")

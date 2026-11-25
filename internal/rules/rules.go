@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"gopkg.in/yaml.v3"
 )
 
@@ -112,6 +113,26 @@ func Filter(scope, gate string) ([]Rule, error) {
 		}
 	}
 	return selected, nil
+}
+
+// Section renders the conduct rules of one actor scope as the brief section
+// that a fresh agent reads: a "## Rules (<scope>)" heading, then one row per
+// rule in table order, in the row form of the rules command. The kernel briefs
+// and the work-item brief of `next --emit-only` print this one section.
+func Section(scope string) (string, error) {
+	selected, err := Filter(scope, "")
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n## Rules (%s)\n\n", scope)
+	if len(selected) == 0 {
+		b.WriteString("None.\n")
+	}
+	for _, r := range selected {
+		fmt.Fprintf(&b, "%s: %s — %s\n", termsafe.Escape(r.ID), termsafe.Escape(r.Prohibition), termsafe.Escape(r.Replacement))
+	}
+	return b.String(), nil
 }
 
 // StagedMarker records a skill rule's removal date. Err retains malformed

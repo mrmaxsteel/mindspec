@@ -18,6 +18,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/executor"
 	"github.com/mrmaxsteel/mindspec/internal/next"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
+	"github.com/mrmaxsteel/mindspec/internal/rules"
 	"github.com/mrmaxsteel/mindspec/internal/validate/readiness"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 	"github.com/spf13/cobra"
@@ -448,6 +449,63 @@ func TestNextSelection_ClaimDefaultPick_PrintsLineAndClaimsRow1(t *testing.T) {
 	requireText(t, out, honestyDefaultLine)
 	if f.status(t, "epic-129.1") != "in_progress" {
 		t.Fatal("default did not claim first row")
+	}
+}
+
+// The work-item brief that an implementer gets (`next <w> --emit-only`, the
+// brief argv of the implementation action) carries the implementer rules: the
+// one section that the kernel briefs print, and no other scope.
+func TestNextSelection_PositionalEmitOnly_ImplementerRules(t *testing.T) {
+	f := newNextHonestyFixture(t)
+	f.write(t)
+	out, err := f.run(t, "--emit-only", "epic-129.1")
+	if err != nil {
+		t.Fatalf("ready item refused: %v\n%s", err, out)
+	}
+	section, err := rules.Section("implementer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, section) {
+		t.Fatalf("the work-item brief lacks the implementer rules section:\n%s\nwant:\n%s", out, section)
+	}
+	implementer, err := rules.Filter("implementer", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(implementer) == 0 {
+		t.Fatal("the rule table has no implementer rule")
+	}
+	ids := map[string]bool{}
+	for _, r := range implementer {
+		ids[r.ID] = true
+		if !strings.Contains(out, r.ID+": ") {
+			t.Errorf("implementer rule %s missing:\n%s", r.ID, out)
+		}
+	}
+	all, err := rules.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := 0
+	for _, r := range all {
+		if !ids[r.ID] {
+			foreign++
+			if strings.Contains(out, r.ID+": ") {
+				t.Errorf("rule %s of another scope printed:\n%s", r.ID, out)
+			}
+		}
+	}
+	if foreign == 0 {
+		t.Fatal("no rule outside the implementer scope to check against")
+	}
+	for _, scope := range []string{"fixer", "reviewer", "orchestrator"} {
+		if strings.Contains(out, "## Rules ("+scope+")") {
+			t.Errorf("the work-item brief prints the %s rules:\n%s", scope, out)
+		}
+	}
+	if strings.Count(out, "## Rules (") != 1 {
+		t.Errorf("want one rules section:\n%s", out)
 	}
 }
 

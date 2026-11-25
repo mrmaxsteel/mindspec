@@ -207,20 +207,14 @@ func ReviewSlotBody(s State, gate string) (body string, err error) {
 	return b.String(), nil
 }
 
-// renderBriefRules prints the conduct rules of one actor scope, in table order,
-// with the row form of the rules command, so a fresh agent gets them from its brief.
+// renderBriefRules prints the conduct rules of one actor scope from the one
+// section that rules.Section renders, so a fresh agent gets them from its brief.
 func renderBriefRules(b *strings.Builder, scope string) error {
-	selected, err := rules.Filter(scope, "")
+	section, err := rules.Section(scope)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(b, "\n## Rules (%s)\n\n", scope)
-	if len(selected) == 0 {
-		b.WriteString("None.\n")
-	}
-	for _, r := range selected {
-		fmt.Fprintf(b, "%s: %s — %s\n", termsafe.Escape(r.ID), termsafe.Escape(r.Prohibition), termsafe.Escape(r.Replacement))
-	}
+	b.WriteString(section)
 	return nil
 }
 

@@ -518,9 +518,10 @@ Remove a foreign cycle link with the tracker before retrying apply.
 A gate that is not a kernel gate prints a `Next` block from `mindspec panel tally`.
 This applies to an older approved plan and to an adhoc panel.
 The block selects its lines from the decision leg, not from the message text.
-A pass prints the next lifecycle command. Missing slots print their prompt lines.
+A pass prints the next lifecycle command. An adhoc pass prints a line to report and stop.
+Missing slots print their prompt lines.
 Unresolved findings print the refute, defer and `fix:` lines; a bead gate adds
 `mindspec complete <bead> --check` before the one fix commit.
-A REJECT or a missing measurement artifact prints the operator-action line.
-A stale subject prints the rebind and abandon lines. Other results print the halt line.
+A REJECT, a `hard_block` or a missing measurement artifact prints the operator-action line.
+A stale subject prints the create, rebind and abandon lines. Other results print the halt line.
 A kernel gate prints no `Next` block.

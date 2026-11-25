@@ -457,6 +457,7 @@ and prints a recovery line.`,
 			Target:          target,
 			NextRound:       nextPanelRound(reg, facts.Res),
 			MissingSlots:    tallyMissingSlots(slots, slotsErr),
+			SlotsErr:        slotsErr,
 			ArtifactMissing: facts.ArtifactDetails != "",
 			Out:             cmd.OutOrStdout(),
 		}
@@ -1153,6 +1154,8 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 // MissingSlots names the slots of the round that are not final, for the
 // incomplete route of the Next block. ArtifactMissing is true when an
 // unresolved finding names a measurement artifact absent from the round tree.
+// SlotsErr is the error of the slot-status read; the incomplete route then
+// prints it in place of the slot lines.
 // Out receives the Next block of a passing gate; nil prints none.
 type tallyRecoveryFacts struct {
 	Kernel          bool
@@ -1163,6 +1166,7 @@ type tallyRecoveryFacts struct {
 	Gate            string
 	NextRound       int
 	MissingSlots    []string
+	SlotsErr        error
 	ArtifactMissing bool
 	Out             io.Writer
 }

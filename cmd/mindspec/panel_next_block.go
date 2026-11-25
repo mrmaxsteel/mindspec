@@ -7,6 +7,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // The Next block of `panel tally` on a gate that is not a kernel gate. The
@@ -16,7 +17,14 @@ import (
 const panelOperatorActionLine = "A REJECT or missing required measurement artifact needs operator action. A text edit does not supply an artifact."
 
 // panelHaltLine starts the halt lines of the Next block.
-const panelHaltLine = "Otherwise halt and report the panel state."
+const panelHaltLine = "Halt and report the panel state."
+
+// panelIncompleteHaltLine follows the re-tally line of the incomplete route.
+const panelIncompleteHaltLine = "If that tally still blocks: halt and report the panel state."
+
+// panelAdhocPassLine is the Next block of a passing panel that has no pass
+// verb. It names no command, so the agent does not go to the loop.
+const panelAdhocPassLine = "The review passed. Report the result to the user and stop."
 
 type nextRoute int
 
@@ -140,8 +148,22 @@ func (o nextBlockOperands) recoveryLines() []string {
 }
 
 func (o nextBlockOperands) haltLines() []string {
-	lines := []string{panelHaltLine, "For the operator, run one of these:"}
+	return o.haltLinesAfter(panelHaltLine)
+}
+
+// haltLinesAfter is the halt line given, then the operator recovery lines.
+func (o nextBlockOperands) haltLinesAfter(halt string) []string {
+	lines := []string{halt, "For the operator, run one of these:"}
 	return append(lines, o.recoveryLines()...)
+}
+
+// dispositionLines are the disposition append lines. An adhoc panel has no
+// spec, and disposition append needs one, so adhoc has none.
+func (o nextBlockOperands) dispositionLines() []string {
+	if o.gate == "adhoc" {
+		return nil
+	}
+	return []string{"for each finding that no verb captured: mindspec panel disposition append --spec " + o.spec + " --panel " + o.slug + " --data -"}
 }
 
 // verdictVerbLines are the refute and defer lines. Adhoc has no defer.
@@ -168,24 +190,29 @@ func renderPanelNextBlock(d panel.Decision, f tallyRecoveryFacts) []string {
 	case routePass:
 		verb := o.passVerb()
 		if verb == "" {
-			return nil
+			verb = panelAdhocPassLine
 		}
 		lines = append(lines, verb)
 	case routeIncomplete:
-		slots := f.MissingSlots
-		if len(slots) == 0 {
-			slots = []string{"<slot>"}
+		if f.SlotsErr != nil || len(f.MissingSlots) == 0 {
+			reason := "the slot status is unknown"
+			if f.SlotsErr != nil {
+				reason = "the slot status could not be read: " + termsafe.Escape(f.SlotsErr.Error())
+			}
+			lines = append(lines, reason, "then: mindspec panel tally "+o.slug)
+			lines = append(lines, o.haltLinesAfter(panelIncompleteHaltLine)...)
+			break
 		}
-		for _, slot := range slots {
+		for _, slot := range f.MissingSlots {
 			s := shellQuoteTarget(escapeConfigValue(slot))
 			lines = append(lines,
 				"mindspec panel checkout "+o.slug+" --slot "+s+" --dispatch",
 				"mindspec panel prompt "+o.slug+" --slot "+s+"   (give the output to a fresh reviewer agent)")
 		}
 		lines = append(lines, "then: mindspec panel tally "+o.slug)
-		lines = append(lines, o.haltLines()...)
+		lines = append(lines, o.haltLinesAfter(panelIncompleteHaltLine)...)
 	case routeUnresolved:
-		lines = append(lines, "for each finding that no verb captured: mindspec panel disposition append --spec "+o.spec+" --panel "+o.slug+" --data -")
+		lines = append(lines, o.dispositionLines()...)
 		lines = append(lines, o.verdictVerbLines()...)
 		lines = append(lines,
 			"fix: mindspec panel verify "+o.slug,

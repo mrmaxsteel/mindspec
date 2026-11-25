@@ -113,12 +113,13 @@ A plan approved before enrollment, and an adhoc panel, use `mindspec panel tally
 On such a gate, the tally prints a `Next` block. Run its lines in order.
 
 - A pass prints the next lifecycle command, for example `mindspec complete <bead>`.
+  An adhoc pass prints a line that tells the agent to report the result and stop.
 - A round with missing slots names each slot and its prompt command.
 - Unresolved findings print the refute and defer lines and the `fix:` lines.
   The fix lines run the verify step, give the reproduced findings to one fresh fixer
   agent, and open the next round with `panel create`.
-- A REJECT or a missing measurement artifact prints the operator-action line.
-- A stale subject prints the rebind and abandon lines with their conditions.
+- A REJECT, a `hard_block` or a missing measurement artifact prints the operator-action line.
+- A stale subject prints the create, rebind and abandon lines with their conditions.
 - Other results print the halt line.
 
 A kernel gate prints no `Next` block. The kernel loop continues with

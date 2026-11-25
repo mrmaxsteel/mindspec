@@ -13,6 +13,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
+	"github.com/mrmaxsteel/mindspec/internal/rules"
 )
 
 // readyPlan declares the files of each item, so the work-item brief that the
@@ -25,14 +26,15 @@ func readyPlan(plan string) string {
 // decisions and run entries of next-action and submit, and the brief texts.
 type printedLoop struct {
 	*kernelE2E
-	printed map[string]bool
-	kinds   map[string]int
-	briefs  map[string]string
-	commits int
+	printed   map[string]bool
+	kinds     map[string]int
+	briefs    map[string]string
+	briefArgv map[string]string
+	commits   int
 }
 
 func newPrintedLoop(e *kernelE2E) *printedLoop {
-	return &printedLoop{kernelE2E: e, printed: map[string]bool{}, kinds: map[string]int{}, briefs: map[string]string{}}
+	return &printedLoop{kernelE2E: e, printed: map[string]bool{}, kinds: map[string]int{}, briefs: map[string]string{}, briefArgv: map[string]string{}}
 }
 
 func (p *printedLoop) allow(out kernel.Output) {
@@ -106,6 +108,7 @@ func (p *printedLoop) act(a kernel.Action, verdict func(kernel.Action) string) {
 	token := claim[2]
 	brief := p.do(a.Brief, nil)
 	p.briefs[a.Kind] = brief
+	p.briefArgv[a.Kind] = strings.Join(a.Brief, " ")
 	fill := map[string]string{"<token>": token}
 	switch a.Kind {
 	case "implement", "fix":
@@ -247,5 +250,17 @@ func TestS134E2E_PrintedCommandLoop(t *testing.T) {
 	}
 	if !strings.Contains(p.briefs["verify"], "Finding: R1 round 1") {
 		t.Fatalf("verify brief lacks the refused finding: %s", p.briefs["verify"])
+	}
+	// The implementer gets the output of the implementation action's brief
+	// argv, the work-item brief, which carries the implementer rules alone.
+	if argv := p.briefArgv["implement"]; !strings.HasSuffix(argv, " --emit-only") || !strings.Contains(argv, " next ") {
+		t.Fatalf("implement brief argv = %q, want the work-item brief", argv)
+	}
+	implementerRules, err := rules.Section("implementer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.briefs["implement"], implementerRules) || strings.Contains(p.briefs["implement"], "## Rules (fixer)") {
+		t.Fatalf("implement brief lacks the implementer rules or prints the fixer rules: %s", p.briefs["implement"])
 	}
 }

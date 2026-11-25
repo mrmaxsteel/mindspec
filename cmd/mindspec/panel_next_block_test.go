@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -137,8 +140,15 @@ func TestPanelTally_NextBlockRoutes(t *testing.T) {
 						t.Errorf("complete --check on gate %s:\n%s", gate, text)
 					}
 				}
+				// Disposition append needs a spec: none on adhoc, --spec on every other gate.
+				if tc.fix {
+					want := gate != "adhoc"
+					if strings.Contains(text, "disposition append") != want ||
+						(want && !strings.Contains(text, "mindspec panel disposition append --spec '900-demo' --panel 'demo' --data -")) {
+						t.Errorf("disposition line on gate %s:\n%s", gate, text)
+					}
+				}
 				// Gate flags of the next round: no --spec on adhoc, the bead binding on a bead gate.
-				// (disposition append takes --spec on every gate, so check only the create line.)
 				if i := strings.Index(text, "mindspec panel create"); i >= 0 {
 					create := text[i:]
 					create = create[:strings.Index(create, "\n")]
@@ -171,6 +181,117 @@ func TestPanelTally_NextBlockRoutes(t *testing.T) {
 			})
 		}
 	}
+
+	// A passing panel prints the gate's verb. Adhoc has no verb: it prints a
+	// line that stops the agent, with no command, so no adapter goes to the loop.
+	for _, gate := range []string{"bead", "spec_approve", "plan_approve", "final_review", "adhoc"} {
+		t.Run(gate+"/pass", func(t *testing.T) {
+			p := newPanel(gate)
+			d := panel.PanelGateDecision(panel.GateFacts{Reg: reg, Res: buildResult(p, 3, 0, 3, 1, nil), HeadSHA: sha, BeadID: map[bool]string{true: beadID}[gate == "bead"]})
+			if d.Action != panel.Allow || d.Leg != panel.LegPass {
+				t.Fatalf("decision = %v/%q (%s)", d.Action, d.Leg, d.Message)
+			}
+			var out bytes.Buffer
+			f := tallyRecoveryFacts{Slug: "demo", SpecID: p.Spec, Target: p.Target, Gate: gate, NextRound: 2, Out: &out}
+			var err error
+			if gate == "bead" {
+				f.BeadID = beadID
+				err = tallyExitAction(d, f)
+			} else {
+				err = tallyExitActionNonBead(d, f)
+			}
+			if err != nil {
+				t.Fatalf("pass exited non-zero: %v", err)
+			}
+			text := out.String()
+			if !strings.HasPrefix(text, "Next:\n  ") {
+				t.Fatalf("pass printed no Next block: %q", text)
+			}
+			if gate == "adhoc" {
+				if text != "Next:\n  "+panelAdhocPassLine+"\n" || strings.Contains(text, "mindspec") || strings.Contains(text, "next-action") {
+					t.Fatalf("adhoc pass Next block = %q, want only the stop line", text)
+				}
+			} else if !strings.Contains(text, "mindspec ") {
+				t.Fatalf("pass Next block names no verb: %q", text)
+			}
+		})
+	}
+
+	nonBead := func(t *testing.T, d panel.Decision, f tallyRecoveryFacts) string {
+		t.Helper()
+		err := tallyExitActionNonBead(d, f)
+		if err == nil {
+			t.Fatal("blocked decision exited 0")
+		}
+		return err.Error()
+	}
+	nextLines := func(text string) []string {
+		i := strings.Index(text, "Next:\n")
+		if i < 0 {
+			return nil
+		}
+		var lines []string
+		for _, l := range strings.Split(text[i+len("Next:\n"):], "\n") {
+			if !strings.HasPrefix(l, "  ") {
+				break
+			}
+			lines = append(lines, strings.TrimPrefix(l, "  "))
+		}
+		return lines
+	}
+
+	// The halted route starts with a line that stands alone: no "Otherwise"
+	// with no condition before it.
+	t.Run("halted/standalone halt line", func(t *testing.T) {
+		text := nonBead(t, panel.Decision{Action: panel.Block, Leg: panel.LegRoundMismatch, Message: "round mismatch"},
+			tallyRecoveryFacts{Slug: "demo", SpecID: "900-demo", Target: "spec/900-demo", Gate: "plan_approve", NextRound: 2})
+		lines := nextLines(text)
+		if len(lines) == 0 || lines[0] != "Halt and report the panel state." {
+			t.Fatalf("halted route first line = %q:\n%s", lines, text)
+		}
+		if strings.Contains(text, "Otherwise") {
+			t.Fatalf("halted route has a dangling Otherwise:\n%s", text)
+		}
+	})
+
+	// A failed slot-status read prints the error and a re-tally line, never
+	// a placeholder slot.
+	t.Run("incomplete/slot status error", func(t *testing.T) {
+		text := nonBead(t, panel.Decision{Action: panel.Block, Leg: panel.LegIncomplete, Message: "incomplete"},
+			tallyRecoveryFacts{Slug: "demo", SpecID: "900-demo", Target: "spec/900-demo", Gate: "spec_approve", NextRound: 2,
+				SlotsErr: errors.New("slot attempts unreadable")})
+		for _, w := range []string{"the slot status could not be read: slot attempts unreadable", "then: mindspec panel tally 'demo'"} {
+			if !strings.Contains(text, w) {
+				t.Errorf("missing %q:\n%s", w, text)
+			}
+		}
+		for _, w := range []string{"<slot>", "--dispatch"} {
+			if strings.Contains(text, w) {
+				t.Errorf("unexpected %q:\n%s", w, text)
+			}
+		}
+	})
+
+	// The workflow runbook states the lines that the stale and operator routes print.
+	t.Run("runbook matches stale and operator routes", func(t *testing.T) {
+		stale := nonBead(t, panel.Decision{Action: panel.Block, Leg: panel.LegStale, Message: "stale"},
+			tallyRecoveryFacts{Slug: "demo", SpecID: "900-demo", Target: "spec/900-demo", Gate: "plan_approve", NextRound: 2})
+		for _, verb := range []string{"mindspec panel create", "mindspec panel rebind", "mindspec panel abandon"} {
+			if !strings.Contains(stale, verb) {
+				t.Fatalf("stale route lacks %q:\n%s", verb, stale)
+			}
+		}
+		raw, err := os.ReadFile(filepath.Join("..", "..", ".mindspec", "domains", "workflow", "runbook.md"))
+		if err != nil {
+			t.Fatalf("read runbook: %v", err)
+		}
+		doc := strings.Join(strings.Fields(string(raw)), " ")
+		for _, w := range []string{"A stale subject prints the create, rebind and abandon lines.", "A REJECT, a `hard_block` or a missing measurement artifact prints the operator-action line."} {
+			if !strings.Contains(doc, w) {
+				t.Errorf("runbook lacks %q", w)
+			}
+		}
+	})
 }
 
 // TestPanelTally_NextBlockPassAndHalted covers the PASS verb of each gate and
@@ -198,8 +319,8 @@ func TestPanelTally_NextBlockPassAndHalted(t *testing.T) {
 				t.Fatalf("pass exited non-zero: %v", err)
 			}
 			if verb == "" {
-				if out.Len() != 0 {
-					t.Fatalf("adhoc pass printed a Next block: %s", out.String())
+				if got := out.String(); got != "Next:\n  "+panelAdhocPassLine+"\n" {
+					t.Fatalf("adhoc pass Next block = %q, want the stop line", got)
 				}
 			} else if got := out.String(); got != "Next:\n  "+verb+"\n" {
 				t.Fatalf("pass Next block = %q, want verb %q", got, verb)

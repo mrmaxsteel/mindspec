@@ -19,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
 	"github.com/mrmaxsteel/mindspec/internal/resolve"
+	"github.com/mrmaxsteel/mindspec/internal/rules"
 	"github.com/mrmaxsteel/mindspec/internal/state"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -519,10 +520,17 @@ func runEmitOnly(root, specFlag string, pick int, args []string) error {
 		if err != nil {
 			return err
 		}
+		// The implementer gets this output as its prompt, so it carries the
+		// implementer rules: the same section as the kernel briefs.
+		implementerRules, err := rules.Section("implementer")
+		if err != nil {
+			return err
+		}
 		if err := emitOnlyPrimer(info); err != nil {
 			return err
 		}
 		fmt.Print(review)
+		fmt.Print(implementerRules)
 		return nil
 	}
 

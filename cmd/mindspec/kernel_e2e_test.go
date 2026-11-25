@@ -1022,9 +1022,11 @@ func TestS134E2E_AuditProducersAndReplay(t *testing.T) {
 	// open foreign child of the epic owns the deferred documentation.
 	e := newKernelE2E(t, kernelE2EBinary(t), 1)
 	// The escape-hatch rows come from the local journal, which refuses a home
-	// inside a Git work tree. Such a TMPDIR cannot give those rows.
+	// inside a Git work tree. Such a TMPDIR cannot give those rows, so the test
+	// fails: a missing prerequisite is not a pass. (-short skips first, in
+	// kernelE2EBinary.)
 	if tree := config.EnclosingGitTree(filepath.Dir(e.f.Root)); tree != "" {
-		t.Skipf("the local journal is disabled: the test home is inside the Git work tree at %s; set TMPDIR outside any Git work tree", tree)
+		t.Fatalf("this test needs TMPDIR to be a home outside any Git work tree: the test home is inside the Git work tree at %s, which disables the local journal", tree)
 	}
 	e.apply()
 	e.foreign()
