@@ -263,6 +263,39 @@ func TestS134E2E_CriterionMalformedVerifyRecords(t *testing.T) {
 	if !strings.Contains(brief, "Finding: R2 round 1") || strings.Contains(brief, "Finding: R1 round 1") {
 		t.Fatalf("the fix brief must name only the reproduced finding:\n%s", brief)
 	}
+	// The verify writes the refutation record of the refuted finding.
+	refs := e.refutations(gate)
+	if len(refs) != 1 || refs[0].VerifyStep != a.Step || refs[0].Slot != "R1" || refs[0].Finding != f.Finding {
+		t.Fatalf("refutation records %+v, want one for R1 by %s", refs, a.Step)
+	}
+	// After the fix closes, round 2 names the verify as its prior, and the
+	// round-2 slot brief shows both findings with their returns.
+	token = e.lease(fix)
+	e.ok("submit", fix, "--lease", token, "--commit", e.commit(e.tree(item), "fixed.txt", "fixed\n"))
+	next := e.apply()
+	round, _, err := kernel.Decode[kernel.GateRound](e.row(gate).Metadata, kernel.KeyRound)
+	e.must(err)
+	if round.Round != 2 || round.Prior == nil || round.Prior.Verify != a.Step {
+		t.Fatalf("round %+v, want round 2 whose prior names %s", round, a.Step)
+	}
+	e.create(next)
+	reg, _, err := kernel.Decode[kernel.RegistrationRecord](e.row(gate).Metadata, kernel.KeyRegistration)
+	e.must(err)
+	prompt := e.ok("panel", "prompt", reg.Slug, "--spec", e.f.SpecID, "--slot", "R1")
+	r1 := strings.Index(prompt, "Finding: R1 round 1 "+f.Finding)
+	r2 := strings.Index(prompt, "Finding: R2 round 1 "+g.Finding)
+	refuted := strings.Index(prompt, "Return: refuted")
+	reproducedAt := strings.LastIndex(prompt, "Return: reproduced")
+	if r1 < 0 || r2 < r1 || refuted < r1 || refuted > r2 || reproducedAt < r2 {
+		t.Fatalf("the round-2 slot brief must show both findings with their returns:\n%s", prompt)
+	}
+	// AC22: the round-2 prompt lists the paths changed since round 1's subject
+	// and tells the slot not to raise a refuted or deferred finding again.
+	changed := strings.Index(prompt, "## Paths changed since the prior round subject\n\n- Path: fixed.txt\n")
+	asks := strings.Index(prompt, "## Prior-Round Asks")
+	if changed < 0 || asks < changed || !strings.Contains(prompt, "Do not raise a refuted or deferred finding again without new evidence.") {
+		t.Fatalf("the round-2 prompt must list the changed paths and the refuted-or-deferred line:\n%s", prompt)
+	}
 }
 
 // AC19: slots R1 and R2 VOID on attempts 1, 2 and 3, with R3 APPROVE, give
@@ -436,6 +469,14 @@ func TestS134E2E_CriterionVerifyKilledBeforeReceipt(t *testing.T) {
 		if r := e.receipt(a.Step); r.At != pin.At.UTC().Format("2006-01-02T15:04:05.999999999Z07:00") {
 			t.Fatalf("verify receipt at %q, want the closing pin's %s", r.At, pin.At)
 		}
+		// The rerun of the same record gives one refutation record per finding.
+		per := map[string]int{}
+		for _, r := range e.refutations(gate) {
+			per[r.Slot+" "+r.Finding]++
+		}
+		if len(per) != 2 || per[findings[0].Slot+" "+findings[0].Finding] != 1 || per[findings[1].Slot+" "+findings[1].Finding] != 1 {
+			t.Fatalf("refutation records per finding %v, want one for each of the two findings", per)
+		}
 		e.apply()
 		if r := e.receipt(gate); r.Kind != "passed" || r.Retally != "verify" {
 			t.Fatalf("gate receipt %+v, want passed by the verify retally", r)
@@ -470,6 +511,69 @@ func TestS134E2E_CriterionVerifyKilledBeforeReceipt(t *testing.T) {
 		e.must(err)
 		if !ok || len(reproduced) != 1 || reproduced[0].Slot != g.Slot {
 			t.Fatalf("fix reproduced %+v, want only %s", reproduced, g.Slot)
+		}
+	})
+	t.Run("generation 2", func(t *testing.T) {
+		t.Parallel()
+		e := newKernelE2E(t, bin, 1)
+		gate := e.f.Items[0] + ".review"
+		e.refusedRound("REQUEST_CHANGES", "REQUEST_CHANGES", "APPROVE")
+		a, findings := e.verifyAction()
+		f, g := findings[0], findings[1]
+		token := e.lease(a.Step)
+		x := kernel.VerifyRecord{Step: a.Step, Subject: a.Subject.Commit, Returns: []kernel.VerifyReturn{returnFor(f, "refuted", a.Subject.Commit), returnFor(g, "refuted", a.Subject.Commit)}}
+		kill(e, a.Step, token, e.jsonFile("x.json", x))
+		second := e.lease(a.Step, "--take", "--reason", "Replace the verify actor.")
+		y := kernel.VerifyRecord{Step: a.Step, Subject: a.Subject.Commit, Returns: []kernel.VerifyReturn{returnFor(f, "reproduced", ""), returnFor(g, "refuted", a.Subject.Commit)}}
+		if out, code := e.run("submit", a.Step, "--lease", second, "--record", e.jsonFile("y.json", y)); code == 0 {
+			t.Fatalf("a generation-2 submit of another record exited 0: %s", out)
+		}
+		var next kernel.Action
+		for _, n := range e.apply().Actions {
+			if n.Kind == "verify" {
+				next = n
+			}
+		}
+		if next.Step != a.Step+".a2" {
+			t.Fatalf("next verify %q, want %s.a2", next.Step, a.Step)
+		}
+		y.Step = next.Step
+		y.Subject = next.Subject.Commit
+		e.ok("submit", next.Step, "--lease", e.lease(next.Step), "--record", e.jsonFile("y2.json", y))
+		byA2 := 0
+		for _, r := range e.refutations(gate) {
+			if r.VerifyStep == next.Step && r.Slot == g.Slot && r.Finding == g.Finding {
+				byA2++
+			}
+		}
+		if byA2 != 1 {
+			t.Fatalf("refutation records of g by %s: %d, want 1", next.Step, byA2)
+		}
+		// The killed submit wrote X's rows; each verify attempt keys its own
+		// row of g, so the two rows have distinct ids.
+		ids := map[string]bool{}
+		rows := e.refutationRows(gate, g.Slot)
+		for _, r := range rows {
+			ids[r.ID] = true
+		}
+		if len(rows) != 2 || len(ids) != 2 {
+			t.Fatalf("rows of g %+v, want two with distinct ids (X's and %s's)", rows, next.Step)
+		}
+		fix := gate + ".r2.fix"
+		reproduced, ok, err := kernel.Decode[[]kernel.Finding](e.row(fix).Metadata, kernel.KeyReproduced)
+		e.must(err)
+		if !ok || len(reproduced) != 1 || reproduced[0].Slot != f.Slot {
+			t.Fatalf("fix reproduced %+v, want only %s", reproduced, f.Slot)
+		}
+		reg, _, err := kernel.Decode[kernel.RegistrationRecord](e.row(gate).Metadata, kernel.KeyRegistration)
+		e.must(err)
+		e.ok("panel", "refute", reg.Slug, "--spec", e.f.SpecID, "--slot", g.Slot, "--round", "1", "--finding", g.Finding, "--by", "operator", "--ground", "disproven", "--reason", "The subject covers the finding.", "--evidence", e.commit(e.proof, "verb-evidence.txt", "verb evidence\n"))
+		e.apply()
+		if r := e.row(gate); r.Status == "closed" {
+			t.Fatalf("the refute of g closed the gate: %+v", e.receipt(gate))
+		}
+		if r := e.row(fix); r.Status == "closed" {
+			t.Fatalf("the refute of g closed the fix: %+v", e.receipt(fix))
 		}
 	})
 }
