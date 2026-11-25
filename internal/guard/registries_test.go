@@ -92,9 +92,9 @@ func TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation(t *testing.
 // drifts from what the exported count vars themselves compute — which
 // can only happen if this test is stale against a code change that
 // also updated the vars, since both are derived from the same slice.
-// Its real value is pinning the CURRENT correct numbers (ten live, ten
-// total, as of bead 7's exit of the four seed-only orchestrator-block
-// entries — fourteen total was the pre-bead-7 state) so a reviewer
+// Its real value is pinning the CURRENT correct numbers (five live, five
+// total, as wantKnownSitesLiveCount below states; earlier exits of
+// orchestrator-block entries made the count smaller) so a reviewer
 // sees them fail loudly if a future edit to the slice's structure
 // (e.g. renaming the seed-only surface, or a leftover orchestrator
 // entry surviving the exit) silently changes what "live" means.

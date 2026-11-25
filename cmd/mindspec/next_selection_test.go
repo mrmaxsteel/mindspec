@@ -627,6 +627,11 @@ func TestNextSelection_PositionalEmitOnly_ReadinessAttempt(t *testing.T) {
 		"empty report":   map[string]interface{}{"report": []interface{}{}, "clarifications": []interface{}{}},
 		"absent ordinal": map[string]interface{}{"report": []interface{}{map[string]interface{}{"ordinal": 1, "signal": "SR-1", "reason": "r"}}, "clarifications": []interface{}{map[string]interface{}{"ordinal": 9, "reason": "r", "answer": "a", "span": "s"}}},
 		"not an object":  "not json",
+		"null value":     nil,
+		"null string":    "null",
+		"number":         float64(7),
+		"boolean":        true,
+		"array":          []interface{}{},
 	} {
 		f.rows[0]["metadata"] = map[string]interface{}{bead.MetaKeyReadinessAttempt: attempt}
 		f.write(t)

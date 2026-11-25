@@ -23,12 +23,14 @@ var readinessReviewSignals = []string{
 
 // renderReadinessReview returns the readiness review that `next <w>
 // --emit-only` prints after the brief. It reads the stored readiness
-// attempt of the item and refuses when that record is malformed. Store
+// attempt of the item and refuses when that record is malformed. A
+// present key is always parsed, so a null or non-object value refuses
+// as malformed; only an absent key means a first dispatch. Store
 // text renders through termsafe.Escape on lines that start with
 // "- Ordinal", so no stored text can start a line or pass as a header.
 func renderReadinessReview(info next.BeadInfo) (string, error) {
 	var record *bead.AttemptRecord
-	if raw, ok := info.Metadata[bead.MetaKeyReadinessAttempt]; ok && raw != nil {
+	if raw, ok := info.Metadata[bead.MetaKeyReadinessAttempt]; ok {
 		parsed, err := bead.ParseAttemptRecord(raw)
 		if err != nil {
 			return "", guard.NewFailure(
