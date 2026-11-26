@@ -216,10 +216,17 @@ func checkLens(s State, r Record, _ Receipt) (err error) {
 		}
 	}
 	if len(bad) > 0 {
-		return actorFailure(strings.Join(bad, "; "))
+		return termsafe.NewFailure(strings.Join(bad, "; "), lensRecordRecovery)
 	}
 	return nil
 }
+
+// lensRecordRecovery names the fix of a lens record that misses, repeats or
+// adds a slot.
+const lensRecordRecovery = "in the lens record, give one non-empty lens to each slot that the message names as missing or empty, remove each extra entry, each second entry for one slot and each adversary entry, then run the same submit command again"
+
+// verifyGroundRecovery names the grounds that a refuted verify return accepts.
+const verifyGroundRecovery = "set ground of the refuted return to disproven, not-load-bearing or out_of_acceptance_scope in the verify record, then run the same submit command again"
 
 func checkVerify(s State, r Record, _ Receipt) error {
 	data, err := recordBytes(r)
@@ -269,7 +276,7 @@ func checkVerify(s State, r Record, _ Receipt) error {
 		case "reproduced":
 		case "refuted":
 			if ret.Ground != "disproven" && ret.Ground != "not-load-bearing" && ret.Ground != "out_of_acceptance_scope" {
-				return actorFailure("refuted finding needs a valid ground")
+				return termsafe.NewFailure("refuted finding needs a valid ground: disproven, not-load-bearing or out_of_acceptance_scope", verifyGroundRecovery)
 			}
 			if ret.Ground == "out_of_acceptance_scope" && !verifyAcceptanceExists(s, ret.AC) {
 				return actorFailure("out_of_acceptance_scope needs ac that names an acceptance criterion in the owning spec")

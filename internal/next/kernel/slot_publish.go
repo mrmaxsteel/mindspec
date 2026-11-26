@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -302,44 +303,83 @@ func commitIdentity(root string) []string {
 
 // syncCheckouts brings each worktree that has the spec branch checked out
 // from base to holding. holding differs from base only at the verdict path.
-// git read-tree -m -u holds the index lock of the worktree for the whole
-// update, keeps every local change, and refuses when a local change at the
-// path would be overwritten. When it refuses, the index alone moves to
-// holding (read-tree -m -i, under the same lock), so the file at the path
-// stays as the user left it. A staged change at the path, or an index lock
-// that another git command holds, stops the sync with a recovery; a retry of
-// the same submit finishes it.
+// A listed worktree whose directory is gone (git marks it prunable) holds no
+// work and no index that a user can see, so the sync skips it; git worktree
+// prune removes its entry.
 func syncCheckouts(root, ref, path, base, holding string) error {
 	list, err := publishGit(root, nil, nil, "worktree", "list", "--porcelain")
 	if err != nil {
 		return err
 	}
-	var trees []string
-	current := ""
-	for _, line := range strings.Split(list, "\n") {
-		if value, ok := strings.CutPrefix(line, "worktree "); ok {
-			current = value
-		}
-		if line == "branch "+ref && current != "" {
-			trees = append(trees, current)
+	for _, tree := range specTrees(list, ref) {
+		if err := syncCheckout(root, tree, path, base, holding); err != nil {
+			return err
 		}
 	}
-	for _, tree := range trees {
-		if _, err := publishGit(tree, nil, nil, "read-tree", "-m", "-u", base, holding); err == nil {
+	return nil
+}
+
+// specTrees returns the directory of each listed worktree that has ref checked
+// out and that exists. A worktree that git marks prunable, or whose directory
+// does not exist, is left out.
+func specTrees(list, ref string) []string {
+	var trees []string
+	for _, block := range strings.Split(list, "\n\n") {
+		dir, onRef, prunable := "", false, false
+		for _, line := range strings.Split(block, "\n") {
+			if value, ok := strings.CutPrefix(line, "worktree "); ok {
+				dir = value
+			}
+			onRef = onRef || line == "branch "+ref
+			prunable = prunable || line == "prunable" || strings.HasPrefix(line, "prunable ")
+		}
+		if dir == "" || !onRef || prunable {
 			continue
 		}
-		if _, err := publishGit(tree, nil, nil, "read-tree", "-m", "-i", base, holding); err != nil {
-			return syncFailure(err, tree, path)
+		if info, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) || (err == nil && !info.IsDir()) {
+			continue
 		}
-		// The index moved without the file. Write the file only when it is
-		// absent; checkout-index without --force never replaces a file.
-		file := filepath.Join(tree, filepath.FromSlash(path))
-		if _, err := os.Lstat(file); os.IsNotExist(err) {
-			if _, err := publishGit(tree, nil, nil, "checkout-index", "--", path); err != nil {
-				if _, e := os.Lstat(file); os.IsNotExist(e) {
-					return syncFailure(err, tree, path)
-				}
-			}
+		trees = append(trees, dir)
+	}
+	return trees
+}
+
+// syncCheckout brings one worktree from base to holding. When a file is at
+// the path, git read-tree -m -u does the update in one git process under the
+// index lock, like git checkout: it keeps every local change and refuses when
+// a local change at the path would be overwritten. When it refuses, or when no
+// file is at the path, the index alone moves (read-tree -m -i). That command
+// refuses a staged change at the path, an unmerged index, or a lock that
+// another git command holds; the refusal stops the sync with a recovery, and a
+// retry of the same submit finishes it. A deleted tracked file stays deleted.
+// For a new path, checkout-index without --force writes the file and never
+// replaces a file that appears before it writes.
+func syncCheckout(root, tree, path, base, holding string) error {
+	file := filepath.Join(tree, filepath.FromSlash(path))
+	_, err := os.Lstat(file)
+	absent := errors.Is(err, fs.ErrNotExist)
+	if err != nil && !absent {
+		return syncFailure(err, tree, path)
+	}
+	if !absent {
+		if _, err := publishGit(tree, nil, nil, "read-tree", "-m", "-u", base, holding); err == nil {
+			return nil
+		}
+	}
+	if _, err := publishGit(tree, nil, nil, "read-tree", "-m", "-i", base, holding); err != nil {
+		return syncFailure(err, tree, path)
+	}
+	if !absent {
+		// A local change at the path stays as the user left it.
+		return nil
+	}
+	if baseBlob, _ := publishGit(root, nil, nil, "rev-parse", "--verify", "--quiet", base+":"+path); baseBlob != "" {
+		// The user deleted the tracked file. Keep the deletion.
+		return nil
+	}
+	if _, err := publishGit(tree, nil, nil, "checkout-index", "--", path); err != nil {
+		if _, e := os.Lstat(file); errors.Is(e, fs.ErrNotExist) {
+			return syncFailure(err, tree, path)
 		}
 	}
 	return nil
@@ -354,7 +394,7 @@ func syncFailure(err error, tree, path string) error {
 		cause = failure.Message()
 	}
 	return termsafe.NewWrappedFailure(err, "spec branch holds the verdict, but the worktree "+termsafe.Escape(tree)+" is not in step with it: "+cause,
-		"in "+termsafe.Escape(tree)+", let the git command that holds the index lock finish and unstage any change at "+termsafe.Escape(path)+", then run the same submit command again")
+		"in "+termsafe.Escape(tree)+", let the git command that holds the index lock finish, resolve any unmerged path and unstage any change at "+termsafe.Escape(path)+" (git status names both), then run the same submit command again")
 }
 
 func publishGit(root string, env []string, stdin []byte, args ...string) (string, error) {
@@ -369,14 +409,26 @@ func publishGit(root string, env []string, stdin []byte, args ...string) (string
 	out, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError
-		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
-			err = fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(exit.Stderr)))
+		if errors.As(err, &exit) && len(bytes.TrimSpace(exit.Stderr)) > 0 {
+			err = fmt.Errorf("git %s: %w: %s", args[0], err, stderrLine(exit.Stderr))
 		} else {
 			err = fmt.Errorf("git %s: %w", args[0], err)
 		}
 		return "", pathFailure(err, "cannot publish slot verdict: ", slotPublishRecovery)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// stderrLine joins the non-empty lines of git stderr with "; ", so a refusal
+// shows the git cause on one readable line.
+func stderrLine(stderr []byte) string {
+	var parts []string
+	for _, line := range strings.FieldsFunc(string(stderr), func(r rune) bool { return r == '\n' || r == '\r' }) {
+		if line = strings.TrimSpace(line); line != "" {
+			parts = append(parts, line)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // SlotPromptRecovery names the command that prints the verdict path and the

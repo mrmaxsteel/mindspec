@@ -165,12 +165,21 @@ func binaryLateRepairRefusal(t *testing.T, bin, producer string) {
 	if !reflect.DeepEqual(before, actorCmdRead(t, store, id)) {
 		t.Fatal("refusal changed the step")
 	}
+	recovery := "mindspec next-action"
+	switch producer {
+	case "repair.reason":
+		recovery = "add --reason <text> to the submit --repair command, then run it again"
+	case "repair.lease", "repair.answer":
+		recovery = "remove --lease and --answer from the submit --repair command, then run it again"
+	case "repair.stray-reason":
+		recovery = "add --repair to repair a closed step, or remove --reason, then run the submit command again"
+	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	count := 0
 	for i, line := range lines {
 		if strings.HasPrefix(line, "recovery:") {
 			count++
-			if i != len(lines)-1 || line != "recovery: mindspec next-action" {
+			if i != len(lines)-1 || line != "recovery: "+recovery {
 				t.Fatalf("forged or misplaced recovery: %q", raw)
 			}
 		}

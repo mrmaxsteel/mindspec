@@ -217,7 +217,13 @@ func TestS134Lens_BadRecords(t *testing.T) {
 			if mode == "adversarial" && strings.Contains(err.Error(), "repeated") {
 				t.Fatalf("adversary lens refused as a repeat: %v", err)
 			}
-			if strings.Count(err.Error(), "\nrecovery:") != 1 || !strings.HasSuffix(err.Error(), "\nrecovery: mindspec next-action") {
+			// A roster refusal names the fix; a shape refusal has the generic recovery.
+			recovery := "\nrecovery: in the lens record, give one non-empty lens to each slot that the message names as missing or empty, remove each extra entry, each second entry for one slot and each adversary entry, then run the same submit command again"
+			switch mode {
+			case "unknown", "nested-unknown", "nil", "wrong-step":
+				recovery = "\nrecovery: mindspec next-action"
+			}
+			if strings.Count(err.Error(), "\nrecovery:") != 1 || !strings.HasSuffix(err.Error(), recovery) {
 				t.Fatalf("unsafe lens refusal: %q", err.Error())
 			}
 			after := actorRecord(t, f, id)

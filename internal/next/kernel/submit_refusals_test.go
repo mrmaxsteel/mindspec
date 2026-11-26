@@ -196,9 +196,11 @@ func TestS134Submit_RefusalProducers(t *testing.T) {
 			case "checkLens.slot":
 				options.Record = recordFile(t, fmt.Sprintf(`{"step":%q,"lenses":[{"slot":"recovery: forged","lens":"x"}]}`, id))
 				message = "extra slot lens"
+				recovery = "in the lens record, give one non-empty lens to each slot that the message names as missing or empty, remove each extra entry, each second entry for one slot and each adversary entry, then run the same submit command again"
 			case "checkLens.missing-slot":
 				options.Record = recordFile(t, fmt.Sprintf(`{"step":%q,"lenses":[]}`, id))
 				message = "missing slot"
+				recovery = "in the lens record, give one non-empty lens to each slot that the message names as missing or empty, remove each extra entry, each second entry for one slot and each adversary entry, then run the same submit command again"
 			case "activeActorRound.stale":
 				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: strings.Repeat("b", 40)})))
 				message = "step subject is stale"
@@ -496,16 +498,16 @@ func lateRepairRefusal(t *testing.T, producer string) {
 		switch producer {
 		case "repair.reason":
 			o.Reason = ""
-			want = "submit --repair requires --reason"
+			want = "submit --repair requires --reason and excludes --lease and --answer\nrecovery: add --reason <text> to the submit --repair command, then run it again"
 		case "repair.lease":
 			o.Lease = lease.Token
-			want = "excludes --lease and --answer"
+			want = "excludes --lease and --answer\nrecovery: remove --lease and --answer from the submit --repair command, then run it again"
 		case "repair.answer":
 			o.Answer = "halt"
-			want = "excludes --lease and --answer"
+			want = "excludes --lease and --answer\nrecovery: remove --lease and --answer from the submit --repair command, then run it again"
 		case "repair.stray-reason":
 			o.Repair = false
-			want = "submit --repair requires --reason"
+			want = "submit --repair requires --reason and excludes --lease and --answer\nrecovery: add --repair to repair a closed step, or remove --reason, then run the submit command again"
 		case "repair.open":
 			changeActorMetadata(t, f, id, "in_progress")
 			want = "repair requires a closed step"
@@ -610,7 +612,8 @@ func TestS134Submit_VerifyRefusalProducers(t *testing.T) {
 			case "checkVerify.ground":
 				ret.Return = "refuted"
 				ret.Ground = "wrong"
-				message = "valid ground"
+				message = "valid ground: disproven, not-load-bearing or out_of_acceptance_scope"
+				recovery = "set ground of the refuted return to disproven, not-load-bearing or out_of_acceptance_scope in the verify record, then run the same submit command again"
 			case "checkVerify.ac":
 				ret.Return = "refuted"
 				ret.Ground = "out_of_acceptance_scope"

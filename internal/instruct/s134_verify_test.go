@@ -219,3 +219,31 @@ func TestS134Instruct_LegacyEmptySpec(t *testing.T) {
 		})
 	}
 }
+
+// A bead panel of a pre-kernel spec keeps the panel route when the real
+// kernel state reader runs against a real tracker that holds the spec's epic
+// without enrolment: no kernel verdict, and the facts of the panel decide.
+func TestS134Instruct_PreKernelBeadPanelRealReader(t *testing.T) {
+	f := kerneltest.PreKernelSpec(t)
+	raw, err := f.Command("git", "rev-parse", "HEAD")
+	f.Must(err)
+	head := strings.TrimSpace(string(raw))
+	p := paneltest.New(t).Panel
+	p.Gate, p.Spec, p.Orchestrated, p.Telemetry, p.SubjectDigest = "bead", f.SpecID, false, "", ""
+	bead := f.Items[0]
+	p.BeadID, p.Target = &bead, "bead/"+bead
+	dir := filepath.Join(f.SpecDir, "reviews", "review")
+	f.Must(panel.WriteSnapshot(dir, p))
+	entries := gatherPanelState(func(string) (string, bool) { return head, true }, f.Root, f.SpecDir)
+	if len(entries) != 1 {
+		t.Fatalf("want one panel entry, got %+v", entries)
+	}
+	if entries[0].KernelVerdict != nil || entries[0].Facts == nil {
+		t.Fatalf("a pre-kernel bead panel took the kernel route: %s", renderPanelState(entries))
+	}
+	state, err := instructKernelStateFn(f.Root, f.SpecID)
+	f.Must(err)
+	if state != nil {
+		t.Fatalf("the kernel state reader selected a pre-kernel epic: %+v", state)
+	}
+}

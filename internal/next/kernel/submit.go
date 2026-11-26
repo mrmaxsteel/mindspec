@@ -64,8 +64,8 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 	if !state.Enrolled {
 		return Output{}, ErrPreKernel
 	}
-	if (options.Repair && (strings.TrimSpace(options.Reason) == "" || options.Lease != "" || options.Answer != "")) || (!options.Repair && options.Reason != "") {
-		return Output{}, actorFailure("submit --repair requires --reason and excludes --lease and --answer")
+	if err := checkRepairFlags(options); err != nil {
+		return Output{}, err
 	}
 	if options.Answer != "" {
 		if options.Record != "" || options.Artifact != "" || options.Commit != "" {
@@ -841,4 +841,19 @@ func answerLocked(s State, decision, option string) (Output, error) {
 	}
 	result, err := Pass(Rules(), fresh, true)
 	return result.Output, err
+}
+
+// checkRepairFlags refuses a flag set that submit --repair does not take. The
+// recovery names the flag to add or remove.
+func checkRepairFlags(o SubmitOptions) error {
+	const message = "submit --repair requires --reason and excludes --lease and --answer"
+	switch {
+	case o.Repair && strings.TrimSpace(o.Reason) == "":
+		return termsafe.NewFailure(message, "add --reason <text> to the submit --repair command, then run it again")
+	case o.Repair && (o.Lease != "" || o.Answer != ""):
+		return termsafe.NewFailure(message, "remove --lease and --answer from the submit --repair command, then run it again")
+	case !o.Repair && o.Reason != "":
+		return termsafe.NewFailure(message, "add --repair to repair a closed step, or remove --reason, then run the submit command again")
+	}
+	return nil
 }

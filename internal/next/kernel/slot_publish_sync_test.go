@@ -106,6 +106,15 @@ func TestS134Submit_SlotSyncRetryRepairsWorktree(t *testing.T) {
 	file := attemptVerdict(t, f, "R1", verdictBytes(subject, "R1"))
 	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file})
 	assertOneRecovery(t, err, "run the same submit command again")
+	// The git cause shows on one readable line: no escaped line break, and the
+	// recovery names each cause that stops the index move.
+	lines := strings.Split(err.Error(), "\n")
+	if len(lines) != 2 || strings.Contains(lines[0], `\n`) || !strings.Contains(lines[0], "index.lock") {
+		t.Fatalf("sync failure does not show the git cause on one readable line:\n%v", err)
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "index lock") || !strings.Contains(last, "unmerged path") || !strings.Contains(last, "unstage any change") {
+		t.Fatalf("sync recovery does not name the lock, the unmerged path and the staged change: %q", last)
+	}
 	if actorRecord(t, f, id).Status == "closed" {
 		t.Fatal("slot closed while a worktree is not in step")
 	}
@@ -247,6 +256,181 @@ func TestS134Submit_SlotPublishKeepsConcurrentBranchCommit(t *testing.T) {
 	}
 	if held := actorCommand(t, f, "show", commit+":"+want); held != verdictBytes(subject, "R1") {
 		t.Fatalf("holding commit bytes %q", held)
+	}
+}
+
+// existingVerdictTree commits a verdict at the registered path in a linked
+// spec worktree and returns the worktree and the changed bytes for the next
+// submit.
+func existingVerdictTree(t *testing.T, f *kerneltest.Fixture, subject, want string) (string, string) {
+	t.Helper()
+	tree := specWorktree(t, f)
+	data := verdictBytes(subject, "R1")
+	f.Must(os.MkdirAll(filepath.Dir(filepath.Join(tree, want)), 0o755))
+	f.Must(os.WriteFile(filepath.Join(tree, want), []byte(data), 0o644))
+	actorCommand(t, f, "-C", tree, "add", want)
+	actorCommand(t, f, "-C", tree, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "existing verdict")
+	return tree, strings.Replace(data, `"rationale":"reviewed"`, `"rationale":"reviewed again"`, 1)
+}
+
+// A user deletes the tracked verdict file before submit and does not stage
+// the deletion. The sync keeps the deletion: the index moves to the holding
+// commit and the file stays absent.
+func TestS134Submit_SlotSyncKeepsUnstagedDeletion(t *testing.T) {
+	f, id, lease, subject, want := slotPublishFixture(t)
+	tree, data := existingVerdictTree(t, f, subject, want)
+	work := filepath.Join(tree, filepath.FromSlash(want))
+	f.Must(os.Remove(work))
+	file := attemptVerdict(t, f, "R1", data)
+	if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file}); err != nil {
+		t.Fatalf("submit refused: %v", err)
+	}
+	if _, err := os.Lstat(work); !os.IsNotExist(err) {
+		t.Fatalf("sync recreated the deleted verdict file: %v; status %q", err, actorCommand(t, f, "-C", tree, "status", "--porcelain"))
+	}
+	if staged := actorCommand(t, f, "-C", tree, "show", ":"+want); staged != data {
+		t.Fatalf("index at the verdict path is %q, want the published bytes", staged)
+	}
+	// The output is trimmed: " D path" reads "D path"; a staged deletion reads
+	// "D  path".
+	if status := actorCommand(t, f, "-C", tree, "status", "--porcelain", "--", want); status != "D "+want {
+		t.Fatalf("status of the verdict path is %q, want an unstaged deletion", status)
+	}
+}
+
+// A deletion of the unchanged verdict file just before the git update starts
+// gets the published bytes back, as git checkout does: the two-tree update
+// writes a file whose old bytes are gone. No user bytes are lost.
+func TestS134Submit_SlotSyncConcurrentDeletionGetsPublishedBytes(t *testing.T) {
+	f, id, lease, subject, want := slotPublishFixture(t)
+	tree, data := existingVerdictTree(t, f, subject, want)
+	work := filepath.Join(tree, filepath.FromSlash(want))
+	mark := gitWrapper(t, tree, []string{"read-tree", "checkout-index"}, nil, "mv -- '"+want+"' '"+filepath.Join(t.TempDir(), "moved")+"'")
+	file := attemptVerdict(t, f, "R1", data)
+	if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file}); err != nil {
+		t.Fatalf("submit refused: %v", err)
+	}
+	fired(t, mark)
+	if got, err := os.ReadFile(work); err != nil || string(got) != data {
+		t.Fatalf("verdict file is %q %v, want the published bytes", got, err)
+	}
+	if status := actorCommand(t, f, "-C", tree, "status", "--porcelain", "--", want); status != "" {
+		t.Fatalf("status of the verdict path is %q, want clean", status)
+	}
+}
+
+// writeWrapper puts a git script first on PATH. The script runs action once,
+// before the first git command in dir that can write the verdict file:
+// checkout-index, or read-tree with -u.
+func writeWrapper(t *testing.T, dir, action string) string {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	mark := filepath.Join(t.TempDir(), "fired")
+	script := "#!/bin/sh\n" +
+		"if [ \"$(pwd -P)\" = '" + dir + "' ] && [ ! -e '" + mark + "' ]; then\n" +
+		"  case \" $* \" in\n" +
+		"  ' checkout-index '*|' read-tree '*' -u '*)\n" +
+		"    : > '" + mark + "'\n" +
+		"    " + action + " ;;\n" +
+		"  esac\n" +
+		"fi\n" +
+		"exec '" + realGit + "' \"$@\"\n"
+	f := filepath.Join(bin, "git")
+	if err := os.WriteFile(f, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return mark
+}
+
+// A user edits the verdict file just before the git command that writes it.
+// The edit survives, and the index holds the published bytes.
+func TestS134Submit_SlotSyncKeepsEditAtWrite(t *testing.T) {
+	for _, name := range []string{"new-path", "unchanged-verdict"} {
+		t.Run(name, func(t *testing.T) {
+			f, id, lease, subject, want := slotPublishFixture(t)
+			data := verdictBytes(subject, "R1")
+			var tree string
+			if name == "new-path" {
+				tree = specWorktree(t, f)
+			} else {
+				tree, data = existingVerdictTree(t, f, subject, want)
+			}
+			action := "mkdir -p \"$(dirname '" + want + "')\" && printf 'user edit at write' > '" + want + "'"
+			mark := writeWrapper(t, tree, action)
+			file := attemptVerdict(t, f, "R1", data)
+			if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file}); err != nil {
+				t.Fatalf("submit refused: %v", err)
+			}
+			fired(t, mark)
+			if work, err := os.ReadFile(filepath.Join(tree, filepath.FromSlash(want))); err != nil || string(work) != "user edit at write" {
+				t.Fatalf("sync overwrote the edit made before its write: %q %v", work, err)
+			}
+			if staged := actorCommand(t, f, "-C", tree, "show", ":"+want); staged != data {
+				t.Fatalf("index at the verdict path is %q, want the published bytes", staged)
+			}
+		})
+	}
+}
+
+// A tracked verdict file that the user did not change moves to the published
+// bytes, and the worktree stays clean.
+func TestS134Submit_SlotSyncUpdatesUnchangedVerdict(t *testing.T) {
+	f, id, lease, subject, want := slotPublishFixture(t)
+	tree, data := existingVerdictTree(t, f, subject, want)
+	file := attemptVerdict(t, f, "R1", data)
+	if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file}); err != nil {
+		t.Fatalf("submit refused: %v", err)
+	}
+	if work, err := os.ReadFile(filepath.Join(tree, filepath.FromSlash(want))); err != nil || string(work) != data {
+		t.Fatalf("sync did not update the unchanged verdict file: %q %v", work, err)
+	}
+	if status := actorCommand(t, f, "-C", tree, "status", "--porcelain"); status != "" {
+		t.Fatalf("sync left the spec worktree out of step:\n%s", status)
+	}
+}
+
+// A linked worktree on the spec branch whose directory is gone (git lists it
+// as prunable) does not stop the publish. The first submit closes the slot,
+// and a retry with the same bytes writes nothing.
+func TestS134Submit_SlotSyncSkipsMissingWorktree(t *testing.T) {
+	f, id, lease, subject, want := slotPublishFixture(t)
+	tree := specWorktree(t, f)
+	f.Must(os.Rename(tree, filepath.Join(t.TempDir(), "moved")))
+	if list := actorCommand(t, f, "worktree", "list", "--porcelain"); !strings.Contains(list, "\nprunable") {
+		t.Fatalf("fixture did not make the worktree prunable:\n%s", list)
+	}
+	file := attemptVerdict(t, f, "R1", verdictBytes(subject, "R1"))
+	if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file}); err != nil {
+		t.Fatalf("a missing spec worktree stopped the submit: %v", err)
+	}
+	if status := actorRecord(t, f, id).Status; status != "closed" {
+		t.Fatalf("slot status %q, want closed", status)
+	}
+	receipt := actorReceipt(t, f, id)
+	if held := actorCommand(t, f, "show", receipt.Commit+":"+want); held != verdictBytes(subject, "R1") {
+		t.Fatalf("holding commit bytes %q", held)
+	}
+	before := gitObjects(t, f)
+	if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file}); err != nil {
+		t.Fatalf("a second submit with the same verdict was refused: %v", err)
+	}
+	if status := actorRecord(t, f, id).Status; status != "closed" {
+		t.Fatalf("slot status %q after the second submit, want closed", status)
+	}
+	again, err := kernel.PublishSlotVerdictForTest(f.State(), id, file)
+	if err != nil {
+		t.Fatalf("a retry was refused: %v", err)
+	}
+	if again != receipt.Commit {
+		t.Fatalf("retry gave %s, want the first holding commit %s", again, receipt.Commit)
+	}
+	if after := gitObjects(t, f); after != before {
+		t.Fatalf("retry wrote a ref or commit:\nbefore %s\nafter %s", before, after)
 	}
 }
 

@@ -201,7 +201,8 @@ func TestS134SubmitCmd_RefusalProducers(t *testing.T) {
 				want = "verify return must be reproduced, refuted or deferred"
 			case "checkVerify.ground":
 				ret.Return, ret.Ground = "refuted", "accepted"
-				want = "refuted finding needs a valid ground"
+				want = "refuted finding needs a valid ground: disproven, not-load-bearing or out_of_acceptance_scope"
+				recovery = "set ground of the refuted return to disproven, not-load-bearing or out_of_acceptance_scope in the verify record, then run the same submit command again"
 			case "checkVerify.ac":
 				ret.Return, ret.Ground = "refuted", "out_of_acceptance_scope"
 				want = "out_of_acceptance_scope needs ac that names an acceptance criterion in the owning spec"
