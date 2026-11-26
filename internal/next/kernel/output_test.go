@@ -11,6 +11,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 func TestS134Output_RevisionInputs(t *testing.T) {
@@ -183,6 +184,60 @@ func TestS134Output_RevisionAcrossRoots(t *testing.T) {
 	left, right := reduce(t, a, false), reduce(t, b, false)
 	if left.Revision != right.Revision {
 		t.Fatalf("checkout root changed revision: %s != %s", left.Revision, right.Revision)
+	}
+}
+
+// The same panel files read from the spec worktree, at any checkout path, give
+// the revision that they give from the main checkout.
+func TestS134Output_RevisionIgnoresSpecWorktreePath(t *testing.T) {
+	f := reducerFixture(t)
+	registerRound(t, f, 1)
+	put(t, filepath.Join(f.SpecDir, "reviews", "panel", "R1-round-1.json"), `{"schema":2,"verdict":"APPROVE"}`)
+	base := f.State()
+	if len(base.Ledgers) != 1 || len(base.Verdicts) != 1 {
+		t.Fatal("fixture must read a registered round and a verdict")
+	}
+	inMain, err := kernel.NextAction(base, false)
+	f.Must(err)
+	tree, err := workspace.SpecWorktreePath(base.Root, nil, base.SpecID)
+	f.Must(err)
+	moved := func(path string) string {
+		rel, err := filepath.Rel(base.Root, path)
+		f.Must(err)
+		return filepath.Join(tree, rel)
+	}
+	state := f.State()
+	state.Ledgers = map[string][][]byte{}
+	for path, lines := range base.Ledgers {
+		state.Ledgers[moved(path)] = lines
+	}
+	state.Verdicts = map[string]json.RawMessage{}
+	for path, data := range base.Verdicts {
+		state.Verdicts[moved(path)] = data
+	}
+	spec, err := kernel.NextAction(state, false)
+	f.Must(err)
+	if spec.Revision != inMain.Revision {
+		t.Fatalf("spec worktree checkout path changed revision: %s != %s", spec.Revision, inMain.Revision)
+	}
+	// The same relative path in both checkouts must keep two keys. All four
+	// combinations of two verdicts must give four revisions; one shared key can
+	// encode only two, in any map order.
+	values := []string{`{"schema":2,"verdict":"APPROVE"}`, `{"schema":2,"verdict":"REQUEST_CHANGES"}`}
+	revisions := map[string]bool{}
+	for _, pair := range [][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}} {
+		both := f.State()
+		both.Verdicts = map[string]json.RawMessage{}
+		for path := range base.Verdicts {
+			both.Verdicts[path] = json.RawMessage(values[pair[0]])
+			both.Verdicts[moved(path)] = json.RawMessage(values[pair[1]])
+		}
+		out, err := kernel.NextAction(both, false)
+		f.Must(err)
+		revisions[out.Revision] = true
+	}
+	if len(revisions) != 4 {
+		t.Fatal("verdicts at one relative path in two checkouts share a revision key")
 	}
 }
 

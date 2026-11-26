@@ -578,3 +578,38 @@ func TestS134Setup_CommentsOnlyConfig(t *testing.T) {
 		t.Fatal("comments-only configuration not initialized")
 	}
 }
+
+// With a bd store present, the scan does not report issue-prefix as missing,
+// because bd keeps the prefix in the store. Without a store it does.
+func TestScanBeadsConfig_StoreKeepsIssuePrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name, config string
+	}{
+		{"no-config", ""},
+		{"config-without-prefix", "status.custom: \"resolved\"\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, store := range []bool{false, true} {
+				root := t.TempDir()
+				if tc.config != "" {
+					writeBeadsConfig(t, root, tc.config)
+				}
+				if store {
+					if err := os.MkdirAll(filepath.Join(root, ".beads"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(root, ".beads", "metadata.json"), []byte("{}\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				res, err := ScanBeadsConfig(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := containsString(res.Added, "issue-prefix"); got == store {
+					t.Fatalf("store=%v: issue-prefix reported as missing = %v, added %v", store, got, res.Added)
+				}
+			}
+		})
+	}
+}

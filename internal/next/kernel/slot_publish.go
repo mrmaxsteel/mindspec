@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/gitutil"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -166,7 +167,10 @@ func ReceiptBytes(root string, receipt Receipt) ([]byte, error) {
 // returns the holding commit. The spec branch push and the merge to main then
 // carry the commit to every clone. The caller holds the phase lock. When the
 // spec branch already holds the blob at the path, publish returns the commit
-// that wrote it, so a retry with the same bytes writes nothing.
+// that wrote it, so a retry with the same bytes writes no commit. On every
+// path, publish brings each worktree that has the spec branch checked out to
+// the holding commit, so a retry repairs a sync that an earlier run did not
+// finish.
 func (p *slotPending) publish(s State) (string, error) {
 	branch, err := workspace.SpecBranch(s.SpecID)
 	if err != nil {
@@ -184,10 +188,17 @@ func (p *slotPending) publish(s State) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			if held, e := publishGit(s.Root, nil, nil, "rev-parse", "--verify", "--quiet", commit+":"+p.path); e == nil && held == p.blob {
-				return commit, nil
+			if held, e := publishGit(s.Root, nil, nil, "rev-parse", "--verify", "--quiet", commit+":"+p.path); e != nil || held != p.blob {
+				return "", actorFailure("spec branch holds the verdict without a holding commit")
 			}
-			return "", actorFailure("spec branch holds the verdict without a holding commit")
+			// A holding commit has one parent and changes only the verdict
+			// path. Sync from that parent, which the caller no longer knows.
+			if parent, ok := p.holdingParent(s.Root, commit); ok {
+				if err = syncCheckouts(s.Root, ref, p.path, parent, commit); err != nil {
+					return "", err
+				}
+			}
+			return commit, nil
 		}
 		commit, err := p.commitOn(s.Root, tip)
 		if err != nil {
@@ -200,16 +211,39 @@ func (p *slotPending) publish(s State) (string, error) {
 			}
 			return "", err
 		}
-		if err = syncCheckouts(s.Root, ref, p.path, p.blob, old); err != nil {
+		if err = syncCheckouts(s.Root, ref, p.path, tip, commit); err != nil {
 			return "", err
 		}
 		return commit, nil
 	}
-	return "", termsafe.NewFailure("spec branch "+termsafe.Escape(branch)+" moved during the verdict commit", "run the submit command again")
+	return "", termsafe.NewFailure("spec branch "+termsafe.Escape(branch)+" moved during the verdict commit", slotRetryRecovery)
+}
+
+// slotRetryRecovery is the recovery when a retry of the same submit finishes
+// the publish.
+const slotRetryRecovery = "run the same submit command again"
+
+// holdingParent returns the parent of commit when commit has one parent and
+// changes only the verdict path.
+func (p *slotPending) holdingParent(root, commit string) (string, bool) {
+	parents, err := publishGit(root, nil, nil, "rev-list", "--parents", "-n", "1", commit)
+	if err != nil {
+		return "", false
+	}
+	fields := strings.Fields(parents)
+	if len(fields) != 2 || fields[0] != commit || !objectID(fields[1]) {
+		return "", false
+	}
+	changed, err := publishGit(root, nil, nil, "diff-tree", "--no-commit-id", "--name-only", "-r", fields[1], commit)
+	if err != nil || changed != p.path {
+		return "", false
+	}
+	return fields[1], true
 }
 
 // commitOn writes a commit with parent tip whose tree is the tree of tip plus
-// the verdict blob at its path.
+// the verdict blob at its path. The commit uses the git identity of the
+// operator and is signed when commit.gpgsign asks for it, as git commit does.
 func (p *slotPending) commitOn(root, tip string) (string, error) {
 	tmp, err := os.MkdirTemp("", "mindspec-verdict-")
 	if err != nil {
@@ -227,15 +261,55 @@ func (p *slotPending) commitOn(root, tip string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	identity := []string{"GIT_AUTHOR_NAME=mindspec", "GIT_AUTHOR_EMAIL=mindspec@localhost", "GIT_COMMITTER_NAME=mindspec", "GIT_COMMITTER_EMAIL=mindspec@localhost"}
-	return publishGit(root, identity, nil, "commit-tree", tree, "-p", tip, "-m", "Record slot verdict "+p.key)
+	signing, err := gitutil.CommitSigningEnabled(root)
+	if err != nil {
+		return "", termsafe.NewWrappedFailure(err, "cannot publish slot verdict: "+err.Error(), slotCommitRecovery)
+	}
+	argv := []string{"commit-tree"}
+	if signing {
+		argv = append(argv, "-S")
+	}
+	argv = append(argv, tree, "-p", tip, "-m", "Record slot verdict "+p.key)
+	commit, err := publishGit(root, commitIdentity(root), nil, argv...)
+	if err != nil {
+		var failure *termsafe.Failure
+		if errors.As(err, &failure) {
+			return "", termsafe.NewWrappedFailure(err, failure.Message(), slotCommitRecovery)
+		}
+		return "", err
+	}
+	return commit, nil
 }
 
-// syncCheckouts keeps each worktree that has the spec branch checked out in
-// step with the new branch tip. The index entry and the file of the verdict
-// path change only when they still equal the old tip, so no staged or
-// unstaged work is lost.
-func syncCheckouts(root, ref, path, blob, old string) error {
+// slotCommitRecovery is the recovery when git cannot write the verdict
+// commit. The spec branch did not move.
+const slotCommitRecovery = "fix the git identity or commit signing setup that the message names, then run the same submit command again"
+
+// commitIdentity returns the identity environment for the verdict commit.
+// The operator's git identity applies when git can resolve one, as for git
+// commit. Only a role that git cannot resolve (no user.email and no
+// detectable address, as on a bare runner) gets the fixed mindspec identity,
+// so the publish does not fail where a commit needs no human author.
+func commitIdentity(root string) []string {
+	var env []string
+	for _, role := range []string{"AUTHOR", "COMMITTER"} {
+		if _, err := publishGit(root, nil, nil, "var", "GIT_"+role+"_IDENT"); err != nil {
+			env = append(env, "GIT_"+role+"_NAME=mindspec", "GIT_"+role+"_EMAIL=mindspec@localhost")
+		}
+	}
+	return env
+}
+
+// syncCheckouts brings each worktree that has the spec branch checked out
+// from base to holding. holding differs from base only at the verdict path.
+// git read-tree -m -u holds the index lock of the worktree for the whole
+// update, keeps every local change, and refuses when a local change at the
+// path would be overwritten. When it refuses, the index alone moves to
+// holding (read-tree -m -i, under the same lock), so the file at the path
+// stays as the user left it. A staged change at the path, or an index lock
+// that another git command holds, stops the sync with a recovery; a retry of
+// the same submit finishes it.
+func syncCheckouts(root, ref, path, base, holding string) error {
 	list, err := publishGit(root, nil, nil, "worktree", "list", "--porcelain")
 	if err != nil {
 		return err
@@ -251,35 +325,36 @@ func syncCheckouts(root, ref, path, blob, old string) error {
 		}
 	}
 	for _, tree := range trees {
-		staged, err := publishGit(tree, nil, nil, "ls-files", "--stage", "--", path)
-		if err != nil {
-			return err
+		if _, err := publishGit(tree, nil, nil, "read-tree", "-m", "-u", base, holding); err == nil {
+			continue
 		}
-		entry := ""
-		if fields := strings.Fields(staged); len(fields) >= 2 {
-			entry = fields[1]
+		if _, err := publishGit(tree, nil, nil, "read-tree", "-m", "-i", base, holding); err != nil {
+			return syncFailure(err, tree, path)
 		}
-		if entry == old {
-			if _, err = publishGit(tree, nil, nil, "update-index", "--add", "--cacheinfo", "100644,"+blob+","+path); err != nil {
-				return err
-			}
-		}
+		// The index moved without the file. Write the file only when it is
+		// absent; checkout-index without --force never replaces a file.
 		file := filepath.Join(tree, filepath.FromSlash(path))
-		work := ""
-		if _, err := os.Lstat(file); err == nil {
-			if work, err = publishGit(tree, nil, nil, "hash-object", "--", path); err != nil {
-				return err
-			}
-		} else if !os.IsNotExist(err) {
-			return pathFailure(err, "cannot inspect verdict file: ", slotPublishRecovery)
-		}
-		if work == old && entry == old {
-			if _, err = publishGit(tree, nil, nil, "checkout-index", "--force", "--", path); err != nil {
-				return err
+		if _, err := os.Lstat(file); os.IsNotExist(err) {
+			if _, err := publishGit(tree, nil, nil, "checkout-index", "--", path); err != nil {
+				if _, e := os.Lstat(file); os.IsNotExist(e) {
+					return syncFailure(err, tree, path)
+				}
 			}
 		}
 	}
 	return nil
+}
+
+// syncFailure reports a worktree that is not yet at the holding commit. The
+// spec branch holds the verdict; the same submit finishes the sync.
+func syncFailure(err error, tree, path string) error {
+	cause := err.Error()
+	var failure *termsafe.Failure
+	if errors.As(err, &failure) {
+		cause = failure.Message()
+	}
+	return termsafe.NewWrappedFailure(err, "spec branch holds the verdict, but the worktree "+termsafe.Escape(tree)+" is not in step with it: "+cause,
+		"in "+termsafe.Escape(tree)+", let the git command that holds the index lock finish and unstage any change at "+termsafe.Escape(path)+", then run the same submit command again")
 }
 
 func publishGit(root string, env []string, stdin []byte, args ...string) (string, error) {

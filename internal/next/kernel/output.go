@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kernelid"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // OutputForPass finalizes a pass without writing state or evidence.
@@ -180,19 +182,17 @@ func revision(s State) string {
 		}
 	}
 	// Checkout locations identify files for reading, but are not revision inputs.
-	key := func(path string) string {
-		if filepath.IsAbs(path) {
-			path, _ = filepath.Rel(s.Root, path)
-		}
-		return filepath.ToSlash(filepath.Clean(path))
-	}
+	// Each ledger and verdict is keyed by its path inside the checkout that holds
+	// it: the main checkout, the spec directory's tree or the spec worktree. When
+	// two files from different checkouts get the same key, both keep their path
+	// relative to the main checkout, so the key set stays unique.
 	ledgers := map[string][][]byte{}
-	for path, lines := range s.Ledgers {
-		ledgers[key(path)] = lines
+	for path, k := range revisionKeys(s, s.Ledgers) {
+		ledgers[k] = s.Ledgers[path]
 	}
 	verdicts := map[string]json.RawMessage{}
-	for path, data := range s.Verdicts {
-		verdicts[key(path)] = data
+	for path, k := range revisionKeys(s, s.Verdicts) {
+		verdicts[k] = s.Verdicts[path]
 	}
 	data, _ := json.Marshal(struct {
 		Records  map[string]any
@@ -204,4 +204,55 @@ func revision(s State) string {
 	}{records, s.Refs, ledgers, verdicts, s.Policy, expired})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// revisionKeys maps each path of files to its revision key. The key is the
+// slash path relative to the deepest checkout root that holds the file.
+func revisionKeys[V any](s State, files map[string]V) map[string]string {
+	roots := []string{s.Root, workspace.TreeRootForSpecDir(s.SpecDir)}
+	if tree, err := workspace.SpecWorktreePath(s.Root, nil, s.SpecID); err == nil {
+		roots = append(roots, tree)
+	}
+	relative := func(root, path string) (string, bool) {
+		if root == "" {
+			return "", false
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", false
+		}
+		return rel, true
+	}
+	fromMain := func(path string) string {
+		if filepath.IsAbs(path) {
+			path, _ = filepath.Rel(s.Root, path)
+		}
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	keys := map[string]string{}
+	owners := map[string][]string{}
+	for path := range files {
+		k := fromMain(path)
+		if filepath.IsAbs(path) {
+			best := ""
+			for _, root := range roots {
+				if _, ok := relative(root, path); ok && len(root) > len(best) {
+					best = root
+				}
+			}
+			if rel, ok := relative(best, path); ok {
+				k = filepath.ToSlash(filepath.Clean(rel))
+			}
+		}
+		keys[path] = k
+		owners[k] = append(owners[k], path)
+	}
+	for _, paths := range owners {
+		if len(paths) > 1 {
+			for _, path := range paths {
+				keys[path] = fromMain(path)
+			}
+		}
+	}
+	return keys
 }
