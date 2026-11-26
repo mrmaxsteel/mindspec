@@ -50,7 +50,7 @@ func Brief(s State, step string) (body string, err error) {
 		}
 		fmt.Fprintf(&b, "Read the slot brief:\nmindspec panel prompt %s --slot R%d --spec %s\n", briefQuote(reg.Slug), t.Slot, briefQuote(idrender.Spec(s.SpecID)))
 	case "verify":
-		b.WriteString("\nReturn each finding as reproduced, refuted, or deferred. A veto cannot be deferred.\nA refutation needs ground, reason, and resolving evidence; an out_of_acceptance_scope ground also needs ac. A deferral needs reason and target.\n")
+		b.WriteString(verifyRecordFields)
 		findings, has, err := Decode[[]Finding](r.Metadata, KeyFindings)
 		if err != nil {
 			return "", err
@@ -217,6 +217,21 @@ func renderBriefRules(b *strings.Builder, scope string) error {
 	b.WriteString(section)
 	return nil
 }
+
+// verifyRecordFields names the fields of the verify record and their values.
+const verifyRecordFields = `
+Return a record with these fields:
+- step: the Step value above
+- subject: the Subject value above
+- returns: one entry for each finding below
+Each entry in returns has these fields:
+- slot: the slot of the finding, a string
+- round: the round of the finding, a number
+- finding: the finding as a string, ccr[<i>] or veto, not a number
+- finding_sha256: the Digest value of the finding
+- return: reproduced, refuted, or deferred
+A refuted entry also needs ground, reason, and evidence (the resolving evidence); an out_of_acceptance_scope ground also needs ac. A deferred entry also needs reason and target. A veto cannot be deferred.
+`
 
 func renderFindings(b *strings.Builder, findings []Finding) {
 	for _, f := range findings {

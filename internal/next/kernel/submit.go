@@ -28,6 +28,8 @@ type SubmitOptions struct {
 	Repair   bool
 	Reason   string
 	// BeforeClose publishes validated evidence before the receipt and final reduction.
+	// A slot verdict from an attempt directory has no holding commit yet when
+	// BeforeClose runs; ReceiptBytes gives its bytes.
 	BeforeClose func(State, Receipt) error
 }
 type ArtifactCheck func(State, Record, Receipt) error
@@ -157,17 +159,22 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 				return actorFailure("artifact does not fit the step kind")
 			}
 			var receipt Receipt
+			var pending *slotPending
 			if recordKind(tuple.Kind) {
 				receipt = Receipt{Kind: "passed", RecordSHA256: recordDigest([]byte(record))}
 			} else {
-				evidence := options
 				if tuple.Kind == "review-slot" && options.Artifact != "" {
-					if evidence, err = slotEvidence(s, r, tuple, options); err != nil {
+					if pending, err = slotEvidence(s, r, tuple, options); err != nil {
 						return err
 					}
 				}
-				receipt, err = resolveArtifact(s, evidence)
-				if err != nil {
+				if pending != nil {
+					receipt = pending.receipt()
+					if valid && old.Path == receipt.Path && old.Blob == receipt.Blob {
+						// The same bytes are already published and closed.
+						receipt.Commit = old.Commit
+					}
+				} else if receipt, err = resolveArtifact(s, options); err != nil {
 					return err
 				}
 			}
@@ -235,11 +242,27 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					if err != nil {
 						return err
 					}
-				} else if _, err = CheckMetadataSize(r.Key(), mergedMetadata(mergedMetadata(r.Metadata, updates), Metadata(KeyClose, receipt))); err != nil {
-					return err
+				} else {
+					sized := receipt
+					if sized.Commit == "" {
+						// The holding commit id has the length of the blob id.
+						sized.Commit = strings.Repeat("0", len(sized.Blob))
+					}
+					if _, err = CheckMetadataSize(r.Key(), mergedMetadata(mergedMetadata(r.Metadata, updates), Metadata(KeyClose, sized))); err != nil {
+						return err
+					}
 				}
 				if options.BeforeClose != nil {
 					if err = options.BeforeClose(s, receipt); err != nil {
+						return err
+					}
+				}
+				if pending != nil && receipt.Commit == "" {
+					// Every check passed: publish the verdict, then write the receipt.
+					if receipt.Commit, err = pending.publish(s); err != nil {
+						return err
+					}
+					if err = ValidReceipt(s.Root, receipt, nil); err != nil {
 						return err
 					}
 				}
@@ -669,7 +692,7 @@ func checkVerdict(s State, r Record, receipt Receipt) error {
 	if err != nil {
 		return err
 	}
-	bytes, err := actorGitBytes(s.Root, "show", receipt.Commit+":"+receipt.Path)
+	bytes, err := ReceiptBytes(s.Root, receipt)
 	if err != nil {
 		return err
 	}

@@ -111,8 +111,14 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 	}
 
 	res := &ConfigResult{CreatedFile: created}
+	hasStore, err := hasBeadsStore(root)
+	if err != nil {
+		return nil, err
+	}
 	if created {
-		res.Added = append(res.Added, "issue-prefix")
+		if !hasStore {
+			res.Added = append(res.Added, "issue-prefix")
+		}
 		for _, rk := range RequiredBeadsConfigKeys {
 			res.Added = append(res.Added, rk.Key)
 		}
@@ -128,7 +134,7 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 		return nil, fmt.Errorf("config root is not a YAML mapping")
 	}
 
-	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok {
+	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok && !hasStore {
 		res.Added = append(res.Added, "issue-prefix")
 	}
 	for _, rk := range RequiredBeadsConfigKeys {
@@ -151,14 +157,30 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 	return res, nil
 }
 
+// hasBeadsStore reports whether a bd store exists in <root>/.beads. bd then
+// keeps the issue prefix in the store.
+func hasBeadsStore(root string) (bool, error) {
+	_, err := os.Stat(filepath.Join(root, ".beads", "metadata.json"))
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("stat store metadata: %w", err)
+}
+
 // EnsureBeadsConfig idempotently applies the mindspec-required keys to
 // <root>/.beads/config.yaml. Existing keys, values, and comments outside the
 // mindspec-required set are preserved byte-for-byte via yaml.v3 Node editing.
 //
 // Behavior per key:
-//   - issue-prefix: written only when absent; the value defaults to
-//     filepath.Base(root). An existing issue-prefix is never overwritten and
-//     never reported as drift (the user's project-naming choice is sovereign).
+//   - issue-prefix: written only when absent and no bd store exists yet; the
+//     value defaults to filepath.Base(root). When a store exists (its
+//     metadata.json is present), bd keeps the prefix in the store, and a
+//     different value here makes bd refuse each new ID, so the key stays
+//     unset. An existing issue-prefix is never overwritten and never
+//     reported as drift (the user's project-naming choice is sovereign).
 //   - types.custom: add missing required members and keep all existing members.
 //   - status.custom / export.git-add: if absent, added. If
 //     present with the canonical value, counted in AlreadyCorrect. If present
@@ -192,6 +214,11 @@ func EnsureBeadsConfig(root string, force bool) (*ConfigResult, error) {
 
 	res := &ConfigResult{CreatedFile: created}
 	defaultPrefix := filepath.Base(root)
+	if hasStore, err := hasBeadsStore(root); err != nil {
+		return nil, err
+	} else if hasStore {
+		defaultPrefix = ""
+	}
 
 	var out []byte
 	if created {
@@ -225,8 +252,10 @@ const freshHeader = "# .beads/config.yaml — managed by mindspec\n" +
 // leak into the output.
 func freshConfig(defaultPrefix string, res *ConfigResult) ([]byte, error) {
 	mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	appendScalarEntry(mapping, "issue-prefix", defaultPrefix)
-	res.Added = append(res.Added, "issue-prefix")
+	if defaultPrefix != "" {
+		appendScalarEntry(mapping, "issue-prefix", defaultPrefix)
+		res.Added = append(res.Added, "issue-prefix")
+	}
 	for _, rk := range RequiredBeadsConfigKeys {
 		appendScalarEntry(mapping, rk.Key, rk.Value)
 		res.Added = append(res.Added, rk.Key)
@@ -258,7 +287,7 @@ func mergeConfig(data []byte, defaultPrefix string, force bool, res *ConfigResul
 		return nil, fmt.Errorf("config root is not a YAML mapping")
 	}
 
-	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok {
+	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok && defaultPrefix != "" {
 		appendScalarEntry(mapping, "issue-prefix", defaultPrefix)
 		res.Added = append(res.Added, "issue-prefix")
 	}

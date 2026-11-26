@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
@@ -198,6 +199,41 @@ func kernelPanelRefusal(t *testing.T, out string, err error, word string) {
 		t.Fatalf("want refusal %q: %s %v", word, out, err)
 	}
 }
+
+// kernelPanelLastRecovery checks that the refusal has one recovery line, that
+// it is the last line and that it equals want. It returns the printed command.
+func kernelPanelLastRecovery(t *testing.T, out string, err error, want string) string {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("want refusal: %s", out)
+	}
+	lines := strings.Split(strings.TrimRight(err.Error(), "\n"), "\n")
+	count := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, guard.RecoveryPrefix) {
+			count++
+		}
+	}
+	if count != 1 || lines[len(lines)-1] != want {
+		t.Fatalf("want one recovery line, last, equal to\n%s\ngot:\n%s", want, err.Error())
+	}
+	return strings.TrimPrefix(want, guard.RecoveryPrefix)
+}
+
+// kernelPanelRunPrinted runs a printed panel submit command with the lease
+// token filled in. The note after the placeholder is not part of the command.
+func kernelPanelRunPrinted(t *testing.T, line, token string) (string, error) {
+	t.Helper()
+	if i := strings.Index(line, " (the token that "); i >= 0 {
+		line = line[:i]
+	}
+	words := shellWords(t, strings.Replace(line, "<token>", shellQuoteTarget(token), 1))
+	if len(words) < 3 || strings.Join(words[:3], " ") != "mindspec panel submit" {
+		t.Fatalf("printed command is not a panel submit: %q", line)
+	}
+	return kernelPanelRun(t, panelSubmitCmd, words[3:]...)
+}
+
 func kernelPanelRecord(t *testing.T, f *kerneltest.Fixture, id string) kernel.Record {
 	t.Helper()
 	r, e := f.Store.Lookup(id)
@@ -662,6 +698,41 @@ func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
 		})
 	}
 }
+
+// TestS134PanelSubmit_StdinNamesPromptCommand checks that a slot of a governed
+// spec refuses a verdict on stdin, with and without a lease, and that the
+// printed command runs and leads to the verdict path and the submit command.
+func TestS134PanelSubmit_StdinNamesPromptCommand(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, e := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, e)
+	id := gate + ".r1.R1"
+	lease, e := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+	f.Must(e)
+	want := "recovery: mindspec panel prompt '1' --slot R1 --spec '" + f.SpecID + "', then write the verdict to the path it names and run the submit command it prints"
+	args := []string{"1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", "-"}
+	for _, extra := range [][]string{nil, {"--lease", lease.Token}} {
+		out, e = kernelPanelRun(t, panelSubmitCmd, append(append([]string{}, args...), extra...)...)
+		kernelPanelLastRecovery(t, out, e, want)
+		if r := kernelPanelRecord(t, f, id); r.Status == "closed" {
+			t.Fatal("stdin submit closed the slot")
+		}
+	}
+	printed := strings.TrimPrefix(want, guard.RecoveryPrefix)
+	words := shellWords(t, printed[:strings.Index(printed, ", then ")])
+	if strings.Join(words[:3], " ") != "mindspec panel prompt" {
+		t.Fatalf("printed command is not a panel prompt: %q", printed)
+	}
+	out, e = kernelPanelRun(t, panelPromptCmd, words[3:]...)
+	kernelPanelRequire(t, out, e)
+	// With no slot attempt yet, the prompt first names the attempt command and
+	// the prompt that then prints the verdict path and the submit command.
+	if !strings.Contains(out, "mindspec panel checkout '1' --spec '"+f.SpecID+"' --slot 'R1' --dispatch") || !strings.Contains(out, "mindspec panel prompt '1' --spec '"+f.SpecID+"' --slot 'R1'") {
+		t.Fatalf("prompt does not name the attempt and submission commands:\n%s", out)
+	}
+}
+
 func TestS134PanelSubmit_LeaseReceiptAndForeignSnapshot(t *testing.T) {
 	f, gate, head := kernelPanelFixture(t)
 	kernelPanelAuthorise(f, gate, head, 1, 2)
@@ -684,9 +755,10 @@ func TestS134PanelSubmit_LeaseReceiptAndForeignSnapshot(t *testing.T) {
 	foreign = kernelPanelProtect(t, f)
 	args := []string{"1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file}
 	out, e = kernelPanelRun(t, panelSubmitCmd, args...)
-	kernelPanelRefusal(t, out, e, "mindspec lease "+id)
+	want := "recovery: mindspec panel submit '1' --file " + shellQuoteTarget(file) + " --slot 'R1' --round 1 --spec " + shellQuoteTarget(f.SpecID) + " --lease <token> (the token that mindspec lease " + shellQuoteTarget(id) + " printed)"
+	argv := kernelPanelLastRecovery(t, out, e, want)
 	kernelPanelAssertUnpublished(t, f, id, filepath.Dir(file))
-	out, e = kernelPanelRun(t, panelSubmitCmd, append(args, "--lease", lease.Token)...)
+	out, e = kernelPanelRunPrinted(t, argv, lease.Token)
 	kernelPanelRequire(t, out, e)
 	r := kernelPanelRecord(t, f, id)
 	receipt, ok, e := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)

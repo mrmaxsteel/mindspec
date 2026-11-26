@@ -227,22 +227,24 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 			return e
 		}
 		step = head.Key()
+		if file == "-" {
+			// The kernel closes a slot from a verdict file: the attempt file
+			// that the slot prompt names, or a committed file.
+			return guard.NewFailure("this slot does not read a verdict from stdin", kernel.SlotPromptRecovery(*state, step))
+		}
 		if token == "" {
-			argv := "mindspec panel submit --file -"
-			if file != "-" {
-				argv = "mindspec panel submit --file " + shellQuoteTarget(file)
+			argv := "mindspec panel submit --file " + shellQuoteTarget(file)
+			if !inferred {
+				argv = fmt.Sprintf("mindspec panel submit %s --file %s --slot %s --round %d --spec %s", shellQuoteTarget(slug), shellQuoteTarget(file), shellQuoteTarget(slot), round, shellQuoteTarget(spec))
 			}
 			return guard.NewFailure("--lease is required for this slot", argv+" --lease <token> (the token that mindspec lease "+shellQuoteTarget(step)+" printed)")
-		}
-		if file == "-" {
-			return panelVerbFailure(fmt.Errorf("use a committed verdict file for this slot"))
 		}
 		artifact, e := filepath.Abs(file)
 		if e != nil {
 			return e
 		}
 		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: func(_ kernel.State, receipt kernel.Receipt) error {
-			committed, exists, e := newExecutor(root).FileAtRefOrAbsent(receipt.Commit, receipt.Path)
+			committed, exists, e := receiptVerdict(root, receipt)
 			if e != nil {
 				return e
 			}
@@ -277,7 +279,7 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 
 func init() {
 	panelSubmitCmd.Flags().String("lease", "", "Current slot lease token")
-	panelSubmitCmd.Flags().String("file", "", "Verdict file; kernel slots require a committed file in this repository; other panels accept - for stdin")
+	panelSubmitCmd.Flags().String("file", "", "Verdict file, or - for stdin; a slot of a governed spec takes the verdict file in its attempt directory or a committed file, not stdin")
 	panelSubmitCmd.Flags().String("slot", "", "Roster slot")
 	panelSubmitCmd.Flags().Int("round", 0, "Panel round")
 	panelSubmitCmd.Flags().String("spec", "", "Owning spec")

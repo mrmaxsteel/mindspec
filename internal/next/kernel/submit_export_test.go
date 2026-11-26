@@ -15,3 +15,18 @@ func DisableArtifactCheckForTest(kind string) func() {
 	delete(artifactChecks, kind)
 	return func() { artifactChecks[kind] = check }
 }
+
+// PublishSlotVerdictForTest runs the publish step of a slot submit for file,
+// as a retry inside Submit does.
+func PublishSlotVerdictForTest(s State, step, file string) (string, error) {
+	r := s.Records[step]
+	t, _, err := r.Tuple()
+	if err != nil {
+		return "", err
+	}
+	pending, err := pendingSlotVerdict(s, r, t, file)
+	if err != nil {
+		return "", err
+	}
+	return pending.publish(s)
+}

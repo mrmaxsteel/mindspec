@@ -15,6 +15,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"github.com/mrmaxsteel/mindspec/internal/rules"
+	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
 
 // readyPlan declares the files of each item, so the work-item brief that the
@@ -32,6 +33,8 @@ type printedLoop struct {
 	briefs    map[string]string
 	briefArgv map[string]string
 	commits   int
+	// afterRun runs after each printed run entry, with the entry's words.
+	afterRun func(string)
 }
 
 func newPrintedLoop(e *kernelE2E) *printedLoop {
@@ -137,21 +140,92 @@ func (p *printedLoop) act(a kernel.Action, verdict func(kernel.Action) string) {
 		fill["<path>"] = path
 	case "verify":
 		path := p.recordPath(brief)
-		record := kernel.VerifyRecord{Step: a.Step, Subject: a.Subject.Commit, Returns: []kernel.VerifyReturn{}}
-		for _, m := range printedFinding.FindAllStringSubmatch(brief, -1) {
-			round, err := strconv.Atoi(m[2])
-			p.must(err)
-			record.Returns = append(record.Returns, kernel.VerifyReturn{Slot: m[1], Round: round, Finding: m[3], FindingSHA256: m[4], Return: "reproduced"})
-		}
-		if len(record.Returns) == 0 {
-			p.t.Fatalf("verify brief lists no finding: %s", brief)
-		}
-		p.writeRecord(path, record)
+		p.writeRecord(path, verifyRecordFromBrief(p.t, brief))
 		fill["<path>"] = path
 	default:
 		p.t.Fatalf("unexpected actor %s: %+v", a.Kind, a)
 	}
 	p.submit(a, fill)
+}
+
+// printedFields returns the field names in the "- name: text" lines after the
+// label line, and the text of each.
+func printedFields(t *testing.T, brief, label string) ([]string, map[string]string) {
+	t.Helper()
+	lines := strings.Split(brief, "\n")
+	start := -1
+	for i, line := range lines {
+		if line == label {
+			start = i + 1
+		}
+	}
+	if start < 0 {
+		t.Fatalf("verify brief lacks %q: %s", label, brief)
+	}
+	var names []string
+	text := map[string]string{}
+	for _, line := range lines[start:] {
+		name, value, ok := strings.Cut(strings.TrimPrefix(line, "- "), ": ")
+		if !strings.HasPrefix(line, "- ") || !ok {
+			break
+		}
+		names = append(names, name)
+		text[name] = value
+	}
+	return names, text
+}
+
+// verifyRecordFromBrief builds the verify record from the field list and the
+// values that the verify brief prints. Each finding is returned as reproduced.
+func verifyRecordFromBrief(t *testing.T, brief string) map[string]any {
+	t.Helper()
+	top, _ := printedFields(t, brief, "Return a record with these fields:")
+	fields, text := printedFields(t, brief, "Each entry in returns has these fields:")
+	if !strings.Contains(text["finding"], "a string, ccr[<i>] or veto") {
+		t.Fatalf("verify brief does not give the finding value form: %s", brief)
+	}
+	var returns []map[string]any
+	for _, m := range printedFinding.FindAllStringSubmatch(brief, -1) {
+		round, err := strconv.Atoi(m[2])
+		if err != nil {
+			t.Fatal(err)
+		}
+		values := map[string]any{"slot": m[1], "round": round, "finding": m[3], "finding_sha256": m[4], "return": "reproduced"}
+		entry := map[string]any{}
+		for _, name := range fields {
+			v, ok := values[name]
+			if !ok {
+				t.Fatalf("verify brief names an unknown entry field %q", name)
+			}
+			entry[name] = v
+		}
+		returns = append(returns, entry)
+	}
+	if len(returns) == 0 {
+		t.Fatalf("verify brief lists no finding: %s", brief)
+	}
+	values := map[string]any{"step": printedValue(t, brief, "Step: "), "subject": printedValue(t, brief, "Subject: "), "returns": returns}
+	record := map[string]any{}
+	for _, name := range top {
+		v, ok := values[name]
+		if !ok {
+			t.Fatalf("verify brief names an unknown record field %q", name)
+		}
+		record[name] = v
+	}
+	return record
+}
+
+// printedValue returns the rest of the first line that starts with prefix.
+func printedValue(t *testing.T, text, prefix string) string {
+	t.Helper()
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	t.Fatalf("printed text lacks %q: %s", prefix, text)
+	return ""
 }
 
 // printedLine returns the line after the label line in a printed text.
@@ -298,8 +372,12 @@ func (p *printedLoop) drive(verdict func(kernel.Action) string) []string {
 			if len(out.Run) == 0 {
 				p.t.Fatalf("no printed step: %+v", out)
 			}
-			ran = append(ran, strings.Join(out.Run[0].Argv[1:], " "))
+			entry := strings.Join(out.Run[0].Argv[1:], " ")
+			ran = append(ran, entry)
 			p.do(out.Run[0].Argv, nil)
+			if p.afterRun != nil {
+				p.afterRun(entry)
+			}
 		}
 	}
 	p.t.Fatal("loop did not finish")
@@ -318,6 +396,13 @@ func TestS134E2E_PrintedCommandLoop(t *testing.T) {
 	}
 	p.write(p.f.Root, ".git/info/exclude", string(exclude)+"\n.mindspec-scratch\n")
 	item := p.f.Items[0]
+	clones := 0
+	p.afterRun = func(entry string) {
+		if strings.HasPrefix(entry, "complete ") || strings.HasPrefix(entry, "impl approve ") {
+			clones++
+			p.cloneReading(entry)
+		}
+	}
 	refused := false
 	ran := p.drive(func(a kernel.Action) string {
 		if a.Step == item+".review.r1.R1" {
@@ -328,6 +413,9 @@ func TestS134E2E_PrintedCommandLoop(t *testing.T) {
 	})
 	if !refused {
 		t.Fatal("the refused slot did not run")
+	}
+	if clones != 2 {
+		t.Fatalf("clone readings %d, want one after complete and one after impl approve", clones)
 	}
 	for kind, want := range map[string]int{"implement": 1, "lens": 3, "review-slot": 9, "verify": 1, "fix": 1} {
 		if p.kinds[kind] != want {
@@ -357,5 +445,74 @@ func TestS134E2E_PrintedCommandLoop(t *testing.T) {
 	}
 	if !strings.Contains(p.briefs["implement"], implementerRules) || strings.Contains(p.briefs["implement"], "## Rules (fixer)") {
 		t.Fatalf("implement brief lacks the implementer rules or prints the fixer rules: %s", p.briefs["implement"])
+	}
+}
+
+// reading returns the next-action reading of the spec against the
+// repository at root and the shared tracker store, and checks each receipt.
+func (p *printedLoop) reading(root string) (kernel.Output, map[string]error) {
+	p.t.Helper()
+	dir, err := workspace.SpecDir(root, p.f.SpecID)
+	p.must(err)
+	s, err := kernel.ReadState(kernel.NewStore(root, p.f.Epic, kerneltest.Runner(p.t, p.f.Root)), p.f.SpecID, dir)
+	p.must(err)
+	result, err := kernel.Pass(kernel.Rules(), s, false)
+	p.must(err)
+	receipts := map[string]error{}
+	for key, r := range s.Records {
+		receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
+		p.must(err)
+		if has && receipt.Commit != "" {
+			receipts[key] = kernel.ValidReceipt(root, receipt, r.Metadata)
+		}
+	}
+	return kernel.OutputForPass(result, s, false), receipts
+}
+
+// cloneReading clones the repository with no local shortcut, as another
+// machine gets it by the normal push and fetch, and checks that the clone
+// reads the spec as the publishing repository does.
+func (p *printedLoop) cloneReading(entry string) {
+	p.t.Helper()
+	want, wantReceipts := p.reading(p.f.Root)
+	clone := filepath.Join(p.t.TempDir(), "clone")
+	args := []string{"clone", "--quiet", "--no-local"}
+	branch, err := workspace.SpecBranch(p.f.SpecID)
+	p.must(err)
+	if _, err := p.f.Command("git", "-C", p.f.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+		args = append(args, "--branch", branch)
+	}
+	p.git(p.f.Root, append(args, p.f.Root, clone)...)
+	got, gotReceipts := p.reading(clone)
+	slots := 0
+	for key, err := range wantReceipts {
+		if err != nil {
+			p.t.Fatalf("after %s: publishing repository receipt of %s is not valid: %v", entry, key, err)
+		}
+		if gotReceipts[key] != nil {
+			p.t.Fatalf("after %s: clone receipt of %s is not valid: %v", entry, key, gotReceipts[key])
+		}
+		if strings.Contains(key, ".r") && strings.Contains(key, ".R") {
+			slots++
+		}
+	}
+	if slots == 0 || len(gotReceipts) != len(wantReceipts) {
+		p.t.Fatalf("after %s: slot receipts %d, clone receipts %d of %d", entry, slots, len(gotReceipts), len(wantReceipts))
+	}
+	for _, flag := range got.Flags {
+		if flag.Code == "unreceipted-close" || flag.Code == "forced-close" {
+			p.t.Fatalf("after %s: clone flags %s %s", entry, flag.Code, flag.Step)
+		}
+	}
+	wantFlags, err := json.Marshal(want.Flags)
+	p.must(err)
+	gotFlags, err := json.Marshal(got.Flags)
+	p.must(err)
+	// Before finalization the panel ledgers are files of the spec worktree that
+	// no commit holds yet, and the revision hashes them. The merge to main
+	// carries them, so the revision must match from then on.
+	sameRevision := got.Revision == want.Revision || !strings.HasPrefix(entry, "impl approve ")
+	if got.Status != want.Status || !sameRevision || string(gotFlags) != string(wantFlags) {
+		p.t.Fatalf("after %s: clone reads %s %s %s, publishing repository reads %s %s %s", entry, got.Status, got.Revision, gotFlags, want.Status, want.Revision, wantFlags)
 	}
 }

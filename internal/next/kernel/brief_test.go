@@ -44,6 +44,11 @@ func TestS134Brief_ActorsAndArgv(t *testing.T) {
 	body, err := kernel.Brief(f.State(), id)
 	f.Must(err)
 	briefContains(t, body, "## verify", v.Subject, "Finding: R1", "Finding: R2", "Finding: R3", "mindspec submit '"+id+"' --lease '<token>' --record", id+".g1.json")
+	// The verify brief names each record field and the value form of each.
+	briefContains(t, body, "Step: "+id+"\n", "Subject: "+v.Subject+"\n",
+		"Return a record with these fields:\n- step: the Step value above\n- subject: the Subject value above\n- returns: one entry for each finding below\n",
+		"Each entry in returns has these fields:\n- slot: the slot of the finding, a string\n- round: the round of the finding, a number\n- finding: the finding as a string, ccr[<i>] or veto, not a number\n- finding_sha256: the Digest value of the finding\n- return: reproduced, refuted, or deferred\n",
+		"A refuted entry also needs ground, reason, and evidence", "A deferred entry also needs reason and target. A veto cannot be deferred.")
 	if before != kerneltest.Snapshot(t, f) {
 		t.Fatal("brief wrote state")
 	}

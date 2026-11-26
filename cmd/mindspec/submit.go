@@ -102,7 +102,7 @@ func publishSubmittedReview(state kernel.State, step string, receipt kernel.Rece
 		if reg.Panel.KernelGate == "" || state.Records[reg.Panel.KernelGate].ID != row.Parent {
 			continue
 		}
-		data, exists, err := newExecutor(state.Root).FileAtRefOrAbsent(receipt.Commit, receipt.Path)
+		data, exists, err := receiptVerdict(state.Root, receipt)
 		if err != nil {
 			return err
 		}
@@ -137,4 +137,15 @@ func publishSubmittedReview(state kernel.State, step string, receipt kernel.Rece
 		return err
 	}
 	return panelVerbFailure(fmt.Errorf("slot has no registered panel"))
+}
+
+// receiptVerdict returns the verdict bytes that a receipt names. A slot verdict
+// from an attempt directory has no holding commit before the kernel publishes
+// it, so its blob gives the bytes.
+func receiptVerdict(root string, receipt kernel.Receipt) ([]byte, bool, error) {
+	if receipt.Commit == "" {
+		data, err := kernel.ReceiptBytes(root, receipt)
+		return data, err == nil, err
+	}
+	return newExecutor(root).FileAtRefOrAbsent(receipt.Commit, receipt.Path)
 }
