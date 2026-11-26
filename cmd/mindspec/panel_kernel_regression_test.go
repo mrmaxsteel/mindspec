@@ -82,7 +82,7 @@ func TestS134PanelSubmit_WrongAndOldLease(t *testing.T) {
 	}
 }
 
-func TestS134PanelSubmit_PublishesCommittedBytes(t *testing.T) {
+func TestS134PanelSubmit_PublishesStoredBytes(t *testing.T) {
 	f, gate, head := kernelPanelFixture(t)
 	kernelPanelAuthorise(f, gate, head, 1, 2)
 	out, err := kernelPanelCreate(t, f, "1")
@@ -98,15 +98,12 @@ func TestS134PanelSubmit_PublishesCommittedBytes(t *testing.T) {
 		}
 		return paneltest.Bytes(t, v)
 	}
-	committed, earlier := mk("REQUEST_CHANGES"), mk("APPROVE")
+	submitted, earlier := mk("REQUEST_CHANGES"), mk("APPROVE")
 	file := filepath.Join(f.SpecDir, "reviews", "1", "R1-round-1.json")
-	f.Must(os.WriteFile(file, committed, 0644))
-	actorCmdGit(t, f, "add", ".")
-	actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verdict")
 	f.Must(os.WriteFile(file, earlier, 0644))
 	resolver := panelKernelStateFn
 	panelKernelStateFn = func(root, spec string) (*kernel.State, error) {
-		f.Must(os.WriteFile(file, committed, 0644))
+		f.Must(os.WriteFile(file, submitted, 0644))
 		return resolver(root, spec)
 	}
 	t.Cleanup(func() { panelKernelStateFn = resolver })
@@ -114,15 +111,18 @@ func TestS134PanelSubmit_PublishesCommittedBytes(t *testing.T) {
 	kernelPanelRequire(t, out, err)
 	subs, err := panel.LatestSubmissions(filepath.Dir(file), 1)
 	f.Must(err)
-	receipt, ok, err := kernel.Decode[kernel.Receipt](kernelPanelRecord(t, f, id).Metadata, kernel.KeyClose)
+	row := kernelPanelRecord(t, f, id)
+	receipt, ok, err := kernel.Decode[kernel.Receipt](row.Metadata, kernel.KeyClose)
 	f.Must(err)
 	if !ok || subs["R1"].Verdict != "REQUEST_CHANGES" {
 		t.Fatal("published verdict differs from receipt", subs, receipt, out)
 	}
 	published, err := os.ReadFile(file)
 	f.Must(err)
-	if !bytes.Equal(published, committed) || actorCmdGit(t, f, "rev-parse", receipt.Commit+":"+receipt.Path) != receipt.Blob {
-		t.Fatal("published bytes differ from committed evidence")
+	stored, err := kernel.ReceiptBytes(row, receipt)
+	f.Must(err)
+	if !bytes.Equal(published, submitted) || !bytes.Equal(stored, submitted) {
+		t.Fatal("published bytes differ from the stored verdict record")
 	}
 }
 
@@ -484,8 +484,6 @@ func TestS134PanelSubmit_PublicationBeforeReceipt(t *testing.T) {
 	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
 	file := filepath.Join(f.SpecDir, "reviews", "1", "R1-round-1.json")
 	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
-	actorCmdGit(t, f, "add", ".")
-	actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verdict")
 	calls := 0
 	panelSubmitMetadataFn = func(string) (map[string]interface{}, error) { calls++; return nil, fmt.Errorf("publication refused") }
 	before := kerneltest.Snapshot(t, f)

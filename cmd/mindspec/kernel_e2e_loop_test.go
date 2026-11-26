@@ -309,10 +309,40 @@ func (p *printedLoop) slot(a kernel.Action, prompt, word string, fill map[string
 			p.t.Fatalf("submit without a token: exit %d\n%s\nwant suffix %q", code, out, want)
 		}
 	}
+	before := p.specBranchState()
 	run(line)
 	if status := p.row(a.Step).Status; status != "closed" {
 		p.t.Fatalf("printed slot submit left %s %s", a.Step, status)
 	}
+	if after := p.specBranchState(); after != before {
+		p.t.Fatalf("slot submit changed the spec branch or a spec worktree:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// specBranchState returns the spec branch ref and the git status of each
+// worktree on the spec branch. A slot submit stores its verdict as a step
+// record, so it must not change either.
+func (p *printedLoop) specBranchState() string {
+	p.t.Helper()
+	branch, err := workspace.SpecBranch(p.f.SpecID)
+	p.must(err)
+	ref := "refs/heads/" + branch
+	state := ref + " " + p.git(p.f.Root, "rev-parse", ref) + "\n"
+	trees := 0
+	path := ""
+	for _, line := range strings.Split(p.git(p.f.Root, "worktree", "list", "--porcelain"), "\n") {
+		if strings.HasPrefix(line, "worktree ") {
+			path = strings.TrimPrefix(line, "worktree ")
+		}
+		if line == "branch "+ref {
+			trees++
+			state += path + ":\n" + p.git(path, "status", "--porcelain") + "\n"
+		}
+	}
+	if trees == 0 {
+		p.t.Fatalf("no worktree is on %s", ref)
+	}
+	return state
 }
 
 // lensSlots names the non-adversarial slots of the round that the lens step drafts.
@@ -462,7 +492,7 @@ func (p *printedLoop) reading(root string) (kernel.Output, map[string]error) {
 	for key, r := range s.Records {
 		receipt, has, err := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
 		p.must(err)
-		if has && receipt.Commit != "" {
+		if has && (receipt.Commit != "" || receipt.RecordSHA256 != "") {
 			receipts[key] = kernel.ValidReceipt(root, receipt, r.Metadata)
 		}
 	}

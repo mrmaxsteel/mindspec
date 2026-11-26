@@ -1,6 +1,7 @@
 package kernel_test
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -32,7 +33,10 @@ func TestS134Submit_RepairEventAfterChecks(t *testing.T) {
 			if kind == "slot" {
 				var subject string
 				f, id, _, subject = slotFixture(t)
-				actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
+				data := verdictBytes(subject, "R1")
+				actorCommit(t, f, "verdict.json", data, "")
+				// A crash after the record write leaves the stored verdict.
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
 				o.Artifact = "verdict.json"
 				o.BeforeClose = func(kernel.State, kernel.Receipt) error { return errors.New("publish failed") }
 			} else {
@@ -109,7 +113,12 @@ func actorAttemptFixture(t *testing.T, kind string, repair bool) (*kerneltest.Fi
 		lease = leaseActor(t, f, id, kernel.LeaseDeps{})
 		o = kernel.SubmitOptions{Lease: lease.Token, Commit: actorCommit(t, f, "code.txt", "fixed", "bead/"+f.Items[0])}
 	} else {
-		actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
+		data := verdictBytes(subject, "R1")
+		actorCommit(t, f, "verdict.json", data, "")
+		if repair {
+			// A crash after the record write leaves the stored verdict.
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
+		}
 	}
 	o.Step = id
 	if repair {
@@ -173,8 +182,9 @@ func TestS134Closes_SlotHeadBeforeSuperseded(t *testing.T) {
 			f, id, _, subject := slotFixture(t)
 			changeActorMetadata(t, f, id, "closed")
 			if status == "passed" {
-				actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
-				r := kernel.Receipt{Kind: "passed", Path: "verdict.json", Commit: actorCommand(t, f, "rev-parse", "HEAD"), Blob: actorCommand(t, f, "rev-parse", "HEAD:verdict.json")}
+				data := verdictBytes(subject, "R1")
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
+				r := kernel.Receipt{Kind: "passed", RecordSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(data)))}
 				f.Must(f.Store.WriteReceipt(id, r))
 			}
 			retry := f.Create(id+".a2", f.Items[0]+".review")
@@ -235,8 +245,9 @@ func TestS134Submit_LateLeaseAndReceiptTogether(t *testing.T) {
 	if err == nil {
 		t.Fatal("receipt failure accepted")
 	}
+	// The verdict record and the superseded lease share the failed receipt write.
 	if !reflect.DeepEqual(before, actorRecord(t, f, id)) {
-		t.Fatal("failed receipt left a superseded lease")
+		t.Fatal("failed receipt left a superseded lease or a stored verdict")
 	}
 }
 

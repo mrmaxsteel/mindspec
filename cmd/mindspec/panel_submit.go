@@ -229,7 +229,8 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 		step = head.Key()
 		if file == "-" {
 			// The kernel closes a slot from a verdict file: the attempt file
-			// that the slot prompt names, or a committed file.
+			// that the slot prompt names, or a file in the registered panel
+			// directory.
 			return guard.NewFailure("this slot does not read a verdict from stdin", kernel.SlotPromptRecovery(*state, step))
 		}
 		if token == "" {
@@ -243,15 +244,12 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 		if e != nil {
 			return e
 		}
-		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: func(_ kernel.State, receipt kernel.Receipt) error {
-			committed, exists, e := receiptVerdict(root, receipt)
+		_, err = kernel.Submit(*state, kernel.SubmitOptions{Step: step, Lease: token, Artifact: artifact, BeforeClose: func(fresh kernel.State, receipt kernel.Receipt) error {
+			stored, e := kernel.ReceiptBytes(fresh.Records[step], receipt)
 			if e != nil {
 				return e
 			}
-			if !exists {
-				return panelVerbFailure(fmt.Errorf("committed verdict is missing"))
-			}
-			data = committed
+			data = stored
 			return submit()
 		}})
 	} else {

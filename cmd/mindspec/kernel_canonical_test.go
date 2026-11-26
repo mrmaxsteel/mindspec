@@ -87,12 +87,16 @@ func TestS134Final_CanonicalLayout(t *testing.T) {
 			v.ReviewedSHA = a.Subject.Commit
 			v.Model = "test-model"
 			path := filepath.Join(dir, "input-"+v.Slot+".json")
-			holding := e.commit(e.cwd, path, string(paneltest.Bytes(t, v)))
+			data := paneltest.Bytes(t, v)
+			e.must(os.MkdirAll(filepath.Join(e.cwd, dir), 0o755))
+			e.must(os.WriteFile(filepath.Join(e.cwd, path), data, 0o644))
 			e.ok("submit", a.Step, "--lease", token, "--artifact", filepath.Join(e.cwd, path))
-			receipt, ok, err := kernel.Decode[kernel.Receipt](e.row(a.Step).Metadata, kernel.KeyClose)
+			row := e.row(a.Step)
+			receipt, ok, err := kernel.Decode[kernel.Receipt](row.Metadata, kernel.KeyClose)
 			e.must(err)
-			if !ok || receipt.Commit != holding || receipt.Path != filepath.ToSlash(path) || kernel.ValidReceipt(f.Root, receipt, nil) != nil {
-				t.Fatalf("holding commit not retained: %+v", receipt)
+			stored, err := kernel.ReceiptBytes(row, receipt)
+			if !ok || err != nil || string(stored) != string(data) || receipt.Commit != "" || kernel.ValidReceipt(f.Root, receipt, row.Metadata) != nil {
+				t.Fatalf("slot verdict not stored as the step record: %+v %v", receipt, err)
 			}
 			if count == 0 {
 				e.ok("panel", "refute", reg.Slug, "--spec", f.SpecID, "--slot", v.Slot, "--round", fmt.Sprint(a.Round), "--by", "operator", "--ground", "disproven", "--reason", "The implementation covers the finding.", "--evidence", a.Subject.Commit)

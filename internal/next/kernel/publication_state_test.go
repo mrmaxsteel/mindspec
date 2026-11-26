@@ -29,7 +29,9 @@ func TestS134Submit_RefreshesPublicationState(t *testing.T) {
 		if row.Status != "in_progress" || closed {
 			t.Fatal("publication ran after receipt or close")
 		}
-		return kernel.ValidReceipt(f.Root, receipt, nil)
+		// The hook state holds the stored verdict that the receipt names.
+		_, err := kernel.ReceiptBytes(fresh.Records[id], receipt)
+		return err
 	}})
 	f.Must(err)
 	if !called || actorRecord(t, f, id).Status != "closed" {

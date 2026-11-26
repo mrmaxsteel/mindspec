@@ -22,7 +22,7 @@ func judgeRefusalFault(t *testing.T, producer string) bool {
 		fault.Expression = `filepath.Rel(root, filepath.Join(res.Dir, panel.FileName))`
 		fault.Replacement = `func(string, string) (string, error) { return "", ` + cause + ` }(root, filepath.Join(res.Dir, panel.FileName))`
 	case "judge.round-read":
-		fault.Expression = `panel.Tally(p.Dir)`
+		fault.Expression = `TallyPanel(s, p)`
 		fault.Replacement = `func() (*panel.Result, error) { return nil, ` + cause + ` }()`
 	default:
 		t.Fatalf("unknown judge fault %s", producer)

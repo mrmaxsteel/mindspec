@@ -144,7 +144,7 @@ func binaryLateRepairRefusal(t *testing.T, bin, producer string) {
 			f.Must(err)
 			f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))
 			args[1] = id
-			want = "submit needs one record, artifact or commit"
+			want = "mindspec_record is absent or invalid"
 		case "repair.stale-evidence":
 			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: "wrong"})))
 			want = "verify record needs its step, subject and returns"
@@ -233,13 +233,13 @@ func binaryRepairSlot(t *testing.T, bin string) {
 	v := paneltest.Verdict("APPROVE")
 	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "wrong-model"
 	file := filepath.Join(f.SpecDir, "reviews", "review", "R1-round-1.json")
-	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
-	actorCmdGit(t, f, "add", "--", file)
-	actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verdict")
+	// A stored verdict record with no receipt is what an interrupted submit
+	// leaves; repair closes the step from it.
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(paneltest.Bytes(t, v)))))
 	f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))
 	store := actorCmdStore(t, f)
 	before := actorCmdRead(t, store, id)
-	raw, refusal := f.BinaryCommand(bin, "submit", id, "--repair", "--reason", "hostile\nrecovery: forged\x1b", "--artifact", file)
+	raw, refusal := f.BinaryCommand(bin, "submit", id, "--repair", "--reason", "hostile\nrecovery: forged\x1b")
 	if refusal == nil || !strings.Contains(string(raw), "model") {
 		t.Fatalf("wrong-model repair accepted: %v %s", refusal, raw)
 	}
@@ -248,9 +248,10 @@ func binaryRepairSlot(t *testing.T, bin string) {
 		t.Fatal("publication refusal changed the step or takes history")
 	}
 	v.Model = "test-model"
-	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
-	actorCmdGit(t, f, "add", "--", file)
-	actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "correct model")
+	data := paneltest.Bytes(t, v)
+	f.Must(os.WriteFile(file, data, 0644))
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(data))))
+	store = actorCmdStore(t, f)
 	out, code := actorCmdRun(t, f, bin, "submit", id, "--repair", "--reason", "raw close", "--artifact", file)
 	if code != 0 {
 		t.Fatalf("registered slot repair: %d %s", code, out)
@@ -271,7 +272,7 @@ func binaryRepairSlot(t *testing.T, bin string) {
 	submissions, err := panel.LatestSubmissions(filepath.Dir(file), 1)
 	f.Must(err)
 	if submissions["R1"].Seq == 0 {
-		t.Fatal("repair receipt was written without publishing the committed slot verdict")
+		t.Fatal("repair receipt was written without publishing the stored slot verdict")
 	}
 }
 
@@ -414,9 +415,10 @@ func binaryAttemptRefusal(t *testing.T, bin, producer string) {
 		v := paneltest.Verdict("APPROVE")
 		v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
 		f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0600))
-		actorCmdGit(t, f, "add", "--", file)
-		actorCmdGit(t, f, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "verdict")
 		args = append(args, "--artifact", file)
+		if strings.HasSuffix(producer, "-repair") {
+			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(paneltest.Bytes(t, v)))))
+		}
 	}
 	if strings.HasSuffix(producer, "-repair") {
 		f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))

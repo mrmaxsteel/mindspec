@@ -118,7 +118,7 @@ func refusedRound(s State) (Changes, error) {
 			if p.Slug() != reg.Slug || p.Panel.Abandoned || p.Panel.Round != round.Round || p.Panel.ReviewedHeadSHA != round.Subject {
 				continue
 			}
-			result, err := panel.Tally(p.Dir)
+			result, err := TallyPanel(s, p)
 			if err != nil {
 				return c, err
 			}

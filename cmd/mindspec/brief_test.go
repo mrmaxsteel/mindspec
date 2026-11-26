@@ -111,6 +111,7 @@ func TestS134PanelPrompt_RetalliedPrior(t *testing.T) {
 				return panel.SubmitResolution{Family: "harness", Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
 			})
 			f.Must(err)
+			kernelPanelCloseSlot(t, f, gate+".r1.R5", data)
 			newest := judgeCmdCommit(t, f, "changed.txt", "J")
 			panelJudgeSubmit(t, f, gate, old, newest, "re-panel", 2, []string{"changed.txt"})
 			v := kernelPanelVerifyRecord(t, f, gate, 99)

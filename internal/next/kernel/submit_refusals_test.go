@@ -388,7 +388,7 @@ fi`)
 				actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
 				options = kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: "verdict.json"}
 				// The refusal names the registered path and the command that prints the submit command.
-				message = "verdict must be in its registered panel directory: .mindspec/specs/" + f.SpecID + "/reviews/panel/R1-round-1.json"
+				message = "verdict must be the slot attempt verdict or a file in its registered panel directory: .mindspec/specs/" + f.SpecID + "/reviews/panel/R1-round-1.json"
 				recovery = "mindspec panel prompt 'panel' --slot R1 --spec '" + f.SpecID + "', then write the verdict to the path it names and run the submit command it prints"
 			case "SlotLineageRoot":
 				var subject string
@@ -542,7 +542,8 @@ func lateRepairRefusal(t *testing.T, producer string) {
 			leaseActor(t, f, id, kernel.LeaseDeps{})
 			changeActorMetadata(t, f, id, "closed")
 			o.Step = id
-			want = "submit needs one record, artifact or commit"
+			// A slot repair with no evidence needs the stored verdict.
+			want = "mindspec_record is absent or invalid"
 		case "repair.stale-evidence":
 			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: "wrong"})))
 			want = "verify record needs its step, subject and returns"
@@ -666,10 +667,10 @@ func TestS134Submit_ArtifactRefusalProducers(t *testing.T) {
 		run  func(*testing.T)
 	}{
 		{"checkImplement.commitPast", TestS134Submit_BadImplement},
-		{"checkVerdict.resolveArtifact.SlotLineageRoot", TestS134Submit_BadVerdictsAndFix},
+		{"checkVerdict.slotRecord.SlotLineageRoot", TestS134Submit_BadVerdictsAndFix},
 		{"checkFix", TestS134Submit_FixPanelOnlyCommit},
 		{"validateJudgement.all-fields", TestS134Judge_RePanelValidationAndScope},
-		{"resolveArtifact.foreign-repository", TestS134Submit_VerdictWorktreeIdentity},
+		{"slotFileInPanel.foreign-repository", TestS134Submit_VerdictWorktreeIdentity},
 	} {
 		t.Run(tc.name, tc.run)
 	}

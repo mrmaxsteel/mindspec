@@ -528,7 +528,7 @@ func withKernelPanelVerb(cmd *cobra.Command, slug string, rebind bool, mutate fu
 				to, _ := cmd.Flags().GetString("bead")
 				slot, _ := cmd.Flags().GetString("slot")
 				n, _ := cmd.Flags().GetInt("round")
-				res, err := panel.Tally(reg.Dir)
+				res, err := kernel.TallyPanel(fresh, panel.Registration{Dir: reg.Dir})
 				if err != nil {
 					return panelVerbFailure(err)
 				}
@@ -582,7 +582,7 @@ func withKernelPanelVerb(cmd *cobra.Command, slug string, rebind bool, mutate fu
 }
 
 func closeRetalliedChildren(s kernel.State, gate, dir string) error {
-	res, err := panel.Tally(dir)
+	res, err := kernel.TallyPanel(s, panel.Registration{Dir: dir})
 	if err != nil {
 		return err
 	}

@@ -268,6 +268,10 @@ func ValidReceipt(root string, r Receipt, metadata map[string]any) error {
 		}
 		return nil
 	}
+	if tuple.Kind == "review-slot" && (r.Path != "" || r.Commit != "" || r.Blob != "") {
+		// A slot verdict is a stored record; git holds no verdict commit.
+		return fmt.Errorf("slot receipt must name record_sha256, not a path, commit or blob")
+	}
 	if r.Path != "" || r.Commit != "" || r.Blob != "" {
 		if r.Path == "" || !objectID(r.Commit) || !objectID(r.Blob) {
 			return fmt.Errorf("receipt needs path, commit and blob")

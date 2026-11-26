@@ -471,7 +471,7 @@ func verdictBytes(subject, slot string) string {
 	return `{"schema":2,"slot":"` + slot + `","round":1,"reviewed_sha":"` + subject + `","status":"final","verdict":"APPROVE","model":"test","rationale":"reviewed","concrete_changes_required":[],"commands_run":[]}`
 }
 func TestS134Submit_BadVerdictsAndFix(t *testing.T) {
-	for _, name := range []string{"old-subject", "another-slot", "changed-blob", "uncommitted", "missing", "stale-round", "stale-step-subject", "draft", "foreign-slot", "verdict-round", "unlisted-slot", "old-token", "bad-token"} {
+	for _, name := range []string{"old-subject", "another-slot", "missing", "stale-round", "stale-step-subject", "draft", "foreign-slot", "verdict-round", "unlisted-slot", "old-token", "bad-token"} {
 		t.Run(name, func(t *testing.T) {
 			f, id, lease, subject := slotFixture(t)
 			data := verdictBytes(subject, "R1")
@@ -502,10 +502,6 @@ func TestS134Submit_BadVerdictsAndFix(t *testing.T) {
 				// Run it here, so the refusal below is checked at its fixed point.
 				_, err := kernel.PassExcept(kernel.Rules(), f.State(), true, id)
 				f.Must(err)
-			case "changed-blob":
-				f.Must(os.WriteFile(filepath.Join(f.Root, "verdict.json"), []byte(data+" "), 0644))
-			case "uncommitted":
-				f.Must(os.WriteFile(filepath.Join(f.Root, "new.json"), []byte(data), 0644))
 			case "stale-round":
 				f.Must(f.Store.WriteMetadata(f.Items[0]+".review", kernel.Metadata(kernel.KeyRound, kernel.GateRound{Round: 2, Subject: subject, Slots: []string{"R1"}, SlotCount: 1})))
 				// The verb's own pre-pass creates the new authorisation's lens step.
@@ -523,13 +519,10 @@ func TestS134Submit_BadVerdictsAndFix(t *testing.T) {
 			if name == "missing" {
 				artifact = "missing.json"
 			}
-			if name == "uncommitted" {
-				artifact = "new.json"
-			}
 			want := map[string]string{
 				"old-subject": "verdict slot, round or subject does not match the step", "another-slot": "verdict slot, round or subject does not match the step",
 				"verdict-round": "verdict slot, round or subject does not match the step", "draft": "verdict slot, round or subject does not match the step",
-				"changed-blob": "artifact blob differs from its holding commit", "uncommitted": "artifact has no holding commit", "missing": "artifact must be a regular committed file",
+				"missing":     "verdict file is not readable",
 				"stale-round": "step subject or round is stale", "stale-step-subject": "step subject is stale", "foreign-slot": "foreign step", "unlisted-slot": "slot is not in the active gate round",
 				"old-token": "step already has a receipt from another generation", "bad-token": "lease token is not current",
 			}[name]
@@ -794,7 +787,8 @@ func TestS134SeedMatch_Answer(t *testing.T) {
 func TestS134SeedMatch_Repaired(t *testing.T) {
 	kerneltest.WithRules(t, kernel.NewRegistry())
 	f, id, lease, subject := slotFixture(t)
-	commit := actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
+	data := verdictBytes(subject, "R1")
+	actorCommit(t, f, "verdict.json", data, "")
 	f.Must(f.Store.SetStatusIf(id, "in_progress", "closed")) // raw slot close
 	twin := kerneltest.Enrolled(t, kerneltest.WithFake(false))
 	// Share git evidence only; compare the full raw row on a copied fake store.
@@ -813,7 +807,8 @@ func TestS134SeedMatch_Repaired(t *testing.T) {
 		f.Must(json.Unmarshal(data, &copy))
 		twin.Fake.Records[row.ID] = copy
 	}
-	receipt := kernel.Receipt{Kind: "passed", Path: "verdict.json", Commit: commit, Blob: actorCommand(t, f, "rev-parse", commit+":verdict.json"), Generation: lease.Lease.Generation}
+	receipt := kernel.Receipt{Kind: "passed", RecordSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(data))), Generation: lease.Lease.Generation}
+	f.Must(twin.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
 	kerneltest.Repaired(twin, id, receipt)
 	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: "verdict.json"})
 	f.Must(err)
@@ -958,15 +953,16 @@ func TestS134Submit_VerdictWorktreeIdentity(t *testing.T) {
 				source = &copy
 			}
 			path := filepath.Join(".mindspec", "specs", f.SpecID, "reviews", "panel", "R1-round-1.json")
-			commit := actorCommit(t, source, path, verdictBytes(subject, "R1"), "")
+			data := verdictBytes(subject, "R1")
+			actorCommit(t, source, path, data, "")
 			o := kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: filepath.Join(source.Root, path)}
 			if otherRepo {
-				actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, "this repository")
+				actorRefusal(t, f, func() error { _, err := kernel.Submit(f.State(), o); return err }, "verdict must be the slot attempt verdict or a file in its registered panel directory")
 			} else {
 				_, err := kernel.Submit(f.State(), o)
 				f.Must(err)
 				receipt := actorReceipt(t, f, id)
-				if receipt.Path != filepath.ToSlash(path) || receipt.Commit != commit || receipt.Kind != "passed" || actorRecord(t, f, id).Status != "closed" {
+				if receipt.RecordSHA256 != fmt.Sprintf("%x", sha256.Sum256([]byte(data))) || receipt.Path != "" || receipt.Commit != "" || receipt.Kind != "passed" || actorRecord(t, f, id).Status != "closed" {
 					t.Fatalf("linked evidence identity lost: %+v", receipt)
 				}
 			}

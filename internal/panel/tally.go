@@ -346,11 +346,19 @@ func Tally(dir string) (*Result, error) {
 	return tally(dir, ReadLedger)
 }
 
-func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, error) {
-	return tallyWithPanel(dir, readLedger, nil)
+// TallyRecords tallies dir with verdict bytes from records, keyed by verdict
+// file name. A record supplies the verdict of a name with no file in dir. A
+// file on disk wins, so a hand edit still shows as a digest mismatch. The
+// caller stores the records and checks their hashes.
+func TallyRecords(dir string, records map[string][]byte) (*Result, error) {
+	return tallyWithPanel(dir, ReadLedger, nil, records)
 }
 
-func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), registered *Panel) (*Result, error) {
+func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, error) {
+	return tallyWithPanel(dir, readLedger, nil, nil)
+}
+
+func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), registered *Panel, records map[string][]byte) (*Result, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
@@ -399,8 +407,27 @@ func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), regis
 		round      int
 	}
 	var vfiles []vfile
+	names := map[string]bool{}
+	type entry struct {
+		name string
+		dir  bool
+	}
+	var listed []entry
 	for _, e := range entries {
-		m := verdictFileRE.FindStringSubmatch(e.Name())
+		names[e.Name()] = true
+		listed = append(listed, entry{name: e.Name(), dir: e.IsDir()})
+	}
+	absent := map[string][]byte{}
+	for name, data := range records {
+		if !names[name] {
+			absent[name] = data
+			listed = append(listed, entry{name: name})
+		}
+	}
+	records = absent
+	sort.Slice(listed, func(i, j int) bool { return listed[i].name < listed[j].name })
+	for _, e := range listed {
+		m := verdictFileRE.FindStringSubmatch(e.name)
 		if m == nil {
 			continue
 		}
@@ -411,10 +438,10 @@ func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), regis
 		if err != nil {
 			continue // unreachable for \d+ short of overflow
 		}
-		if e.IsDir() && (res.Panel == nil || round != res.Panel.Round || !roster[m[1]]) {
+		if e.dir && (res.Panel == nil || round != res.Panel.Round || !roster[m[1]]) {
 			continue
 		}
-		vfiles = append(vfiles, vfile{name: e.Name(), slot: m[1], round: round})
+		vfiles = append(vfiles, vfile{name: e.name, slot: m[1], round: round})
 		if round > res.LatestRound {
 			res.LatestRound = round
 		}
@@ -449,7 +476,7 @@ func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), regis
 			continue
 		}
 		offRoster := len(roster) > 0 && !roster[vf.slot]
-		data, err := ReadVerdictFile(filepath.Join(dir, vf.name), round.VerdictSchema)
+		data, err := verdictBytes(dir, vf.name, round.VerdictSchema, records)
 		if err != nil {
 			if round.VerdictSchema != 2 {
 				res.Malformed = append(res.Malformed, vf.name)
@@ -604,6 +631,12 @@ func (r *Result) ReviewerModel(slot string) string {
 // TallyRegisteredRound reads the durable round and its votes after a gate freezes.
 // Later snapshots and rebinds cannot replace the original registration.
 func TallyRegisteredRound(dir, spec string, number int, subject string) (*Result, error) {
+	return TallyRegisteredRoundRecords(dir, spec, number, subject, nil)
+}
+
+// TallyRegisteredRoundRecords is TallyRegisteredRound with verdict bytes from
+// records, as for TallyRecords.
+func TallyRegisteredRoundRecords(dir, spec string, number int, subject string, records map[string][]byte) (*Result, error) {
 	lines, err := ReadLedger(dir)
 	if err != nil {
 		return nil, err
@@ -668,5 +701,18 @@ func TallyRegisteredRound(dir, spec string, number int, subject string) (*Result
 			registered.Abandoned = true
 		}
 	}
-	return tallyWithPanel(dir, func(string) ([][]byte, error) { return filtered, nil }, registered)
+	return tallyWithPanel(dir, func(string) ([][]byte, error) { return filtered, nil }, registered, records)
+}
+
+// verdictBytes returns the verdict of name from records, which hold only
+// names with no file in dir, or else from the file in dir.
+func verdictBytes(dir, name string, schema int, records map[string][]byte) ([]byte, error) {
+	data, ok := records[name]
+	if !ok {
+		return ReadVerdictFile(filepath.Join(dir, name), schema)
+	}
+	if schema == 2 && len(data) > MaxVerdictBytes {
+		return nil, fmt.Errorf("verdict file exceeds 1 MiB")
+	}
+	return data, nil
 }

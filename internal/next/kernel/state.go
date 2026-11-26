@@ -145,6 +145,11 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 			}
 			s.Verdicts[path] = data
 		}
+		for name, data := range SlotRecords(s, p) {
+			if _, ok := s.Verdicts[filepath.Join(p.Dir, name)]; !ok {
+				s.Verdicts[filepath.Join(p.Dir, name)] = data
+			}
+		}
 	}
 	specBranch, err := workspace.SpecBranch(specID)
 	if err != nil {

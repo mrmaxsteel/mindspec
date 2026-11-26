@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -572,8 +573,21 @@ func kernelPanelVerdict(t *testing.T, f *kerneltest.Fixture, gate, head, slug, s
 	if _, ok := f.State().Records[id]; !ok {
 		f.Create(id, gate)
 	}
-	kernelPanelClose(t, f, id, head)
+	kernelPanelCloseSlot(t, f, id, data)
 	return name
+}
+
+// kernelPanelCloseSlot closes a slot step with its verdict stored as the step
+// record, as the slot submit does.
+func kernelPanelCloseSlot(t *testing.T, f *kerneltest.Fixture, id string, data []byte) {
+	t.Helper()
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(data))))
+	f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", RecordSHA256: fmt.Sprintf("%x", sha256.Sum256(data))}))
+	r, e := f.Store.Lookup(id)
+	f.Must(e)
+	if r.Status != "closed" {
+		f.Must(f.Store.SetStatusIf(id, r.Status, "closed"))
+	}
 }
 func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
 	for _, final := range []bool{false, true} {
@@ -750,8 +764,6 @@ func TestS134PanelSubmit_LeaseReceiptAndForeignSnapshot(t *testing.T) {
 	v.Model = "test-model"
 	file := filepath.Join(f.SpecDir, "reviews", "1", "R1-round-1.json")
 	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
-	actorCmdGit(t, f, "add", ".")
-	actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "verdict")
 	foreign = kernelPanelProtect(t, f)
 	args := []string{"1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file}
 	out, e = kernelPanelRun(t, panelSubmitCmd, args...)
@@ -763,7 +775,7 @@ func TestS134PanelSubmit_LeaseReceiptAndForeignSnapshot(t *testing.T) {
 	r := kernelPanelRecord(t, f, id)
 	receipt, ok, e := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
 	f.Must(e)
-	if !ok || r.Status != "closed" || receipt.Path == "" {
+	if !ok || r.Status != "closed" || receipt.RecordSHA256 == "" || receipt.Path != "" {
 		t.Fatal(r)
 	}
 	f.Must(kernel.ValidReceipt(f.Root, receipt, r.Metadata))

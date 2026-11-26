@@ -29,7 +29,7 @@ func roundResult(s State, gate string, round GateRound) (*panel.Result, error) {
 		if p.Slug() != reg.Slug || p.Panel.Spec != s.SpecID || !gatePanel(tuple, p.Panel) {
 			continue
 		}
-		result, err := panel.Tally(p.Dir)
+		result, err := TallyPanel(s, p)
 		if err != nil {
 			return nil, pathFailure(err, "cannot read round panel: ", "restore the panel directory and retry")
 		}

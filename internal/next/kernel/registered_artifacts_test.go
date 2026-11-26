@@ -39,7 +39,7 @@ func TestS134Submit_RecordedPanelDirectory(t *testing.T) {
 			actorCommit(t, f, path, verdictBytes(subject, "R1"), "")
 			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: filepath.Join(f.Root, path)})
 			if strings.HasPrefix(mode, "unrecorded") {
-				if err == nil || !strings.Contains(err.Error(), "verdict must be in its registered panel directory") {
+				if err == nil || !strings.Contains(err.Error(), "verdict must be the slot attempt verdict or a file in its registered panel directory") {
 					t.Fatalf("unrecorded verdict: %v", err)
 				}
 				if actorRecord(t, f, id).Status == "closed" {
@@ -49,8 +49,9 @@ func TestS134Submit_RecordedPanelDirectory(t *testing.T) {
 			}
 			f.Must(err)
 			receipt := actorReceipt(t, f, id)
-			if actorRecord(t, f, id).Status != "closed" || receipt.Path != filepath.ToSlash(path) || kernel.ValidReceipt(f.Root, receipt, nil) != nil {
-				t.Fatalf("missing committed verdict receipt: %+v", receipt)
+			row := actorRecord(t, f, id)
+			if row.Status != "closed" || receipt.RecordSHA256 == "" || receipt.Path != "" || kernel.ValidReceipt(f.Root, receipt, row.Metadata) != nil {
+				t.Fatalf("missing stored verdict receipt: %+v", receipt)
 			}
 		})
 	}

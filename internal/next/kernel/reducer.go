@@ -522,12 +522,12 @@ func gatePassEvidence(s State, gate Record) (string, bool, error) {
 			if !matchingRound {
 				continue
 			}
-			result, err = panel.TallyRegisteredRound(dir, s.SpecID, round.Round, round.Subject)
+			result, err = panel.TallyRegisteredRoundRecords(dir, s.SpecID, round.Round, round.Subject, SlotRecords(s, candidate))
 		} else {
 			if candidate.Panel.Abandoned || candidate.Panel.Round != round.Round || candidate.Panel.ReviewedHeadSHA != round.Subject || candidate.Panel.Spec != s.SpecID {
 				continue
 			}
-			result, err = panel.Tally(dir)
+			result, err = TallyPanel(s, candidate)
 		}
 		if err != nil {
 			return "", false, err

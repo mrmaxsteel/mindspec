@@ -1283,7 +1283,7 @@ func TestS134E2E_ProtectedSnapshotComputedRefs(t *testing.T) {
 
 // Use the command entry point with a subprocess fake tracker. This isolates the
 // publication wiring from the longer real-store lifecycle and runs in short mode.
-func TestS134SubmitCmd_PublishesCommittedReview(t *testing.T) {
+func TestS134SubmitCmd_PublishesStoredReview(t *testing.T) {
 	f, gate, head := kernelPanelFixture(t)
 	kernelPanelAuthorise(f, gate, head, 1, 2)
 	out, err := kernelPanelCreate(t, f, "1")
@@ -1293,11 +1293,9 @@ func TestS134SubmitCmd_PublishesCommittedReview(t *testing.T) {
 	f.Must(err)
 	v := paneltest.Verdict("APPROVE")
 	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "wrong-model"
-	file := filepath.Join(f.SpecDir, "reviews", "1", "committed-verdict.json")
+	file := filepath.Join(f.SpecDir, "reviews", "1", "verdict.json")
 	data := paneltest.Bytes(t, v)
 	f.Must(os.WriteFile(file, data, 0600))
-	actorCmdGit(t, f, "add", ".")
-	actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "verdict")
 	store := actorCmdStore(t, f)
 	out, err = kernelPanelRun(t, submitCmd, id, "--lease", "wrong-token", "--artifact", file)
 	kernelPanelRefusal(t, out, err, "lease token is not current")
@@ -1322,22 +1320,23 @@ func TestS134SubmitCmd_PublishesCommittedReview(t *testing.T) {
 	}
 	v.Model = "test-model"
 	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0600))
-	actorCmdGit(t, f, "add", ".")
-	actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "correct verdict")
 	out, err = kernelPanelRun(t, submitCmd, id, "--lease", lease.Token, "--artifact", file)
 	kernelPanelRequire(t, out, err)
 	subs, err = panel.LatestSubmissions(filepath.Dir(file), 1)
 	f.Must(err)
 	row = actorCmdRead(t, store, id)
 	if row.Status != "closed" || len(subs) != 1 || subs["R1"].Verdict != "APPROVE" || subs["R1"].Seq != 1 {
-		t.Fatal("generic submit did not publish its committed verdict", row, subs)
+		t.Fatal("generic submit did not publish its stored verdict", row, subs)
 	}
 	receipt, ok, err := kernel.Decode[kernel.Receipt](row.Metadata, kernel.KeyClose)
 	f.Must(err)
 	if !ok {
 		t.Fatal("published submission has no receipt")
 	}
-	f.Must(kernel.ValidReceipt(f.Root, receipt, nil))
+	if receipt.RecordSHA256 == "" || receipt.Commit != "" {
+		t.Fatalf("slot receipt is not a stored record: %+v", receipt)
+	}
+	f.Must(kernel.ValidReceipt(f.Root, receipt, row.Metadata))
 	ledgerBefore, err = panel.ReadLedger(filepath.Dir(file))
 	f.Must(err)
 	before := kerneltest.Snapshot(t, f)
@@ -1364,10 +1363,8 @@ func TestS134SubmitCmd_RefreshesPublicationState(t *testing.T) {
 	f.Must(err)
 	v := paneltest.Verdict("APPROVE")
 	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
-	file := filepath.Join(f.SpecDir, "reviews", "1", "committed-verdict.json")
+	file := filepath.Join(f.SpecDir, "reviews", "1", "verdict.json")
 	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0600))
-	actorCmdGit(t, f, "add", ".")
-	actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "verdict")
 	// Keep the command's initial read before registration; the actor lock must refresh it.
 	old := submitCommandStateFn
 	submitCommandStateFn = func(_, target string) (kernel.State, error) {
@@ -1387,7 +1384,10 @@ func TestS134SubmitCmd_RefreshesPublicationState(t *testing.T) {
 	if row.Status != "closed" || !ok || len(subs) != 1 || subs["R1"].Verdict != "APPROVE" || subs["R1"].Seq != 1 {
 		t.Fatal("submit did not publish with refreshed registration", row.Status, ok, subs)
 	}
-	f.Must(kernel.ValidReceipt(f.Root, receipt, nil))
+	if receipt.RecordSHA256 == "" || receipt.Commit != "" {
+		t.Fatalf("slot receipt is not a stored record: %+v", receipt)
+	}
+	f.Must(kernel.ValidReceipt(f.Root, receipt, row.Metadata))
 }
 
 func TestS134PanelCreate_NonEnrolledSpecShorthand(t *testing.T) {

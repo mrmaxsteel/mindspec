@@ -193,14 +193,13 @@ func TestS134Closes_RepairSlot(t *testing.T) {
 			put(t, filepath.Join(f.Root, ".beads", "config.yaml"), "types.custom: gate,step\n")
 			gate := f.Items[0] + ".review"
 			kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "review", Round: 1, Subject: subject, Slots: []string{"R1", "R2"}})
-			path, err := filepath.Rel(f.Root, filepath.Join(f.SpecDir, "reviews", "review", "R1-round-1.json"))
-			f.Must(err)
+			// A crash after the record write leaves the stored verdict and no receipt.
 			if mode != "missing" {
 				verdictSubject := subject
 				if mode == "another-subject" {
 					verdictSubject = strings.Repeat("b", 40)
 				}
-				actorCommit(t, f, path, verdictBytes(verdictSubject, "R1"), "")
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, verdictBytes(verdictSubject, "R1"))))
 			}
 			useDefaultRules(t)
 			reduce(t, f, true)
@@ -210,7 +209,7 @@ func TestS134Closes_RepairSlot(t *testing.T) {
 			if before != kerneltest.Snapshot(t, f) {
 				t.Fatal("repair probe wrote")
 			}
-			argv := []string{"mindspec", "submit", id, "--repair", "--reason", "<text>", "--artifact", filepath.Join(f.Root, path)}
+			argv := []string{"mindspec", "submit", id, "--repair", "--reason", "<text>"}
 			fitting := mode == "fitting"
 			if hasRun(out, argv...) != fitting {
 				t.Fatalf("repair run entry differs: %+v", out.Run)
@@ -218,14 +217,14 @@ func TestS134Closes_RepairSlot(t *testing.T) {
 			assertRetry(t, f, id, id+".a2", false)
 			if !fitting {
 				actorRefusal(t, f, func() error {
-					_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "raw close", Artifact: filepath.Join(f.Root, path)})
+					_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "raw close"})
 					return err
-				}, map[string]string{"missing": "regular committed file", "another-subject": "verdict slot, round or subject"}[mode])
+				}, map[string]string{"missing": "mindspec_record is absent or invalid", "another-subject": "verdict slot, round or subject"}[mode])
 				reduce(t, f, true)
 				assertRetry(t, f, id, id+".a2", true)
 				return
 			}
-			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "raw close", Artifact: filepath.Join(f.Root, path)})
+			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "raw close"})
 			f.Must(err)
 			receipt := actorReceipt(t, f, id)
 			r := actorRecord(t, f, id)

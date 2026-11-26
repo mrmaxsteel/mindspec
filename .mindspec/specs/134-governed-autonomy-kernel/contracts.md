@@ -14,7 +14,7 @@ ruling is silent; the operator confirmed them on 2026-11-18, but for those §8 a
 5. Mindspec has one path. `plan approve` enrols every new spec. There is no hand mode inside mindspec. To work by
    hand means to work without mindspec, in the same bd store (§12).
 
-Thesis: beads hold plan, dispatch and kernel records; git holds code and the panel files; the binary holds rules. No driver is required.
+Thesis: beads hold plan, dispatch and kernel records (slot verdicts included); git holds code; the binary holds rules. No driver is required.
 
 ## 2. Graph model
 
@@ -63,9 +63,9 @@ Thesis: beads hold plan, dispatch and kernel records; git holds code and the pan
     A step held by an open foreign child or upstream, and its kernel ancestors, stay open. It never closes a foreign bead.
 12. A gate is a child of what it decides. An open bead gate makes raw `bd close <work item>` fail without `--force`.
     A gate closed `passed` is frozen; only a `carry-over` (§13.2) adds to its receipt.
-13. A receipt names its evidence, never the body. For a commit or a verdict file it names path, holding commit and
-    blob id, and readers resolve from that commit, not from the branch head. For a lens, verify or judgement record
-    it names `record_sha256`, the sha256 of the record bytes that `submit` read and `mindspec_record` holds (§6).
+13. A receipt names its evidence, never the body. For a commit it names the commit, and readers resolve from that
+    commit, not from the branch head. For a slot verdict or a lens, verify or judgement record it names
+    `record_sha256`, the sha256 of the record bytes that `submit` read and `mindspec_record` holds (§6).
 
 ## 4. `next-action [<spec>] [--apply] [--json]`
 
@@ -117,9 +117,9 @@ An epic, work item or gate with status `in_progress` does not hold work. The pas
 ## 6. `submit <step> --lease <t> <evidence>` | `submit <step> --repair --reason <text> [<evidence>]` | `submit <decision> --answer <opt>`
 
 `<evidence>` is `--record <path>` for a lens, verify or change-judge step, `--artifact <path>` for a slot and
-`--commit <oid>` for an implement step or a fix. Only the repair of a record step may omit it (§9); a repair of a
-slot, implement step or fix without its flag refuses. Checks: the generation; the step's subject (**Subjects**); the
-evidence; it fits the kind (a lens record, §13.11; a verdict whose path resolves at a commit with a matching blob; a
+`--commit <oid>` for an implement step or a fix. Only the repair of a record step or a slot may omit it (§9); a
+repair of an implement step or fix without its flag refuses. Checks: the generation; the step's subject (**Subjects**); the
+evidence; it fits the kind (a lens record, §13.11; a slot verdict, the file that the slot prompt names in an attempt directory of the slot or in the registered panel directory, at most 1 MiB; a
 verify record, §13.10; for a fix, a commit on the branch the gate names past the fix step's subject that changes,
 relative to that subject, a path outside the panel directories, so the step's subject itself and any commit that the
 step's subject contains are refused; a commit past the claim base for an implement step; a judgement, §13.2).
@@ -130,7 +130,12 @@ closing pin) stores the bytes as the step metadata `mindspec_record`, a JSON str
 exactly (the metadata route and bound, §13.10); a reader decodes the string, then the record. `record_sha256` is the
 sha256 of those bytes on every path: the receipt (B13), the closing pin, `ValidReceipt` (which reads the step
 metadata; a record receipt on a step with no `mindspec_record` is invalid) and the repair (§9). The
-receipt names no path, commit or blob id. The actor commits no record. Each reader of a record (the brief
+receipt names no path, commit or blob id. The actor commits no record. **Slot verdict.** A slot verdict is a record:
+`submit` reads the `--artifact` file once and writes `mindspec_record` and the receipt in one write, after the
+publication hook. It makes no commit, moves no ref and writes no index or file outside the registered panel directory.
+The verdict file stays in the panel directory. The tally reads a verdict file that is on disk, so a hand edit fails
+its digest (§13.10); for an absent file, as in a fresh clone, it reads `mindspec_record` of the current slot attempt
+when the receipt `record_sha256` matches. A slot repair uses `mindspec_record`, and a supplied file must match it. Each reader of a record (the brief
 render, the tally, the verify retally, the audit, the closing pin) reads `mindspec_record` and the close writes of
 its kind, never a file. Each `submit` and `panel submit` runs under the phase lock, so no two writes of one step
 interleave. On a step with a valid receipt no submit makes a close write; the closed-step rules below apply. Else, for

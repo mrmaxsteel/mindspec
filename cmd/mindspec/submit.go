@@ -78,7 +78,7 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 func init() {
 	submitCmd.Flags().String("lease", "", "Current lease token")
 	submitCmd.Flags().String("record", "", "Record file outside this repository")
-	submitCmd.Flags().String("artifact", "", "Artifact path: a file held by a commit, or the verdict file in the slot attempt directory")
+	submitCmd.Flags().String("artifact", "", "Artifact path: a file held by a commit, or the verdict file that the slot prompt names")
 	submitCmd.Flags().String("commit", "", "Commit that holds the implementation or fix")
 	submitCmd.Flags().String("answer", "", "Listed option for a decision")
 	submitCmd.Flags().Bool("repair", false, "Receipt an unreceipted closed step with fitting evidence")
@@ -87,8 +87,9 @@ func init() {
 	rootCmd.AddCommand(submitCmd)
 }
 
-// publishSubmittedReview makes a committed slot verdict visible to the panel tally.
-// The kernel invokes this only after it validates the token and artifact.
+// publishSubmittedReview writes a stored slot verdict to the registered panel
+// directory, where the panel tally reads it. The kernel invokes this only
+// after it validates the token and the verdict.
 func publishSubmittedReview(state kernel.State, step string, receipt kernel.Receipt) error {
 	row := state.Records[step]
 	tuple, _, err := row.Tuple()
@@ -102,12 +103,9 @@ func publishSubmittedReview(state kernel.State, step string, receipt kernel.Rece
 		if reg.Panel.KernelGate == "" || state.Records[reg.Panel.KernelGate].ID != row.Parent {
 			continue
 		}
-		data, exists, err := receiptVerdict(state.Root, receipt)
+		data, err := kernel.ReceiptBytes(row, receipt)
 		if err != nil {
 			return err
-		}
-		if !exists {
-			return panelVerbFailure(fmt.Errorf("committed verdict is missing"))
 		}
 		cfg, err := config.Load(state.Root)
 		if err != nil {
@@ -137,15 +135,4 @@ func publishSubmittedReview(state kernel.State, step string, receipt kernel.Rece
 		return err
 	}
 	return panelVerbFailure(fmt.Errorf("slot has no registered panel"))
-}
-
-// receiptVerdict returns the verdict bytes that a receipt names. A slot verdict
-// from an attempt directory has no holding commit before the kernel publishes
-// it, so its blob gives the bytes.
-func receiptVerdict(root string, receipt kernel.Receipt) ([]byte, bool, error) {
-	if receipt.Commit == "" {
-		data, err := kernel.ReceiptBytes(root, receipt)
-		return data, err == nil, err
-	}
-	return newExecutor(root).FileAtRefOrAbsent(receipt.Commit, receipt.Path)
 }

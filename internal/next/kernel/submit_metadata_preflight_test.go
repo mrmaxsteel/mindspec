@@ -20,7 +20,10 @@ func TestS134Submit_RepairFinalMetadataBound(t *testing.T) {
 				var subject string
 				f, id, _, subject = slotFixture(t)
 				artifact = "verdict.json"
-				actorCommit(t, f, artifact, verdictBytes(subject, "R1"), "")
+				data := verdictBytes(subject, "R1")
+				actorCommit(t, f, artifact, data, "")
+				// A crash after the record write leaves the stored verdict.
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
 			} else {
 				f, id, _ = seededRecordActor(t, kind)
 				changeActorMetadata(t, f, id, "open", kernel.KeyClose, kernel.KeyClosing, kernel.KeyReturns)
@@ -123,7 +126,9 @@ func assertMetadataSizeRefusal(t *testing.T, err error) {
 
 func TestS134Submit_RepairEventAndReceiptTogether(t *testing.T) {
 	f, id, _, subject := slotFixture(t)
-	actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
+	data := verdictBytes(subject, "R1")
+	actorCommit(t, f, "verdict.json", data, "")
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
 	changeActorMetadata(t, f, id, "closed")
 	before := actorRecord(t, f, id)
 	run := f.Store.Run

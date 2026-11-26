@@ -1,10 +1,5 @@
 package kernel
 
-import (
-	"fmt"
-	"path/filepath"
-)
-
 func repairable(r Record, lease LeaseRecord, valid bool) error {
 	if r.Status != "closed" {
 		return actorFailure("repair requires a closed step")
@@ -38,7 +33,7 @@ func repairEvidence(s State, r Record) (SubmitOptions, error) {
 	t, _, _ := r.Tuple()
 	receipt := Receipt{Kind: "passed", Generation: lease.Generation}
 	switch t.Kind {
-	case "lens", "verify", "change-judge":
+	case "lens", "verify", "change-judge", "review-slot":
 		data, err := recordBytes(r)
 		if err != nil {
 			return o, err
@@ -51,23 +46,6 @@ func repairEvidence(s State, r Record) (SubmitOptions, error) {
 		if has && pin.RecordSHA256 != receipt.RecordSHA256 {
 			return o, actorFailure("repair record differs from mindspec_closing")
 		}
-	case "review-slot":
-		registration, has, err := Decode[RegistrationRecord](s.Records[activeGate(s, t.Gate)].Metadata, KeyRegistration)
-		if err != nil {
-			return o, err
-		}
-		if !has {
-			return o, actorFailure("repair needs a registered verdict path")
-		}
-		for _, p := range s.Panels {
-			if p.Slug() == registration.Slug {
-				o.Artifact = filepath.Join(p.Dir, fmt.Sprintf("R%d-round-%d.json", t.Slot, t.Round))
-				break
-			}
-		}
-		if o.Artifact == "" {
-			return o, actorFailure("repair needs a registered verdict path")
-		}
 	case "implement", "fix":
 		o.Commit = rawSubject(s, r.Key())
 		if o.Commit == "" {
@@ -76,7 +54,7 @@ func repairEvidence(s State, r Record) (SubmitOptions, error) {
 	default:
 		return o, actorFailure("step kind has no repair evidence")
 	}
-	if !recordKind(t.Kind) {
+	if o.Commit != "" {
 		receipt, err = resolveArtifact(s, o)
 		if err != nil {
 			return o, err

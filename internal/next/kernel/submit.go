@@ -27,9 +27,9 @@ type SubmitOptions struct {
 	Answer   string
 	Repair   bool
 	Reason   string
-	// BeforeClose publishes validated evidence before the receipt and final reduction.
-	// A slot verdict from an attempt directory has no holding commit yet when
-	// BeforeClose runs; ReceiptBytes gives its bytes.
+	// BeforeClose publishes validated evidence before the receipt and final
+	// reduction. In its state, the step record holds the stored
+	// mindspec_record; ReceiptBytes gives its bytes.
 	BeforeClose func(State, Receipt) error
 }
 type ArtifactCheck func(State, Record, Receipt) error
@@ -118,24 +118,34 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 			}
 			valid := present && ValidReceipt(s.Root, old, r.Metadata) == nil
 			generation := lease.Generation
+			slot := tuple.Kind == "review-slot"
+			stored := recordKind(tuple.Kind) || slot
+			if slot && options.Artifact != "" {
+				if record, err = slotRecord(s, tuple, options.Artifact); err != nil {
+					return err
+				}
+			}
 			if options.Repair {
 				if err = repairable(r, lease, valid); err != nil {
 					return err
 				}
-				if recordKind(tuple.Kind) {
-					stored, err := recordBytes(r)
+				if stored {
+					data, err := recordBytes(r)
 					if err != nil {
 						return err
 					}
-					if options.Record != "" && recordDigest([]byte(record)) != recordDigest(stored) {
+					if options.Record != "" && recordDigest([]byte(record)) != recordDigest(data) {
 						return actorFailure("repair --record differs from mindspec_record")
 					}
-					record = string(stored)
+					if slot && options.Artifact != "" && recordDigest([]byte(record)) != recordDigest(data) {
+						return actorFailure("repair --artifact differs from mindspec_record")
+					}
+					record = string(data)
 					pin, has, err := Decode[Closing](r.Metadata, KeyClosing)
 					if err != nil {
 						return err
 					}
-					if has && pin.RecordSHA256 != recordDigest(stored) {
+					if has && pin.RecordSHA256 != recordDigest(data) {
 						return actorFailure("repair record differs from mindspec_closing")
 					}
 				}
@@ -151,32 +161,24 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					evidenceCount++
 				}
 			}
-			storedRepair := options.Repair && recordKind(tuple.Kind) && evidenceCount == 0
+			storedRepair := options.Repair && stored && evidenceCount == 0
 			if evidenceCount != 1 && !(storedRepair && evidenceCount == 0) {
 				return actorFailure("submit needs one record, artifact or commit")
 			}
-			if recordKind(tuple.Kind) != (options.Record != "" || storedRepair) || (tuple.Kind == "implement" || tuple.Kind == "fix") != (options.Commit != "") {
+			if slot {
+				// A slot takes its verdict file; a repair can name the stored
+				// record instead.
+				if options.Commit != "" || (options.Record != "" && !options.Repair) {
+					return actorFailure("artifact does not fit the step kind")
+				}
+			} else if recordKind(tuple.Kind) != (options.Record != "" || storedRepair) || (tuple.Kind == "implement" || tuple.Kind == "fix") != (options.Commit != "") {
 				return actorFailure("artifact does not fit the step kind")
 			}
 			var receipt Receipt
-			var pending *slotPending
-			if recordKind(tuple.Kind) {
+			if stored {
 				receipt = Receipt{Kind: "passed", RecordSHA256: recordDigest([]byte(record))}
-			} else {
-				if tuple.Kind == "review-slot" && options.Artifact != "" {
-					if pending, err = slotEvidence(s, r, tuple, options); err != nil {
-						return err
-					}
-				}
-				if pending != nil {
-					receipt = pending.receipt()
-					if valid && old.Path == receipt.Path && old.Blob == receipt.Blob {
-						// The same bytes are already published and closed.
-						receipt.Commit = old.Commit
-					}
-				} else if receipt, err = resolveArtifact(s, options); err != nil {
-					return err
-				}
+			} else if receipt, err = resolveArtifact(s, options); err != nil {
+				return err
 			}
 			receipt.Generation = generation
 			if generation != lease.Generation {
@@ -196,13 +198,6 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					}
 					return actorFailure("step already has a different result")
 				}
-				if tuple.Kind == "review-slot" {
-					// An earlier run can stop after the spec branch moved.
-					// The replay finishes the worktree sync.
-					if err = syncHeldVerdict(s, receipt); err != nil {
-						return err
-					}
-				}
 				// A closed receipt is immutable, even after the gate advances or TTL expires.
 				if r.Status == "closed" {
 					return nil
@@ -211,7 +206,7 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 				if !options.Repair && generation == lease.Generation && !lease.Expires.After(s.At) {
 					return actorFailure("lease has expired")
 				}
-				if recordKind(tuple.Kind) {
+				if stored {
 					r.Metadata = mergedMetadata(r.Metadata, Metadata(KeyRecord, record))
 				}
 				if err = check(s, r, receipt); err != nil {
@@ -244,39 +239,29 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					lease.Ended = "superseded"
 					updates[KeyLease] = lease
 				}
-				if recordKind(tuple.Kind) {
+				if slot {
+					// The verdict record and its receipt share the one durable
+					// write below, after the publication hook.
+					updates[KeyRecord] = record
+					final := mergedMetadata(mergedMetadata(r.Metadata, updates), Metadata(KeyClose, receipt))
+					if _, err = CheckMetadataSize(r.Key(), final); err != nil {
+						return err
+					}
+					if err = ValidReceipt(s.Root, receipt, final); err != nil {
+						return actorFailure(err.Error())
+					}
+				} else if stored {
 					receipt, err = recordCloseWrites(s, r, receipt, updates)
 					if err != nil {
 						return err
 					}
-				} else {
-					sized := receipt
-					if sized.Commit == "" {
-						// The holding commit id has the length of the blob id.
-						sized.Commit = strings.Repeat("0", len(sized.Blob))
-					}
-					if _, err = CheckMetadataSize(r.Key(), mergedMetadata(mergedMetadata(r.Metadata, updates), Metadata(KeyClose, sized))); err != nil {
-						return err
-					}
+				} else if _, err = CheckMetadataSize(r.Key(), mergedMetadata(mergedMetadata(r.Metadata, updates), Metadata(KeyClose, receipt))); err != nil {
+					return err
 				}
 				if options.BeforeClose != nil {
-					if err = options.BeforeClose(s, receipt); err != nil {
-						return err
-					}
-				}
-				if pending != nil && receipt.Commit == "" {
-					// Every check passed: publish the verdict, then write the receipt.
-					if receipt.Commit, err = pending.publish(s); err != nil {
-						return err
-					}
-					if err = ValidReceipt(s.Root, receipt, nil); err != nil {
-						return err
-					}
-				} else if tuple.Kind == "review-slot" {
-					// The spec branch already holds the verdict, as after a
-					// stopped sync and a raw close. Finish the worktree sync
-					// before the receipt is written.
-					if err = syncHeldVerdict(s, receipt); err != nil {
+					hook := s.Clone()
+					hook.Records[r.Key()] = r
+					if err = options.BeforeClose(hook, receipt); err != nil {
 						return err
 					}
 				}
@@ -284,7 +269,8 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					return err
 				}
 
-				// The receipt, repair event and superseded lease share one durable write.
+				// The receipt, repair event, superseded lease and slot record share one
+				// durable write.
 				updates[KeyClose] = receipt
 				if err = s.Store.WriteMetadata(r.Key(), updates); err != nil {
 					return err
@@ -706,7 +692,7 @@ func checkVerdict(s State, r Record, receipt Receipt) error {
 	if err != nil {
 		return err
 	}
-	bytes, err := ReceiptBytes(s.Root, receipt)
+	bytes, err := ReceiptBytes(r, receipt)
 	if err != nil {
 		return err
 	}
@@ -729,17 +715,6 @@ func checkVerdict(s State, r Record, receipt Receipt) error {
 	}
 	if !listed {
 		return actorFailure("slot is not in the active gate round")
-	}
-	_, exists, err := Decode[RegistrationRecord](s.Records[activeGate(s, t.Gate)].Metadata, KeyRegistration)
-	if err != nil {
-		return err
-	}
-	if exists && !registeredPanelArtifact(s, t.Gate, receipt.Path) {
-		message := "verdict must be in its registered panel directory"
-		if path, err := slotVerdictPath(s, t); err == nil {
-			message += ": " + termsafe.Escape(path)
-		}
-		return termsafe.NewFailure(message, slotRecovery(s, t))
 	}
 	return nil
 }

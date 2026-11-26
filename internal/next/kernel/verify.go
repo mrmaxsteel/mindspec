@@ -373,7 +373,7 @@ func verifyCloseWrites(s State, r Record, receipt Receipt) ([]Write, error) {
 	var res *panel.Result
 	for _, p := range s.Panels {
 		if p.Slug() == registration.Slug {
-			res, err = panel.Tally(p.Dir)
+			res, err = TallyPanel(s, p)
 			break
 		}
 	}
