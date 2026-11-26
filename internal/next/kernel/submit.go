@@ -196,6 +196,13 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					}
 					return actorFailure("step already has a different result")
 				}
+				if tuple.Kind == "review-slot" {
+					// An earlier run can stop after the spec branch moved.
+					// The replay finishes the worktree sync.
+					if err = syncHeldVerdict(s, receipt); err != nil {
+						return err
+					}
+				}
 				// A closed receipt is immutable, even after the gate advances or TTL expires.
 				if r.Status == "closed" {
 					return nil
@@ -263,6 +270,13 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 						return err
 					}
 					if err = ValidReceipt(s.Root, receipt, nil); err != nil {
+						return err
+					}
+				} else if tuple.Kind == "review-slot" {
+					// The spec branch already holds the verdict, as after a
+					// stopped sync and a raw close. Finish the worktree sync
+					// before the receipt is written.
+					if err = syncHeldVerdict(s, receipt); err != nil {
 						return err
 					}
 				}
@@ -417,7 +431,7 @@ func actorGitBytes(root string, args ...string) ([]byte, error) {
 		}
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			err = fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, exit.Stderr)
+			err = fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, stderrLine(exit.Stderr))
 		} else {
 			err = fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 		}

@@ -651,8 +651,11 @@ func validateJudgement(s State, r Record, current bool) error {
 			return actorFailure("carry-over needs a reason and no round scope")
 		}
 	case "re-panel":
-		if j.SlotCount < 2 || j.SlotCount > ceiling || len(j.Paths) == 0 {
-			return actorFailure(fmt.Sprintf("re-panel needs changed paths and 2 to %d slots; expected old subject %s and new subject %s", ceiling, accepted, sub.Commit))
+		if j.SlotCount < 2 || j.SlotCount > ceiling {
+			return actorFailure(fmt.Sprintf("re-panel slot_count %d is outside 2..%d; set slot_count to 2 to %d slots", j.SlotCount, ceiling, ceiling))
+		}
+		if len(j.Paths) == 0 {
+			return actorFailure("re-panel needs paths; name every changed path")
 		}
 		for _, name := range j.Paths {
 			if strings.TrimSpace(name) == "" || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") {

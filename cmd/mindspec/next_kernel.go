@@ -168,6 +168,9 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 	if step == "" {
 		return true, fmt.Errorf("implementation is blocked\nrecovery: mindspec next-action %s", idrender.Spec(s.SpecID))
 	}
+	if err := liveLeaseRefusal(s, step); err != nil {
+		return true, err
+	}
 	gate, err := nextGateReadinessFn(root, selected, next.GateOptions{ScopeSpec: s.SpecID, NamedSignals: signals, FlagGiven: flagGiven, EvidencePath: evidence})
 	if err != nil {
 		return true, err
@@ -191,4 +194,26 @@ func runKernelNext(cmd *cobra.Command, root, spec, name string, pick int, signal
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "generation %d\n%s\n", result.Lease.Generation, result.Token)
 	return true, err
+}
+
+// liveLeaseRefusal refuses next for a step with a live lease, before any
+// readiness marker is written. A takeover alone issues a new live lease, so
+// next would refuse again. The recovery releases the lease first, with the
+// token that the holder has or that a takeover prints, so a rerun of the same
+// next command takes the lease.
+func liveLeaseRefusal(s kernel.State, step string) error {
+	r := s.Records[step]
+	if r.Status == "closed" {
+		return nil
+	}
+	lease, _, err := kernel.Decode[kernel.LeaseRecord](r.Metadata, kernel.KeyLease)
+	if err != nil {
+		return err
+	}
+	if lease.TokenHash == "" || !lease.Expires.After(s.At) {
+		return nil
+	}
+	key := r.Key()
+	return termsafe.NewFailure("step has a live lease: "+key,
+		"mindspec lease --release <token> "+key+", then run this mindspec next command again; without the token, run mindspec lease --take "+key+" --reason <text> first and release with the token it prints")
 }

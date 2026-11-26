@@ -109,10 +109,23 @@ func lifecycleChildrenWithCache(c *Cache, epicID string, children []ChildInfo) (
 	selected := []ChildInfo{}
 	for _, child := range candidates {
 		key, _ := child.Metadata["mindspec_key"].(string)
+		if finalGateRecord(key, epicID) || finalGateRecord(child.ID, epicID) {
+			// The final gate and its steps are review work after every
+			// bead of the plan, not beads of the plan. They stay
+			// enrollment witnesses but do not count in the derived phase.
+			continue
+		}
 		if recorded[child.ID] || kernelid.UnderEpic(child.ID, epicID) || kernelid.UnderEpic(key, epicID) {
 			child.IssueType = "task"
 			selected = append(selected, child)
 		}
 	}
 	return selected, nil
+}
+
+// finalGateRecord reports whether id is the final gate of the epic or a step
+// of that gate.
+func finalGateRecord(id, epicID string) bool {
+	t, err := kernelid.Parse(id)
+	return err == nil && t.Epic == epicID && t.WorkItem == "" && t.Gate == epicID+".final"
 }

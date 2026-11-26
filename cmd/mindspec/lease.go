@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var leaseCmd = &cobra.Command{Use: "lease <step>", Short: "Lease a kernel actor step", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+var leaseCmd = &cobra.Command{Use: "lease <step>", Short: "Lease a kernel actor step", Args: cobra.ExactArgs(1), SilenceUsage: true, RunE: func(cmd *cobra.Command, args []string) error {
 	state, err := kernelCommandState("", args[0])
 	if err != nil {
 		return err

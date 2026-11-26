@@ -1,6 +1,7 @@
 package kernel_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -497,4 +498,111 @@ func TestS134Submit_SlotVerdictCommitFollowsSigning(t *testing.T) {
 			t.Fatalf("a failed signature moved the spec branch to %s", now)
 		}
 	})
+}
+
+// The first submit publishes and syncs a new verdict, and the receipt write
+// then fails. The user deletes the published file. The retry of the same
+// submit keeps the deletion, because the worktree index already tracks the
+// path, and the slot closes.
+func TestS134Submit_SlotRetryKeepsDeletionAfterFirstSync(t *testing.T) {
+	f, id, lease, subject, want := slotPublishFixture(t)
+	tree := specWorktree(t, f)
+	file := attemptVerdict(t, f, "R1", verdictBytes(subject, "R1"))
+	realRun := f.Store.Run
+	failed := false
+	f.Store.Run = func(args ...string) ([]byte, error) {
+		for i, arg := range args {
+			if arg != "--metadata" || i+1 >= len(args) {
+				continue
+			}
+			data, err := os.ReadFile(strings.TrimPrefix(args[i+1], "@"))
+			var fields map[string]json.RawMessage
+			if err == nil && json.Unmarshal(data, &fields) == nil && fields[kernel.KeyClose] != nil {
+				failed = true
+				return nil, errors.New("receipt write failed")
+			}
+		}
+		return realRun(args...)
+	}
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file})
+	f.Store.Run = realRun
+	if err == nil || !failed {
+		t.Fatalf("the receipt write did not fail, so the test proves nothing: %v", err)
+	}
+	work := filepath.Join(tree, filepath.FromSlash(want))
+	if got, e := os.ReadFile(work); e != nil || string(got) != verdictBytes(subject, "R1") {
+		t.Fatalf("first submit did not sync the verdict file: %q %v", got, e)
+	}
+	f.Must(os.Remove(work))
+	if status := actorCommand(t, f, "-C", tree, "status", "--porcelain", "--", want); status != "D "+want {
+		t.Fatalf("status before the retry is %q, want an unstaged deletion", status)
+	}
+	if _, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file}); err != nil {
+		t.Fatalf("the retry was refused: %v", err)
+	}
+	if _, err := os.Lstat(work); !os.IsNotExist(err) {
+		t.Fatalf("the retry recreated the deleted verdict file: %v; status %q", err, actorCommand(t, f, "-C", tree, "status", "--porcelain", "--", want))
+	}
+	if status := actorCommand(t, f, "-C", tree, "status", "--porcelain", "--", want); status != "D "+want {
+		t.Fatalf("status after the retry is %q, want the unstaged deletion kept", status)
+	}
+	if status := actorRecord(t, f, id).Status; status != "closed" {
+		t.Fatalf("slot status %q, want closed", status)
+	}
+}
+
+// An index lock stops the sync after the spec branch moved, so the worktree
+// shows a staged deletion of the verdict. The route that the binary prints
+// next finishes the sync: after a raw close it is a repair with the
+// registered path, and after a full close it is a replay of the same submit.
+// No staged deletion stays, so a later ordinary commit keeps the verdict.
+func TestS134Submit_SlotRepairRoutesFinishSync(t *testing.T) {
+	for _, route := range []string{"repair-after-raw-close", "closed-receipt-replay"} {
+		t.Run(route, func(t *testing.T) {
+			f, id, lease, subject, want := slotPublishFixture(t)
+			tree := specWorktree(t, f)
+			data := verdictBytes(subject, "R1")
+			file := attemptVerdict(t, f, "R1", data)
+			work := filepath.Join(tree, filepath.FromSlash(want))
+			if route == "repair-after-raw-close" {
+				lock := actorCommand(t, f, "-C", tree, "rev-parse", "--path-format=absolute", "--git-path", "index.lock")
+				f.Must(os.WriteFile(lock, []byte("held by another git command"), 0o600))
+				_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file})
+				assertOneRecovery(t, err, "run the same submit command again")
+				f.Must(os.Rename(lock, filepath.Join(t.TempDir(), "index.lock")))
+				// The panel verb leaves an untracked copy of the verdict at
+				// the registered path, and a raw close closes the slot with
+				// no receipt.
+				f.Must(os.MkdirAll(filepath.Dir(work), 0o755))
+				f.Must(os.WriteFile(work, []byte(data), 0o644))
+				changeActorMetadata(t, f, id, "closed")
+			} else {
+				f.Must(func() error {
+					_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file})
+					return err
+				}())
+				// A crash of a later git command puts the index back at the
+				// parent of the holding commit; the file stays.
+				actorCommand(t, f, "-C", tree, "read-tree", "HEAD~1")
+			}
+			if status := actorCommand(t, f, "-C", tree, "status", "--porcelain", "--", want); !strings.HasPrefix(status, "D  "+want) {
+				t.Fatalf("fixture shows %q, want a staged deletion of the verdict", status)
+			}
+			var err error
+			if route == "repair-after-raw-close" {
+				_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "raw close", Artifact: work})
+			} else {
+				_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: file})
+			}
+			if err != nil {
+				t.Fatalf("the printed route was refused: %v", err)
+			}
+			if status := actorCommand(t, f, "-C", tree, "status", "--porcelain"); status != "" {
+				t.Fatalf("the printed route left the spec worktree out of step:\n%s", status)
+			}
+			if status := actorRecord(t, f, id).Status; status != "closed" {
+				t.Fatalf("slot status %q, want closed", status)
+			}
+		})
+	}
 }

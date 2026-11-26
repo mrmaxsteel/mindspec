@@ -240,3 +240,29 @@ func fakeBDBinary(t *testing.T) string {
 	}
 	return path
 }
+
+// A lease refusal ends with exactly one recovery line, and no usage block
+// follows it.
+func TestS134LeaseCmd_RefusalEndsWithRecovery(t *testing.T) {
+	bin := buildMindspecBinary(t)
+	f, _ := actorCmdFixture(t)
+	actorCmdStore(t, f)
+	for _, args := range [][]string{{"lease", f.Items[0]}, {"lease", "not-a-step"}} {
+		out, code := actorCmdRun(t, f, bin, args...)
+		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+		// actorCmdRun appends the exit status after the output.
+		if code == 0 || len(lines) < 2 {
+			t.Fatalf("%v: want a refusal, got %d %q", args, code, out)
+		}
+		lines = lines[:len(lines)-1]
+		count := 0
+		for _, line := range lines {
+			if strings.HasPrefix(line, "recovery:") {
+				count++
+			}
+		}
+		if count != 1 || !strings.HasPrefix(lines[len(lines)-1], "recovery:") || strings.Contains(out, "Usage:") {
+			t.Fatalf("%v: want one recovery line, last, and no usage block:\n%s", args, out)
+		}
+	}
+}

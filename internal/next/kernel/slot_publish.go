@@ -194,7 +194,7 @@ func (p *slotPending) publish(s State) (string, error) {
 			}
 			// A holding commit has one parent and changes only the verdict
 			// path. Sync from that parent, which the caller no longer knows.
-			if parent, ok := p.holdingParent(s.Root, commit); ok {
+			if parent, ok := holdingParent(s.Root, p.path, commit); ok {
 				if err = syncCheckouts(s.Root, ref, p.path, parent, commit); err != nil {
 					return "", err
 				}
@@ -224,9 +224,35 @@ func (p *slotPending) publish(s State) (string, error) {
 // the publish.
 const slotRetryRecovery = "run the same submit command again"
 
+// syncHeldVerdict brings each spec worktree to the holding commit of a slot
+// receipt. Every submit route that ends with the verdict held on the spec
+// branch runs it: a repair, a replay of a closed receipt and a retry of the
+// same bytes. A run that an index lock or a crash stopped after the spec
+// branch moved is thus finished by the command that the binary prints. It
+// does nothing when the spec branch tip does not hold the receipt blob at the
+// receipt path, or when the receipt commit is not a holding commit.
+func syncHeldVerdict(s State, receipt Receipt) error {
+	if receipt.Commit == "" || receipt.Path == "" || !objectID(receipt.Blob) {
+		return nil
+	}
+	branch, err := workspace.SpecBranch(s.SpecID)
+	if err != nil {
+		return nil
+	}
+	ref := "refs/heads/" + branch
+	if held, _ := publishGit(s.Root, nil, nil, "rev-parse", "--verify", "--quiet", ref+":"+receipt.Path); held != receipt.Blob {
+		return nil
+	}
+	parent, ok := holdingParent(s.Root, receipt.Path, receipt.Commit)
+	if !ok {
+		return nil
+	}
+	return syncCheckouts(s.Root, ref, receipt.Path, parent, receipt.Commit)
+}
+
 // holdingParent returns the parent of commit when commit has one parent and
-// changes only the verdict path.
-func (p *slotPending) holdingParent(root, commit string) (string, bool) {
+// changes only path.
+func holdingParent(root, path, commit string) (string, bool) {
 	parents, err := publishGit(root, nil, nil, "rev-list", "--parents", "-n", "1", commit)
 	if err != nil {
 		return "", false
@@ -236,7 +262,7 @@ func (p *slotPending) holdingParent(root, commit string) (string, bool) {
 		return "", false
 	}
 	changed, err := publishGit(root, nil, nil, "diff-tree", "--no-commit-id", "--name-only", "-r", fields[1], commit)
-	if err != nil || changed != p.path {
+	if err != nil || changed != path {
 		return "", false
 	}
 	return fields[1], true
@@ -351,15 +377,26 @@ func specTrees(list, ref string) []string {
 // file is at the path, the index alone moves (read-tree -m -i). That command
 // refuses a staged change at the path, an unmerged index, or a lock that
 // another git command holds; the refusal stops the sync with a recovery, and a
-// retry of the same submit finishes it. A deleted tracked file stays deleted.
-// For a new path, checkout-index without --force writes the file and never
-// replaces a file that appears before it writes.
+// retry of the same submit finishes it. A deleted tracked file stays deleted:
+// the path is tracked when the base commit or the worktree index has it, so a
+// file that an earlier run wrote and the user then deleted stays deleted on a
+// retry. Only for a path that neither tracks does checkout-index without
+// --force write the file, and it never replaces a file that appears before it
+// writes.
 func syncCheckout(root, tree, path, base, holding string) error {
 	file := filepath.Join(tree, filepath.FromSlash(path))
 	_, err := os.Lstat(file)
 	absent := errors.Is(err, fs.ErrNotExist)
 	if err != nil && !absent {
 		return syncFailure(err, tree, path)
+	}
+	indexed := false
+	if absent {
+		staged, err := publishGit(tree, nil, nil, "ls-files", "--stage", "--", path)
+		if err != nil {
+			return syncFailure(err, tree, path)
+		}
+		indexed = staged != ""
 	}
 	if !absent {
 		if _, err := publishGit(tree, nil, nil, "read-tree", "-m", "-u", base, holding); err == nil {
@@ -371,6 +408,11 @@ func syncCheckout(root, tree, path, base, holding string) error {
 	}
 	if !absent {
 		// A local change at the path stays as the user left it.
+		return nil
+	}
+	if indexed {
+		// The index tracked the path before this sync: an earlier run wrote
+		// the file and the user deleted it. Keep the deletion.
 		return nil
 	}
 	if baseBlob, _ := publishGit(root, nil, nil, "rev-parse", "--verify", "--quiet", base+":"+path); baseBlob != "" {

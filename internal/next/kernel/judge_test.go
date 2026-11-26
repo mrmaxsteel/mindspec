@@ -876,8 +876,8 @@ func TestS134Judge_PassingRoundCeiling(t *testing.T) {
 			lease := leaseActor(t, f, id, kernel.LeaseDeps{})
 			artifact := judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 4, Paths: []string{"app.go"}}, reg.Slug)
 			_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Record: artifact})
-			if err == nil || !strings.Contains(err.Error(), "2 to 3 slots") {
-				t.Fatalf("passing-round ceiling refusal: %v", err)
+			if err == nil || !strings.Contains(err.Error(), "re-panel slot_count 4 is outside 2..3") || strings.Contains(err.Error(), "subject") {
+				t.Fatalf("passing-round ceiling refusal does not name slot_count: %v", err)
 			}
 			// The gate's frozen roster also allows valid scope without a snapshot.
 			artifact = judgeArtifact(t, f, kernel.Judgement{Value: "re-panel", OldSubject: old, NewSubject: newest, SlotCount: 3, Paths: []string{".mindspec/config.yaml"}}, reg.Slug)

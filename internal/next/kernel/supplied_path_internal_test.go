@@ -122,6 +122,10 @@ func TestS134Paths_NoRepository(t *testing.T) {
 		if !errors.As(err, &exit) || !errors.Is(err, exit) || !strings.Contains(err.Error(), "git worktree list") {
 			t.Fatalf("repository refusal lost the Git command or cause: %v", err)
 		}
+		// The Git cause shows on one readable line, with no escaped line break.
+		if lines := strings.Split(err.Error(), "\n"); len(lines) != 2 || strings.Contains(err.Error(), `\n`) || !strings.Contains(lines[0], "not a git repository") {
+			t.Fatalf("repository refusal does not show the Git cause on one readable line: %q", err.Error())
+		}
 	})
 	t.Setenv("TMPDIR", base)
 	t.Run("initialization", func(t *testing.T) {

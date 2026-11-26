@@ -266,3 +266,40 @@ func TestS134Derive_StoreReadSharedAcrossEpics(t *testing.T) {
 		t.Fatalf("store-wide reads = %d, want 1", reads)
 	}
 }
+
+// Every bead of the plan is closed, and the final gate and one of its steps
+// are open. The final gate is review work, so the derived phase is review and
+// a stored review phase gets no disagreement warning.
+func TestS134Derive_OpenFinalGateStepDerivesReview(t *testing.T) {
+	f := kerneltest.Enrolled(t, kerneltest.WithFake(kernel.NativeIDs))
+	final := f.ID(f.Epic + ".final")
+	for id, r := range f.Fake.Records {
+		if id != f.Epic && id != final {
+			r.Status = "closed"
+			f.Fake.Records[id] = r
+		}
+	}
+	gate := f.Fake.Records[final]
+	gate.Status = "open"
+	f.Fake.Records[final] = gate
+	step := f.Create(f.Epic+".final.r1.R1", f.Epic+".final")
+	if step.Status != "open" || step.Type != "step" {
+		t.Fatalf("fixture step is %s %s, want an open step row", step.Status, step.Type)
+	}
+	epic := f.Fake.Records[f.Epic]
+	epic.Metadata["mindspec_phase"] = "review"
+	f.Fake.Records[epic.ID] = epic
+	t.Cleanup(phase.SetRunBDForTest(f.Fake.Run))
+	t.Cleanup(phase.SetListJSONForTest(func(args ...string) ([]byte, error) { return f.Fake.Run(append([]string{"list"}, args...)...) }))
+	detail, err := phase.DerivePhaseDetail(f.Epic)
+	f.Must(err)
+	if detail.Derived != "review" {
+		t.Fatalf("open final gate step changed the derived phase: %+v", detail)
+	}
+	var got string
+	stderr := captureStderrPhase(t, func() { got, err = phase.DerivePhaseWithStatus(f.Epic, "open") })
+	f.Must(err)
+	if got != "review" || strings.Contains(stderr, "disagrees with child-derived phase") {
+		t.Fatalf("phase read gave %q with a disagreement warning: %q", got, stderr)
+	}
+}

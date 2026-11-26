@@ -428,3 +428,39 @@ func TestS134Next_UnrelatedBrokenWitness(t *testing.T) {
 		t.Fatal("named broken witness was hidden")
 	}
 }
+
+// The actor holds the implement lease and runs next for the same work item
+// with a readiness override. The refusal prints a recovery that converges:
+// after the release it names, the same next command takes the lease.
+func TestS134Next_LiveLeaseRecoveryConverges(t *testing.T) {
+	f, step := nextKernelFixture(t)
+	var output bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&output)
+	_, err := runKernelNext(cmd, f.Root, "", "1", 0, nil, false, "")
+	f.Must(err)
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	token := lines[len(lines)-1]
+	signals := []string{"MF-1"}
+	_, err = runKernelNext(cmd, f.Root, "", "1", 0, signals, true, "evidence.txt")
+	if err == nil {
+		t.Fatalf("next with a live lease: %v", err)
+	}
+	text := strings.Split(err.Error(), "\n")
+	last := text[len(text)-1]
+	if strings.Count(err.Error(), "recovery:") != 1 || !strings.HasPrefix(last, "recovery: mindspec lease --release <token> "+step+", then run this mindspec next command again") || !strings.Contains(last, "lease --take") {
+		t.Fatalf("live lease recovery does not name the release:\n%v", err)
+	}
+	// Follow the recovery: release with the token that the first next printed.
+	_, err = kernel.Lease(f.State(), kernel.LeaseOptions{Step: step, Release: token}, kernel.LeaseDeps{EnsureWorktree: func(string, string, string) (string, error) { return f.Root, nil }})
+	f.Must(err)
+	output.Reset()
+	if _, err = runKernelNext(cmd, f.Root, "", "1", 0, signals, true, "evidence.txt"); err != nil {
+		t.Fatalf("the same next after the printed release was refused: %v", err)
+	}
+	lease, _, err := kernel.Decode[kernel.LeaseRecord](f.State().Records[step].Metadata, kernel.KeyLease)
+	f.Must(err)
+	if lease.Generation != 2 || !strings.Contains(output.String(), "generation 2") {
+		t.Fatalf("retry did not take the lease: %s %+v", output.String(), lease)
+	}
+}
