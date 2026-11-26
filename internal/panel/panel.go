@@ -29,6 +29,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 )
 
 // FileName is the registration file's basename inside a panel
@@ -51,12 +53,15 @@ const FileName = "panel.json"
 // Round/verdict-filename disagreement as a writer error to report
 // (see Result.RoundMismatch), never as something to silently repair.
 type Panel struct {
-	VerdictSchema     int     `json:"verdict_schema,omitempty"`
-	BeadID            *string `json:"bead_id"`
-	Spec              string  `json:"spec"`
-	Target            string  `json:"target"`
-	Round             int     `json:"round"`
-	ExpectedReviewers int     `json:"expected_reviewers"`
+	Orchestrated      bool     `json:"orchestrated,omitempty"`
+	KernelGate        string   `json:"kernel_gate,omitempty"`
+	Scope             []string `json:"scope,omitempty"`
+	VerdictSchema     int      `json:"verdict_schema,omitempty"`
+	BeadID            *string  `json:"bead_id"`
+	Spec              string   `json:"spec"`
+	Target            string   `json:"target"`
+	Round             int      `json:"round"`
+	ExpectedReviewers int      `json:"expected_reviewers"`
 	// ReviewerCountSource is default or explicit; absent legacy values mean default.
 	ReviewerCountSource string `json:"reviewer_count_source,omitempty"`
 	ReviewedHeadSHA     string `json:"reviewed_head_sha"`
@@ -110,6 +115,8 @@ type Panel struct {
 // FindingSHA256 pins raw finding text. Legacy entries can omit both. Only a
 // REQUEST_CHANGES finding is dischargeable; other vetoes remain consumer checks.
 type Refutation struct {
+	VerifyStep string `json:"verify_step,omitempty"`
+	Enrolled   bool   `json:"enrolled,omitempty"`
 	// Slot is the reviewer slot this refutation targets — matched
 	// byte-exactly (case-sensitive) against a Verdict.Slot.
 	Slot string `json:"slot"`
@@ -136,10 +143,13 @@ type RosterSlot struct {
 	Family string `json:"family,omitempty"`
 	Model  string `json:"model"`
 	Lens   string `json:"lens"`
+	Focus  string `json:"focus,omitempty"`
 }
 
 // Deferral pins a finding to a follow-up bead. Gate-time checks belong to callers.
 type Deferral struct {
+	VerifyStep       string `json:"verify_step,omitempty"`
+	Enrolled         bool   `json:"enrolled,omitempty"`
 	SourceVerdict    string `json:"source_verdict,omitempty"`
 	SourceFileSHA256 string `json:"source_file_sha256,omitempty"`
 	Slot             string `json:"slot"`
@@ -353,6 +363,11 @@ func ForBead(regs []Registration, beadID string) []Registration {
 	return out
 }
 
+// ReadRegistration reads one panel directory without scanning adjacent panels.
+func ReadRegistration(dir string) Registration {
+	return load(dir)
+}
+
 // load reads and parses dir/panel.json into a Registration.
 func load(dir string) Registration {
 	abs, err := filepath.Abs(dir)
@@ -366,7 +381,7 @@ func load(dir string) Registration {
 		return reg
 	}
 	if err := json.Unmarshal(data, &reg.Panel); err != nil {
-		reg.Err = fmt.Errorf("parse %s: %w", FileName, err)
+		reg.Err = fmt.Errorf("parse %s in %s: %w", FileName, termsafe.Escape(abs), err)
 		reg.Panel = Panel{}
 		return reg
 	}

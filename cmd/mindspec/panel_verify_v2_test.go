@@ -434,7 +434,7 @@ func TestPanelTally_CollectLargeHistoricalChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changes := collectSlotChanges(reg, res)
+	changes := collectSlotChanges(reg, res, nil)
 	if len(changes) != 1 || changes[0].DecodeErr != "" || len(changes[0].Changes) != 1 || changes[0].Changes[0] != text {
 		t.Fatal("large historical finding must reach the change list")
 	}

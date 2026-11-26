@@ -48,8 +48,12 @@ Use the quoted acceptance criteria in the managed region above.
 // CreateInput contains caller-resolved registration values. The caller resolves
 // the roster from config and the reviewed commit and digest from the target.
 type CreateInput struct {
+	Orchestrated      bool
+	KernelGate        string
+	Scope             []string
 	BriefRegions      BriefRegions
 	BriefFile         string
+	BriefBody         string
 	BeadID            *string
 	Spec              string
 	Target            string
@@ -354,7 +358,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		}
 	}
 	gate := in.Gate
-	p := Panel{VerdictSchema: 2, BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
+	p := Panel{Orchestrated: in.Orchestrated, KernelGate: in.KernelGate, Scope: in.Scope, VerdictSchema: 2, BeadID: in.BeadID, Spec: in.Spec, Target: in.Target, Round: in.Round,
 		ExpectedReviewers: len(roster), ReviewerCountSource: countSource, Roster: roster, ReviewedHeadSHA: in.ReviewedHeadSHA,
 		SubjectDigest: in.SubjectDigest, Gate: gate, Telemetry: "required",
 		Refutations: carried.Refutations, Deferrals: carried.Deferrals, PlanDeferrals: carriedPlan, Rebinds: carried.Rebinds,
@@ -371,7 +375,7 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 	if spec == "" {
 		spec = "adhoc"
 	}
-	event := RoundRecord{VerdictSchema: 2, Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
+	event := RoundRecord{Scope: in.Scope, VerdictSchema: 2, Record: RecordRound, Spec: spec, Panel: filepath.Base(dir), Round: p.Round,
 		ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target,
 		Gate: p.Gate, BeadID: p.BeadID, Roster: p.Roster, ExpectedReviewers: p.ExpectedReviewers,
 		ReviewerCountSource: p.ReviewerCountSource, Telemetry: p.Telemetry, Carried: baseline, CreatedAt: now}
@@ -392,21 +396,28 @@ func prepareCreate(dir string, in CreateInput) (*preparedCreate, error) {
 		return nil, fmt.Errorf("read %s: %w", briefPath, readErr)
 	}
 	prior := "none recorded"
-	priorData, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("consolidated-round-%d.md", in.Round-1)))
-	if err == nil {
-		prior = termsafe.Escape(string(priorData))
-		// Quoted prose must not become region syntax or toggle fence scanning.
-		trimmed := strings.TrimSpace(prior)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") || markerLookalikeRE.MatchString(trimmed) ||
-			trimmed == "<!-- mindspec:prior-round -->" || trimmed == "<!-- /mindspec:prior-round -->" {
-			prior = "> " + prior
+	if in.BriefBody != "" && in.Round > 1 {
+		prior = "See Prior-Round Asks in the generated body below."
+	}
+	if in.BriefBody == "" {
+		priorData, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("consolidated-round-%d.md", in.Round-1)))
+		if err == nil {
+			prior = termsafe.Escape(string(priorData))
+			// Quoted prose must not become region syntax or toggle fence scanning.
+			trimmed := strings.TrimSpace(prior)
+			if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") || markerLookalikeRE.MatchString(trimmed) ||
+				trimmed == "<!-- mindspec:prior-round -->" || trimmed == "<!-- /mindspec:prior-round -->" {
+				prior = "> " + prior
+			}
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read prior round: %w", err)
 		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("read prior round: %w", err)
 	}
 	header := renderCreateBriefHeader(filepath.Base(dir), p, prior, in.BriefRegions)
 	var newBrief string
-	if in.BriefFile != "" {
+	if in.BriefBody != "" {
+		newBrief = header + "\n\n" + in.BriefBody
+	} else if in.BriefFile != "" {
 		newBrief = header + "\n\n" + string(suppliedBrief)
 	} else if briefExists {
 		newBrief, err = spliceBriefHeader(string(existing), header)

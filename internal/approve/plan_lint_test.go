@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/validate"
+	"path/filepath"
 )
 
 // TestPlanLintDoubleAssignedFiles_UnitLevel pins planLintDoubleAssignedFiles
@@ -128,93 +129,17 @@ func TestPlanLintDoubleAssignedFiles_TermsafeEscaped(t *testing.T) {
 // plan-lint finding (advisory — approve still succeeds) naming the
 // file and both beads.
 func TestApprovePlan_DoubleAssignedFile_LintWarns(t *testing.T) {
-	noopStubPhaseMergeMetadataForTest(t)
-	specID := "042-test"
-	planContent := `---
-status: Draft
-spec_id: "042-test"
-version: "1.0"
-work_chunks:
-  - id: 1
-    depends_on: []
-  - id: 2
-    depends_on: [1]
----
-
-# Plan
-
-## ADR Fitness
-
-No ADRs are relevant to this work.
-
-## Testing Strategy
-
-Unit tests will verify the implementation.
-
-## Bead 1: First thing
-
-**Steps**
-1. Add ` + "`internal/shared/helper.go`" + ` with the new logic.
-2. Wire it into the caller.
-3. Add tests.
-
-**Verification**
-- [ ] ` + "`go test ./...`" + ` passes
-
-**Acceptance Criteria**
-- First bead works
-
-**Depends on**
-None
-
-## Bead 2: Second thing
-
-**Steps**
-1. Consume ` + "`internal/shared/helper.go`" + ` from the executor.
-2. Wire the executor caller.
-3. Add tests.
-
-**Verification**
-- [ ] ` + "`go test ./...`" + ` passes
-
-**Acceptance Criteria**
-- Second bead works
-
-**Depends on**
-Bead 1
-`
-	root, _, _ := setupPreflightPlan(t, specID, planContent)
-	stubApprovePlanEpic(t, "epic-42", specID)
-
-	origBD := planRunBDFn
-	defer func() { planRunBDFn = origBD }()
-	beadCounter := 0
-	planRunBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "create" {
-			beadCounter++
-			return []byte(`{"id":"bead-` + string(rune('0'+beadCounter)) + `"}`), nil
-		}
-		if len(args) > 0 && args[0] == "dep" {
-			return nil, nil
-		}
-		return []byte(`[]`), nil
-	}
-
-	mockExec := &executor.MockExecutor{}
-	result, err := ApprovePlan(root, specID, "tester", mockExec)
-	if err != nil {
-		t.Fatalf("ApprovePlan: %v", err)
-	}
-
+	f := enrolFixture(t)
+	text := strings.ReplaceAll(kerneltest.EnrolmentPlan(f.SpecID, 3), "Build the item.", "Build `internal/shared/helper.go`.")
+	enrolWrite(t, filepath.Join(f.SpecDir, "plan.md"), text)
+	result, err := enrolApprove(f)
+	f.Must(err)
 	found := false
-	for _, w := range result.Warnings {
-		if strings.Contains(w, "plan-lint") &&
-			strings.Contains(w, "internal/shared/helper.go") &&
-			strings.Contains(w, "Bead 1") && strings.Contains(w, "Bead 2") {
-			found = true
-		}
+	for _, warning := range result.Warnings {
+		found = found || strings.Contains(warning, "internal/shared/helper.go")
 	}
-	if !found {
-		t.Errorf("expected a plan-lint warning naming internal/shared/helper.go and both Bead 1/Bead 2, got: %v", result.Warnings)
+	if !found || !f.State().Enrolled {
+		t.Fatalf("missing warning or enrolment: %+v", result)
 	}
+
 }

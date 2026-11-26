@@ -1,0 +1,10 @@
+{
+  "value": "re-panel",
+  "old_subject": "old",
+  "new_subject": "new",
+  "reason": "changed",
+  "slot_count": 2,
+  "paths": [
+    "app.go"
+  ]
+}

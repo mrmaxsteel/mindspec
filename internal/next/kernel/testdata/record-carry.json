@@ -1,0 +1,11 @@
+{
+  "old_subject": "old",
+  "new_subject": "new",
+  "judge": "judge",
+  "receipt": {
+    "kind": "passed",
+    "record_sha256": "digest",
+    "generation": 1
+  },
+  "rebind": "accepted-rebind"
+}

@@ -73,6 +73,7 @@ type Context struct {
 	InWorktree            bool       `json:"in_worktree,omitempty"`
 	SpecGoal              string     `json:"spec_goal,omitempty"`
 	PlanApproved          bool       `json:"plan_approved,omitempty"`
+	KernelNextAction      string     `json:"-"`
 	AvailableSpecs        []string   `json:"available_specs,omitempty"`
 	ActiveSpecList        []SpecInfo `json:"active_spec_list,omitempty"`
 	BeadPrimer            string     `json:"bead_primer,omitempty"`

@@ -307,7 +307,7 @@ func TestPanelCreate_AdhocSlugCollision(t *testing.T) {
 }
 
 func TestTallyExitActionNonBead_AdhocNoSpec(t *testing.T) {
-	err := tallyExitActionNonBead(panel.Decision{Action: panel.Block, Message: "blocked"}, "demo", "main", "adhoc", "")
+	err := tallyExitActionNonBead(panel.Decision{Action: panel.Block, Message: "blocked"}, tallyRecoveryFacts{Slug: "demo", Target: "main", Gate: "adhoc"})
 	if err == nil || strings.Contains(err.Error(), "--spec") || !strings.Contains(err.Error(), "--gate 'adhoc'") {
 		t.Fatalf("wrong adhoc recovery: %v", err)
 	}
@@ -319,8 +319,8 @@ func TestTallyExitActionNonBead_AdhocNoSpec(t *testing.T) {
 }
 
 func TestTallyExitActionNonBead_RecordedSpec(t *testing.T) {
-	err := tallyExitActionNonBead(panel.Decision{Action: panel.Block, Message: "blocked"}, "demo", "main", "final_review", "901-demo")
-	if err == nil || !strings.Contains(err.Error(), "--spec '901-demo'") || strings.Contains(err.Error(), "<id>") {
+	err := tallyExitActionNonBead(panel.Decision{Action: panel.Block, Message: "blocked"}, tallyRecoveryFacts{Slug: "demo", Target: "main", Gate: "final_review", SpecID: "901-demo"})
+	if err == nil || !strings.Contains(err.Error(), "--spec '901-demo'") || strings.Contains(err.Error(), "<spec-id>") {
 		t.Fatalf("wrong spec recovery: %v", err)
 	}
 }
@@ -407,10 +407,18 @@ func TestPanelTally_AdhocBlockRecoveryRegistersNextRound(t *testing.T) {
 	}
 	recovery := err.Error()
 	start := strings.LastIndex(recovery, "mindspec panel create")
-	if start < 0 || !strings.Contains(recovery[start:], "<N+1>") || strings.Contains(recovery[start:], "--spec") {
+	if start < 0 {
 		t.Fatalf("wrong adhoc recovery: %s", recovery)
 	}
-	command := strings.ReplaceAll(recovery[start:], "<N+1>", "2")
+	command, _, _ := strings.Cut(recovery[start:], "\n")
+	if !strings.Contains(command, "--round 2") || strings.Contains(command, "--spec") {
+		t.Fatalf("wrong adhoc recovery: %s", recovery)
+	}
+	briefFile := filepath.Join(t.TempDir(), "brief.md")
+	if err := os.WriteFile(briefFile, []byte("Filled authored review body."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command = strings.ReplaceAll(command, "<absolute path>", briefFile)
 	tokens := splitPosixSingleQuoted(t, command)
 	resetPanelCreateFlags(t)
 	if out, err := runPanelVerbCmd(tokens[2:]...); err != nil {
@@ -467,5 +475,29 @@ func TestPanelVerify_AdhocMissingRefRecoveryNoSpec(t *testing.T) {
 				t.Fatalf("missing-ref adhoc advisory: %v %s", err, out)
 			}
 		})
+	}
+}
+
+func TestS134Final_WorktreePanelSlugOwner(t *testing.T) {
+	root := setupCreateIntegrity(t)
+	slug := "custom-panel"
+	wt := filepath.Join(root, ".worktrees", "worktree-spec-901-other")
+	dir := writePanelFixture(t, wt, slug, panel.Panel{Spec: "901-other", Gate: "final_review", Round: 1})
+	destination := filepath.Join(root, ".worktrees", "worktree-spec-900-demo", "review", slug)
+	if err := checkPanelSlugOwner(root, slug, "900-demo", "final_review", destination); err == nil || !strings.Contains(err.Error(), dir) {
+		t.Fatalf("cross-spec worktree slug reuse not refused: %v", err)
+	}
+	if err := checkPanelSlugOwner(root, slug, "901-other", "final_review", dir); err != nil {
+		t.Fatalf("same owner refused: %v", err)
+	}
+	local := writePanelFixture(t, root, slug, panel.Panel{Spec: "900-demo", Gate: "final_review", Round: 1})
+	if _, err := findPanelRegistration(root, slug); err == nil || !strings.Contains(err.Error(), "ambiguous panel slug") {
+		t.Fatalf("worktree ambiguity not retained: %v", err)
+	}
+	for spec, want := range map[string]string{"900-demo": local, "901-other": dir} {
+		reg, err := findPanelRegistration(root, slug, spec)
+		if err != nil || reg.Dir != want {
+			t.Fatalf("spec %s selected %s, want %s: %v", spec, reg.Dir, want, err)
+		}
 	}
 }

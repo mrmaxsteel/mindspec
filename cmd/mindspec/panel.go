@@ -25,6 +25,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/shellquote"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -172,6 +173,9 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 				fmt.Sprintf("--spec %q cannot be combined with --gate adhoc: an ad-hoc panel has no owning spec", idrender.Spec(specID)),
 				fmt.Sprintf("use `panel create %s --spec %s --target %s` for a gated panel, or `panel create %s --gate adhoc --target %s` for an ad-hoc panel", slug, knownOr(idrender.Spec(specForRecovery), "<id>"), knownOr(target, "<ref>"), slug, knownOr(target, "<ref>")))
 		}
+		if handled, err := tryKernelPanelCreate(cmd, slug, specID, gate); handled || err != nil {
+			return err
+		}
 		if gate != "adhoc" && strings.TrimSpace(specID) == "" {
 			return fmt.Errorf("--spec is required")
 		}
@@ -285,6 +289,12 @@ Ad-hoc panels are never scanned by mindspec complete.`,
 			return checkoutError(err, "check the panel scratch paths, then repeat panel create")
 		}
 		defer releaseCheckouts()
+		if (gate == "spec_approve" || gate == "plan_approve") && panelCountsDocumentRounds(root, specDir, specID) {
+			count, err := panel.RoundsForGate(panel.Scan(root, specDir), specID, gate, "")
+			if err == nil && count+1 > cfg.Panel.MaxRounds {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: review round count %d exceeds the configured limit\n", count+1)
+			}
+		}
 		if err := panel.Create(dir, in); err != nil {
 			return panelCreateFailure(err, slug, in)
 		}
@@ -344,9 +354,15 @@ final, 1 while a slot is pending, and 2 for other incomplete states.`,
 		if err != nil {
 			return fail(err)
 		}
-		facts := resolvePanelGateFacts(root, reg)
+		// Read the slot records once, so the verdict line and the slot table
+		// show the same records.
+		records, recordsErr := panelRecords(root, reg.Dir)
+		facts := resolvePanelGateFactsSource(root, reg, func(string) (map[string][]byte, error) { return records, recordsErr })
 		line, _ := renderPanelVerify(facts.Res, facts)
-		slots, err := panelSlotStatuses(root, facts.Res)
+		slots, err := []panel.SlotStatus(nil), recordsErr
+		if err == nil {
+			slots, err = panelSlotStatusesRecords(root, facts.Res, records)
+		}
 		if err != nil {
 			if !asJSON {
 				fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
@@ -403,13 +419,36 @@ and prints a recovery line.`,
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
-		facts := resolvePanelGateFacts(root, reg)
-		changes := collectSlotChanges(reg, facts.Res)
+		// A bead or final review gate reads the kernel state once. The
+		// slot records and the exit decision both use that one read.
+		kernelGate := panelHoldsSlotRecords(reg)
+		var state *kernel.State
+		var stateErr error
+		if kernelGate {
+			state, stateErr = panelKernelStateFn(root, reg.Panel.Spec)
+			if stateErr != nil && reg.Panel.Orchestrated {
+				// The slot verdicts of an orchestrated panel are tracker
+				// records. No disk file substitutes for them, so the tally
+				// counts nothing and names the tracker failure.
+				return stateErr
+			}
+		}
+		facts := resolvePanelGateFactsSource(root, reg, func(string) (map[string][]byte, error) {
+			if !kernelGate {
+				return nil, nil
+			}
+			return panelStateRecords(reg, state, stateErr)
+		})
+		var records map[string][]byte
+		if kernelGate {
+			records, _ = panelStateRecords(reg, state, stateErr)
+		}
+		changes := collectSlotChanges(reg, facts.Res, records)
 		if err := panel.WriteCoverageManifest(facts.Res); err != nil {
 			return panelCoverageWriteFailure(reg, err)
 		}
-		slots, err := panelSlotStatuses(root, facts.Res)
-		if err == nil {
+		slots, slotsErr := panelSlotStatusesRecords(root, facts.Res, records)
+		if slotsErr == nil {
 			for _, annotation := range panel.ReplacementAnnotations(slots) {
 				fmt.Fprintln(cmd.OutOrStdout(), termsafe.Escape(annotation))
 			}
@@ -422,33 +461,34 @@ and prints a recovery line.`,
 			target = facts.Res.Panel.Target
 		}
 
-		// Spec 113 R1: a non-bead panel is not complete-gated, so its exit
-		// path must never route through tallyExitAction's bead recovery
-		// (which names `mindspec complete <bead>` — a forbidden
-		// instruction on a panel with no bead to complete). The non-bead
-		// recovery is rendered by tallyExitActionNonBead instead.
-		//
-		// Spec 127 final review (mindspec-tyi3): tallyExitAction used to
-		// be a static 2-arg helper rendering `mindspec panel create <slug>
-		// --round <N+1> ...` — an argv that CANNOT carry the bead binding
-		// even in principle, so an agent following it re-registered a
-		// panel with `bead_id: null`, which internal/complete's
-		// panel.ForBead selection never sees and which therefore
-		// fails-open the very gate the recovery exists to restore. The
-		// binding is derivable right here: reg carries the matched
-		// registration's spec/target/bead/gate, exactly as the non-bead
-		// leg below already derives its own operands.
-		if reg.Err == nil && reg.Panel.IsBead() {
-			return tallyExitAction(d, tallyRecoveryFacts{
-				Slug:      slug,
-				SpecID:    reg.Panel.Spec,
-				Target:    target,
-				BeadID:    *reg.Panel.BeadID,
-				Gate:      reg.Panel.Gate,
-				NextRound: nextPanelRound(reg, facts.Res),
-			})
+		// A non-bead panel is not complete-gated, so it goes through
+		// tallyExitActionNonBead, whose Next block never names
+		// `mindspec complete <bead>`. A bead panel carries the bead binding
+		// of the matched registration into its next round.
+		// A kernel gate (bead or final_review of an enrolled spec) prints
+		// no Next block: next-action decides. Every other gate prints the
+		// Next block that the decision leg selects.
+		if kernelGate && stateErr == nil && state != nil && state.Enrolled {
+			return tallyExitAction(d, tallyRecoveryFacts{SpecID: state.SpecID, Kernel: true})
 		}
-		return tallyExitActionNonBead(d, slug, target, reg.Panel.Gate, reg.Panel.Spec)
+		recovery := tallyRecoveryFacts{
+			Slug:            slug,
+			Target:          target,
+			NextRound:       nextPanelRound(reg, facts.Res),
+			MissingSlots:    tallyMissingSlots(slots, slotsErr),
+			SlotsErr:        slotsErr,
+			ArtifactMissing: facts.ArtifactDetails != "",
+			Out:             cmd.OutOrStdout(),
+		}
+		if reg.Err == nil {
+			recovery.SpecID = reg.Panel.Spec
+			recovery.Gate = reg.Panel.Gate
+		}
+		if reg.Err == nil && reg.Panel.IsBead() {
+			recovery.BeadID = *reg.Panel.BeadID
+			return tallyExitAction(d, recovery)
+		}
+		return tallyExitActionNonBead(d, recovery)
 	},
 }
 
@@ -564,12 +604,70 @@ func panelSlugMatches(root, slug string) []panel.Registration {
 	if isolation != "" {
 		skip = []string{filepath.Join(root, isolation)}
 	}
-	for _, reg := range panel.ScanSkipping(skip, configShowReviewRoots(root)...) {
+	regs := panel.ScanSkipping(skip, configShowReviewRoots(root)...)
+	regs = append(regs, panelWorktreeSlugMatches(root, slug, skip)...)
+	for _, reg := range regs {
 		if reg.Slug() == slug {
 			matches = append(matches, reg)
 		}
 	}
 	return matches
+}
+
+// panelWorktreeSlugMatches reads only the requested slug in spec worktree roots.
+// Spec-directory panels use the normal inventory. Root panels belong to the spec
+// named by the worktree; other panels there are checkout copies.
+func panelWorktreeSlugMatches(root, slug string, skip []string) []panel.Registration {
+	var matches []panel.Registration
+	if validatePanelSlug(slug) != nil {
+		return matches
+	}
+	entries, _ := os.ReadDir(workspace.DefaultWorktreesDir(root))
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), workspace.SpecWorktreePrefix) {
+			continue
+		}
+		specID := strings.TrimPrefix(entry.Name(), workspace.SpecWorktreePrefix)
+		if idvalidate.SpecID(specID) != nil {
+			continue
+		}
+		tree := filepath.Join(workspace.DefaultWorktreesDir(root), entry.Name())
+		for _, base := range workspace.PanelReviewRoots(tree) {
+			for _, segment := range []string{"review", "reviews"} {
+				dir := filepath.Join(base, segment, slug)
+				if panelLookupExcluded(dir, skip) {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join(dir, panel.FileName)); err != nil {
+					continue
+				}
+				reg := panel.ReadRegistration(dir)
+				if reg.Err != nil || reg.Panel.Spec == specID {
+					matches = append(matches, reg)
+				}
+			}
+		}
+	}
+	return matches
+}
+
+// panelLookupExcluded keeps lexical and physical isolation roots out of lookup.
+func panelLookupExcluded(dir string, skip []string) bool {
+	for _, base := range skip {
+		pairs := [][2]string{{base, dir}}
+		resolvedBase, baseErr := filepath.EvalSymlinks(base)
+		resolvedDir, dirErr := filepath.EvalSymlinks(dir)
+		if baseErr == nil && dirErr == nil {
+			pairs = append(pairs, [2]string{resolvedBase, resolvedDir})
+		}
+		for _, pair := range pairs {
+			rel, err := filepath.Rel(pair[0], pair[1])
+			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // findPanelRegistration selects a spec before preferring its checkout copy.
@@ -649,7 +747,11 @@ func checkPanelSlugOwner(root, slug, specID, gate, dir string) error {
 		if sameDir && (reg.Err != nil || (gate == "adhoc" && reg.Panel.Gate == "adhoc")) {
 			continue
 		}
-		if reg.Err != nil || gate == "adhoc" || reg.Panel.Gate == "adhoc" || reg.Panel.Spec != specID {
+		if reg.Err != nil {
+			return guard.NewFailure(fmt.Sprintf("panel copy is damaged in %s: %s", termsafe.Escape(reg.Dir), termsafe.Escape(reg.Err.Error())),
+				"repair panel.json in that directory or move the damaged panel out of the review root, then retry")
+		}
+		if gate == "adhoc" || reg.Panel.Gate == "adhoc" || reg.Panel.Spec != specID {
 			return guard.NewFailure(fmt.Sprintf("panel slug %q is already registered in %s (spec %s)", slug, termsafe.Escape(reg.Dir), termsafe.Escape(reg.Panel.Spec)),
 				"mindspec panel create <new-slug> --target <ref>"+panelCreateScope(specID, gate))
 		}
@@ -707,6 +809,12 @@ func panelCreateFailure(err error, slug string, in panel.CreateInput) error {
 // is untouched (zero-byte diff) — this is purely caller-side fact
 // gathering through the GateIO seam ADR-0037 designed for exactly this.
 func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts {
+	return resolvePanelGateFactsSource(root, reg, panelRecordSource(root))
+}
+
+// resolvePanelGateFactsSource is resolvePanelGateFacts with the slot records
+// from records, so a caller that read the kernel state reads it once.
+func resolvePanelGateFactsSource(root string, reg panel.Registration, records panel.RecordSource) panel.GateFacts {
 	beadID := ""
 	if reg.Err == nil && reg.Panel.IsBead() {
 		beadID = *reg.Panel.BeadID
@@ -727,6 +835,7 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 		Status:        exec.Status,
 		IsRefNotFound: exec.IsRefNotFound,
 		Worktree:      panelBeadWorktreePath(beadID),
+		Records:       records,
 	})
 }
 
@@ -911,11 +1020,12 @@ type panelVerdictChangesJSON struct {
 
 // collectSlotChanges iterates res.Verdicts of the latest round and, for
 // each REQUEST_CHANGES/REJECT verdict, re-decodes its verdict file's
-// concrete_changes_required array (Bead 4 step 3). A re-parse failure, an
+// concrete_changes_required array (Bead 4 step 3). A stored record in
+// records gives the verdict bytes of its name, as the tally reads them. A re-parse failure, an
 // absent key, or a non-array-of-strings type attributes ZERO items to
 // that slot with an advisory DecodeErr — never fatal, never silently
 // dropped. This read never feeds panel.PanelGateDecision or the exit code.
-func collectSlotChanges(reg panel.Registration, res *panel.Result) []slotChanges {
+func collectSlotChanges(reg panel.Registration, res *panel.Result, records map[string][]byte) []slotChanges {
 	if res == nil {
 		return nil
 	}
@@ -925,7 +1035,7 @@ func collectSlotChanges(reg panel.Registration, res *panel.Result) []slotChanges
 			continue
 		}
 		sc := slotChanges{Slot: v.Slot}
-		data, err := panel.ReadVerdictFile(filepath.Join(reg.Dir, v.File), res.VerdictSchema)
+		data, err := panel.RecordVerdictBytes(reg.Dir, v.File, res.VerdictSchema, records)
 		if err != nil {
 			sc.DecodeErr = fmt.Sprintf("could not re-read %s: %v", v.File, err)
 			out = append(out, sc)
@@ -1012,6 +1122,9 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 		// R3(c): per-element, same discipline as renderPanelVerify above.
 		fmt.Fprintf(&b, "  malformed (counted as missing): %s\n", strings.Join(escapeEach(res.Malformed), ", "))
 	}
+	for _, line := range res.ExclusionLines() {
+		fmt.Fprintf(&b, "  %s\n", line)
+	}
 
 	fmt.Fprintln(&b, panel.RuleLine(res))
 	if notice := panel.LegacyThresholdNotice(res.Panel); notice != "" {
@@ -1064,17 +1177,28 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 // SpecID/Target/BeadID/Gate are read RAW from a repo-write-attacker-
 // poisonable panel.json, so none of them is rendered raw: the ID-typed
 // pair goes through idrender. Shell arguments also need shellQuoteTarget.
-// The free-form pair goes through escapeConfigValue + shellQuoteTarget, as
-// tallyExitActionNonBead already renders target/gate. Slug is the
+// The free-form pair goes through escapeConfigValue + shellQuoteTarget. Slug is the
 // already-validated positional (validatePanelSlug), carried here so the
 // re-panel names the SAME panel this tally adjudicated.
+//
+// MissingSlots names the slots of the round that are not final, for the
+// incomplete route of the Next block. ArtifactMissing is true when an
+// unresolved finding names a measurement artifact absent from the round tree.
+// SlotsErr is the error of the slot-status read; the incomplete route then
+// prints it in place of the slot lines.
+// Out receives the Next block of a passing gate; nil prints none.
 type tallyRecoveryFacts struct {
-	Slug      string
-	SpecID    string
-	Target    string
-	BeadID    string
-	Gate      string
-	NextRound int
+	Kernel          bool
+	Slug            string
+	SpecID          string
+	Target          string
+	BeadID          string
+	Gate            string
+	NextRound       int
+	MissingSlots    []string
+	SlotsErr        error
+	ArtifactMissing bool
+	Out             io.Writer
 }
 
 // nextPanelRound is the round a re-panel recovery must be created at: one
@@ -1098,122 +1222,95 @@ func nextPanelRound(reg panel.Registration, res *panel.Result) int {
 	return round + 1
 }
 
-// tallyExitAction derives `panel tally`'s exit purely from d.Action — the
-// SAME panel.Decision renderPanelTally already returns — never from raw
-// verdict counts (res.Approves etc.): panel.Allow -> nil (exit 0);
-// panel.Warn -> print the advisory to tallyWarnOut and return nil (exit 0,
-// non-blocking, parity with internal/complete.panelGate's Warn handling);
-// panel.Block -> guard.NewFailure carrying PanelGateDecision's raw-`git
-// merge` fence in the body plus a genuine recovery line (ADR-0035). A
-// regression that re-derives Allow/Block from the raw counts instead of
-// d.Action (passing every planned gate yet exiting 0 on a stale-SHA or
-// hard_block Block, the lola-f4a8 class) is caught by
-// TestPanelTally_ExitCodeTracksDecision.
+// tallyExitAction derives the exit of `panel tally` from d.Action only,
+// never from raw verdict counts. Allow exits 0; Warn prints the advisory
+// to tallyWarnOut and exits 0; Block returns a failure with one recovery
+// line. TestPanelTally_ExitCodeTracksDecision catches a regression that
+// re-derives the exit from the counts.
 //
-// Spec 127 final review (mindspec-tyi3): the Block recovery used to render
-// the static `mindspec panel create %s --round <N+1> ...` from a 2-arg
-// helper that received only (Decision, slug). That argv carries no
-// `--bead`, so a follower's re-panel registers with `bead_id: null`;
-// internal/complete's gate selects via panel.ForBead, which matches ONLY
-// registrations whose BeadID equals the bead being completed, and an empty
-// selection is the documented fail-open (panel_advisory.go's "Fail-open
-// (§6)" leg) — the bead then completes UNGATED against stale verdicts.
-// A recovery that silently disarms the gate it claims to restore is worse
-// than no recovery, so the operands now come from the matched
-// registration (tallyRecoveryFacts) and `--bead` is always emitted.
-// TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds asserts the
-// COMPOSED effect — the emitted line, run for real through the command
-// tree, produces a registration panel.ForBead selects — rather than the
-// mere presence of a recovery line, which is what let this ship.
+// On a kernel gate (f.Kernel) no Next block prints: the Block recovery is
+// `mindspec next-action <spec> --apply`. On any other gate the Next block
+// comes from Decision.Leg (renderPanelNextBlock). Its operands come from
+// the matched registration, and a bead gate always renders `--bead`: a
+// next round without it registers with no bead binding, panel.ForBead
+// then selects nothing, and complete fails open against stale verdicts.
+// TestPanelTally_BlockRecoveryRebindsBeadAndForBeadFinds runs the rendered
+// create line through the command tree and checks that ForBead finds it.
 func tallyExitAction(d panel.Decision, f tallyRecoveryFacts) error {
+	if f.Kernel {
+		// A kernel gate prints no Next block: next-action decides.
+		switch d.Action {
+		case panel.Block:
+			return guard.NewFailure(d.Message, fmt.Sprintf("mindspec next-action %s --apply", shellQuoteTarget(idrender.Spec(f.SpecID))))
+		case panel.Warn:
+			fmt.Fprintf(tallyWarnOut, "panel advisory: %s\n", d.Message)
+		}
+		return nil
+	}
+	// Legacy bead panels omitted gate; their Next block keeps the bead gate.
+	if f.Gate == "" {
+		f.Gate = "bead"
+	}
+	return tallyNextBlockExit(d, f)
+}
+
+// tallyExitActionNonBead mirrors tallyExitAction's Action -> exit contract
+// for a NON-BEAD panel. d.Message has ALREADY been sanitized by
+// renderPanelTally/sanitizeNonBeadDecision, so it carries no bead/<empty>
+// fragment and no RawMergeFence. Its Next block NEVER names
+// `mindspec complete <bead>`: a non-bead panel is not complete-gated.
+// Target, gate and spec are read raw from panel.json, so the Next block
+// renders them through escapeConfigValue (or idrender) then
+// shellQuoteTarget; an unrecorded operand renders as a placeholder, never
+// as a dangling flag.
+func tallyExitActionNonBead(d panel.Decision, f tallyRecoveryFacts) error {
+	f.BeadID = ""
+	if f.Gate == "bead" {
+		f.Gate = ""
+	}
+	return tallyNextBlockExit(d, f)
+}
+
+// tallyNextBlockExit derives the exit of a non-kernel tally purely from
+// d.Action and prints the Next block that d.Leg selects. Allow exits 0 and
+// prints the gate verb to f.Out. Warn exits 0 and prints the advisory and
+// the halt lines to tallyWarnOut. Block exits non-zero: the Next block is in
+// the failure body, in place of one re-run recovery, and the one recovery
+// line re-runs the tally after those steps.
+func tallyNextBlockExit(d panel.Decision, f tallyRecoveryFacts) error {
+	block := formatPanelNextBlock(renderPanelNextBlock(d, f))
 	switch d.Action {
+	case panel.Allow:
+		if block != "" && f.Out != nil {
+			fmt.Fprintln(f.Out, block)
+		}
+		return nil
 	case panel.Warn:
 		fmt.Fprintf(tallyWarnOut, "panel advisory: %s\n", d.Message)
+		if block != "" {
+			fmt.Fprintln(tallyWarnOut, block)
+		}
 		return nil
 	case panel.Block:
-		// Two different render disciplines, matching what each operand
-		// IS. The ID-typed operands go through idrender (the house
-		// forced-safe renderer, scan (h)): a validated ID renders
-		// byte-identically, a malformed one is forced through
-		// strconv.Quote. Quote the spec argument for the shell as well. The
-		// free-form registration fields (target, gate) get
-		// tallyExitActionNonBead's exact treatment: escapeConfigValue
-		// then shellQuoteTarget, so a control byte cannot reach the
-		// terminal and a shell metacharacter cannot execute if the
-		// printed line is copied into a shell.
-		safeBeadID := idrender.Bead(f.BeadID)
-		recreate := fmt.Sprintf("mindspec panel create %s --bead %s --round %d",
-			shellQuoteTarget(escapeConfigValue(f.Slug)), safeBeadID, f.NextRound)
-		// Same omission discipline as tallyExitActionNonBead (F3-2): an
-		// unrecorded operand renders no dangling flag with nothing after
-		// it — which would otherwise swallow the NEXT flag as its value.
-		if f.SpecID != "" {
-			recreate += fmt.Sprintf(" --spec %s", shellQuoteTarget(idrender.Spec(f.SpecID)))
-		}
-		if f.Target != "" {
-			recreate += fmt.Sprintf(" --target %s", shellQuoteTarget(escapeConfigValue(f.Target)))
-		}
-		// Legacy bead panels omitted gate. Their recovery must satisfy the
-		// create binding checks as well as preserve their bead identity.
-		gate := f.Gate
-		if gate == "" {
-			gate = "bead"
-		}
-		recreate += fmt.Sprintf(" --gate %s", shellQuoteTarget(escapeConfigValue(gate)))
-		return guard.NewFailure(d.Message, fmt.Sprintf(
-			"re-run the panel (%s), then mindspec complete %s", recreate, safeBeadID))
+		return guard.NewFailure(d.Message+"\n\n"+block, tallyRerunRecovery(f.Slug))
 	default:
 		return nil
 	}
 }
 
-// tallyExitActionNonBead mirrors tallyExitAction's Action -> exit contract
-// for a NON-BEAD panel (Bead 1 step 4, R1), rendered here in the RunE
-// handler rather than inside the pinned 2-arg tallyExitAction so that
-// helper — and its sole test caller, TestPanelTally_ExitCodeTracksDecision
-// — stays byte-identical. d.Message has ALREADY been sanitized by
-// renderPanelTally/sanitizeNonBeadDecision, so it carries no bead/<empty>
-// fragment and no RawMergeFence. This function's own Block recovery line
-// names a genuine re-panel command against the recorded target and NEVER
-// emits `mindspec complete <bead>` — a non-bead panel is not
-// complete-gated, so that instruction would be actively wrong here.
-//
-// The recovery line embeds a copyable `mindspec panel create ...` command,
-// so target and gate — both read RAW from a repo-write-attacker-poisonable
-// panel.json — go through escapeConfigValue (kills a control byte/embedded
-// newline reaching stdout, spec-113-final G2 finding 2) THEN
-// shellQuoteTarget (single-quotes the result so a shell metacharacter like
-// `;`/`$`/a backtick can never execute if the printed line is copied into a
-// shell, finding 1). When target is empty (the unreadable-registration
-// tally edge, F3-2), the `--target` flag is OMITTED entirely rather than
-// rendering a dangling `--target ` with nothing after it. gate (F3-1) is
-// included only when the panel recorded one, so the re-panel recovery
-// preserves that gate's creation-time defaults.
-func tallyExitActionNonBead(d panel.Decision, slug, target, gate, specID string) error {
-	switch d.Action {
-	case panel.Warn:
-		fmt.Fprintf(tallyWarnOut, "panel advisory: %s\n", d.Message)
-		return nil
-	case panel.Block:
-		var cmd strings.Builder
-		fmt.Fprintf(&cmd, "mindspec panel create %s --round <N+1>", shellQuoteTarget(escapeConfigValue(slug)))
-		if gate != "adhoc" {
-			renderedSpec := "<id>"
-			if specID != "" {
-				renderedSpec = shellQuoteTarget(escapeConfigValue(specID))
-			}
-			fmt.Fprintf(&cmd, " --spec %s", renderedSpec)
-		}
-		if target != "" {
-			fmt.Fprintf(&cmd, " --target %s", shellQuoteTarget(escapeConfigValue(target)))
-		}
-		if gate != "" {
-			fmt.Fprintf(&cmd, " --gate %s", shellQuoteTarget(escapeConfigValue(gate)))
-		}
-		return guard.NewFailure(d.Message, "re-run the panel: "+cmd.String())
-	default:
+// tallyMissingSlots names the slots that are not final. It returns nil when
+// the slot statuses are unavailable; the Next block then prints a placeholder.
+func tallyMissingSlots(slots []panel.SlotStatus, err error) []string {
+	if err != nil {
 		return nil
 	}
+	var missing []string
+	for _, s := range slots {
+		if s.Status != "final" {
+			missing = append(missing, s.Slot)
+		}
+	}
+	return missing
 }
 
 // shellQuoteTarget quotes a literal POSIX shell argument.
@@ -1322,7 +1419,19 @@ func panelCoverageWriteFailure(reg panel.Registration, err error) error {
 }
 
 // panelSlotStatuses supplies config and non-blocking lock probes to the leaf.
+// An enrolled bead or final review gate reads the stored slot records, so a
+// slot whose file is absent keeps the status of its record.
 func panelSlotStatuses(root string, res *panel.Result) ([]panel.SlotStatus, error) {
+	records, err := panelRecords(root, res.Dir)
+	if err != nil {
+		return nil, err
+	}
+	return panelSlotStatusesRecords(root, res, records)
+}
+
+// panelSlotStatusesRecords is panelSlotStatuses with the slot records that
+// the caller read once.
+func panelSlotStatusesRecords(root string, res *panel.Result, records map[string][]byte) ([]panel.SlotStatus, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
@@ -1369,7 +1478,7 @@ func panelSlotStatuses(root string, res *panel.Result) ([]panel.SlotStatus, erro
 		}
 		runtime[slot.Slot] = rt
 	}
-	return panel.ReadSlotStatuses(res, runtime, time.Now())
+	return panel.ReadSlotStatusesRecords(res, runtime, time.Now(), records)
 }
 
 // panelSubjectReader supplies the same document digest to each panel verb.

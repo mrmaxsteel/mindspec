@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -69,9 +70,42 @@ func FormatFailure(msg string, commands ...string) string {
 }
 
 // Failure holds a guard refusal with its validated recovery commands.
-type Failure struct{ formatted string }
+type Failure struct {
+	formatted string
+	message   string
+	recovery  string
+	cause     error
+}
 
 func (f *Failure) Error() string { return f.formatted }
+func (f *Failure) Unwrap() error { return f.cause }
+
+// PrefixFailure adds escaped context and keeps one final recovery line.
+// Earlier recovery commands remain as neutralized message lines. The cause stays
+// available, including the original guard refusal.
+func PrefixFailure(err error, prefix, fallback string) error {
+	var failure *Failure
+	if !errors.As(err, &failure) {
+		return err
+	}
+	last := strings.LastIndex(failure.recovery, "\n")
+	if last < 0 {
+		return termsafe.NewWrappedFailure(err, prefix+failure.Error(), fallback)
+	}
+	message := neutralizeMessage(termsafe.EscapeRecovery(prefix) + failure.message + failure.recovery[:last])
+	recovery := failure.recovery[last:]
+	return &Failure{formatted: message + recovery, message: message, recovery: recovery, cause: err}
+}
+
+func neutralizeMessage(message string) string {
+	lines := strings.Split(message, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "recovery:") {
+			lines[i] = " " + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
 
 // TrustedRecovery marks the producer's formatted recovery as trusted.
 func (f *Failure) TrustedRecovery() {}
@@ -90,7 +124,9 @@ func NewFailure(msg string, commands ...string) error {
 	for i, command := range commands {
 		safeCommands[i] = termsafe.EscapeRecovery(command)
 	}
-	return &Failure{formatted: FormatFailure(strings.Join(lines, "\n"), safeCommands...)}
+	message := strings.TrimRight(strings.Join(lines, "\n"), "\n")
+	formatted := FormatFailure(message, safeCommands...)
+	return &Failure{formatted: formatted, message: message, recovery: strings.TrimPrefix(formatted, message)}
 }
 
 // HasFinalRecoveryLine reports whether the final line of msg is a

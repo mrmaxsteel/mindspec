@@ -19,6 +19,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/next"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/recording"
@@ -280,6 +281,7 @@ var (
 // discipline. If CompleteBead fails, the metadata is not written —
 // the failure itself is the audit trail.
 type CompleteOpts struct {
+	kernelState *kernel.State
 	// Check runs content gates without changing lifecycle or workspace state.
 	Check              bool
 	workDestructionErr error
@@ -358,6 +360,7 @@ type Result struct {
 	Check           bool
 	BeadID          string
 	BeadClosed      bool
+	AlreadyMerged   bool
 	WorktreeRemoved bool
 	NextMode        string
 	NextBead        string
@@ -482,7 +485,7 @@ func (e *ReportedError) Unwrap() error { return e.Err }
 // merged-unclosed / branch-less reconcile detection immediately below and
 // the fault-injection matrix in internal/complete's *_fault_test.go (Spec
 // 119 Bead 6, AC-26).
-func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opts CompleteOpts) (*Result, error) {
+func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opts CompleteOpts) (retResult *Result, retErr error) {
 	// R3 explicit-ingress early gate (ADR-0042, AC-6): a malformed beadID
 	// refuses EARLY with a clean CLI error and the "bd ready" lever,
 	// before any lineage lookup or mutation — rather than failing deep in
@@ -599,6 +602,26 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if err := validateDocFlags(beadID, opts); err != nil {
 		return nil, err
 	}
+	kernelState, kernelErr := completeKernelStateFn(root, specID, lineageEpicID)
+	if kernelErr != nil {
+		return nil, kernelErr
+	}
+	if kernelState != nil {
+		checked, err := prepareKernelComplete(*kernelState, beadID, !opts.Check)
+		if err != nil {
+			return nil, err
+		}
+		kernelState = &checked
+		opts.kernelState = kernelState
+		if !opts.Check && checked.Merged[beadID] && checked.Records[beadID].Status == "closed" {
+			return &Result{BeadID: beadID, BeadClosed: true, NextSpec: specID, AlreadyMerged: true}, finishKernelComplete(*kernelState, beadID)
+		}
+		defer func() {
+			if retErr == nil && !opts.Check {
+				retErr = finishKernelComplete(*kernelState, beadID)
+			}
+		}()
+	}
 	if opts.Check {
 		return runCheck(root, beadID, specID, exec, opts)
 	}
@@ -621,7 +644,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	// post-close children read is deliberately NOT memoized here — advanceState
 	// re-issues it via the uncached phase.FetchChildren so it observes the
 	// child set `bd close` mutated mid-run.
-	epicCache := phase.NewCache()
+	epicCache := phase.NewCache().WithRoot(root)
 
 	// 1.25. Spec 089 / ADR-0034: one-shot legacy-to-metadata migration on
 	// first lifecycle command. Must precede the phase-dependent guard
@@ -962,10 +985,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if gateCfgErr != nil {
 		return nil, completionFailure(beadID, opts, "reading configuration", gateCfgErr)
 	}
-	presence := &beadPanelPresence{policy: gateCfg.Enforcement.PanelPresence, specID: specID, ignore: reconcile != nil, closed: closedAtEntry}
-	panelGateEnabled := gateCfg.Enforcement.PanelGate
+	presence := &beadPanelPresence{policy: gateCfg.Enforcement.PanelPresence, specID: specID, ignore: reconcile != nil, closed: closedAtEntry, records: kernel.PanelRecordSource(kernelState)}
+	panelGateEnabled := gateCfg.Enforcement.PanelGate && kernelState == nil
 	if resumeStage != "" {
-		if err := recheckResumedPanelDeferrals(beadID, specID, panelGateRoots(root, wtPath, specID), panelGateEnabled); err != nil {
+		if err := recheckResumedPanelDeferrals(beadID, specID, panelGateRoots(root, wtPath, specID), panelGateEnabled, presence.records); err != nil {
 			return nil, err
 		}
 		// A closed retry reaches the merged handler after landing. Check
@@ -976,7 +999,7 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 			}
 		}
 	}
-	if resumeStage == "" {
+	if resumeStage == "" && kernelState == nil {
 		// Spec 106 Bead 4 (AC13): the scan roots are LAYOUT-AWARE — on a
 		// canonical/legacy tree the gate honors BOTH the repo-root review/ and the
 		// co-located <spec-dir>/reviews/ panels (the transition union); on a flat
@@ -1219,6 +1242,12 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 		}
 		// An unchanged ancestor branch creates no naming merge. Keep the
 		// existing completion path for that case.
+	}
+
+	if kernelState != nil {
+		if err := recheckKernelComplete(*kernelState, beadID); err != nil {
+			return nil, err
+		}
 	}
 
 	// 4. Close bead (idempotent: tolerate already-closed beads)
@@ -1667,8 +1696,11 @@ func completeSyncPhase(root, epicID, nextMode, beadID string) error {
 
 // FormatResult returns a human-readable summary of the completion.
 func FormatResult(r *Result) string {
+	if r != nil && r.AlreadyMerged {
+		return fmt.Sprintf("Bead %s is already complete.\n", idrender.Bead(r.BeadID))
+	}
 	if r != nil && r.Check {
-		return "Content gates passed.\n"
+		return "Content gates passed. Panel and kernel gates were not checked.\n"
 	}
 	if r != nil && r.MergeOnly {
 		var out strings.Builder

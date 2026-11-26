@@ -1,45 +1,7 @@
 package phase
 
-// phaselock.go — spec 128 (lifecycle-verb-state-honesty) Bead 1, R3.3: the
-// repo-scoped, kernel-held write lock that serializes EVERY
-// mindspec_phase writer — `plan approve` (internal/approve/plan.go's
-// ApprovePlan phase-write closure), `spec approve`'s existing-epic
-// backfill (internal/approve/spec.go's backfillExistingEpicPhase),
-// `next`'s claim-time advance (cmd/mindspec/next.go's
-// advancePhaseOnClaim — bead 2's OQ-3 writer), `complete`'s step-6.5
-// sync (internal/complete/complete.go's completeSyncPhase), `release`'s
-// step-6.5 sync (via phase.SanctionedDerivedSync, sanctioned_sync.go —
-// release.go itself never calls WithPhaseWriteLock directly),
-// `impl approve`'s reconcile + done writes (internal/approve/impl.go),
-// `impl adopt`'s done write (internal/approve/adopt.go),
-// `EnsureMigrated`'s ADR-0034 backfill (migrate.go), the one-shot v2
-// phase-semantics translation (semantics_v2.go's
-// EnsurePhaseSemanticsV2), and `mindspec repair phase`
-// (cmd/mindspec/repair.go's repairPhaseRunE) — so a concurrent writer
-// can never land a stale value over a fresher one (AC-5(v)). Function
-// names, not line numbers, on purpose: the numbers drifted on every
-// edit above them (final-review round 1 G7), and
-// writer_inventory_test.go's AST walk — which maintains no list — is
-// the structural fence; this header is the sole human-readable
-// inventory and must stay complete.
-//
-// Kernel-held on both platforms so a crashed holder's lock releases with
-// its process — there is NO PID/timestamp content, NO takeover, and NO
-// deletion step:
-//   - unix: flock(2) LOCK_EX (phaselock_unix.go).
-//   - windows: LockFileEx (exclusive byte-range lock) on a RETAINED
-//     handle opened WITHOUT FILE_SHARE_DELETE, held for the whole
-//     critical section (phaselock_windows.go). This moots the
-//     stale-lockfile-content problem entirely: the FILE is not the lock
-//     (the byte-range lock is), so a pre-existing empty/partial leftover
-//     lockfile never blocks acquisition.
-//
-// This deliberately does NOT carry internal/journal's O_EXCL-lockfile
-// idiom (lock_windows.go there uses a create-and-remove dance) — only
-// that package's withReportsLock READ-MODIFY-WRITE SHAPE is imitated
-// here (internal/journal/lock.go:55-61: acquire → run the critical
-// section → release via defer). The phase lock is kernel-held on BOTH
-// platforms.
+// The repository phase lock serializes phase writers across lifecycle verbs,
+// implementation leases, migration, and repair.
 
 import (
 	"errors"
@@ -248,14 +210,28 @@ func readPhaseForLock(c *Cache, epicID string) (phaseReadOutcome, error) {
 //     self-blocks on its own held lock until the bounded wait expires,
 //     surfacing as ErrPhaseLockTimeout — never a deadlock detection, and
 //     never automatic reentry.
-func WithPhaseWriteLock(root, epicID string, mergeMetadata MergeMetadataFunc, fn func(stored string, present bool) (updates map[string]interface{}, err error)) error {
+//
+// An optional readStored callback uses the caller's scoped store. The lock
+// invokes it fresh after acquisition. It must not return a pre-lock snapshot.
+func WithPhaseWriteLock(root, epicID string, mergeMetadata MergeMetadataFunc, fn func(stored string, present bool) (updates map[string]interface{}, err error), readStored ...func() (string, bool, error)) error {
 	unlock, err := acquirePhaseLock(root)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
-	outcome, err := readPhaseForLock(NewCache(), epicID)
+	if len(readStored) > 1 {
+		return errors.New("phase: supply at most one stored-phase reader")
+	}
+	var outcome phaseReadOutcome
+	if len(readStored) == 1 {
+		outcome.Stored, outcome.Present, err = readStored[0]()
+		if !state.IsValidPhase(outcome.Stored) {
+			outcome.Stored = ""
+		}
+	} else {
+		outcome, err = readPhaseForLock(NewCache(), epicID)
+	}
 	if err != nil {
 		return err
 	}
@@ -284,4 +260,15 @@ func acquirePhaseLock(root string) (func(), error) {
 		return nil, fmt.Errorf("phase: acquire write lock at %s: %w", path, err)
 	}
 	return unlock, nil
+}
+
+// WithPhaseLock serializes a kernel operation with other phase writers.
+// Read all decision inputs inside fn. This lock is not reentrant.
+func WithPhaseLock(root string, fn func() error) error {
+	unlock, err := acquirePhaseLock(root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
 }

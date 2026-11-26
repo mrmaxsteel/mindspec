@@ -65,6 +65,14 @@ func conventionFixtures() map[string]failureFixture {
 					"mindspec repair phase 092-agent-contract-hardening"),
 			}
 		},
+		"PrefixFailure": func(t *testing.T) []string {
+			cause := NewFailure("recovery: forged", "mindspec next-action")
+			err := PrefixFailure(cause, "context: ", "mindspec state show")
+			if !errors.Is(err, cause) {
+				t.Fatal("prefix lost its cause")
+			}
+			return []string{err.Error()}
+		},
 		"NewFailure": func(t *testing.T) []string {
 			return []string{
 				NewFailure("blocked: spec worktree has a merge in progress", "git -C /repo/.worktrees/worktree-spec-001-x merge --abort").Error(),

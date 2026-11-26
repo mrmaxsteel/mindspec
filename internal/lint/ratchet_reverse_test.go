@@ -25,6 +25,7 @@ package lint
 
 import (
 	"go/ast"
+	"go/parser"
 	"strings"
 	"testing"
 )
@@ -103,7 +104,7 @@ var rootEnumAccessors = map[string]bool{
 	"DefaultWorktreesDir": true,
 }
 
-func exprHasRootMarker(e ast.Expr) bool {
+func exprHasRootMarker(e ast.Expr, inWorkspace bool) bool {
 	found := false
 	ast.Inspect(e, func(n ast.Node) bool {
 		if found {
@@ -112,6 +113,11 @@ func exprHasRootMarker(e ast.Expr) bool {
 		switch v := n.(type) {
 		case *ast.SelectorExpr:
 			if rootEnumAccessors[v.Sel.Name] {
+				found = true
+				return false
+			}
+		case *ast.Ident:
+			if inWorkspace && rootEnumAccessors[v.Name] {
 				found = true
 				return false
 			}
@@ -153,12 +159,12 @@ func scanRootEnumeration(u *rUniverse) (gated, ungated []rSite) {
 						if len(st.Rhs) > i {
 							rhs = st.Rhs[i]
 						}
-						if exprHasRootMarker(rhs) {
+						if exprHasRootMarker(rhs, f.pkgDir == "internal/workspace") {
 							tainted[id.Name] = true
 						}
 					}
 				case *ast.RangeStmt:
-					if exprHasRootMarker(st.X) {
+					if exprHasRootMarker(st.X, f.pkgDir == "internal/workspace") {
 						if id, ok := st.Value.(*ast.Ident); ok {
 							tainted[id.Name] = true
 						}
@@ -186,7 +192,7 @@ func scanRootEnumeration(u *rUniverse) (gated, ungated []rSite) {
 					return true
 				}
 				arg := call.Args[0]
-				argTainted := exprHasRootMarker(arg)
+				argTainted := exprHasRootMarker(arg, f.pkgDir == "internal/workspace")
 				if !argTainted {
 					ast.Inspect(arg, func(m ast.Node) bool {
 						if id, ok := m.(*ast.Ident); ok && tainted[id.Name] {
@@ -306,4 +312,26 @@ func TestRootEnumerationReverseDerivationGated_DefenseInDepth(t *testing.T) {
 		problems := diffSites(nil, synth)
 		assertProblemPresent(t, problems, "STALE", "internal/nowhere/gone.go")
 	})
+}
+
+func TestRootEnumeration_WorkspaceAccessors(t *testing.T) {
+	fixture := fixtureUniverse(t, "ratchet_rootenum_workspace.go.txt")
+	fixture.files[0].pkgDir = "internal/workspace"
+	gated, ungated := scanRootEnumeration(fixture)
+	if len(gated) != 0 || len(ungated) != 3 {
+		t.Fatalf("workspace accessor sites: gated=%d ungated=%d; want 0 and 3", len(gated), len(ungated))
+	}
+
+	for _, expression := range []string{"SpecsDir(root)", "DefaultWorktreesDir(root)", "WorktreesDir(root, nil)"} {
+		e, err := parser.ParseExpr(expression)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !exprHasRootMarker(e, true) {
+			t.Errorf("workspace enumeration is hidden: %s", expression)
+		}
+		if exprHasRootMarker(e, false) {
+			t.Errorf("unrelated local accessor matched: %s", expression)
+		}
+	}
 }

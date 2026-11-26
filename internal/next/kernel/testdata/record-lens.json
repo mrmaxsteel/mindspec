@@ -1,0 +1,9 @@
+{
+  "step": "lens",
+  "lenses": [
+    {
+      "slot": "R1",
+      "lens": "inspect paths"
+    }
+  ]
+}

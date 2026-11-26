@@ -1,0 +1,63 @@
+{
+  "round": 2,
+  "subject": "subject",
+  "slots": [
+    "slot"
+  ],
+  "slot_count": 1,
+  "lenses": [
+    {
+      "slot": "R1",
+      "lens": "inspect paths"
+    }
+  ],
+  "lens": "lens",
+  "verify": "verify",
+  "prior": {
+    "round": 1,
+    "subject": "old",
+    "slots": [
+      "slot"
+    ],
+    "slot_count": 1,
+    "verify": "verify",
+    "read": {
+      "verdict.json": "digest"
+    },
+    "asks": [
+      {
+        "slot": "R1",
+        "round": 1,
+        "finding": "ccr[0]",
+        "finding_sha256": "digest",
+        "text": "full finding",
+        "returns": [
+          {
+            "slot": "R1",
+            "round": 1,
+            "finding": "ccr[0]",
+            "finding_sha256": "digest",
+            "ground": "out_of_acceptance_scope",
+            "ac": "AC-1",
+            "reason": "outside scope",
+            "evidence": "https://example.com/proof",
+            "target": "test-target",
+            "return": "refuted"
+          }
+        ]
+      },
+      {
+        "slot": "R1",
+        "round": 1,
+        "finding": "ccr[0]",
+        "finding_sha256": "digest",
+        "text": "full finding"
+      }
+    ]
+  },
+  "judged": {
+    "judge": "judge",
+    "value": "carry-over",
+    "new_subject": "subject"
+  }
+}

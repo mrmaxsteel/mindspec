@@ -16,6 +16,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
 	"github.com/mrmaxsteel/mindspec/internal/lifecycle"
 	"github.com/mrmaxsteel/mindspec/internal/mergefollowup"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -108,6 +109,7 @@ func runMergedCompletion(root, beadID, specID, epicID, beadHead, wtPath string, 
 	if presence == nil {
 		presence = &beadPanelPresence{policy: cfg.Enforcement.PanelPresence, specID: specID, closed: closed}
 	}
+	presence.records = kernel.PanelRecordSource(opts.kernelState)
 	decisions, err := panelGateWithPresence(beadID, roots, wtPath, cfg.Enforcement.PanelGate, out, presence)
 	if err != nil {
 		return nil, err
@@ -174,6 +176,11 @@ func closeMergedBead(root, beadID, specID, epicID, specBranch, specWT, wtPath st
 		var err error
 		switch step {
 		case 1:
+			if opts.kernelState != nil {
+				if err := recheckKernelComplete(*opts.kernelState, beadID); err != nil {
+					return nil, err
+				}
+			}
 			if !closed {
 				err = closeBeadFn(beadID)
 				if err == nil {

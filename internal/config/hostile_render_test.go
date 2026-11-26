@@ -1,75 +1,17 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
 
-// TestLoad_GateAuthorityKeyEscapesControlBytes extends the
-// TestLoad_UnknownGateKeyEscapesControlBytes pattern (AC-20, spec 120
-// R8): a hostile loop.gate_authority key must not reach the refusal
-// text raw at EITHER interpolation point (the message clause's %q, and
-// the recovery clause, which previously repeated the key via a bare
-// %s).
 func TestLoad_GateAuthorityKeyEscapesControlBytes(t *testing.T) {
-	ResetCache()
-	defer ResetCache()
-
-	// YAML double-quoted scalar escapes: \a = BEL (0x07), \e = ESC
-	// (0x1b) — decoded into the actual map key, not raw in this Go
-	// source.
-	content := "loop:\n  gate_authority:\n    \"bad\\a\\e key\": \"nonsense\"\n"
-
-	root := t.TempDir()
-	dir := filepath.Join(root, ".mindspec")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
+	cfg, warnings := s134Load(t, "loop:\n  gate_authority:\n    \"bad\\a\\e key\": nonsense\n")
+	if cfg == nil || strings.ContainsAny(warnings, "\a\x1b") {
+		t.Fatalf("unsafe warning: %q", warnings)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := Load(root)
-	if err == nil {
-		t.Fatal("expected Load to refuse the malformed gate_authority value, got nil error")
-	}
-	msg := err.Error()
-
-	if strings.ContainsRune(msg, '\x07') {
-		t.Errorf("error text contains a raw BEL byte: %q", msg)
-	}
-	if strings.ContainsRune(msg, '\x1b') {
-		t.Errorf("error text contains a raw ESC byte: %q", msg)
-	}
-	// Both interpolation points (message clause + recovery clause) must
-	// carry the QUOTED form of the key, not a raw repeat.
-	if got := strings.Count(msg, strconv.Quote("bad\a\x1b key")); got != 2 {
-		t.Errorf("expected the quoted key at both interpolation points (message + recovery), got %d occurrences in: %q", got, msg)
-	}
-
-	// Clean-fixture consistency: a normal key is quoted the SAME way at
-	// both interpolation points (the panel.gates precedent quotes
-	// unconditionally via %q/strconv.Quote — this is fmt's own quoting
-	// convention for naming an offending config key, not the
-	// identity-preserving termsafe.Escape/idrender discipline used for
-	// free-text/ID render positions elsewhere in R4). What must hold
-	// here is consistency between the two interpolation points, and
-	// that the clean key's quoted form carries no extra control bytes.
-	ResetCache()
-	content2 := "loop:\n  gate_authority:\n    bead_merge: \"nonsense\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content2), 0644); err != nil {
-		t.Fatal(err)
-	}
-	_, err2 := Load(root)
-	if err2 == nil {
-		t.Fatal("expected Load to refuse the malformed gate_authority value, got nil error")
-	}
-	msg2 := err2.Error()
-	if got := strings.Count(msg2, strconv.Quote("bead_merge")); got != 2 {
-		t.Errorf("expected the quoted clean key at both interpolation points, got %d occurrences in: %q", got, msg2)
+	if len(cfg.RemovedLoopKeys()) != 1 || !strings.Contains(warnings, "ignored") {
+		t.Fatalf("removed map must be ignored: %q", warnings)
 	}
 }
 

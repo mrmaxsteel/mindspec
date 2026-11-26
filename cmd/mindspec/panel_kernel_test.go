@@ -1,0 +1,1064 @@
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+)
+
+func kernelPanelFixture(t *testing.T) (*kerneltest.Fixture, string, string) {
+	t.Helper()
+	return kernelPanelFixtureIDs(t, true)
+}
+
+// kernelPanelFixtureIDs takes the store identity mode. A test in which the
+// binary creates records uses the binary's mode, so all rows share one grammar.
+func kernelPanelFixtureIDs(t *testing.T, native bool) (*kerneltest.Fixture, string, string) {
+	t.Helper()
+	f := kerneltest.Enrolled(t, kerneltest.WithFake(native))
+	withTestChdir(t, f.Root)
+	rebindWrite(t, f.Root, ".beads/config.yaml", "types.custom: gate,step\n")
+	rebindWrite(t, f.Root, ".gitignore", ".mindspec/phase.lock\n")
+	rebindWrite(t, f.Root, ".mindspec/config.yaml", "panel:\n  reviewers:\n    - family: harness\n      model: test-model\n      lens: test-lens\n      count: 2\n")
+	rebindWrite(t, f.Root, "proof.txt", "proof")
+	actorCmdGit(t, f, "add", ".")
+	actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "fixture")
+	head := actorCmdGit(t, f, "rev-parse", "HEAD")
+	actorCmdGit(t, f, "update-ref", "refs/heads/main", head)
+	actorCmdGit(t, f, "branch", "spec/"+f.SpecID)
+	for _, item := range f.Items {
+		actorCmdGit(t, f, "branch", "bead/"+item)
+	}
+	impl := f.Items[0] + ".impl.a1"
+	f.Create(impl, f.Items[0])
+	kernelPanelClose(t, f, impl, head)
+	f.Must(f.Store.WriteMetadata(impl, kernel.Metadata(kernel.KeyLease, kernel.LeaseRecord{Generation: 1, ClaimBase: head})))
+	old := panelKernelStateFn
+	panelKernelStateFn = func(_, _ string) (*kernel.State, error) { s := f.State(); return &s, nil }
+	t.Cleanup(func() { panelKernelStateFn = old })
+	oldMeta := panelSubmitMetadataFn
+	panelSubmitMetadataFn = func(string) (map[string]interface{}, error) { return map[string]interface{}{}, nil }
+	t.Cleanup(func() { panelSubmitMetadataFn = oldMeta })
+	return f, f.Items[0] + ".review", head
+}
+func kernelPanelClose(t *testing.T, f *kerneltest.Fixture, id, head string) {
+	t.Helper()
+	receipt := kernel.Receipt{Kind: "passed", Path: "proof.txt", Commit: head, Blob: actorCmdGit(t, f, "rev-parse", head+":proof.txt")}
+	f.Must(f.Store.WriteReceipt(id, receipt))
+	r, e := f.Store.Lookup(id)
+	f.Must(e)
+	if r.Status != "closed" {
+		f.Must(f.Store.SetStatusIf(id, r.Status, "closed"))
+	}
+}
+func kernelPanelAuthorise(f *kerneltest.Fixture, gate, head string, n, size int) {
+	slots := []string{}
+	s := f.State()
+	base := gateBase(s, gate)
+	for i := 1; i <= size; i++ {
+		slots = append(slots, fmt.Sprintf("%s.r%d.R%d", base, n, i))
+	}
+	kerneltest.Authorise(f, gate, kernel.GateRound{Round: n, Subject: head, Slots: slots, SlotCount: size})
+	round, _, err := kernel.Decode[kernel.GateRound](f.State().Records[gate].Metadata, kernel.KeyRound)
+	f.Must(err)
+	row := f.State().Records[round.Lens]
+	lease, _, err := kernel.Decode[kernel.LeaseRecord](row.Metadata, kernel.KeyLease)
+	f.Must(err)
+	if lease.Generation != 0 {
+		return
+	}
+	// Exercise the real lens receipt path during fixture setup. The caller owns
+	// round authorization here; no other reducer transition belongs to this setup.
+	data, _, err := kernel.Decode[string](row.Metadata, kernel.KeyRecord)
+	f.Must(err)
+	seeded := row
+	seeded.Metadata = maps.Clone(row.Metadata)
+	row.Metadata = maps.Clone(row.Metadata)
+	delete(row.Metadata, kernel.KeyClose)
+	delete(row.Metadata, kernel.KeyRecord)
+	row.Status = "open"
+	f.Fake.Records[row.ID] = row
+	restore := kernel.ReplaceRulesForTest(kernel.NewRegistry())
+	defer restore()
+	claimed, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: round.Lens}, kernel.LeaseDeps{})
+	if err != nil && strings.Contains(err.Error(), "step is held or blocked by ") {
+		// A work item behind an open upstream cannot lease its lens. Keep the
+		// seeded close, which matches a real lens close.
+		f.Fake.Records[row.ID] = seeded
+		return
+	}
+	f.Must(err)
+	file, err := f.RecordFile([]byte(data))
+	f.Must(err)
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: round.Lens, Lease: claimed.Token, Record: file})
+	f.Must(err)
+}
+
+// kernelPanelDraftLens closes the current round's lens step through lease and
+// submit, as an orchestrator does before panel create.
+func kernelPanelDraftLens(t *testing.T, f *kerneltest.Fixture, gate string) {
+	t.Helper()
+	_, err := kernel.NextAction(f.State(), true)
+	f.Must(err)
+	s := f.State()
+	base := gateBase(s, gate)
+	active, attempt := gate, 0
+	for _, id := range s.Gates {
+		tuple, _, _ := s.Records[id].Tuple()
+		receipt, _, _ := kernel.Decode[kernel.Receipt](s.Records[id].Metadata, kernel.KeyClose)
+		if tuple.Gate == base && tuple.Attempt > attempt && !(s.Records[id].Status == "closed" && receipt.Kind == "superseded") {
+			active, attempt = id, tuple.Attempt
+		}
+	}
+	round, _, err := kernel.Decode[kernel.GateRound](s.Records[active].Metadata, kernel.KeyRound)
+	f.Must(err)
+	row, ok := s.Records[round.Lens]
+	if !ok {
+		t.Fatalf("round names no lens step: %+v", round)
+	}
+	if row.Status == "closed" {
+		return
+	}
+	cfg, err := config.Load(f.Root)
+	f.Must(err)
+	tuple, _, err := s.Records[active].Tuple()
+	f.Must(err)
+	kind := "bead"
+	if tuple.WorkItem == "" {
+		kind = "final_review"
+	}
+	roster, err := kernel.RoundReviewerSlots(cfg, kind, round)
+	f.Must(err)
+	record := kernel.LensRecord{Step: round.Lens, Lenses: []kernel.SlotLens{}}
+	for _, slot := range roster {
+		if slot.Lens != "adversarial" {
+			record.Lenses = append(record.Lenses, kernel.SlotLens{Slot: slot.Slot, Lens: "Review " + slot.Lens + "."})
+		}
+	}
+	claimed, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: round.Lens}, kernel.LeaseDeps{})
+	f.Must(err)
+	data, err := json.Marshal(record)
+	f.Must(err)
+	file, err := f.RecordFile(data)
+	f.Must(err)
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: round.Lens, Lease: claimed.Token, Record: file})
+	f.Must(err)
+}
+func kernelPanelRun(t *testing.T, cmd *cobra.Command, args ...string) (string, error) {
+	t.Helper()
+	reset := func() {
+		cmd.Flags().VisitAll(func(f *pflag.Flag) {
+			if v, ok := f.Value.(pflag.SliceValue); ok {
+				_ = v.Replace(nil)
+			} else {
+				_ = f.Value.Set(f.DefValue)
+			}
+			f.Changed = false
+		})
+	}
+	reset()
+	defer reset()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	defer cmd.SetOut(nil)
+	defer cmd.SetErr(nil)
+	if e := cmd.ParseFlags(args); e != nil {
+		return out.String(), e
+	}
+	e := cmd.RunE(cmd, cmd.Flags().Args())
+	return out.String(), e
+}
+func kernelPanelCreate(t *testing.T, f *kerneltest.Fixture, slug string, extra ...string) (string, error) {
+	return kernelPanelRun(t, panelCreateCmd, append([]string{slug, "--spec", f.SpecID}, extra...)...)
+}
+func kernelPanelRequire(t *testing.T, out string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+}
+func kernelPanelRefusal(t *testing.T, out string, err error, word string) {
+	t.Helper()
+	if err == nil || !strings.Contains(out+err.Error(), word) {
+		t.Fatalf("want refusal %q: %s %v", word, out, err)
+	}
+}
+
+// kernelPanelLastRecovery checks that the refusal has one recovery line, that
+// it is the last line and that it equals want. It returns the printed command.
+func kernelPanelLastRecovery(t *testing.T, out string, err error, want string) string {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("want refusal: %s", out)
+	}
+	lines := strings.Split(strings.TrimRight(err.Error(), "\n"), "\n")
+	count := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, guard.RecoveryPrefix) {
+			count++
+		}
+	}
+	if count != 1 || lines[len(lines)-1] != want {
+		t.Fatalf("want one recovery line, last, equal to\n%s\ngot:\n%s", want, err.Error())
+	}
+	return strings.TrimPrefix(want, guard.RecoveryPrefix)
+}
+
+// kernelPanelRunPrinted runs a printed panel submit command with the lease
+// token filled in. The note after the placeholder is not part of the command.
+func kernelPanelRunPrinted(t *testing.T, line, token string) (string, error) {
+	t.Helper()
+	if i := strings.Index(line, " (the token that "); i >= 0 {
+		line = line[:i]
+	}
+	words := shellWords(t, strings.Replace(line, "<token>", shellQuoteTarget(token), 1))
+	if len(words) < 3 || strings.Join(words[:3], " ") != "mindspec panel submit" {
+		t.Fatalf("printed command is not a panel submit: %q", line)
+	}
+	return kernelPanelRun(t, panelSubmitCmd, words[3:]...)
+}
+
+func kernelPanelRecord(t *testing.T, f *kerneltest.Fixture, id string) kernel.Record {
+	t.Helper()
+	r, e := f.Store.Lookup(id)
+	f.Must(e)
+	if r == nil {
+		t.Fatal("missing", id)
+	}
+	return *r
+}
+
+type kernelPanelProtected struct {
+	Snapshot string
+	Gate     string
+}
+
+func kernelPanelForeign(t *testing.T, f *kerneltest.Fixture) kernelPanelProtected {
+	t.Helper()
+	f.Fake.Records["foreign-note"] = kernel.Record{ID: "foreign-note", Parent: f.Epic, Type: "task", Status: "open", Title: "note", Metadata: map[string]any{"foreign": true}}
+	f.Fake.Records["foreign-bug"] = kernel.Record{ID: "foreign-bug", Type: "bug", Status: "open", Title: "bug", Metadata: map[string]any{"foreign": true}}
+	r := f.Fake.Records[f.Items[1]]
+	r.Dependencies = append(r.Dependencies, kernel.Dependency{ID: "foreign-bug", Type: "blocks"})
+	f.Fake.Records[r.ID] = r
+	f.Create(f.Items[2]+".impl.a1", f.Items[2])
+	r = f.Fake.Records[f.Items[2]+".impl.a1"]
+	r.Status = "in_progress"
+	f.Fake.Records[r.ID] = r
+	return kernelPanelProtect(t, f)
+}
+
+// Preserve every snapshot field except the selected gate's computed records,
+// links between those records, and the panel artifact paths written by the verb.
+func kernelPanelProtectedSnapshot(t *testing.T, f *kerneltest.Fixture, gate string) string {
+	t.Helper()
+	raw := kerneltest.Snapshot(t, f)
+	lines := strings.Split(raw, "\n")
+	var rows []kernel.Record
+	f.Must(json.Unmarshal([]byte(lines[0]), &rows))
+	allowed := map[string]bool{gate: true}
+	for _, r := range rows {
+		tuple, ok, err := r.Tuple()
+		if err == nil && ok && tuple.Gate == gate && (tuple.Kind == "review-slot" || tuple.Kind == "fix" || tuple.Kind == "decision" || tuple.Kind == "change-judge") {
+			allowed[r.ID] = true
+		}
+	}
+	var kept []kernel.Record
+	var deps []json.RawMessage
+	for i, row := range rows {
+		if allowed[row.ID] {
+			var links []kernel.Dependency
+			f.Must(json.Unmarshal([]byte(lines[i+1]), &links))
+			for _, link := range links {
+				if !allowed[link.ID] || (link.DependsOnID != "" && !allowed[link.DependsOnID]) {
+					deps = append(deps, json.RawMessage(lines[i+1]))
+					break
+				}
+			}
+			continue
+		}
+		kept = append(kept, row)
+		deps = append(deps, json.RawMessage(lines[i+1]))
+	}
+	tail := []string{}
+	for _, line := range lines[len(rows)+1:] {
+		if strings.HasPrefix(line, "?? .mindspec/specs/"+f.SpecID+"/reviews/") {
+			continue
+		}
+		// Only review artifacts may change in the working tree.
+		if len(line) > 3 && strings.Contains(line[3:], ".mindspec/specs/"+f.SpecID+"/reviews/") {
+			continue
+		}
+		tail = append(tail, line)
+	}
+	data, err := json.Marshal(struct {
+		Rows []kernel.Record
+		Deps []json.RawMessage
+		Tail []string
+	}{kept, deps, tail})
+	f.Must(err)
+	return string(data)
+}
+func kernelPanelProtect(t *testing.T, f *kerneltest.Fixture) kernelPanelProtected {
+	t.Helper()
+	gate := f.Items[0] + ".review"
+	return kernelPanelProtected{Snapshot: kernelPanelProtectedSnapshot(t, f, gate), Gate: gate}
+}
+func kernelPanelCheckForeign(t *testing.T, f *kerneltest.Fixture, before kernelPanelProtected) {
+	t.Helper()
+	after := kernelPanelProtectedSnapshot(t, f, before.Gate)
+	if before.Snapshot != after {
+		t.Fatalf("panel verb changed protected snapshot\nbefore: %s\nafter: %s", before.Snapshot, after)
+	}
+}
+
+func TestS134PanelCreate_AuthorisationAndFrozenGate(t *testing.T) {
+	for _, mode := range []string{"missing", "registered", "reject", "refused"} {
+		t.Run(mode, func(t *testing.T) {
+			f, gate, head := kernelPanelFixture(t)
+			if mode != "missing" {
+				kernelPanelAuthorise(f, gate, head, 1, 2)
+				kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "old", Round: 1, Subject: head, Slots: []string{"R1", "R2"}})
+			}
+			if mode == "reject" || mode == "refused" {
+				word := "REQUEST_CHANGES"
+				if mode == "reject" {
+					word = "REJECT"
+				}
+				kernelPanelVerdict(t, f, gate, head, "old", "R1", word, 1)
+				kernelPanelVerdict(t, f, gate, head, "old", "R2", "REQUEST_CHANGES", 1)
+				kernelPanelReproduce(t, f, gate)
+				fix := gate + ".r2.fix"
+				f.Create(fix, gate)
+				if mode == "reject" {
+					d := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
+					kerneltest.Answer(f, d, "fix")
+				}
+			}
+			before := kerneltest.Snapshot(t, f)
+			out, e := kernelPanelCreate(t, f, "1")
+			n := 1
+			if mode != "missing" {
+				n = 2
+			}
+			kernelPanelRefusal(t, out, e, fmt.Sprintf("round %d is not authorized", n))
+			wantRecovery := "recovery: mindspec next-action '" + f.SpecID + "' --apply"
+			if !strings.Contains(out+fmt.Sprint(e), wantRecovery) {
+				t.Fatalf("missing runnable round recovery %q: %s %v", wantRecovery, out, e)
+			}
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("unauthorized create wrote")
+			}
+			if mode == "reject" || mode == "refused" {
+				kernelPanelClose(t, f, gate+".r2.fix", head)
+				kernelPanelAuthorise(f, gate, head, 2, 2)
+			} else {
+				kernelPanelAuthorise(f, gate, head, n, 2)
+			}
+			out, e = kernelPanelCreate(t, f, "1")
+			kernelPanelRequire(t, out, e)
+			before = kerneltest.Snapshot(t, f)
+			out, e = kernelPanelCreate(t, f, "1")
+			kernelPanelRefusal(t, out, e, "not authorized")
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("duplicate round wrote")
+			}
+		})
+	}
+	t.Run("passed and target", func(t *testing.T) {
+		f, gate, head := kernelPanelFixture(t)
+		kernelPanelAuthorise(f, gate, head, 1, 2)
+		f.Create(gate+".r1.R1", gate)
+		before := kerneltest.Snapshot(t, f)
+		out, e := kernelPanelCreate(t, f, "1", "--target", "another")
+		kernelPanelRefusal(t, out, e, "target must be")
+		if before != kerneltest.Snapshot(t, f) {
+			t.Fatal("target refusal wrote")
+		}
+		kernelPanelAssertUnpublished(t, f, gate+".r1.R1", filepath.Join(f.SpecDir, "reviews", "1"))
+		kerneltest.PassGate(f, gate, head)
+		out, e = kernelPanelCreate(t, f, "1")
+		kernelPanelRefusal(t, out, e, "closed")
+		out, e = kernelPanelCreate(t, f, "1", "--target", "another")
+		kernelPanelRefusal(t, out, e, "target must be")
+	})
+}
+func TestS134PanelCreate_CollisionHaltAndOpenSlot(t *testing.T) {
+	for _, mode := range []string{"collision", "halt", "slot"} {
+		t.Run(mode, func(t *testing.T) {
+			f, gate, head := kernelPanelFixture(t)
+			kernelPanelAuthorise(f, gate, head, 1, 2)
+			switch mode {
+			case "collision":
+				id := gate + ".r1.R1"
+				f.Fake.Records[id] = kernel.Record{ID: id, Type: "bug", Status: "open", Title: "foreign"}
+			case "halt":
+				d := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
+				kerneltest.Answer(f, d, "halt")
+			case "slot":
+				f.Create(gate+".r1.R1", gate)
+			}
+			before := kerneltest.Snapshot(t, f)
+			target := "1"
+			if mode == "halt" {
+				target = "2"
+			}
+			out, e := kernelPanelCreate(t, f, target)
+			word := map[string]string{"collision": "id-collision", "halt": "halted", "slot": "is open"}[mode]
+			kernelPanelRefusal(t, out, e, word)
+			if mode == "slot" {
+				kernelPanelRefusal(t, out, e, "mindspec panel launch "+shellQuoteTarget("1")+" R1 --spec "+shellQuoteTarget(f.SpecID))
+			}
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("refusal changed snapshot")
+			}
+		})
+	}
+}
+
+func TestS134PanelKernel_ListedRecoveryAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		cause   string
+		options []string
+		answer  string
+	}{
+		{"reject", []string{"fix", "halt"}, "fix"},
+		{"uncounted", []string{"redispatch", "halt"}, "redispatch"},
+		{"limit", []string{"continue:<n>", "halt"}, "continue:1"},
+	} {
+		verbs := []string{"create", "refute"}
+		if tc.cause == "limit" {
+			// Disposition verbs keep their existing limit exemption.
+			verbs = []string{"create"}
+		}
+		for _, verb := range verbs {
+			t.Run(tc.cause+"/"+verb, func(t *testing.T) {
+				f, gate, head := kernelPanelFixture(t)
+				kernelPanelAuthorise(f, gate, head, 1, 2)
+				kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "review", Round: 1, Subject: head, Slots: []string{"R1", "R2"}})
+				id := kerneltest.OpenDecision(f, gate, tc.cause, 1, tc.options...)
+				var out string
+				var err error
+				if verb == "create" {
+					out, err = kernelPanelCreate(t, f, "review", "--gate", "bead", "--target", "bead/"+f.Items[0])
+				} else {
+					out, err = kernelPanelRun(t, panelRefuteCmd, "review", "R1", "--spec", f.SpecID, "--finding", "ccr[0]", "--ground", "disproven", "--reason", "checked", "--evidence", "proof.txt", "--by", "operator")
+				}
+				if err == nil {
+					t.Fatal("open decision did not hold the panel verb")
+				}
+				message := strings.TrimSpace(out + err.Error())
+				lines := strings.Split(message, "\n")
+				count := 0
+				for _, line := range lines {
+					if strings.HasPrefix(line, "recovery:") {
+						count++
+					}
+				}
+				want := "recovery: mindspec submit " + id + " --answer " + tc.answer
+				if count != 1 || !strings.HasPrefix(lines[len(lines)-1], "recovery: mindspec submit "+id+" --answer ") {
+					t.Fatalf("decision recovery must be one final submit command: %s", message)
+				}
+				argv := strings.Fields(strings.TrimPrefix(lines[len(lines)-1], "recovery: "))
+				if len(argv) != 5 {
+					t.Fatalf("decision recovery has invalid arguments: %s", message)
+				}
+				_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: argv[2], Answer: argv[4]})
+				if err != nil {
+					t.Fatalf("printed recovery answer was refused: %v", err)
+				}
+				if lines[len(lines)-1] != want {
+					t.Fatalf("decision recovery must use the first non-halt option %q: %s", want, message)
+				}
+			})
+		}
+	}
+}
+func TestS134PanelCreate_LocalDecisionAndLease(t *testing.T) {
+	f, _, head := kernelPanelFixture(t)
+	gate := f.Items[1] + ".review"
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	fix := gate + ".r2.fix"
+	f.Create(fix, gate)
+	d := kerneltest.OpenDecision(f, gate, "reject", 1, "fix", "halt")
+	kerneltest.PassGate(f, f.Items[0]+".review", head)
+	f.Must(f.Store.SetStatusIf(f.Items[0], "open", "closed"))
+	_, e := kernel.Lease(f.State(), kernel.LeaseOptions{Step: fix}, kernel.LeaseDeps{})
+	kernelPanelRefusal(t, "", e, d)
+	out, e := kernelPanelCreate(t, f, "2")
+	kernelPanelRefusal(t, out, e, "mindspec submit "+d+" --answer fix")
+	_, e = kernel.Answer(f.State(), d, "fix")
+	f.Must(e)
+	_, e = kernel.Lease(f.State(), kernel.LeaseOptions{Step: fix}, kernel.LeaseDeps{})
+	f.Must(e)
+}
+func TestS134PanelRepanel_ScopeAndCount(t *testing.T) {
+	f, base, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, base, head, 1, 3)
+	out, e := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, e)
+	for _, slot := range []string{"R1", "R2", "R3"} {
+		kernelPanelVerdict(t, f, base, head, "1", slot, "APPROVE", 1)
+	}
+	kerneltest.PassGate(f, base, head)
+	gate := base + ".a2"
+	f.Create(gate, f.Items[0])
+	f.Must(f.Store.WriteMetadata(gate, map[string]any{kernel.KeyFrom: base, kernel.KeyRePanel: kernel.RePanel{SlotCount: 2, Paths: []string{"source.go"}}}))
+	kerneltest.Authorise(f, gate, kernel.GateRound{Round: 2, Subject: head, SlotCount: 2, Paths: []string{"source.go"}, Slots: []string{base + ".r2.R1", base + ".r2.R2"}})
+	out, e = kernelPanelCreate(t, f, "1", "--reviewers", "6")
+	kernelPanelRefusal(t, out, e, "requires 2")
+	out, e = kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, e)
+	r := kernelPanelRecord(t, f, gate)
+	reg, ok, e := kernel.Decode[kernel.RegistrationRecord](r.Metadata, kernel.KeyRegistration)
+	f.Must(e)
+	if !ok || reg.Round != 2 || !reflect.DeepEqual(reg.Slots, []string{"R1", "R2"}) {
+		t.Fatal(reg)
+	}
+	res, e := panel.Tally(filepath.Join(f.SpecDir, "reviews", "1"))
+	f.Must(e)
+	if res.Panel.KernelGate != gate || !reflect.DeepEqual(res.Panel.Scope, []string{"source.go"}) {
+		t.Fatal(res.Panel)
+	}
+	lines, e := panel.ReadLedger(res.Dir)
+	f.Must(e)
+	var round panel.RoundRecord
+	for _, line := range lines {
+		var candidate panel.RoundRecord
+		f.Must(json.Unmarshal(line, &candidate))
+		if candidate.Record == panel.RecordRound {
+			round = candidate
+		}
+	}
+	if round.Round != 2 || !reflect.DeepEqual(round.Scope, []string{"source.go"}) {
+		t.Fatal(round)
+	}
+}
+
+func kernelPanelVerdict(t *testing.T, f *kerneltest.Fixture, gate, head, slug, slot, word string, n int) string {
+	t.Helper()
+	dir := filepath.Join(f.SpecDir, "reviews", slug)
+	v := paneltest.Verdict(word)
+	v.Slot = slot
+	v.Round = n
+	v.ReviewedSHA = head
+	v.Model = "test-model"
+	if word == "REQUEST_CHANGES" {
+		v.ConcreteChangesRequired = []panel.ChangeRequired{{Text: "missing test", Basis: "traced"}}
+	}
+	data := paneltest.Bytes(t, v)
+	name := filepath.Join(dir, fmt.Sprintf("%s-round-%d.json", slot, n))
+	f.Must(os.WriteFile(name, data, 0644))
+	_, e := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: slug, Slot: slot, Round: n}, data, func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
+		return panel.SubmitResolution{Family: "harness", Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
+	})
+	f.Must(e)
+	id := fmt.Sprintf("%s.r%d.%s", gateBase(f.State(), gate), n, slot)
+	if _, ok := f.State().Records[id]; !ok {
+		f.Create(id, gate)
+	}
+	kernelPanelCloseSlot(t, f, id, data)
+	return name
+}
+
+// kernelPanelCloseSlot closes a slot step with its verdict stored as the step
+// record, as the slot submit does.
+func kernelPanelCloseSlot(t *testing.T, f *kerneltest.Fixture, id string, data []byte) {
+	t.Helper()
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(data))))
+	f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", RecordSHA256: fmt.Sprintf("%x", sha256.Sum256(data))}))
+	r, e := f.Store.Lookup(id)
+	f.Must(e)
+	if r.Status != "closed" {
+		f.Must(f.Store.SetStatusIf(id, r.Status, "closed"))
+	}
+}
+func TestS134PanelCreate_RoundAllowanceAcrossSlugs(t *testing.T) {
+	for _, final := range []bool{false, true} {
+		t.Run(fmt.Sprint(final), func(t *testing.T) {
+			f, gate, head := kernelPanelFixture(t)
+			extra := []string{}
+			if final {
+				gate = f.Epic + ".final"
+				extra = []string{"--gate", "final_review"}
+				for _, item := range f.Items {
+					kerneltest.PassGate(f, item+".review", head)
+					f.Must(f.Store.SetStatusIf(item, "open", "closed"))
+				}
+
+			}
+			for n := 1; n <= 5; n++ {
+				slug := "A"
+				if n > 3 {
+					slug = "B"
+				}
+				kernelPanelAuthorise(f, gate, head, n, 2)
+				if n > 1 {
+					fix := fmt.Sprintf("%s.r%d.fix", gate, n)
+					f.Create(fix, gate)
+					kernelPanelClose(t, f, fix, head)
+				}
+				out, e := kernelPanelCreate(t, f, slug, append(extra, "--bead", func() string {
+					if final {
+						return ""
+					}
+					return f.Items[0]
+				}())...)
+				kernelPanelRequire(t, out, e)
+				kernelPanelVerdict(t, f, gate, head, slug, "R1", "REQUEST_CHANGES", n)
+				kernelPanelVerdict(t, f, gate, head, slug, "R2", "REQUEST_CHANGES", n)
+				if n == 3 {
+					out, e = kernelPanelRun(t, panelAbandonCmd, "A", "--spec", f.SpecID, "--reason", "use B", "--by", "operator")
+					kernelPanelRequire(t, out, e)
+				}
+			}
+			create := func() (string, error) {
+				args := append([]string{}, extra...)
+				if !final {
+					args = append(args, "--bead", f.Items[0])
+				}
+				return kernelPanelCreate(t, f, "B", args...)
+			}
+			if !final {
+				// Before the tally pass opens a decision, the allowance still holds.
+				out, e := create()
+				kernelPanelRefusal(t, out, e, "round 6 exceeds the allowance")
+				kernelPanelAuthorise(f, gate, head, 6, 2)
+				out, e = create()
+				kernelPanelRefusal(t, out, e, "round 6 exceeds the allowance")
+				kernelPanelAuthorise(f, gate, head, 5, 2)
+			}
+			// A completed refused tally at the limit is verified before its decision.
+			_, e := kernel.Pass(kernel.Rules(), f.State(), true)
+			f.Must(e)
+			kernelPanelReproduce(t, f, gate)
+			if got := kernel.Allowance(f.State(), gate); got != 5 {
+				t.Fatalf("want allowance 5, got %d", got)
+			}
+			d := gate + ".decide.limit.r5"
+			decisions := f.State().OpenDecisions()
+			if len(decisions) != 1 || decisions[0].Key() != d {
+				t.Fatalf("want the round-5 limit decision: %+v", decisions)
+			}
+			decision, ok, e := kernel.Decode[kernel.DecisionRecord](decisions[0].Metadata, kernel.KeyDecision)
+			f.Must(e)
+			if !ok || !reflect.DeepEqual(decision.Options, []string{"continue:<n>", "halt"}) {
+				t.Fatal("wrong limit options", decision)
+			}
+			before := kerneltest.Snapshot(t, f)
+			out, e := create()
+			kernelPanelRefusal(t, out, e, "answer decision "+d+" first")
+			kernelPanelRefusal(t, out, e, "recovery: mindspec submit "+d+" --answer continue:1")
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("decision refusal wrote")
+			}
+			_, e = kernel.Answer(f.State(), d, "continue:1")
+			f.Must(e)
+			if got := kernel.Allowance(f.State(), gate); got != 6 {
+				t.Fatalf("want allowance 6, got %d", got)
+			}
+			fix := gate + ".r6.fix"
+			if r := kernelPanelRecord(t, f, fix); r.Status != "open" {
+				t.Fatal("continuation did not create an open fix", r)
+			}
+			before = kerneltest.Snapshot(t, f)
+			out, e = create()
+			kernelPanelRefusal(t, out, e, "round 6 is not authorized")
+			if before != kerneltest.Snapshot(t, f) {
+				t.Fatal("unauthorized round wrote")
+			}
+			kernelPanelClose(t, f, fix, head)
+			_, e = kernel.Pass(kernel.Rules(), f.State(), true)
+			f.Must(e)
+			if r := kernelPanelRecord(t, f, fix); r.Status != "closed" {
+				t.Fatal("continuation replaced completed fix", r)
+			}
+			for _, r := range f.State().Records {
+				tuple, ok, _ := r.Tuple()
+				if ok && tuple.Kind == "fix" && tuple.Gate == gate && r.Key() != fix && tuple.Round > 5 {
+					t.Fatal("continuation created a second fix", r)
+				}
+			}
+			kernelPanelDraftLens(t, f, gate)
+			out, e = create()
+			kernelPanelRequire(t, out, e)
+			kernelPanelVerdict(t, f, gate, head, "B", "R1", "REQUEST_CHANGES", 6)
+			kernelPanelVerdict(t, f, gate, head, "B", "R2", "REQUEST_CHANGES", 6)
+			if !final {
+				out, e = create()
+				kernelPanelRefusal(t, out, e, "round 7 exceeds the allowance")
+			}
+			kernelPanelReproduce(t, f, gate)
+			_, e = kernel.Pass(kernel.Rules(), f.State(), true)
+			f.Must(e)
+			out, e = create()
+			kernelPanelRefusal(t, out, e, "answer decision "+gate+".decide.limit.r6 first")
+		})
+	}
+}
+
+// TestS134PanelSubmit_StdinNamesPromptCommand checks that a slot of a governed
+// spec refuses a verdict on stdin, with and without a lease, and that the
+// printed command runs and leads to the verdict path and the submit command.
+func TestS134PanelSubmit_StdinNamesPromptCommand(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, e := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, e)
+	id := gate + ".r1.R1"
+	lease, e := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+	f.Must(e)
+	want := "recovery: mindspec panel prompt '1' --slot R1 --spec '" + f.SpecID + "', then write the verdict to the path it names and run the submit command it prints"
+	args := []string{"1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", "-"}
+	for _, extra := range [][]string{nil, {"--lease", lease.Token}} {
+		out, e = kernelPanelRun(t, panelSubmitCmd, append(append([]string{}, args...), extra...)...)
+		kernelPanelLastRecovery(t, out, e, want)
+		if r := kernelPanelRecord(t, f, id); r.Status == "closed" {
+			t.Fatal("stdin submit closed the slot")
+		}
+	}
+	printed := strings.TrimPrefix(want, guard.RecoveryPrefix)
+	words := shellWords(t, printed[:strings.Index(printed, ", then ")])
+	if strings.Join(words[:3], " ") != "mindspec panel prompt" {
+		t.Fatalf("printed command is not a panel prompt: %q", printed)
+	}
+	out, e = kernelPanelRun(t, panelPromptCmd, words[3:]...)
+	kernelPanelRequire(t, out, e)
+	// With no slot attempt yet, the prompt first names the attempt command and
+	// the prompt that then prints the verdict path and the submit command.
+	if !strings.Contains(out, "mindspec panel checkout '1' --spec '"+f.SpecID+"' --slot 'R1' --dispatch") || !strings.Contains(out, "mindspec panel prompt '1' --spec '"+f.SpecID+"' --slot 'R1'") {
+		t.Fatalf("prompt does not name the attempt and submission commands:\n%s", out)
+	}
+}
+
+func TestS134PanelSubmit_LeaseReceiptAndForeignSnapshot(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	foreign := kernelPanelForeign(t, f)
+	out, e := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, e)
+	kernelPanelCheckForeign(t, f, foreign)
+	id := gate + ".r1.R1"
+	lease, e := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
+	f.Must(e)
+	v := paneltest.Verdict("APPROVE")
+	v.Slot = "R1"
+	v.Round = 1
+	v.ReviewedSHA = head
+	v.Model = "test-model"
+	file := filepath.Join(f.SpecDir, "reviews", "1", "R1-round-1.json")
+	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
+	foreign = kernelPanelProtect(t, f)
+	args := []string{"1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--file", file}
+	out, e = kernelPanelRun(t, panelSubmitCmd, args...)
+	want := "recovery: mindspec panel submit '1' --file " + shellQuoteTarget(file) + " --slot 'R1' --round 1 --spec " + shellQuoteTarget(f.SpecID) + " --lease <token> (the token that mindspec lease " + shellQuoteTarget(id) + " printed)"
+	argv := kernelPanelLastRecovery(t, out, e, want)
+	kernelPanelAssertUnpublished(t, f, id, filepath.Dir(file))
+	out, e = kernelPanelRunPrinted(t, argv, lease.Token)
+	kernelPanelRequire(t, out, e)
+	r := kernelPanelRecord(t, f, id)
+	receipt, ok, e := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
+	f.Must(e)
+	if !ok || r.Status != "closed" || receipt.RecordSHA256 == "" || receipt.Path != "" {
+		t.Fatal(r)
+	}
+	f.Must(kernel.ValidReceipt(f.Root, receipt, r.Metadata))
+	submitted, e := panel.LatestSubmissions(filepath.Dir(file), 1)
+	f.Must(e)
+	if len(submitted) != 1 || submitted["R1"].Seq == 0 || !strings.Contains(out, "R1 final") {
+		t.Fatalf("verdict not published: %s %+v", out, submitted)
+	}
+	kernelPanelCheckForeign(t, f, foreign)
+}
+
+func kernelPanelDischarge(t *testing.T, deferIt bool, limit bool) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, e := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, e)
+	kernelPanelVerdict(t, f, gate, head, "1", "R1", "REQUEST_CHANGES", 1)
+	kernelPanelVerdict(t, f, gate, head, "1", "R2", "APPROVE", 1)
+	extra := gate + ".r2.fix"
+	if limit {
+		extra = kerneltest.OpenDecision(f, gate, "limit", 1, "continue:<n>", "halt")
+	} else {
+		f.Create(extra, gate)
+	}
+	foreign := kernelPanelForeign(t, f)
+	args := []string{"1", "--spec", f.SpecID, "--slot", "R1", "--round", "1", "--by", "operator"}
+	if deferIt {
+		fake := fakeDeferralBD(t)
+		rebindWrite(t, fake, "epics.json", fmt.Sprintf(`[{"id":%q,"issue_type":"epic","metadata":{"spec_id":%q}}]`, f.Epic, f.SpecID))
+		rebindWrite(t, fake, "follow-up.json", fmt.Sprintf(`[{"id":"follow-up","status":"open","description":"missing test","dependencies":[{"id":%q,"dependency_type":"discovered-from"}]}]`, f.Epic))
+		out, e = kernelPanelRun(t, panelDeferCmd, append(args, "--bead", "follow-up")...)
+	} else {
+		out, e = kernelPanelRun(t, panelRefuteCmd, append(args, "--ground", "disproven", "--reason", "covered", "--evidence", "proof.txt")...)
+	}
+	kernelPanelRequire(t, out, e)
+	for id, want := range map[string]string{gate: "passed", extra: "superseded"} {
+		r := kernelPanelRecord(t, f, id)
+		receipt, ok, e := kernel.Decode[kernel.Receipt](r.Metadata, kernel.KeyClose)
+		f.Must(e)
+		if r.Status != "closed" || !ok || receipt.Kind != want {
+			t.Fatalf("%s: %+v", id, r)
+		}
+		f.Must(kernel.ValidReceipt(f.Root, receipt, r.Metadata))
+	}
+	if deferIt {
+		_, ok, e := kernel.Decode[kernel.DeferRecord](kernelPanelRecord(t, f, gate).Metadata, kernel.KeyDefer)
+		f.Must(e)
+		if !ok {
+			t.Fatal("defer audit missing")
+		}
+	}
+	next, e := kernel.NextAction(f.State(), false)
+	f.Must(e)
+	complete := false
+	for _, run := range next.Run {
+		if reflect.DeepEqual(run.Argv, []string{"mindspec", "panel", "create", f.Items[0]}) {
+			t.Fatal("passed gate opens another round")
+		}
+		if reflect.DeepEqual(run.Argv, []string{"mindspec", "complete", f.Items[0]}) {
+			complete = true
+		}
+	}
+	if !complete {
+		t.Fatalf("complete missing: %+v", next)
+	}
+	kernelPanelCheckForeign(t, f, foreign)
+}
+func TestS134PanelRefute_RetallySupersedes(t *testing.T) {
+	for _, limit := range []bool{false, true} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) { kernelPanelDischarge(t, false, limit) })
+	}
+}
+func TestS134PanelDefer_RetallySupersedes(t *testing.T) {
+	for _, limit := range []bool{false, true} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) { kernelPanelDischarge(t, true, limit) })
+	}
+}
+func TestS134PanelRebind_OnePassAndForeignSnapshot(t *testing.T) {
+	for _, refused := range []bool{false, true} {
+		t.Run(fmt.Sprint(refused), func(t *testing.T) {
+			f, gate, head := kernelPanelFixture(t)
+			kernelPanelAuthorise(f, gate, head, 1, 2)
+			out, e := kernelPanelCreate(t, f, "1")
+			kernelPanelRequire(t, out, e)
+			kernelPanelVerdict(t, f, gate, head, "1", "R1", "APPROVE", 1)
+			kernelPanelVerdict(t, f, gate, head, "1", "R2", "APPROVE", 1)
+			kerneltest.PassGate(f, gate, head)
+			path := "source.go"
+			if refused {
+				path = ".mindspec/config.yaml"
+			}
+			rebindWrite(t, f.Root, path, "changed\n")
+			actorCmdGit(t, f, "add", ".")
+			actorCmdGit(t, f, "-c", "user.name=Kernel Test", "-c", "user.email=kernel@example.invalid", "commit", "-qm", "changed")
+			tip := actorCmdGit(t, f, "rev-parse", "HEAD")
+			actorCmdGit(t, f, "update-ref", "refs/heads/bead/"+f.Items[0], tip)
+			foreign := kernelPanelForeign(t, f)
+			calls := 0
+			reg := kernel.NewRegistry("counter")
+			f.Must(reg.Register("counter", kernel.Ordinary, func(kernel.State) (kernel.Changes, error) { calls++; return kernel.Changes{}, nil }))
+			kerneltest.WithRules(t, reg)
+			out, e = kernelPanelRun(t, panelRebindCmd, "1", "--spec", f.SpecID, "--reason", "operator: reviewed diff")
+			if refused {
+				kernelPanelRefusal(t, out, e, "config.yaml")
+				if calls != 0 {
+					t.Fatal("refused rebind ran pass", calls)
+				}
+			} else {
+				kernelPanelRequire(t, out, e)
+				if calls != 1 {
+					t.Fatal("successful rebind pass count", calls)
+				}
+			}
+			kernelPanelCheckForeign(t, f, foreign)
+		})
+	}
+}
+func TestS134PanelCreate_PlanRoundsWarn(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, e := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, e)
+	// Document gates remain count-and-warn even when the work lifecycle is enrolled.
+	for n := 1; n <= 6; n++ {
+		out, e := kernelPanelRun(t, panelCreateCmd, "plan", "--spec", f.SpecID, "--gate", "plan_approve", "--target", "spec/"+f.SpecID, "--round", fmt.Sprint(n))
+		kernelPanelRequire(t, out, e)
+		if n <= 5 && strings.Contains(out, "warning:") {
+			t.Fatal("early round warning", out)
+		}
+		if n == 6 && (strings.Count(out, "warning:") != 1 || !strings.Contains(out, "count 6")) {
+			t.Fatal("sixth round warning", out)
+		}
+	}
+	_ = head
+}
+func TestS134SeedMatch_Register(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, e := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, e)
+	actual := kernelPanelRecord(t, f, gate)
+	registration, _, e := kernel.Decode[kernel.RegistrationRecord](actual.Metadata, kernel.KeyRegistration)
+	f.Must(e)
+	dir := filepath.Join(f.SpecDir, "reviews", "1")
+	res, e := panel.Tally(dir)
+	f.Must(e)
+	// A twin has the same store, refs and committed content, with no panel files.
+	twin := kerneltest.Enrolled(t, kerneltest.WithFake(true))
+	twin.Root = f.Root
+	twin.SpecDir = filepath.Join(f.Root, ".mindspec", "specs", "seed-copy")
+	twin.SpecID = f.SpecID
+	twin.Store.Root = f.Root
+	kernelPanelAuthorise(twin, gate, head, 1, 2)
+	kerneltest.Register(twin, gate, registration)
+	seeded := kernelPanelRecord(t, twin, gate)
+	if !reflect.DeepEqual(actual.Metadata, seeded.Metadata) {
+		t.Fatalf("registration metadata mismatch\n%+v\n%+v", actual.Metadata, seeded.Metadata)
+	}
+	seedDir := filepath.Join(twin.SpecDir, "reviews", "1")
+	seed, e := panel.Tally(seedDir)
+	f.Must(e)
+	if !reflect.DeepEqual(res.Panel, seed.Panel) {
+		t.Fatalf("snapshot mismatch\n%+v\n%+v", res.Panel, seed.Panel)
+	}
+	a, e := panel.ReadLedger(dir)
+	f.Must(e)
+	b, e := panel.ReadLedger(seedDir)
+	f.Must(e)
+	normal := func(lines [][]byte) []map[string]any {
+		result := []map[string]any{}
+		for _, line := range lines {
+			var m map[string]any
+			f.Must(json.Unmarshal(line, &m))
+			delete(m, "created_at")
+			result = append(result, m)
+		}
+		return result
+	}
+	if !reflect.DeepEqual(normal(a), normal(b)) {
+		t.Fatalf("round ledger mismatch\n%s\n%s", a, b)
+	}
+}
+
+func TestS134PanelCreate_CommandResolvesEnrolledGate(t *testing.T) {
+	bin := buildMindspecBinary(t)
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	store := actorCmdStore(t, f)
+	out, code := actorCmdRun(t, f, bin, "panel", "create", "1")
+	if code != 0 {
+		t.Fatalf("create command: %d %s", code, out)
+	}
+	row := actorCmdRead(t, store, gate)
+	reg, ok, e := kernel.Decode[kernel.RegistrationRecord](row.Metadata, kernel.KeyRegistration)
+	f.Must(e)
+	if !ok || reg.Subject != head || len(reg.Slots) != 2 {
+		t.Fatal("command registration", row)
+	}
+	before, e := os.ReadFile(store)
+	f.Must(e)
+	out, code = actorCmdRun(t, f, bin, "panel", "create", "1")
+	after, e := os.ReadFile(store)
+	f.Must(e)
+	if code == 0 || !strings.Contains(out, "not authorized") || !bytes.Equal(before, after) {
+		t.Fatalf("duplicate command: %d %s", code, out)
+	}
+}
+
+func TestS134PanelCreate_KeepsBindingAndBriefRefusals(t *testing.T) {
+	for _, mode := range []string{"final-bead", "bead-without-item", "blank-brief"} {
+		t.Run(mode, func(t *testing.T) {
+			f, gate, head := kernelPanelFixture(t)
+			kernelPanelAuthorise(f, gate, head, 1, 2)
+			args := []string{"1", "--spec", f.SpecID}
+			word := ""
+			switch mode {
+			case "final-bead":
+				args = append(args, "--gate", "final_review", "--bead", f.Items[0])
+				word = "--bead is only valid"
+			case "bead-without-item":
+				args[0] = f.SpecID
+				args = append(args, "--gate", "bead")
+				word = "requires a recorded work item"
+			case "blank-brief":
+				args = append(args, "--brief-file", "")
+				word = "--brief-file is not accepted"
+			}
+			before := kerneltest.Snapshot(t, f)
+			out, e := kernelPanelRun(t, panelCreateCmd, args...)
+			kernelPanelRefusal(t, out, e, word)
+			if kerneltest.Snapshot(t, f) != before {
+				t.Fatal("binding or brief refusal wrote")
+			}
+		})
+	}
+}
+
+func TestS134PanelDefer_RepeatedEvents(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kernelPanelAuthorise(f, gate, head, 1, 2)
+	out, err := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, err)
+	for _, slot := range []string{"R1", "R2"} {
+		kernelPanelVerdict(t, f, gate, head, "1", slot, "REQUEST_CHANGES", 1)
+	}
+	fake := fakeDeferralBD(t)
+	rebindWrite(t, fake, "epics.json", fmt.Sprintf(`[{"id":%q,"issue_type":"epic","metadata":{"spec_id":%q}}]`, f.Epic, f.SpecID))
+	rebindWrite(t, fake, "follow-up.json", fmt.Sprintf(`[{"id":"follow-up","status":"open","description":"missing test","dependencies":[{"id":%q,"dependency_type":"discovered-from"}]}]`, f.Epic))
+	for _, slot := range []string{"R1", "R1", "R2"} {
+		out, err = kernelPanelRun(t, panelDeferCmd, "1", "--spec", f.SpecID, "--slot", slot, "--round", "1", "--by", "operator", "--bead", "follow-up")
+		kernelPanelRequire(t, out, err)
+	}
+	result, err := panel.Tally(filepath.Join(f.SpecDir, "reviews", "1"))
+	f.Must(err)
+	t.Logf("panel effective deferrals=%d", len(result.EffectiveDeferrals()))
+	if len(result.EffectiveDeferrals()) != 2 {
+		t.Fatal("probe did not establish two effective deferrals")
+	}
+	for replay := 0; replay < 2; replay++ {
+		rows, err := kernel.Audit(f.State(), nil)
+		f.Must(err)
+		for _, row := range rows {
+			if row.Event == "deferrals" {
+				t.Logf("replay %d: deferrals=%d after two successful panel defer commands", replay, row.Count)
+				if row.Count != 2 {
+					t.Errorf("deferral audit lost an event: got %d, want 2", row.Count)
+				}
+			}
+		}
+	}
+}
+
+func TestS134PanelCreate_StoresDirectoryHistory(t *testing.T) {
+	f, gate, head := kernelPanelFixture(t)
+	kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "older", Round: 1, Subject: head, Slots: []string{"R1", "R2"}})
+	kernelPanelAuthorise(f, gate, head, 2, 2)
+	out, err := kernelPanelCreate(t, f, "1")
+	kernelPanelRequire(t, out, err)
+	reg, ok, err := kernel.Decode[kernel.RegistrationRecord](kernelPanelRecord(t, f, gate).Metadata, kernel.KeyRegistration)
+	f.Must(err)
+	prefix := ".mindspec/specs/" + f.SpecID + "/reviews/"
+	want := []string{prefix + "1", prefix + "older"}
+	if !ok || !reflect.DeepEqual(reg.Directories, want) {
+		t.Fatalf("recorded directories=%v want=%v", reg.Directories, want)
+	}
+}

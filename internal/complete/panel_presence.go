@@ -8,6 +8,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
 )
@@ -20,6 +21,8 @@ type beadPanelPresence struct {
 	closed         bool
 	absent         bool
 	ignore         bool
+	// records gives the stored slot verdicts of an enrolled spec.
+	records panel.RecordSource
 }
 
 func (p *beadPanelPresence) check(beadID string, enabled bool, out io.Writer) error {
@@ -75,4 +78,12 @@ func panelGate(beadID string, roots []string, wtPath string, enabled bool, out i
 		p.policy = cfg.Enforcement.PanelPresence
 	}
 	return panelGateWithPresence(beadID, roots, wtPath, enabled, out, p)
+}
+
+// source returns the record source of p. A nil p reads the disk files only.
+func (p *beadPanelPresence) source() panel.RecordSource {
+	if p == nil {
+		return nil
+	}
+	return p.records
 }

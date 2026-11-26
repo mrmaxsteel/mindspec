@@ -1,83 +1,44 @@
 ---
 name: ms-spec-autopilot
-description: Whole-spec orchestrator — cycle every ready bead until the spec is done, then run impl approve
+description: Run the binary's kernel loop for a plan-approved spec until the binary reports done
 ---
 
 # Spec Autopilot
 
-The headline skill. Take a mindspec-approved plan and drive it bead-by-bead to completion. Each bead goes through `/ms-bead-cycle` (which owns pick + claim in its step 0). The autopilot sequences: it loops the cycle until no beads remain, then approves impl.
-
-**Beads run serially by design; parallelism lives inside each cycle** (across the configured panel reviewers + the impl subagent). There is no fan-out-across-beads mode — the cycle is the unit of work, one bead at a time.
-
-Include the standard guardrails (AGENTS.md § Bead-loop guardrails) — the orchestrator rules apply across the whole loop (one push at end-of-spec, never raw-merge).
+The binary selects the work, checks the gates and prints each command.
+This skill runs that loop for the whole spec until `status` is `done`.
 
 ## Inputs
 
-- `spec-slug` (optional) — defaults to the active spec from `mindspec state show`.
-- `max-rounds-per-bead` (default `3`) — passed through to `/ms-bead-cycle`.
+- `spec-slug` (optional): the spec. Ask the user when more than one spec is active.
+- `panel-slug` (optional): the panel, when the user starts this skill for a panel.
 
-## Sequence
+## Panel
 
-```
-loop:
-  /ms-bead-cycle            (step 0 picks + claims the next eligible bead, then runs it end-to-end)
-    ↓ no bead available?
-        if all spec beads closed → /ms-spec-final-review → /ms-impl-approve → exit
-        else → halt (deps not satisfiable, ask user)
-    ↓ merged?
-        yes → loop
-        halted → exit, return state to user
-```
+When the user starts this skill for a panel, run `mindspec panel tally <panel-slug>`.
 
-## Sequencing rules
+- It exits non-zero and prints no `decision:` line: report the error to the user and stop.
+- It prints a `Next` block: run the lines of that block above `For the operator, run one of these:`, then stop. Do not run `next-action --apply`.
+- It prints no `Next` block, which only a kernel gate does: go to the loop.
 
-- **Trust the plan dep graph over `bd ready`.** `bd ready` only knows the explicit `bd add-dep` edges; the plan's `Depends on:` lines are the authoritative source. If `bd ready` shows a bead the plan says is blocked, `bd update <bead> --add-dep <blocker>` to fix `bd` rather than working around it. (The cycle's step 0 performs this cross-check.)
+## Loop
 
-- **Pick the lowest-depth bead first.** Among eligible beads, choose the one with the shortest dep-path back to Bead 1. Front-loads the chain, exposes downstream deps soonest.
+1. Run `mindspec next-action --apply <spec-slug> --json`.
+   If it refuses, run the commands that the refusal and `mindspec instruct` print.
+2. For each entry in `actions`, run its `claim` argv (`mindspec lease <step>`) and keep the token.
+   Run its `brief` argv. Start a fresh agent with that output as its prompt.
+   If the `brief` argv exits non-zero, start no agent and follow the `mindspec instruct` rules.
+   Renew a long lease with `mindspec lease <step> --renew <token>`.
+3. When the agent returns, run the action's `submit` argv with the token and the evidence:
+   `--commit <oid>` for an implement or fix step; `--record <path>` for a lens, verify or
+   change-judge step, at the record path that its brief names; `--artifact <path>` for a review slot.
+   If `submit` refuses, run its recovery line.
+4. Run each `run` entry's `argv` as printed.
+5. For each entry in `decisions`, follow the `mindspec instruct` rules.
+6. Read `status`:
+   - `work`: go to step 1.
+   - `wait`: report `waiting` and `retry_at` to the user, wait, then go to step 1.
+   - `done`: report the result to the user and stop.
+   - any other status: report it and each flag to the user, and stop.
 
-- **One halted bead halts the spec.** If `/ms-bead-cycle` returns halted, don't skip to the next bead. The halt usually signals the plan needs revision, not just that one bead is hard.
-
-## Stop conditions
-
-| Condition | Action |
-|:----------|:-------|
-| All spec-owned beads closed | `/ms-spec-final-review` → `/ms-impl-approve` → exit |
-| Any bead REJECT verdict | Halt, return to user with verdict JSONs |
-| `max-rounds-per-bead` exceeded on any bead | Halt, leave bead `in_progress` |
-| `bd ready` shows beads but none satisfy plan deps | Halt, report dep-graph mismatch |
-| Two consecutive impl-subagent failures on same bead | Halt, ask user |
-| Bead returns an ACCEPTed `NOT READY` | Halt at the bead level; surface the ordinal-numbered report + revision routing; do NOT proceed to the next bead |
-
-## Reporting
-
-After each bead merges, report to the user (concise):
-
-```
-✓ <bead-id> merged in <K> rounds (round 1: <verdict tally>, round K: <N>/<N> APPROVE)
-  Commit: <merge sha>
-  Test summary: <pass/fail/skip>
-  Deviations folded into BRIEF for next round: <yes/no>
-
-Next: <bead-id> claimed, /ms-bead-cycle starting.
-```
-
-After the spec is done:
-
-```
-✓ Spec <spec-slug> complete. <N> beads merged in <T> minutes total.
-  Avg rounds per bead: <R>
-  Beads that needed 0 fix rounds: <X> / <N>
-  Beads that hit max-rounds: <Y> / <N>
-  /ms-impl-approve executed; spec branch ready for review-mode merge to main.
-```
-
-## Anti-patterns
-
-- Don't keep going after a halt. The plan needs human attention.
-- Don't `git push` mid-spec to "save progress". Push at end-of-spec only (single CI run per spec — AGENTS.md § Bead-loop guardrails).
-- Don't claim two beads at once. Beads run serially by design — the cycle is the unit of work.
-- Don't run `/ms-impl-approve` while beads are still open. The skill checks this, but failing the check wastes time.
-
-## Composition
-
-This skill is a thin loop around `/ms-bead-cycle`. The decision-making lives in the cycle and the smaller skills; autopilot just sequences them. If you find yourself adding logic here, ask whether it belongs in `/ms-bead-cycle` first.
+Run the `repair` line of each flag. Follow the orchestrator rules that `mindspec instruct` prints.

@@ -147,6 +147,18 @@
 # reuse, not a special case.
 
 [opaque_operand_registry]
+internal/executor/finalize_artifacts.go	finalizeArtifactRefusal	arg2:unprovable
+cmd/mindspec/panel_prompt.go	resolvePanelPrompt	arg1:unprovable
+cmd/mindspec/panel_kernel.go	panelKernelGuard	arg1:unprovable
+cmd/mindspec/panel_kernel.go	tryKernelPanelCreate	arg1:unprovable
+cmd/mindspec/panel_submit.go	runPanelSubmit	arg1:unprovable
+internal/approve/impl_kernel.go	implKernelPreflight	arg1:unprovable
+# Enrolment recovery operands use safe ID renderers. Their registry
+# entries carry the source-template and destructive-floor test obligation.
+internal/approve/enrol.go	approveEnrolment	arg1:unprovable
+internal/approve/enrol.go	enrolEdit	arg1:unprovable
+internal/approve/enrol.go	enrolWaits.check	arg1:unprovable
+internal/approve/enrol.go	enrolAddLink	arg1:unprovable
 internal/approve/doc_declarations.go	implDocGate	arg1:unprovable
 internal/approve/doc_declarations.go	implDocGate	arg2:unprovable
 internal/complete/check.go	reportContentGates	arg2:unprovable
@@ -161,7 +173,7 @@ internal/complete/check.go	reportContentGates	arg1:unprovable
 internal/complete/closing.go	commitPanelLedgers	arg1:unprovable
 internal/complete/closing.go	unignoredLedgers	arg1:unprovable
 internal/complete/closing.go	unignoredLedgers	arg2:unprovable
-cmd/mindspec/panel_defer.go	runPanelDefer	arg1:unprovable
+cmd/mindspec/panel_defer.go	runPanelDeferBody	arg1:unprovable
 internal/approve/impl.go	implFinalizeFailure	arg1:unprovable
 internal/lifecycle/merge_state.go	RestoreMergeRecovery	variadic-spread:commands
 internal/lifecycle/stale_open.go	StaleOpenBead.Message	arg1:unprovable
@@ -174,7 +186,7 @@ cmd/mindspec/panel.go	findPanelRegistration	arg1:unprovable
 cmd/mindspec/panel.go	panelCreateFailure	arg1:unprovable
 cmd/mindspec/panel.go	panelCreateCmd	arg1:unprovable
 cmd/mindspec/panel.go	tallyExitAction	arg1:unprovable
-cmd/mindspec/panel.go	tallyExitActionNonBead	arg1:unprovable
+cmd/mindspec/panel.go	tallyNextBlockExit	arg1:unprovable
 cmd/mindspec/reattest.go	reattestRefusalFailure	arg1:unprovable
 cmd/mindspec/reattest.go	reattestRefusalFailure	arg2:unprovable
 cmd/mindspec/reattest.go	reattestRefusalFailure	variadic-spread:recovery
@@ -282,15 +294,10 @@ internal/complete/merge_only.go	runMergeOnly	arg1:unprovable
 # removes their registries.go KnownSitesExemptionList entries — bead 7
 # deletes the orchestrator's raw bypass block outright (spec 127
 # R5(e)), so none of these four strings remains on that surface for an
-# exemption entry to cover. Ten live entries remain below.
-.claude/skills/ms-bead-cycle/SKILL.md	**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.	1	git merge
-.claude/skills/ms-bead-cycle/SKILL.md	3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).	1	git merge
+# exemption entry to cover. The six ms-bead-cycle lines left when that
+# skill became a harness adapter that names no merge.
 .claude/skills/ms-impl-approve/SKILL.md	bead branch already raw-`git merge`d and then `bd close`d,	1	git merge
 agentsMDBlockTemplate	- **Never merge a bead branch with raw `git merge bead/<id>`** — only `mindspec complete` merges. Raw merge bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on automatic merge commits, so raw merge is the obvious gate workaround).	1	git merge
 claudeMDManagedBlock	See **AGENTS.md § Bead-loop guardrails (mindspec)** for the canonical orchestrator rules and subagent prompt fences (only the cycle runs `mindspec complete`, after the panel gate passes; never raw `git merge bead/<id>`; one `git push` at end-of-spec; subagents make exactly one commit, tests must PASS). Surviving skills reference that section rather than re-stating it.	1	git merge
-ms-bead-cycle	**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.	1	git merge
-ms-bead-cycle	3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).	1	git merge
 ms-impl-approve	bead branch already raw-`git merge`d and then `bd close`d,	1	git merge
-plugins/mindspec/skills/ms-bead-cycle/SKILL.md	**Partial-failure rule (verbatim):** "Don't proceed to the next bead if the merge failed mid-way (e.g. a check stopped between bd-close and the actual git merge). Resolve the failure first." Re-running `mindspec complete <id>` after a partial failure is the documented recovery path; the gate passes a deleted-branch / missing-worktree rerun through to `complete`'s own idempotent handling.	1	git merge
-plugins/mindspec/skills/ms-bead-cycle/SKILL.md	3. **Do NOT push, do NOT raw-merge.** The user-controlled push gate is at end-of-spec (after `/ms-impl-approve`), not per-bead. **Never merge a bead branch with raw `git merge bead/<id>`** — it bypasses `bd` closure, worktree cleanup, AND the panel gate (no git hook fires on merge commits; raw merge is the obvious gate workaround). Only `mindspec complete` merges bead branches (AGENTS.md, Bead-loop guardrails).	1	git merge
 project-docs/user/guides/merge-safety.md	git -C "<spec worktree>" checkout <merge> -- <paths>	1	git checkout -- <path>

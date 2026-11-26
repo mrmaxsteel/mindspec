@@ -1,9 +1,13 @@
 package approve
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -75,7 +79,7 @@ func setupPreflightPlan(t *testing.T, specID, planContent string) (root, planPat
 	// seams), exactly like EnsureMigrated's own tests already stub this
 	// same seam for its (rarer) migration write.
 	noopStubPhaseMergeMetadataForTest(t)
-	root = t.TempDir()
+	root = planFixtureRoot(t)
 	if err := os.MkdirAll(filepath.Join(root, ".mindspec"), 0755); err != nil {
 		t.Fatalf("mkdir .mindspec: %v", err)
 	}
@@ -252,87 +256,38 @@ func TestApprovePlan_Preflight_GenuinelyAbsentEpic_RefusesPreMutation(t *testing
 }
 
 func TestApprovePlan_Preflight_ChildQueryFailure_RefusesPreMutation(t *testing.T) {
-	specID := "042-test"
-	root, planPath, original := setupPreflightPlan(t, specID, validSingleBeadPlan)
-	forbidBDCalls(t)
-
-	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
-		for _, a := range args {
-			if a == "--type=epic" {
-				return epicJSONFor("epic-42", specID), nil
-			}
+	f := enrolFixture(t)
+	before, _ := json.Marshal(f.Fake.Records)
+	f.Fake.Hook = func(args []string) error {
+		if len(args) > 0 && args[0] == "list" {
+			return fmt.Errorf("child-query failure")
 		}
-		return []byte(`[]`), nil
-	})
-	defer restoreList()
-	// EnsureMigrated (ahead of preflight) reads the resolved epic via `bd
-	// show`; the fixture epic already carries mindspec_phase, so this
-	// returns "already migrated" without ever calling mergeMetadataFn.
-	restoreRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "show" {
-			return epicJSONFor("epic-42", specID), nil
-		}
-		return []byte(`[]`), nil
-	})
-	defer restoreRunBD()
-
-	origList := planListJSONFn
-	defer func() { planListJSONFn = origList }()
-	planListJSONFn = func(args ...string) ([]byte, error) {
-		return nil, fmt.Errorf("bd list --parent: connection refused")
+		return nil
+	}
+	_, err := enrolApprove(f)
+	if err == nil || !strings.Contains(err.Error(), "child-query failure") {
+		t.Fatalf("query failure swallowed: %v", err)
+	}
+	after, _ := json.Marshal(f.Fake.Records)
+	if string(before) != string(after) {
+		t.Fatal("store read failure wrote records")
 	}
 
-	mockExec := &executor.MockExecutor{}
-	_, err := ApprovePlan(root, specID, "tester", mockExec)
-	if err == nil {
-		t.Fatal("expected a preflight refusal on a child-set query failure")
-	}
-	if !strings.Contains(err.Error(), "querying existing beads under epic") {
-		t.Errorf("expected a child-query-failure message, got: %v", err)
-	}
-	assertPlanUnchangedAndNoMutation(t, planPath, original, mockExec)
 }
 
-func TestApprovePlan_Preflight_InProgressChild_RefusesPreMutation(t *testing.T) {
-	specID := "042-test"
-	root, planPath, original := setupPreflightPlan(t, specID, validSingleBeadPlan)
-	forbidBDCalls(t)
-
-	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
-		for _, a := range args {
-			if a == "--type=epic" {
-				return epicJSONFor("epic-42", specID), nil
-			}
-		}
-		return []byte(`[]`), nil
-	})
-	defer restoreList()
-	// EnsureMigrated (ahead of preflight) reads the resolved epic via `bd
-	// show`; the fixture epic already carries mindspec_phase, so this
-	// returns "already migrated" without ever calling mergeMetadataFn.
-	restoreRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "show" {
-			return epicJSONFor("epic-42", specID), nil
-		}
-		return []byte(`[]`), nil
-	})
-	defer restoreRunBD()
-
-	origList := planListJSONFn
-	defer func() { planListJSONFn = origList }()
-	planListJSONFn = func(args ...string) ([]byte, error) {
-		return []byte(`[{"id":"bead-active","status":"in_progress"}]`), nil
+func TestApprovePlan_Preflight_ForeignInProgressChildUnchanged(t *testing.T) {
+	f := enrolFixture(t)
+	foreign := kernel.Record{ID: "foreign-active", Parent: f.Epic, Status: "in_progress", Type: "task", Title: "foreign"}
+	f.Fake.Records[foreign.ID] = foreign
+	result, err := enrolApprove(f)
+	f.Must(err)
+	if !reflect.DeepEqual(f.Fake.Records[foreign.ID], foreign) {
+		t.Fatal("approval changed foreign active work")
+	}
+	if len(result.BeadIDs) != 3 || !f.State().Enrolled {
+		t.Fatal("approval did not enrol recorded work")
 	}
 
-	mockExec := &executor.MockExecutor{}
-	_, err := ApprovePlan(root, specID, "tester", mockExec)
-	if err == nil {
-		t.Fatal("expected a preflight refusal for an in_progress existing child")
-	}
-	if !strings.Contains(err.Error(), "bead-active") || !strings.Contains(err.Error(), "in_progress") {
-		t.Errorf("expected the in_progress refusal to name the bead and status, got: %v", err)
-	}
-	assertPlanUnchangedAndNoMutation(t, planPath, original, mockExec)
 }
 
 // stubApprovePlanEpic wires phase.SetListJSONForTest + phase.SetRunBDForTest
@@ -379,201 +334,45 @@ func stubApprovePlanEpic(t *testing.T, epicID, specID string) {
 // 097 R3) — but the historical silence is replaced by a warning naming the
 // absent block.
 func TestApprovePlan_MissingWorkChunks_WarnsAndApproves(t *testing.T) {
-	noopStubPhaseMergeMetadataForTest(t)
-	specID := "042-test"
-	planContent := `---
-status: Draft
-spec_id: "042-test"
-version: "1.0"
----
-
-# Plan
-
-## ADR Fitness
-
-No ADRs are relevant to this work.
-
-## Testing Strategy
-
-Unit tests will verify the implementation.
-
-## Bead 1: First thing
-
-**Steps**
-1. Step one
-2. Step two
-3. Step three
-
-**Verification**
-- [ ] ` + "`go test ./...`" + ` passes
-
-**Acceptance Criteria**
-- First bead works
-
-**Depends on**
-None
-`
-	root, _, _ := setupPreflightPlan(t, specID, planContent)
-	stubApprovePlanEpic(t, "epic-42", specID)
-
-	var depCalls []string
-	origBD := planRunBDFn
-	defer func() { planRunBDFn = origBD }()
-	planRunBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "create" {
-			return []byte(`{"id":"bead-1"}`), nil
-		}
-		if len(args) > 0 && args[0] == "dep" {
-			depCalls = append(depCalls, strings.Join(args, " "))
-			return nil, nil
-		}
-		return []byte(`[]`), nil
-	}
-
-	mockExec := &executor.MockExecutor{}
-	result, err := ApprovePlan(root, specID, "tester", mockExec)
-	if err != nil {
-		t.Fatalf("ApprovePlan: %v", err)
-	}
-	if len(depCalls) != 0 {
-		t.Errorf("expected ZERO dep calls from a prose-only plan, got: %v", depCalls)
-	}
+	f := enrolFixture(t)
+	text := kerneltest.EnrolmentPlan(f.SpecID, 1)
+	text = strings.Replace(text, "work_chunks:\n  - id: 1\n    depends_on: []\n", "", 1)
+	enrolWrite(t, filepath.Join(f.SpecDir, "plan.md"), text)
+	result, err := enrolApprove(f)
+	f.Must(err)
 	found := false
-	for _, w := range result.Warnings {
-		if strings.Contains(w, "work_chunks") {
-			found = true
+	for _, warning := range result.Warnings {
+		found = found || strings.Contains(warning, "work_chunks")
+	}
+	if !found || len(result.BeadIDs) != 1 || !f.State().Enrolled {
+		t.Fatalf("missing prose-plan warning or enrolment: %+v", result)
+	}
+	for _, link := range f.State().Links {
+		if len(link.Upstream) > 0 {
+			t.Fatal("prose-only plan wired upstreams")
 		}
 	}
-	if !found {
-		t.Errorf("expected a warning naming the missing work_chunks block, got: %v", result.Warnings)
-	}
+
 }
 
 // TestApprovePlan_DepAddFailure_WarnsBothIDs is AC-20: a best-effort
 // `bd dep add` failure for one edge warns naming BOTH bead IDs of the
 // unwired edge, while approve still succeeds and the OTHER edges wire.
-func TestApprovePlan_DepAddFailure_WarnsBothIDs(t *testing.T) {
-	noopStubPhaseMergeMetadataForTest(t)
-	specID := "042-test"
-	planContent := `---
-status: Draft
-spec_id: "042-test"
-version: "1.0"
-work_chunks:
-  - id: 1
-    depends_on: []
-  - id: 2
-    depends_on: [1]
-  - id: 3
-    depends_on: [1, 2]
----
-
-# Plan
-
-## ADR Fitness
-
-No ADRs are relevant to this work.
-
-## Testing Strategy
-
-Unit tests will verify the implementation.
-
-## Bead 1: First thing
-
-**Steps**
-1. Step one
-2. Step two
-3. Step three
-
-**Verification**
-- [ ] ` + "`go test ./...`" + ` passes
-
-**Acceptance Criteria**
-- First bead works
-
-**Depends on**
-None
-
-## Bead 2: Second thing
-
-**Steps**
-1. Step one
-2. Step two
-3. Step three
-
-**Verification**
-- [ ] ` + "`go test ./...`" + ` passes
-
-**Acceptance Criteria**
-- Second bead works
-
-**Depends on**
-Bead 1
-
-## Bead 3: Third thing
-
-**Steps**
-1. Step one
-2. Step two
-3. Step three
-
-**Verification**
-- [ ] ` + "`go test ./...`" + ` passes
-
-**Acceptance Criteria**
-- Third bead works
-
-**Depends on**
-Bead 1, Bead 2
-`
-	root, _, _ := setupPreflightPlan(t, specID, planContent)
-	stubApprovePlanEpic(t, "epic-42", specID)
-
-	var created int
-	var depCalls []string
-	origBD := planRunBDFn
-	defer func() { planRunBDFn = origBD }()
-	planRunBDFn = func(args ...string) ([]byte, error) {
-		if len(args) > 0 && args[0] == "create" {
-			created++
-			return []byte(fmt.Sprintf(`{"id":"bead-%d"}`, created)), nil
+func TestApprovePlan_DepAddFailure_RefusesBeforeEnrolment(t *testing.T) {
+	f := enrolFixture(t)
+	f.Fake.Hook = func(args []string) error {
+		if len(args) > 1 && args[0] == "dep" && args[1] == "add" {
+			return fmt.Errorf("link fault")
 		}
-		if len(args) > 0 && args[0] == "dep" {
-			depCalls = append(depCalls, strings.Join(args, " "))
-			// Fail exactly the (bead-3 -> bead-2) edge.
-			if len(args) == 4 && args[2] == "bead-3" && args[3] == "bead-2" {
-				return nil, fmt.Errorf("dep add: simulated failure")
-			}
-			return nil, nil
-		}
-		return []byte(`[]`), nil
+		return nil
+	}
+	_, err := enrolApprove(f)
+	ids := enrolIDs(t, f)
+	if err == nil || !strings.Contains(err.Error(), ids[0]) || !strings.Contains(err.Error(), ids[1]) {
+		t.Fatalf("link failure must name both endpoints: %v", err)
+	}
+	if f.State().Enrolled {
+		t.Fatal("failed plan-order link enrolled")
 	}
 
-	mockExec := &executor.MockExecutor{}
-	result, err := ApprovePlan(root, specID, "tester", mockExec)
-	if err != nil {
-		t.Fatalf("ApprovePlan: %v (approve must remain best-effort on a dep-add failure)", err)
-	}
-
-	// All 3 declared edges were ATTEMPTED (2->1, 3->1, 3->2).
-	if len(depCalls) != 3 {
-		t.Fatalf("expected 3 attempted dep calls, got %d: %v", len(depCalls), depCalls)
-	}
-	// The two edges that did NOT fail actually wired.
-	if depCalls[0] != "dep add bead-2 bead-1" {
-		t.Errorf("expected the 2->1 edge to wire, got: %v", depCalls)
-	}
-	if depCalls[1] != "dep add bead-3 bead-1" {
-		t.Errorf("expected the 3->1 edge to wire, got: %v", depCalls)
-	}
-
-	var warning string
-	for _, w := range result.Warnings {
-		if strings.Contains(w, "bead-3") && strings.Contains(w, "bead-2") {
-			warning = w
-		}
-	}
-	if warning == "" {
-		t.Fatalf("expected a warning naming BOTH bead-3 and bead-2, got: %v", result.Warnings)
-	}
 }

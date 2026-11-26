@@ -2,6 +2,67 @@
 
 ## Provided Interfaces
 
+### Panel verbs
+
+An enrolled spec uses its active gate to authorise each review round.
+`panel create` takes the subject and reviewer count from that authorisation.
+It refuses a `--target` other than the gate branch.
+It selects the highest gate attempt.
+A re-panel uses the slot count and changed paths from the gate round record.
+Before registration, a scoped re-panel keeps the subject, slot count, and path limit that the judge authorized.
+A round after a refused re-panel uses the full roster with no path limit.
+The re-panel judgment record retains what the judge authorized; it does not override a later round.
+An open successor gate cannot create a change judge for an older passed attempt.
+The registration and round ledger retain that scope.
+A closed gate, an open slot, an unanswered decision, a collision, or a halted spec blocks creation.
+A round must equal the total registered rounds plus one.
+All registrations count, including abandoned panels.
+A continuation answer increases the pinned allowance.
+Spec and plan approval panels count rounds before plan approval and after enrollment.
+Past `panel.max_rounds`, they print one warning with the count and continue.
+A count or tracker read failure does not stop document panel creation.
+
+`panel submit` requires the current slot lease for an enrolled spec.
+Use a committed verdict file in the panel directory.
+The command checks roster membership before it reads kernel state.
+It validates the lease and evidence before it publishes the verdict.
+It writes the receipt after publication and before it closes the slot.
+A passing refute or defer retally supersedes the open fix or limit decision.
+The reducer then closes the gate as passed.
+A deferral also stores its audit record.
+A successful rebind runs one reducer pass.
+A refused rebind runs no pass.
+Panel commands keep the existing rules for specs without enrollment.
+The kernel reads the main checkout and its `.mindspec` directory, the supplied
+spec directory, and that spec's worktree root and `.mindspec` directory.
+It does not scan other specs or worktrees. A damaged panel in these roots refuses
+the read and names its directory and repair step.
+Slug lookup also searches spec directories in the main checkout and default worktrees.
+In a spec worktree root or its `.mindspec` directory, lookup reads only the requested
+slug and requires the panel to name that worktree's spec. Checkout copies of shared
+panels do not gain another owner. Copies of the same ledger round count once.
+A slug owned by another spec is refused during creation.
+A damaged checkout copy refuses creation, names its directory, and gives a repair step.
+Use `--spec` to select a spec when a slug has more than one owner.
+
+### Surface scan
+
+The branch surface scan runs only with the `surfacescan` build tag.
+It checks added and changed lines in non-test Go files under `cmd/` and `internal/`.
+It excludes Go test files and `testdata/` directories.
+It also checks all files under `.claude/skills/` and `plugins/mindspec/skills/`.
+The matcher rejects internal record references and tracker export filenames.
+It permits whole quoted slot tokens, dotted slot tokens, and listed product words.
+An unknown product word with the project prefix fails the scan.
+
+`MINDSPEC_SURFACE_BASE` can select a later base commit.
+The base must include the pinned history floor and precede the head.
+The base must be an ancestor of the head and reachable from `origin/main`.
+The scan checks only lines after that base.
+Missing history fails with fetch guidance.
+Temporary repository tests check the matcher, path selection, and history rules.
+The permanent product surface guard also checks shipped skills and embedded text.
+
 ### Doctor status and merge state
 
 `doctor.Info` renders as `[INFO]`. `Report.HasFailures` counts only Error
@@ -823,7 +884,7 @@ and no `--bead`. Every panel subcommand, including disposition leaves, sets
 
 | Symbol | Purpose |
 |:-------|:--------|
-| `ReadySet{Filtered, Raw, SpecFlag, EpicID, NearMisses, PlanNotice, Cache}` + `ExcludedCount()`/`ExclusionNotice()` (`beads.go`) | One construction shared by claims and non-positional emit-only. `Filtered` preserves the selectable bd order; `Raw` retains global ready rows for positional resolution. `SpecFlag`/`EpicID` identify the scope, `NearMisses` explains exclusions, `PlanNotice` discloses source divergence, and the per-invocation `Cache` shares phase reads. Positional emit-only fetches by ID without constructing a set and prints `emit-only: bead fetched by ID; readiness not checked.` |
+| `ReadySet{Filtered, Raw, SpecFlag, EpicID, NearMisses, PlanNotice, Cache}` + `ExcludedCount()`/`ExclusionNotice()` (`beads.go`) | One construction shared by claims and non-positional emit-only. `Filtered` preserves the selectable bd order; `Raw` retains global ready rows for positional resolution. `SpecFlag`/`EpicID` identify the scope, `NearMisses` explains exclusions, `PlanNotice` discloses source divergence, and the per-invocation `Cache` shares phase reads. Positional emit-only fetches by ID without constructing a set, runs the read-only `bead ready-check` check (non-zero with its report and no brief when the item is not ready or not plan-form), and prints the brief and then the readiness review (`renderReadinessReview`, `cmd/mindspec/next_readiness_review.go`; `bead.ParseAttemptRecord` reads the stored attempt and refuses a malformed one). |
 | `NearMiss{Bead, Class, Message, Recoveries, Blocking, Lineage, NoLineage}` (`nearmiss.go`) | A linked non-member with its N1–N4 classification, true reason and recovery. `String()` renders the diagnostic; lineage fields govern positional N4 handling. |
 | `EmptyAfterFilterError` (`beads.go`) | Typed blocking emptiness: the returned set is still valid for printing derived lifecycle state before refusing. |
 | `ReadySet.HasBlockingNearMisses()` (`beads.go`) | Reports whether the near-misses make an empty scoped result non-zero; informational near-misses alone do not. |
@@ -862,7 +923,7 @@ Core 3 runs in `complete` before materialization for every required matched regi
 | `mindspec complete` | Close bead, remove worktree, advance state |
 | `mindspec approve spec\|plan\|impl` | Transition between lifecycle phases |
 | `mindspec cleanup` | Remove stale worktrees and branches |
-| `mindspec config show` | Print the effective config (panel/models/loop/runner + retained keys), with no `merge_strategy` row; read-only |
+| `mindspec config show` | Print the effective config and supplied removed settings, with no `merge_strategy` row; read-only |
 | `mindspec panel create <slug>` | Register a panel with the live commit, subject digest, roster and round ledger event. `--brief-file <absolute-path>` copies a filled regular file below the managed BRIEF.md header, replacing only the authored body on a round bump. Prompt, launch and dispatch refuse unfilled `<!-- TODO(skill)` stubs in that body. `--gate` selects the subject and roster defaults. `--reviewers N` sets at least 2 slots. A round bump keeps the latest roster unless this flag is supplied. New writes omit `approve_threshold`. |
 | `mindspec panel verify <slug>` | Read-only completeness/staleness report; decision-identical to the gate, writes nothing, always exits 0 (spec 110 R2; spec 113 R1 non-bead staleness from recorded target) |
 | `mindspec panel tally <slug>` | Per-slot verdicts + rule line + decision; advisory-but-block-capable — exit code tracks the decision alone, non-zero on Block (spec 110 R3; spec 113 R1 non-bead staleness from recorded target) |
@@ -1040,14 +1101,11 @@ Core 3 runs in `complete` before materialization for every required matched regi
   `cmd/mindspec/config.go` adds a read-only `config` command with a `show`
   subcommand: it loads the effective config via `config.Load`, renders it
   through the pure `renderConfig(*config.Config) (string, error)` (no fs, no
-  panel scan — testable without a process), and prints it to stdout. The
-  `models:`, `loop:`, and `runner:` blocks are annotated "declared, not yet
-  enforced" in the rendered output; `panel:` is not, since it already drives
-  a fresh panel.json's creation-time defaults today. `renderConfig` sorts
-  `Loop.GateAuthority`'s map keys before rendering (a map iterated directly
-  would make the command's output nondeterministic) and renders
-  `PanelApproveThresholdExpr()` verbatim (no trim/normalize — the resolver's
-  contract is "exactly as configured").
+  panel scan — testable without a process), and prints it to stdout.
+  The display labels removed loop settings as ignored. It labels the round
+  alias as deprecated and labels `runner:` as read by a skill. Panel settings
+  supply defaults for new panels. Model family keys select reviewer models.
+  Other model keys supply guidance. Display order stays deterministic.
   Two caller-side surfaces render the leaf-safe `panel.ReviewerCountNote`
   advisory (Bead 3) when a registered panel's recorded `expected_reviewers`
   differs from `cfg.PanelExpectedReviewers()` — never altering any gate
@@ -1291,7 +1349,8 @@ under both presence policies. These checks do not change approval state.
 
 `mindspec complete <bead> --check` reports doc-sync, ADR and work-destruction
 failures on the same candidate and landing tree as completion. It skips panel
-review and coverage. It leaves git, worktrees and bead records unchanged. The
+review, kernel gates and coverage. Its success output names the skipped gate checks.
+It leaves git, worktrees and bead records unchanged. The
 bead must be open, have a branch and have no pending merge-only run. Check refuses
 `--merge-only`, `--resolve-merge`, `--override-adr`, `--supersede-adr` and
 `--allow-net-deletion`. Completion also reports all failing content gates.
@@ -1335,3 +1394,384 @@ ledgers in the plan's `## Resolutions` section. It reads abandoned, replaced
 and ledger-only registrations. Missing ids refuse before any lifecycle write.
 A refusal does not supersede or create beads. The Approval section is optional
 in a draft spec because spec approval creates it.
+
+## Setup and skills
+
+The binary owns work selection and gate policy. The cycle skill runs
+`next-action --apply`, leases actor steps, dispatches agents and submits evidence.
+It executes each returned `run` entry. The autopilot uses the same cycle.
+Open decisions return to the user. A rejected round holds its own gate.
+A submitted halt answer stops every work item.
+
+Plugin skills are the source for their tracked Claude copies. Each pair must
+match byte for byte. Setup refreshes a file only when its bytes match a shipped
+version. It keeps user edits and reports them. Historical snapshots retain the
+prior bytes so plain setup can refresh an older install.
+
+Use `bd ready --exclude-label mindspec` to hide MindSpec work in a shared store.
+Setup preserves existing custom types when it adds required types.
+
+## Config show and friction
+
+`config show` renders effective panel policy and supplied removed settings.
+It labels each removed setting as ignored. It labels the deprecated round
+alias with its precedence rule. It labels `runner:` as read by a skill.
+It escapes config strings before terminal output. It sorts map keys.
+The display writes no file.
+
+`allow-not-ready` belongs to both escape-hatch registries. A successful
+command with this flag can produce a journal event. The event contains the
+token. It contains no reason text. Detection uses the existing flag order,
+then `allow-not-ready`.
+
+## Round counter
+
+`panel.RoundsForGate(regs, spec, gate, beadID)` returns a count and an error.
+It reads round records from every supplied registration directory.
+The caller supplies all directories, including a ledger-only registration.
+A bead gate matches its work item. A lifecycle gate matches its spec and gate.
+Abandoned registrations retain their rounds. Snapshot edits do not change
+history. Launch and recovery records add no round. Duplicate directory
+paths count once. A malformed ledger returns an error.
+The panel package imports only the standard library and leaf utilities.
+
+## Kernel store and ids
+
+`kernelid` defines exact kernel identities and enrolment witnesses.
+It imports only the standard library.
+A numbered child of a kernel record is foreign.
+An enrolment marker, a kernel identity, or an orchestrated panel is an enrolment witness.
+A computed identity in `mindspec_key` is also a witness.
+A missing marker uses the default policy and sets the missing-marker signal.
+
+The store uses `mindspec_key` because bd refuses an explicit id with a parent.
+Each kernel record has a tuple, a `mindspec` label, and a `[mindspec]` title prefix.
+The store refuses a computed identity without its matching tuple.
+Writes select recorded work items or computed kernel identities.
+Status writes use compare-and-set and retry one mismatch.
+Every close writes its receipt first.
+Artifact receipts retain the path, holding commit, and blob id.
+Reducer receipts retain the close reason.
+
+Round identities include `r<N>.lens` and `r<N>.verify`.
+Each identity can have an attempt suffix.
+The action schema is `mindspec.next-action/v2`.
+Actions sort by plan order, then implement, lens, review slot, verify, fix,
+and change judge. Decisions follow those kinds.
+A branch move during a registered round leaves its slots on the round subject.
+
+Each metadata write uses a unique external file with mode 0600.
+The store passes its path to the tracker with `--metadata @<file>`.
+It removes the file after the call.
+An apply pass removes metadata files from processes that no longer run.
+It keeps actor files in the `records` directory.
+Merged metadata has a 16 MiB limit. An oversized write refuses before mutation.
+The error names the gate, step, largest key, and size. Stored text is not cut.
+
+Lens, verify, and change-judge steps use `submit --record <path>`.
+Record and temporary paths must be outside every worktree of the repository.
+The supplied path and its cleaned spelling must exist and name the same file.
+Use an existing path without `..` segments if these spellings differ.
+Containment checks the cleaned path and resolved target by file identity.
+Git supplies the worktree roots, including the top of an enclosing worktree.
+A record submission refuses if Git cannot supply these roots.
+For a temporary path before Git initialization, containment uses the physical project root.
+This requires a failed Git query and no `.git` entry in that root or its ancestors.
+An opened record must be the checked regular file.
+The file must contain valid UTF-8.
+The decoder refuses unknown fields.
+The first close write stores the exact bytes as the JSON string `mindspec_record`.
+The receipt holds their `record_sha256`, with no path, commit, or blob.
+Receipt validation compares that digest with the stored string.
+A later metadata write preserves the string and its digest.
+Decision answers hold an option and time, with no actor field.
+
+A verify first builds and size-checks its close writes.
+It then pins the generation, record digest, and time in `mindspec_closing`.
+The pin precedes the stored record and each kind-specific close write.
+A matching retry keeps the time and repeats those writes before the receipt.
+A different generation or digest sets only the pin's conflict and refuses.
+A conflict prevents every later submit of that attempt.
+A submit with a valid receipt makes no close write and does not change the pin.
+A lens has no closing pin.
+
+`Pass` dispatches rules in registry order.
+Each rule reads the prior rules' projected writes.
+A read-only pass returns the same write list that an apply pass uses.
+A halted pass runs only halt rules and flag rules.
+Flag rules cannot write.
+The command entry points refuse a pre-kernel spec and name its existing lifecycle verbs.
+The action, lease, submit, and answer entry points reserve their public contracts.
+
+### Lease and submit
+
+`lease` claims one actor step under the phase lock.
+It uses the pinned lease duration.
+It stores the generation, expiry, token hash, and claim base in one status compare-and-set.
+The command prints the generation and the new token.
+Renew and release require the current token.
+A take requires a reason and creates a new generation.
+It records the revoked token hash and the step subject in the take history.
+A live lease, a hold, a blocker, or an unanswered gate decision prevents another claim.
+Implementation claims use the worktree adapter and record the branch head as the claim base.
+The first claim fixes the attempt's claim base. Later generations keep it.
+
+`submit` accepts the current token. It also accepts a revoked token on an open
+step with the same subject, unless a newer generation has a receipt or closing pin.
+The receipt records the accepted and superseded generations. The newer lease
+ends `superseded`. A refused revoked token changes no pin or receipt.
+Implement and fix steps use a commit. Review slots use a committed verdict.
+Lens, verify, and change-judge steps use an external record. Do not commit the record.
+Implementation commits must follow the claim base on the work branch.
+Fix commits must follow the round subject on the gate branch.
+Final fixes use the spec branch.
+Review verdicts must match the active slot, round, and subject.
+Verdict artifact paths use the same recorded panel directory set as subject checks.
+A stored directory list replaces the canonical path; a path outside every recorded directory is refused.
+Enrolled panel creation writes in the worktree that contains the spec, including non-flat layouts.
+An artifact can come from any linked worktree of the same repository.
+Its receipt uses the path relative to that worktree root.
+The command writes a receipt before it closes the step.
+It then runs one reducer pass.
+A status conflict permits one fresh read and retry.
+The same evidence can finish a receipt left open by a crash.
+A closed receipt accepts the same evidence without a write.
+Valid evidence can repair a raw close with the current token.
+Without a token, use `submit <step> --repair --reason <text>` on an unreceipted
+closed step that was leased. Record steps use their stored bytes. An optional
+`--record` must contain the same bytes. Slots require `--artifact`; implementation
+and fix steps require `--commit`. All evidence must fit the kind and subject.
+Repair runs the kind's close writes before its receipt. It records a repair event
+with the current generation and no revoked token hash. It issues no generation.
+The pass lists that repair command when evidence fits and creates no retry.
+Otherwise a retry keeps its subject and kind-specific context. The gate round
+points to a lens or verify retry.
+
+`submit --answer` records a listed decision option without a token.
+The answer remains effective if an open child prevents the close.
+A halt prevents further claims and submissions.
+A retry of the same halt answer can finish the halt.
+The command exits with code 4 when its pass reports a halted spec.
+An accepted halt answer reports the halt without an error label.
+Panel creation on a halted spec directs the operator to `mindspec next-action`.
+
+## next-action
+
+`next-action` reads the approved plan and the enrolled tree.
+It returns one JSON document with actions, leases, decisions, commands and flags.
+JSON is the default output format; `--json` selects the same format.
+A flag may omit its message when its code and repair command describe the state.
+A read creates no record and changes no file.
+`--apply` reads the state again under the phase lock.
+It applies one ordered reducer pass.
+A repeated pass writes nothing when the state has no change.
+A deleted gate or authorised slot is created again before missing links are repaired.
+A deleted initial implement step is created again when its work remains eligible.
+
+An implement step starts only after each plan upstream has passed and merged.
+A passed gate alone does not release downstream work.
+A removed branch uses its recorded landed merge and verified second parent.
+Only a passed close with a valid receipt can authorise a round.
+The gate must remain open.
+A registered round creates slots only when its round and subject match the authorisation.
+Before registration, a subject change updates an ordinary round.
+A scoped re-panel keeps its authorized subject, slot count, and path limit.
+The panel tally closes a passing gate after every child has closed.
+An open change judge holds the completion command.
+
+The round allowance uses the policy pinned on the epic.
+Each durable continuation answer increases only its own gate allowance.
+The count includes abandoned registrations and directories with only a ledger.
+A malformed ledger refuses the count and names its directory.
+This also applies to an unrelated ledger in the scanned review roots.
+
+Every missing link is checked against child edges and block edges.
+A cyclic link stays absent.
+A foreign blocker flag names the link and its removal command.
+Foreign records receive no kernel action or write.
+An open foreign child holds its parent close and produces a flag.
+A missing run marker retains the default policy and produces a flag.
+An epic, work item or gate with status `in_progress` does not hold work.
+The `raw-claim` flag names that record and gives its status repair command.
+An occupied computed identity is a collision and remains unchanged.
+
+The revision hashes state, named refs, ledgers, verdicts, policy and lease expiry state.
+Display time does not change the revision.
+Actions use plan order, kind order and numeric slot order.
+Commands use argument arrays.
+Implement and fix actions submit with `--commit <commit>`.
+Review slots submit with `--artifact <path>`.
+Lens, verify, and change-judge steps submit with `--record <path>` outside the repository.
+A successful actor submit returns the current action document, including step existence and revision.
+The revision uses a fresh read after the writes, including assigned store ids.
+An exact retry returns the current read-only document.
+Terminal text is escaped.
+A live lease sets a waiting entry and the earliest retry time.
+Statuses `work`, `wait`, `halted`, `done` and `indeterminate` exit 0, 3, 4, 5 and 1.
+An empty result on unfinished work is indeterminate.
+After the epic closes, done requires each recorded work item to be done and each highest gate attempt to pass.
+The active gates must have valid evidence and no approval blocker may remain.
+A historical gate close repaired by a completed retry does not prevent done.
+The command refuses an unapproved plan.
+Apply also requires the custom step type and a readable store.
+
+
+## Close flags and audit
+
+A kernel close needs a valid receipt.
+Artifact receipts identify a path, holding commit and blob.
+Reducer receipts identify their close reason.
+A gate pass requires a registered round with the same nonempty subject,
+valid receipts for every slot, and a passing panel tally.
+A path or close-reason label alone supplies no gate evidence.
+Readers use the durable registration and votes for a frozen gate.
+Rebind and carry-over records may extend its accepted subject.
+A verdict file alone does not permit a gate tally.
+Every registered slot needs a valid close or a completed retry.
+An invalid close produces `unreceipted-close`.
+A stale review slot closed without a valid receipt keeps the raw-close evidence when superseded.
+Its supersede receipt sets `repaired`, so the audit counts the close once on every read.
+For an active slot, the next apply creates one retry with predecessor lineage.
+A valid repaired receipt or a valid completed retry clears the flag.
+A retry retains its subject and decision options.
+It receives no old lease or receipt.
+A slot retry must name its exact predecessor in `mindspec_from` at every hop.
+The predecessor must be closed without a valid vote.
+The chain must reach the slot in the active round.
+Both submit verbs select this verified lineage; a retry cannot add a second vote.
+
+A closed, unmerged work item with a passing gate produces `raw-close`.
+A work item closed over an open child produces `forced-close`.
+Neither state releases dependent work.
+A claimed actor step without a lease produces `raw-claim`.
+These flags are computed from the current state.
+
+Implementation approval checks the enrolled tree before any write.
+It refuses open steps, open decisions, invalid closes and open foreign children.
+It also refuses raw work-item closes and forced closes.
+Every recorded work item must be done, with a nonempty completed subject that matches its accepted subject.
+Finalization uses only recorded work-item ids.
+After branch removal, merge checks use the recorded publication tip.
+Specs without enrolment retain the existing approval path.
+
+The audit table shows the pinned policy and event counts on every approval run.
+Escape-hatch counts come from the local journal.
+The journal has no project identity, so these counts cover this machine.
+Typed metadata supplies deferrals, takeovers, timed answers, repaired closes,
+carry-overs, each re-panel's slot count, verify returns, late submissions and repair receipts.
+The lens-steps row comes from the ids of the lens steps.
+`mindspec_takes` retains takeover events by lease generation.
+The `takeovers` row counts every lease take and every repair event in `mindspec_takes`.
+Its details are `lease <n>, repair <m>`.
+The `unreceipted-closes` row counts valid receipts that set `repaired`.
+A completed retry without such a receipt adds no count.
+The `verify-reproduced`, `verify-refuted` and `verify-deferred` rows count the returns of that type
+in every verify attempt. A deferred return also writes a record to `mindspec_deferrals`.
+The `late-submissions` row counts valid receipts that name a superseded lease generation.
+The `repair-receipts` row counts valid receipts written by a repair submit.
+The `lens-steps` row counts the lens attempts of all gate rounds.
+Its details give one `<gate> r<N>: <k>` entry for each round.
+Details show store text in escaped form, so no line of the table can start a new header or recovery line.
+`mindspec_deferrals` retains distinct panel, round, slot, finding and target records.
+The latest `mindspec_take` and `mindspec_defer` records remain readable.
+An older latest record supplies one event when no history array exists.
+Renewal, release, expiry and an exact deferral retry add no event.
+A lease that replaces a raw claim retains a timed claim record.
+Raw-claim counts include retained records and current unrepaired claims.
+Audit counts do not block approval.
+An audit read error gives a warning.
+
+The kernel content check reads halt state, plan membership and closed-item refusals.
+It runs content checks before any review pass, receipt or completion write.
+Plain completion still requires a passing gate and no open child.
+It writes a completed subject only when that subject is nonempty.
+
+With an enrolled spec, `next` prints the worktree path with its lease token.
+An unscoped scan warns and skips an unrelated spec whose state cannot be read.
+A named unreadable spec still refuses.
+An approved legacy plan without recorded work item ids names the missing `bead_ids` and their recovery.
+
+Kernel verdict artifacts must be committed files in a worktree of the repository.
+Other panel types can read a verdict from stdin.
+If a panel brief has stubs, fill the named `BRIEF.md`, then retry `panel prompt`.
+An authored brief can instead be passed with `--brief-file` at initial panel creation.
+
+An unscoped `next` resolves enrolled specs first.
+If the selected enrolled spec has no eligible implementation, it refuses and names `next-action`.
+Name a legacy work item or use `next --spec <spec>` to select legacy work in a mixed repository.
+`plan approve` directs an enrolled spec to `next-action <spec> --apply`.
+A successful rerun for a pre-kernel spec directs the operator to `mindspec next`.
+
+A refused submit leaves its pre-pass writes in place. The next pass covers the named step.
+An excluded gate remains visible for attempt selection and evidence reads.
+The pass omits it from gate target lists and writes nothing to it.
+A pass closes open slots from older rounds, including retries, with a `superseded` receipt.
+A raw close of a slot from an older round gets that receipt and creates no retry.
+A current-round raw close requires a retry even when its subject metadata differs.
+The open-slot check for `panel create` counts only slots in the current round.
+A halt leaves a step open while it has an open blocking upstream. It writes no halt receipt
+on that step. The halt answer, its retry, and `next-action --apply` exit with the halt code.
+`submit` and `next-action` refusals omit command usage text.
+For a bead or final review panel of an enrolled spec, a blocked tally directs the operator to `next-action --apply`
+so that the kernel can create the required decision or fix before another round.
+A pre-kernel panel keeps its recovery when a tracker read fails.
+An unauthorized or duplicate kernel round directs the operator to `next-action --apply`.
+Panel submission publishes the canonical verdict and ledger files used by tally readers.
+These files remain in the review directory for finalization.
+
+A commit that changes only directories registered to the gate does not move its subject.
+An exempt directory must be a lexical `review/<slug>` or `reviews/<slug>` location under
+the repository root, `.mindspec`, or the spec directory. Paths are relative to the root
+of the worktree that contains them, even when the store uses another checkout.
+Existing directory components below that root must be real directories. A symlink grants no exemption.
+A recorded directory remains in the set when it is absent from disk.
+Only directories recorded by the kernel store for the same gate grant an exemption.
+Panel creation records the directory and keeps earlier directories of that gate.
+An older record with no directory list uses its canonical spec review location.
+Panel files and ledgers in a judged commit cannot define an exemption.
+Untracked and ignored working files cannot define an exemption.
+Round creation, tally, and approval use the effective subject.
+A review slot submission uses the registered round subject.
+A commit that also changes another path moves the subject.
+A merge compares its tree with its first parent; an empty commit moves the subject.
+Panel evidence can be committed on the subject branch.
+After finalization closes the epic, approval can resume at the recorded publication tip.
+The recorded checkpoint must resolve to the accepted subject, and must precede that publication.
+The publication tree may differ from the accepted subject only in finalization artifact paths.
+Before any approval write, an enrolled spec refuses pending user content in its spec or lifecycle bead worktrees.
+Allowed paths are its own spec directory, repository-relative panel directories recorded for this spec's bead and final gates,
+and `.beads/issues.jsonl`. The refusal names each path and requires a commit through the normal workflow
+with a new review round, or moving the changes out. An enrolled approval cannot create a new ADR;
+create and review it through the normal workflow first.
+An open epic or any other branch tip still requires the accepted subject.
+Setup ignores the configured panel isolation directory and local panel config, including without init.
+If config cannot load, the ignore step prints under `Warnings` and uses the default isolation directory.
+
+## Briefs
+
+The binary renders actor briefs for enrolled specs. `brief <step>` is read-only.
+It accepts an actor step and refuses a gate, decision, or foreign record.
+Implementation actions use `next --emit-only`. Review slots use `panel prompt`.
+Lens, verify, fix, and change-judge actions use `brief`.
+
+Kernel panel creation supplies the shared body below the managed header.
+It refuses `--brief-file`. Other gates keep authored briefs and the initial stub.
+A slot prompt refuses an unfilled stub.
+
+The shared body gives the work-item context and files in scope. A full round
+uses the implementation claim base. A scoped round uses its recorded paths.
+Later rounds also list paths changed since the prior round subject.
+Prior asks come only from the round's stored `prior.asks`, with full finding
+text and each return, evidence, or target. Rendering reads no prior verdict file.
+Refuted or deferred findings need new evidence to be raised again.
+The final review uses the spec summary, all recorded work items, and the diff
+from the merge base with the destination branch.
+
+A verify brief lists every pinned finding, including vetoes. A fix brief lists
+only reproduced findings and retains the concrete changes of a veto.
+A work-item fix ends with the content check command. For a final gate, the fix
+brief tells the actor to run the verification commands in the approved plan before the return. A change judge gets the accepted and
+new subjects, their diff, and the slot ceiling. A lens gets the spec, plan,
+work context, and scope diff. Record briefs name the external record path for
+the current lease generation and the submission command. Rendering creates
+no directory or record. Untrusted text is labeled and escaped on one line.

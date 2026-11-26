@@ -16,7 +16,7 @@ import (
 //
 // Exported so downstream checks (e.g. doctor) can reference the same source.
 var RequiredBeadsConfigKeys = []RequiredKey{
-	{Key: "types.custom", Value: "gate"},
+	{Key: "types.custom", Value: "gate,step"},
 	{Key: "status.custom", Value: "resolved"},
 	{Key: "export.git-add", Value: false},
 }
@@ -111,8 +111,14 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 	}
 
 	res := &ConfigResult{CreatedFile: created}
+	hasStore, err := hasBeadsStore(root)
+	if err != nil {
+		return nil, err
+	}
 	if created {
-		res.Added = append(res.Added, "issue-prefix")
+		if !hasStore {
+			res.Added = append(res.Added, "issue-prefix")
+		}
 		for _, rk := range RequiredBeadsConfigKeys {
 			res.Added = append(res.Added, rk.Key)
 		}
@@ -128,7 +134,7 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 		return nil, fmt.Errorf("config root is not a YAML mapping")
 	}
 
-	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok {
+	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok && !hasStore {
 		res.Added = append(res.Added, "issue-prefix")
 	}
 	for _, rk := range RequiredBeadsConfigKeys {
@@ -136,7 +142,9 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 		switch {
 		case !ok:
 			res.Added = append(res.Added, rk.Key)
-		case scalarEquals(valNode, rk.Value):
+		case rk.Key == "types.custom" && !hasRequiredTypes(valNode):
+			res.Added = append(res.Added, "types.custom (missing "+strings.Join(missingTypes(valNode), ",")+")")
+		case rk.Key == "types.custom" || scalarEquals(valNode, rk.Value):
 			res.AlreadyCorrect = append(res.AlreadyCorrect, rk.Key)
 		default:
 			res.UserAuthored = append(res.UserAuthored, ConfigDrift{
@@ -149,15 +157,32 @@ func ScanBeadsConfig(root string) (*ConfigResult, error) {
 	return res, nil
 }
 
+// hasBeadsStore reports whether a bd store exists in <root>/.beads. bd then
+// keeps the issue prefix in the store.
+func hasBeadsStore(root string) (bool, error) {
+	_, err := os.Stat(filepath.Join(root, ".beads", "metadata.json"))
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("stat store metadata: %w", err)
+}
+
 // EnsureBeadsConfig idempotently applies the mindspec-required keys to
 // <root>/.beads/config.yaml. Existing keys, values, and comments outside the
 // mindspec-required set are preserved byte-for-byte via yaml.v3 Node editing.
 //
 // Behavior per key:
-//   - issue-prefix: written only when absent; the value defaults to
-//     filepath.Base(root). An existing issue-prefix is never overwritten and
-//     never reported as drift (the user's project-naming choice is sovereign).
-//   - types.custom / status.custom / export.git-add: if absent, added. If
+//   - issue-prefix: written only when absent and no bd store exists yet; the
+//     value defaults to filepath.Base(root). When a store exists (its
+//     metadata.json is present), bd keeps the prefix in the store, and a
+//     different value here makes bd refuse each new ID, so the key stays
+//     unset. An existing issue-prefix is never overwritten and never
+//     reported as drift (the user's project-naming choice is sovereign).
+//   - types.custom: add missing required members and keep all existing members.
+//   - status.custom / export.git-add: if absent, added. If
 //     present with the canonical value, counted in AlreadyCorrect. If present
 //     with a different value, recorded in UserAuthored and left alone unless
 //     force=true, in which case they are replaced and reported in Added.
@@ -189,6 +214,11 @@ func EnsureBeadsConfig(root string, force bool) (*ConfigResult, error) {
 
 	res := &ConfigResult{CreatedFile: created}
 	defaultPrefix := filepath.Base(root)
+	if hasStore, err := hasBeadsStore(root); err != nil {
+		return nil, err
+	} else if hasStore {
+		defaultPrefix = ""
+	}
 
 	var out []byte
 	if created {
@@ -222,8 +252,10 @@ const freshHeader = "# .beads/config.yaml — managed by mindspec\n" +
 // leak into the output.
 func freshConfig(defaultPrefix string, res *ConfigResult) ([]byte, error) {
 	mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	appendScalarEntry(mapping, "issue-prefix", defaultPrefix)
-	res.Added = append(res.Added, "issue-prefix")
+	if defaultPrefix != "" {
+		appendScalarEntry(mapping, "issue-prefix", defaultPrefix)
+		res.Added = append(res.Added, "issue-prefix")
+	}
 	for _, rk := range RequiredBeadsConfigKeys {
 		appendScalarEntry(mapping, rk.Key, rk.Value)
 		res.Added = append(res.Added, rk.Key)
@@ -255,7 +287,7 @@ func mergeConfig(data []byte, defaultPrefix string, force bool, res *ConfigResul
 		return nil, fmt.Errorf("config root is not a YAML mapping")
 	}
 
-	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok {
+	if _, ok := findMapEntry(mapping, "issue-prefix"); !ok && defaultPrefix != "" {
 		appendScalarEntry(mapping, "issue-prefix", defaultPrefix)
 		res.Added = append(res.Added, "issue-prefix")
 	}
@@ -280,6 +312,17 @@ func applyRequiredKey(mapping *yaml.Node, rk RequiredKey, force bool, res *Confi
 	valNode, ok := findMapEntry(mapping, rk.Key)
 	if !ok {
 		appendScalarEntry(mapping, rk.Key, rk.Value)
+		res.Added = append(res.Added, rk.Key)
+		return
+	}
+	if rk.Key == "types.custom" {
+		if hasRequiredTypes(valNode) {
+			res.AlreadyCorrect = append(res.AlreadyCorrect, rk.Key)
+			return
+		}
+		values := splitCustomList(nodeValue(valNode))
+		values = append(values, missingTypes(valNode)...)
+		setScalarValue(valNode, strings.Join(values, ","))
 		res.Added = append(res.Added, rk.Key)
 		return
 	}
@@ -318,6 +361,9 @@ func renderNodeValue(n *yaml.Node) string {
 // A zero-content document (empty file) is promoted to an empty mapping in
 // place so callers can append keys.
 func rootMapping(doc *yaml.Node) *yaml.Node {
+	if doc.Kind == 0 {
+		doc.Kind = yaml.DocumentNode
+	}
 	if doc.Kind != yaml.DocumentNode {
 		return nil
 	}
@@ -492,3 +538,39 @@ func splitCustomList(raw interface{}) []string {
 	}
 	return out
 }
+
+// CustomTypes reads the custom issue types from the local Beads configuration.
+func CustomTypes(root string) []string {
+	data, err := os.ReadFile(filepath.Join(root, ".beads", "config.yaml"))
+	if err != nil {
+		return nil
+	}
+	var cfg map[string]any
+	if yaml.Unmarshal(data, &cfg) != nil {
+		return nil
+	}
+	return splitCustomList(cfg["types.custom"])
+}
+
+func nodeValue(n *yaml.Node) any {
+	var value any
+	_ = n.Decode(&value)
+	return value
+}
+func missingTypes(n *yaml.Node) []string {
+	values := splitCustomList(nodeValue(n))
+	var missing []string
+	for _, required := range []string{"gate", "step"} {
+		found := false
+		for _, value := range values {
+			if value == required {
+				found = true
+			}
+		}
+		if !found {
+			missing = append(missing, required)
+		}
+	}
+	return missing
+}
+func hasRequiredTypes(n *yaml.Node) bool { return len(missingTypes(n)) == 0 }

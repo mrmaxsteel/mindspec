@@ -619,3 +619,11 @@ func tracedCombined(op string, args []string) ([]byte, error) {
 		}))
 	return out, err
 }
+
+// RunBDAt runs bd in a specified repository without changing process CWD.
+func RunBDAt(root string, args ...string) ([]byte, error) {
+	cmd := execCommand("bd", args...)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	return out, wrapBDError(err)
+}

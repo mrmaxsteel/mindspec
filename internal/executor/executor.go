@@ -132,7 +132,7 @@ type Executor interface {
 	// whichever site actually has a preserved merge acts on it.
 	// hasRemote is the caller's one preflight decision. Finalization does
 	// not probe again: true pushes the spec branch, false merges locally.
-	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool) (FinalizeResult, error)
+	FinalizeEpic(epicID, specID, specBranch string, lifecycleAllowSet []string, overrideReason string, resolveMerge, hasRemote bool, policies ...FinalizeArtifactPolicy) (FinalizeResult, error)
 
 	// ResumeFinalizedEpic verifies publication evidence after local spec-branch
 	// deletion. The caller requires a closed epic and a stored done phase.

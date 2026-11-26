@@ -3,6 +3,8 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,130 +64,68 @@ func stubApproveBeads(t *testing.T) {
 // be stubbed rather than left to shell out to a nonexistent bd. Every
 // scenario using this stub is a first approval (no pre-existing children),
 // so "[]" (no children) is the correct response, not just an expedient one.
-func stubApproveBeadsWithEpicRegistry(t *testing.T) {
+func stubApproveBeadsWithEpicRegistry(t *testing.T) *kerneltest.FakeBD {
 	t.Helper()
-
+	fake := kerneltest.NewFakeBD()
 	var mu sync.Mutex
-	var epics []map[string]interface{}
-	epicByID := map[string]map[string]interface{}{}
-	t.Cleanup(approve.SetLifecycleMergeMetadataForTest(func(id string, updates map[string]interface{}) error {
+	run := func(args ...string) ([]byte, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		epic, ok := epicByID[id]
-		if !ok {
-			return fmt.Errorf("unknown fixture epic %q", id)
+		normalized := []string{}
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "--type=") {
+				normalized = append(normalized, "--type", strings.TrimPrefix(arg, "--type="))
+			} else {
+				normalized = append(normalized, arg)
+			}
 		}
-		metadata, ok := epic["metadata"].(map[string]interface{})
+		return fake.Run(normalized...)
+	}
+	merge := func(id string, updates map[string]interface{}) error {
+		mu.Lock()
+		defer mu.Unlock()
+		r, ok := fake.Records[id]
 		if !ok {
-			metadata = map[string]interface{}{}
-			epic["metadata"] = metadata
+			return fmt.Errorf("unknown fixture item %q", id)
+		}
+		if r.Metadata == nil {
+			r.Metadata = map[string]any{}
 		}
 		for key, value := range updates {
-			metadata[key] = value
+			r.Metadata[key] = value
 		}
+		fake.Records[id] = r
 		return nil
-	}))
-
-	bdFn := func(args ...string) ([]byte, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if len(args) > 0 && args[0] == "create" {
-			isEpic := false
-			var title, metadataRaw string
-			for i, a := range args {
-				if a == "--title" && i+1 < len(args) {
-					title = args[i+1]
-				}
-				if a == "--metadata" && i+1 < len(args) {
-					metadataRaw = args[i+1]
-				}
-				if a == "--type=epic" {
-					isEpic = true
-				}
-			}
-			if isEpic {
-				id := fmt.Sprintf("fake-epic-%d", len(epics)+1)
-				// Record the SAME metadata ApproveSpec's real epic-create
-				// call sends (including mindspec_phase) so EnsureMigrated
-				// (phase.EnsureMigrated, ApprovePlan's exempt pre-preflight
-				// step) sees an already-migrated, post-080-native epic — a
-				// real freshly-created epic never needs migration, so
-				// faithfully recording its metadata here means the ADR-0034
-				// migration path correctly no-ops instead of falling
-				// through to the real (unstubbed) mergeMetadataFn.
-				var metadata map[string]interface{}
-				_ = json.Unmarshal([]byte(metadataRaw), &metadata)
-				epic := map[string]interface{}{
-					"id":         id,
-					"title":      title,
-					"status":     "open",
-					"issue_type": "epic",
-					"metadata":   metadata,
-				}
-				epics = append(epics, epic)
-				epicByID[id] = epic
-				out, _ := json.Marshal(map[string]string{"id": id})
-				return out, nil
-			}
-		}
-		return []byte(`{"id":"fake-test-bead"}`), nil
 	}
-	t.Cleanup(approve.SetSpecRunBDForTest(bdFn))
-	t.Cleanup(approve.SetPlanRunBDForTest(bdFn))
-	t.Cleanup(approve.SetPlanRunBDCombinedForTest(bdFn))
-	t.Cleanup(approve.SetPlanListJSONForTest(func(args ...string) ([]byte, error) {
-		return []byte(`[]`), nil
-	}))
-	// Spec 128 Bead 2: phase.EnsurePhaseSemanticsV2 now runs beside
-	// EnsureMigrated at ApprovePlan's ahead-of-preflight position and
-	// writes via phase's OWN mergeMetadataFn seam (never a caller-
-	// injected one — see semantics_v2.go's doc comment). This fake
-	// epic-create seed above does not stamp the v2 marker (that lives in
-	// ApproveSpec's real epic-create call, out of this bead's scope), so
-	// without this stub every scenario below would attempt a REAL
-	// bd write. A no-op here is harmless for these scenarios (none
-	// inspect the marker itself) and mirrors the ADR-0034 migration's
-	// pre-seeded metadata trick just above for the identical reason.
-	t.Cleanup(phase.SetMergeMetadataForTest(func(string, map[string]interface{}) error { return nil }))
-
-	restoreList := phase.SetListJSONForTest(func(args ...string) ([]byte, error) {
+	list := func(args ...string) ([]byte, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		// fetchAllEpics is the only phase.listJSONFn caller passing
-		// `--type=epic`; any other query (e.g. fetchChildren's `--parent`)
-		// still gets "[]" — no scenario test using this stub exercises
-		// epic-children phase queries.
-		for _, a := range args {
-			if a == "--type=epic" {
-				out, err := json.Marshal(epics)
-				if err != nil {
-					return nil, err
-				}
-				return out, nil
+		typ, parent := "", ""
+		for i, arg := range args {
+			if strings.HasPrefix(arg, "--type=") {
+				typ = strings.TrimPrefix(arg, "--type=")
+			}
+			if arg == "--parent" && i+1 < len(args) {
+				parent = args[i+1]
 			}
 		}
-		return []byte(`[]`), nil
-	})
-	t.Cleanup(restoreList)
-	restoreRunBD := phase.SetRunBDForTest(func(args ...string) ([]byte, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		// fetchEpic (`bd show <id> --json`, used by EnsureMigrated's
-		// stored-phase check) is the only phase.runBDFn caller that needs a
-		// specific epic back; `dolt pull` (CheckSpecNumberCollision) ignores
-		// its return value entirely, so "[]" is harmless there.
-		if len(args) >= 2 && args[0] == "show" {
-			if epic, ok := epicByID[args[1]]; ok {
-				out, err := json.Marshal([]map[string]interface{}{epic})
-				if err != nil {
-					return nil, err
-				}
-				return out, nil
+		rows := []kernel.Record{}
+		for _, r := range fake.Records {
+			if (typ == "" || typ == r.Type) && (parent == "" || parent == r.Parent) {
+				rows = append(rows, r)
 			}
 		}
-		return []byte(`[]`), nil
-	})
-	t.Cleanup(restoreRunBD)
+		return json.Marshal(rows)
+	}
+	t.Cleanup(approve.SetSpecRunBDForTest(run))
+	t.Cleanup(approve.SetPlanRunBDForTest(run))
+	t.Cleanup(approve.SetPlanRunBDCombinedForTest(run))
+	t.Cleanup(approve.SetPlanListJSONForTest(list))
+	t.Cleanup(approve.SetLifecycleMergeMetadataForTest(merge))
+	t.Cleanup(phase.SetListJSONForTest(list))
+	t.Cleanup(phase.SetRunBDForTest(run))
+	t.Cleanup(phase.SetMergeMetadataForTest(merge))
+	return fake
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +139,7 @@ func testRepo(t *testing.T) string {
 
 	root := filepath.Join(t.TempDir(), "repo")
 	must(t, os.MkdirAll(root, 0o755))
+	kerneltest.CleanupTemp(t, root)
 
 	gitRun(t, root, "init")
 	gitRun(t, root, "config", "user.email", "test@mindspec.dev")
@@ -213,6 +154,7 @@ func testRepo(t *testing.T) string {
 		must(t, os.MkdirAll(filepath.Join(root, d), 0o755))
 	}
 
+	writeFile(t, root, ".beads/config.yaml", "types.custom: gate,step\n")
 	writeFile(t, root, ".mindspec/config.yaml", `protected_branches: [main]
 worktree_root: .worktrees
 enforcement:
@@ -463,7 +405,8 @@ func simulateApproveImpl(t *testing.T, root, specID string) {
 // ---------------------------------------------------------------------------
 
 func TestScenario_HappyPath(t *testing.T) {
-	stubApproveBeadsWithEpicRegistry(t)
+	fake := stubApproveBeadsWithEpicRegistry(t)
+	_ = fake
 	root := testRepo(t)
 	specID := "001-test-feature"
 
@@ -519,7 +462,8 @@ func TestScenario_IdleStartsClean(t *testing.T) {
 }
 
 func TestScenario_InterruptForBug(t *testing.T) {
-	stubApproveBeadsWithEpicRegistry(t)
+	fake := stubApproveBeadsWithEpicRegistry(t)
+	_ = fake
 	root := testRepo(t)
 	specID := "002-main-feature"
 	bugSpecID := "003-hotfix-bug"
@@ -671,7 +615,8 @@ func TestValidateFromWorktree(t *testing.T) {
 }
 
 func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
-	stubApproveBeadsWithEpicRegistry(t)
+	fake := stubApproveBeadsWithEpicRegistry(t)
+	_ = fake
 	root := testRepo(t)
 	specID := "006-plan-artifact"
 
@@ -691,6 +636,15 @@ func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
 		t.Fatalf("ApprovePlan: %v", err)
 	}
 
+	found := false
+	for _, r := range fake.Records {
+		if r.Type == "epic" && r.Metadata["spec_id"] == specID {
+			_, found = r.Metadata[kernel.KeyRun]
+		}
+	}
+	if !found {
+		t.Fatal("plan approval did not enrol the spec")
+	}
 	// Verify plan.md was updated with approval
 	planPath := filepath.Join(mustSpecDir(t, root, specID), "plan.md")
 	data, err := os.ReadFile(planPath)
@@ -708,7 +662,8 @@ func TestScenario_PlanApprovalUpdatesArtifacts(t *testing.T) {
 // where a failed auto-commit during plan approval left the spec worktree
 // dirty, causing downstream `mindspec complete` merges to fail.
 func TestScenario_PlanApprovalCommitFailureIsHardError(t *testing.T) {
-	stubApproveBeadsWithEpicRegistry(t)
+	fake := stubApproveBeadsWithEpicRegistry(t)
+	_ = fake
 	root := testRepo(t)
 	specID := "007-plan-commit-fail"
 
@@ -741,7 +696,8 @@ func TestScenario_PlanApprovalCommitFailureIsHardError(t *testing.T) {
 // hook touched tracked files without staging them). The approval must
 // refuse to advance rather than leave the next merge broken.
 func TestScenario_PlanApprovalDirtyTreeIsHardError(t *testing.T) {
-	stubApproveBeadsWithEpicRegistry(t)
+	fake := stubApproveBeadsWithEpicRegistry(t)
+	_ = fake
 	root := testRepo(t)
 	specID := "008-plan-dirty-tree"
 
@@ -783,5 +739,21 @@ func TestScenario_SpecApprovalCommitFailureIsHardError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "auto-commit spec approval failed") {
 		t.Errorf("error should explain the commit failure, got: %v", err)
+	}
+}
+
+func TestScenario_KernelTempCleanup(t *testing.T) {
+	caller := t.TempDir()
+	t.Setenv("TMPDIR", caller)
+	t.Run("fixture", func(t *testing.T) {
+		root := testRepo(t)
+		dir, err := kernel.KernelTempDir(root)
+		must(t, err)
+		must(t, os.WriteFile(filepath.Join(dir, "record.json"), []byte("record"), 0600))
+	})
+	entries, err := os.ReadDir(caller)
+	must(t, err)
+	if len(entries) != 0 {
+		t.Fatalf("harness fixture leaked into caller TMPDIR: %v", entries)
 	}
 }

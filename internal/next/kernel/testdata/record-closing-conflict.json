@@ -1,0 +1,9 @@
+{
+  "generation": 1,
+  "record_sha256": "digest",
+  "at": "2026-01-02T03:04:05Z",
+  "conflict": {
+    "generation": 2,
+    "record_sha256": "different"
+  }
+}

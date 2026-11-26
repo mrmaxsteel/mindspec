@@ -104,12 +104,20 @@ func checkoutRegistration(dir string) (panel.Registration, error) {
 	if reg.Panel.Abandoned {
 		return reg, checkoutFailure("panel is abandoned", fmt.Sprintf("mindspec panel create %s --round %d", shellQuoteTarget(reg.Slug()), reg.Panel.Round+1))
 	}
-	if field, err := panel.CheckHandEdits(dir, reg.Panel); err != nil {
-		return reg, err
-	} else if field != "" {
-		return reg, checkoutFailure("panel registration differs from its ledger: "+field, "repair the panel registration with mindspec panel create")
+	return reg, checkHandEdits(reg)
+}
+
+// checkHandEdits refuses a panel.json or ledger changed outside the panel
+// verbs. Each refusal ends in one recovery line.
+func checkHandEdits(reg panel.Registration) error {
+	field, err := panel.CheckHandEdits(reg.Dir, reg.Panel)
+	if err != nil {
+		return checkoutError(err, "restore "+shellQuoteTarget(filepath.Join(reg.Dir, "dispositions.jsonl"))+" to the records the panel verbs wrote, then retry")
 	}
-	return reg, nil
+	if field != "" {
+		return checkoutFailure("panel registration differs from its ledger: "+field, "undo the hand edit of field "+field+" in "+shellQuoteTarget(filepath.Join(reg.Dir, panel.FileName))+"; the panel ledger holds its value")
+	}
+	return nil
 }
 
 func checkoutLayout(root, isolation string, reg panel.Registration, slot string) (panel.SlotLayout, error) {
@@ -309,7 +317,7 @@ var panelCheckoutCmd = &cobra.Command{
 			return err
 		}
 		if dispatch {
-			if _, err := panel.ReadFilledBrief(filepath.Join(reg.Dir, "BRIEF.md")); err != nil {
+			if _, err := panel.ReadPanelBrief(reg.Dir, reg.Panel); err != nil {
 				return err
 			}
 		}

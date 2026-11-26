@@ -160,6 +160,8 @@ if args[0] == 'show':
     row = records[args[1]].copy()
     if args[1] != 'epic-parent': row['dependencies'] = [{'id':'epic-parent','issue_type':'epic','dependency_type':'parent-child'}]
     print(json.dumps([row]))
+elif args[0] == 'list':
+    print(json.dumps(list(records.values())))
 elif args[0] == 'close':
     records[args[1]]['status'] = 'closed'
     with open(path, 'w') as f: json.dump(records, f)

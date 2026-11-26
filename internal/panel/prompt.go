@@ -15,19 +15,25 @@ import (
 // PromptInput is resolved by the adapter. Launch supplies a fresh Nonce and its
 // new attempt; the harness prompt uses the latest dispatched attempt.
 type PromptInput struct {
-	Brief      string
-	Slot       string
-	Family     string
-	Model      string
-	Lens       string
-	Focus      string
-	SlotDir    string
-	Tree       string
-	Kind       string
-	Output     string
-	Nonce      string
-	Attempt    int
-	PriorItems PriorItemsResult
+	Brief        string
+	Slot         string
+	Family       string
+	Model        string
+	Lens         string
+	Focus        string
+	SlotDir      string
+	Tree         string
+	Kind         string
+	Output       string
+	Nonce        string
+	Attempt      int
+	PriorItems   PriorItemsResult
+	DurablePrior bool
+	// LeaseStep is the kernel step of a slot that needs a lease token.
+	// Checkout and Prompt are the exact commands for that slot.
+	LeaseStep string
+	Checkout  string
+	Prompt    string
 }
 
 // PriorItemsResult holds verified items or a warning about unavailable evidence.
@@ -73,20 +79,30 @@ func RenderSlotPrompt(in PromptInput) string {
 			b.WriteString("Cannot render the submission command: the verdict path contains a non-printable character or invalid UTF-8.\n")
 		} else {
 			b.WriteString("Submit the verdict JSON through this command:\n")
-			b.WriteString("mindspec panel submit --file " + promptShellQuote(verdictPath) + "\n")
+			if in.LeaseStep != "" {
+				b.WriteString("mindspec panel submit --file " + promptShellQuote(verdictPath) + " --lease <token>\n")
+				b.WriteString("Replace <token> with the token that mindspec lease " + promptShellQuote(termsafe.Escape(in.LeaseStep)) + " printed.\n")
+			} else {
+				b.WriteString("mindspec panel submit --file " + promptShellQuote(verdictPath) + "\n")
+			}
 		}
+	} else if in.Checkout != "" && in.Prompt != "" {
+		b.WriteString("Make the slot attempt through this command:\n" + termsafe.Escape(in.Checkout) + "\n")
+		b.WriteString("Then run this command for the submission command:\n" + termsafe.Escape(in.Prompt) + "\n")
 	} else {
 		b.WriteString("Use mindspec panel checkout with --slot and --dispatch. Then run mindspec panel prompt again for the submission command.\n")
 	}
-	b.WriteString("\n## Prior-round items\n\n")
-	if in.PriorItems.Warning != "" {
-		b.WriteString(termsafe.Escape(in.PriorItems.Warning) + "\n")
-	} else if len(in.PriorItems.Items) == 0 {
-		b.WriteString("no prior-round items\n")
-	} else {
-		b.WriteString("Grade each item ADDRESSED, PARTIAL, MISSED or NEW_ISSUE.\n")
-		for i, item := range in.PriorItems.Items {
-			fmt.Fprintf(&b, "%d. %s\n", i+1, termsafe.Escape(item))
+	if !in.DurablePrior {
+		b.WriteString("\n## Prior-round items\n\n")
+		if in.PriorItems.Warning != "" {
+			b.WriteString(termsafe.Escape(in.PriorItems.Warning) + "\n")
+		} else if len(in.PriorItems.Items) == 0 {
+			b.WriteString("no prior-round items\n")
+		} else {
+			b.WriteString("Grade each item ADDRESSED, PARTIAL, MISSED or NEW_ISSUE.\n")
+			for i, item := range in.PriorItems.Items {
+				fmt.Fprintf(&b, "%d. %s\n", i+1, termsafe.Escape(item))
+			}
 		}
 	}
 	b.WriteString("\nWrite scratch only in the slot directory. Use absolute paths within it.\n")

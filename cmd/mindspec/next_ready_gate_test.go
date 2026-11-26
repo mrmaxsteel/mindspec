@@ -93,9 +93,8 @@ func nextReadyGateSetupSandbox(t *testing.T) *harness.Sandbox {
 }
 
 // nextReadyGateApproveSingleBeadPlan sets up a spec branch + worktree,
-// writes specMD/planMD (a single-work-chunk plan), commits, and runs the
-// real `mindspec plan approve` path — returning the epic ID `next` claims
-// beads under.
+// writes specMD/planMD, commits a pre-kernel approval, and returns the
+// epic ID that next claims work under.
 func nextReadyGateApproveSingleBeadPlan(t *testing.T, sb *harness.Sandbox, specID, specMD, planMD string) string {
 	t.Helper()
 	epicID := sb.CreateSpecEpic(specID)
@@ -121,9 +120,7 @@ func nextReadyGateApproveSingleBeadPlan(t *testing.T, sb *harness.Sandbox, specI
 	}
 	sb.Commit("setup: spec worktree state")
 
-	if out, err := sb.Run("mindspec", "plan", "approve", specID); err != nil {
-		t.Fatalf("mindspec plan approve %s: %v\n%s", specID, err, out)
-	}
+	seedPreKernelPlan(t, sb, specID)
 	return epicID
 }
 

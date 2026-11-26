@@ -983,10 +983,9 @@ failure return, with ZERO commits, a report whose first line is exactly
 span-quoting.
 
 **NOT READY is its own outcome** (`/ms-bead-cycle`), distinct from an
-implementation failure: no panel round is consumed, it is EXCLUDED from
-`loop.halt.max_consecutive_impl_failures` (that brake stops repeated
-post-damage failures; this is the pre-damage refusal that prevents
-them), it never routes to `/ms-bead-fix`, and the worktree stays intact.
+implementation failure. It consumes no panel round. It adds no
+implementation failure. It never routes to `/ms-bead-fix`.
+The worktree stays intact.
 `/ms-spec-autopilot` treats an ACCEPTed NOT READY as a bead-level halt.
 Exactly two dispositions: **ACCEPT** (default — halt, surface the
 ordinal report, revise plan/spec, re-dispatch) or **clarify** (R8).
@@ -1421,8 +1420,14 @@ Selectors are checked before empty-set handling. A positional near-miss
 gets its reason even when no members exist. An N4 with lineage E can
 reach the readiness gate deliberately; a no-lineage N4 refuses before the
 gate. An unlinked globally ready positional names that fact and its parent.
-Positional emit-only still fetches by ID and prints
-`emit-only: bead fetched by ID; readiness not checked.`
+Positional emit-only still fetches by ID. It then runs the read-only
+check of `bead ready-check`. An item that is not ready, or not plan-form,
+exits non-zero with that report and no brief. A ready item prints the
+brief and then the readiness review: SR-1..SR-5, the `NOT READY: <w>`
+return form, the anti-browbeat and re-derivation rules, each stored
+readiness-attempt reason with its clarification or `(none recorded)`, and
+`mindspec complete <w> --check` before the return. A malformed stored
+attempt exits non-zero and names `mindspec_readiness_attempt`.
 
 Without a selector, an empty scoped set prints the lifecycle child tally,
 stored and child-derived phase, and the emptiness rule before acting:
@@ -1653,3 +1658,176 @@ Each step resumes from its own done signal.
 A closed resume keeps all gates and tip checks. It skips the presence check.
 An absent worktree passes the user-changes check. In a non-flat layout with
 panel enforcement, no worktree and no surviving registration refuses.
+
+## Rounds, decisions and halt
+
+Count registered rounds across all panels for a gate. Include abandoned panels.
+A complete refused round creates a verify step. Only reproduced findings create
+a fix for the next round. A reproduced REJECT also creates a local decision.
+Answer `fix` to release that fix. Other work items can continue.
+At the round limit, the verify creates only a limit decision when findings remain.
+Answer `continue:<n>` to add an allowance and create the fix.
+The answer does not authorize a round. A passed fix authorizes the next round.
+
+A commit during a registered review keeps its slots open on the round subject.
+The commit authorizes no new round. A commit during an open fix keeps the review active.
+The final review starts on the spec branch head after every work item has a
+passed gate, a closed work item and a completion record from `complete`.
+The record names the accepted subject. A raw close and Git ancestry alone
+release no dependent. A retry of `complete` repairs a missing completion pass.
+The final review uses the same limits
+and decisions as a work item review.
+
+The `halt` option stops the spec and every work item. Its answer receipt is
+durable before any close. A halt pass closes only computed steps and decisions.
+It records each close as `halted`. It leaves the epic and work items open.
+An open foreign child prevents its parent and kernel ancestors from closing.
+The pass reports that child. A retry finishes the remaining permitted closes.
+Halted reads and retries return exit status 4. They create no steps.
+
+## Verify step
+
+The verify step pins every finding and the digest of each round verdict file.
+A REJECT, hard block, or unexpected veto file gives one veto finding.
+Other REQUEST_CHANGES verdicts give their concrete changes or legacy slot finding.
+The step stores each text in full, with machine-local paths replaced.
+It adds no registered round.
+
+An incomplete tally creates no verify. Each uncounted slot gets its next attempt
+on the round subject. After three uncounted attempts, one local decision lists
+each capped slot and its attempt. An open decision holds all slots of that round.
+The `redispatch` answer releases the listed slots that remain uncounted.
+
+Lease the verify step. Submit a record outside the repository with exactly one
+return for each pinned finding: `reproduced`, `refuted`, or `deferred`.
+A veto cannot be deferred. A refutation needs a supported ground, reason, and
+resolving evidence. A deferral needs an open follow-up outside the owning epic
+that contains the finding text and a discovered-from link.
+All checks and write size checks run before the closing pin.
+
+The closing pin fixes the generation, record digest, and close time.
+A matching retry repeats the same close writes and keeps that time.
+A different generation or record marks a conflict. The next pass retires that
+attempt and creates another verify with the same pinned findings and read set.
+Refutation and deferral events and their coverage rows name the verify attempt.
+The step stores all returns before its receipt.
+
+If no finding is reproduced, the gate passes with a verify receipt, including
+a refuted veto. Otherwise the fix contains only the reproduced findings.
+An applied verify freezes its round. Later edits to verdict files do not retire
+the verify or create slot attempts. A passed fix authorizes the next round and
+supersedes open slots of the previous round.
+
+A passing refute or defer retally supersedes an open verify or fix.
+During a fix, that retally must match the verify's complete verdict read set.
+Events of an unfinished or retired verify remain audit history and resolve no
+finding. A verb event written at or before the latest passed verify also resolves
+no finding. Filtered tallies preserve the original panel snapshot and its history.
+
+## Enrolment
+
+Plan approval records each work-item ID immediately after creation.
+A retry uses these IDs. It does not select items by parent.
+A foreign child stays unchanged.
+
+Approval writes the complete plan-order link record before it checks cycles.
+It checks child links and blocking links before each blocking-link write.
+A cycle before enrolment stops approval. The error names the link and a tracker
+command to remove the blocking link. No gate or approval record exists yet.
+After enrolment, a refused link stays absent. The next apply pass retries it.
+
+Enrolment pins the round allowance and lease duration on the epic.
+The approval record follows this policy record.
+Each work item gets an open review gate as its child.
+The epic gets a final gate. Each work item blocks that final gate.
+These gates use computed identities and tuple metadata.
+An open review gate prevents a normal close of its work item.
+
+Before approval, a retry checks every recorded item against its plan chunk.
+It also checks each recorded upstream list. A change stops the retry before
+any write. A new chunk with no recorded ID can be created.
+An approval with an enrolment witness refuses a second approval.
+An older approval with no witness keeps its existing lifecycle.
+
+The epic and work items carry the `mindspec` label and title tag.
+Title parsers skip this tag.
+
+## Change judge
+
+A gate has a round subject and a review subject. Registration fixes the round
+subject for its slots and panel evidence. A judgment sets the review subject.
+Verify and fix steps use that review subject. A fix must commit a change after
+its subject and outside the gate's panel directories.
+
+A complete round waits for a change judge when the subject moved. The same rule
+holds before an unapplied verify retally and after a gate passed. A panel-only
+commit does not move the subject. An applied verify freezes its round, so a fix
+commit creates no judge until the gate passes. Merged work items and closed epics
+create no judges. A closed judgment ends that subject change.
+
+The judge is a child of the work item or epic. A newer commit supersedes an open
+judge. A successful panel rebind also supersedes it and supplies its receipt.
+Lease the judge and submit its judgment with `--record <path>` outside the
+repository. Submission stores the record in the tracker and creates no Git object.
+
+Use `carry-over` with a reason to accept the new subject. On an open gate, the
+waiting tally uses the review subject. On a passed gate, the original receipt
+keeps its evidence and adds the carry-over and judge receipt.
+
+Use `re-panel` with changed paths and at least two slots. The slot count cannot
+exceed the reviewed round's count. The paths must cover the diff from the accepted
+subject to the new subject, with the gate's panel directories excluded.
+On a passed gate, a successor gate gets the scoped round. On an open gate, a
+passing tally or an all-refuted verify authorizes the scoped round on that gate.
+A refused tally creates a verify on the new review subject. A reproduced finding
+creates a fix. The round after a passed fix is a full round.
+
+Each successor round keeps its prior round's findings, full text, returns, kept
+verb records, and read digests in tracker metadata. A passed verify supplies its
+pinned findings and read set. Otherwise the authorizing tally supplies them.
+Later verdict edits do not change these asks. Reading a proposed transition
+writes no tracker record or Git object.
+
+A non-panel commit before scoped registration requires another judge. Its diff
+starts at the accepted subject. Its judgment supersedes the unregistered successor
+or restores the open gate's prior round. A current verify is retired and replaced
+once on the new review subject. The latest judgment supplies the next scope.
+
+Refute and defer retallies wait while a judge is open or due. During an open fix,
+a passing retally also needs every finding covered by the current verify and an
+exact match to its pinned verdict file set and digests on disk. It supersedes the
+fix and passes on the review subject, or authorizes the scoped round if the
+judgment requires one. A later subject commit then needs its own judge.
+
+## Lens step
+
+Each authorized round starts with a lens step on its authorized subject.
+This includes final review and scoped rounds. The gate round names the current
+attempt in `lens`. Panel creation requires that attempt to be closed passed.
+The action document lists panel creation only after that close.
+
+A later authorization of the same round, or a subject move before registration,
+gets a new lens attempt. The new attempt names its predecessor in `mindspec_from`.
+An open predecessor closes superseded. A passed predecessor keeps its receipt.
+A new judgment retires the pending scoped round and its lens before it supplies
+another authorization. A lens retry becomes the round's current attempt.
+
+A scoped roster selects configured adversary slots first, up to its slot count.
+It fills the remaining positions from the first other configured slots.
+It then restores configured order and assigns contiguous slot names.
+Each selected slot keeps its configured family, model, and lens.
+
+The actor submits one nonempty lens for each selected slot except an adversary.
+The record has no unknown fields, duplicate slots, or extra slots.
+An adversary-only round requires an empty lenses list.
+The binary checks record shape, not the quality of the lens text.
+
+Before its receipt, each lens submit replaces the round's complete lenses list.
+Repair repeats this write. A lens has no closing pin. After an interrupted close,
+a new lease generation can replace the draft before it writes the receipt.
+A submit refused after a receipt changes no lens or receipt.
+
+Panel creation copies each drafted lens to its slot's optional `focus` field.
+An adversary slot has no drafted focus. The slot prompt uses the stored focus,
+or the configured lens text when focus is empty. It renders the focus on one
+escaped, labeled line. The managed acceptance header remains in every prompt.

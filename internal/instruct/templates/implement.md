@@ -42,7 +42,7 @@ Run `cd {{.ActiveWorktree | shellsafe}}` to enter the bead worktree. All code ch
 {{- end}}
 {{- else}}
 
-**No active worktree.** Run `mindspec next` NOW — before any other action. Do NOT create files, edit code, or run `git commit` until `mindspec next` has succeeded.
+{{if .KernelNextAction}}**No active worktree.** Run `{{termsafe .KernelNextAction}}` to see the authorized work.{{else}}**No active worktree.** Run `mindspec next` NOW — before any other action. Do NOT create files, edit code, or run `git commit` until `mindspec next` has succeeded.{{end}}
 {{- end}}
 
 Do NOT create manual workflow branches/worktrees in implement mode.

@@ -60,8 +60,10 @@ var templateFieldClassification = map[string]tmplClass{
 	"indeterminate.md {{termsafe .IndeterminateReason}}": classTermsafeText,
 
 	// implement.md
-	"implement.md {{.ActiveSpec}}": classSpineGatedID,
-	"implement.md {{.ActiveBead}}": classSpineGatedID,
+	"implement.md {{.ActiveSpec}}":                classSpineGatedID,
+	"implement.md {{.ActiveBead}}":                classSpineGatedID,
+	"implement.md {{termsafe .KernelNextAction}}": classTermsafeText,
+	"plan.md {{termsafe .KernelNextAction}}":      classTermsafeText,
 	// .SpecGoal: agent-writable markdown payload — PINNED as fenced
 	// payload under 116's inherited persuasion Non-Goal (AC-14).
 	"implement.md {{.SpecGoal}}": classFencedPayload,
@@ -191,12 +193,9 @@ func TestInstructTemplateFieldClassification(t *testing.T) {
 	if len(found) == 0 {
 		t.Fatal("no template interpolations found — the scanner has regressed")
 	}
-	// Census pin (S2-F2): 15 audited rendering interpolations across
-	// the instruct templates (incl. ambiguous.md's two; spec 128 bead 5
-	// added indeterminate.md's one). Update BOTH the classification map
-	// and this count when templates change.
-	if len(templateFieldClassification) != 15 {
-		t.Errorf("template classification census drift: map has %d entries, the audited census is 15", len(templateFieldClassification))
+	// Keep the classification map and its census in sync with rendered fields.
+	if len(templateFieldClassification) != 17 {
+		t.Errorf("template classification census drift: map has %d entries, the audited census is 17", len(templateFieldClassification))
 	}
 	failOnProblems(t, "scan (d) template classification",
 		classifyTemplates(found, templateFieldClassification))

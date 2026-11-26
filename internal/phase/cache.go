@@ -36,13 +36,17 @@ var ErrNoEpicForSpec = errors.New("no epic found for spec")
 // bd call without memoization. This lets call sites be cache-aware without
 // nil checks; the legacy non-cache wrappers also exploit this.
 type Cache struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	root     string
+	uncached bool
 
 	// Whole-list memoization.
-	epicsAll       []EpicInfo
-	epicsAllLoaded bool
-	openAll        []ChildInfo
-	openAllLoaded  bool
+	epicsAll         []EpicInfo
+	epicsAllLoaded   bool
+	openAll          []ChildInfo
+	openAllLoaded    bool
+	recordsAll       []ChildInfo
+	recordsAllLoaded bool
 
 	// Per-key memoization. Presence of the map key means "looked up successfully".
 	// I/O errors are never stored. specErrors stores data-resolution refusals.
@@ -63,11 +67,56 @@ func NewCache() *Cache {
 	}
 }
 
+// WithRoot sets the repository context, clears cached reads if a set root changes, and returns the receiver.
+// An empty root keeps the current context.
+// A nil receiver returns a context holder that does not cache tracker reads.
+func (c *Cache) WithRoot(root string) *Cache {
+	if c == nil {
+		return &Cache{root: root, uncached: true}
+	}
+	c.mu.Lock()
+	if root != "" {
+		if c.root != "" && c.root != root {
+			c.epicsAll, c.epicsAllLoaded = nil, false
+			c.openAll, c.openAllLoaded = nil, false
+			c.recordsAll, c.recordsAllLoaded = nil, false
+			clear(c.epicByID)
+			clear(c.children)
+			clear(c.specErrors)
+			clear(c.specToEpic)
+		}
+		c.root = root
+	}
+	c.mu.Unlock()
+	return c
+}
+
+func (c *Cache) repositoryRoot() (string, error) {
+	if c != nil {
+		c.mu.Lock()
+		root := c.root
+		c.mu.Unlock()
+		if root != "" {
+			return root, nil
+		}
+	}
+	// Legacy callers have no repository context.
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	root, err := workspace.FindRoot(cwd)
+	if errors.Is(err, workspace.ErrNoRoot) {
+		return "", nil
+	}
+	return root, err
+}
+
 // AllEpics returns every epic (open + in_progress + closed) from bd in a single
 // `bd list --type=epic --status=open,in_progress,closed -n 0` call. On error,
 // nothing is memoized so the next call retries.
 func (c *Cache) AllEpics() ([]EpicInfo, error) {
-	if c == nil {
+	if c == nil || c.uncached {
 		return fetchAllEpics()
 	}
 	c.mu.Lock()
@@ -109,7 +158,7 @@ func (c *Cache) ActiveEpics() ([]EpicInfo, error) {
 // the parent epic's status, without a per-epic children query). On error,
 // nothing is memoized so the next call retries.
 func (c *Cache) OpenBeads() ([]ChildInfo, error) {
-	if c == nil {
+	if c == nil || c.uncached {
 		return fetchOpenBeads()
 	}
 	c.mu.Lock()
@@ -126,6 +175,36 @@ func (c *Cache) OpenBeads() ([]ChildInfo, error) {
 	return open, nil
 }
 
+// allRecords reads every tracker record once per cache, including closed records.
+// Read and parse errors are not cached.
+func (c *Cache) allRecords() ([]ChildInfo, error) {
+	fetch := func() ([]ChildInfo, error) {
+		data, err := listJSONFn("--all", "-n", "0")
+		if err != nil {
+			return nil, err
+		}
+		var records []ChildInfo
+		if err = json.Unmarshal(data, &records); err != nil {
+			return nil, err
+		}
+		return records, nil
+	}
+	if c == nil || c.uncached {
+		return fetch()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.recordsAllLoaded {
+		return c.recordsAll, nil
+	}
+	records, err := fetch()
+	if err != nil {
+		return nil, err
+	}
+	c.recordsAll, c.recordsAllLoaded = records, true
+	return records, nil
+}
+
 // FindEpic returns the EpicInfo for an exact epic ID, fetching via `bd show`
 // once per ID per cache. Returns (nil, nil) if successfully looked up but not
 // found. On bd error, returns the error and does NOT memoize.
@@ -135,7 +214,7 @@ func (c *Cache) OpenBeads() ([]ChildInfo, error) {
 // queryEpicStatus. Cache-aware variants of those helpers call FindEpic and
 // read the relevant field off the returned *EpicInfo instead of re-fetching.
 func (c *Cache) FindEpic(epicID string) (*EpicInfo, error) {
-	if c == nil {
+	if c == nil || c.uncached {
 		return fetchEpic(epicID)
 	}
 	c.mu.Lock()
@@ -158,7 +237,7 @@ func (c *Cache) FindEpic(epicID string) (*EpicInfo, error) {
 // Callers that only want a subset (e.g. in_progress for
 // FindActiveBeadForEpicWithCache) filter the returned slice in-process.
 func (c *Cache) GetChildren(epicID string) ([]ChildInfo, error) {
-	if c == nil {
+	if c == nil || c.uncached {
 		return fetchChildren(epicID)
 	}
 	c.mu.Lock()
@@ -177,7 +256,7 @@ func (c *Cache) GetChildren(epicID string) ([]ChildInfo, error) {
 // FindEpicBySpecID resolves a spec ID to its epic ID using AllEpics + the
 // full-ID resolver. It checks all epics, including closed epics, before caching.
 func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
-	if c != nil {
+	if c != nil && !c.uncached {
 		c.mu.Lock()
 		if err, ok := c.specErrors[specID]; ok {
 			c.mu.Unlock()
@@ -215,7 +294,7 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 		resolutionErr = fmt.Errorf("%w: multiple epics resolve to spec %s: %s; keep one epic bound to this spec\nrecovery: bd show %s --json", ErrSpecResolution, idrender.Spec(specID), strings.Join(matches, ", "), idrender.Bead(matches[0]))
 	}
 	if resolutionErr != nil {
-		if c != nil {
+		if c != nil && !c.uncached {
 			c.mu.Lock()
 			c.specErrors[specID] = resolutionErr
 			c.mu.Unlock()
@@ -223,14 +302,14 @@ func (c *Cache) FindEpicBySpecID(specID string) (string, error) {
 		return "", resolutionErr
 	}
 	if len(matches) == 1 {
-		if c != nil {
+		if c != nil && !c.uncached {
 			c.mu.Lock()
 			c.specToEpic[specID] = matches[0]
 			c.mu.Unlock()
 		}
 		return matches[0], nil
 	}
-	if c != nil {
+	if c != nil && !c.uncached {
 		c.mu.Lock()
 		c.specToEpic[specID] = "" // memoize the not-found
 		c.mu.Unlock()

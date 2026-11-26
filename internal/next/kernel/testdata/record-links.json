@@ -1,0 +1,12 @@
+[
+  {
+    "id": "test-abc.1",
+    "upstream": []
+  },
+  {
+    "id": "test-abc.2",
+    "upstream": [
+      "test-abc.1"
+    ]
+  }
+]

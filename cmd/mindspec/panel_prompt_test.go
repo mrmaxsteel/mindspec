@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
+	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 )
@@ -17,6 +18,10 @@ import (
 func promptFixture(t *testing.T, schema int, cfg string) (string, paneltest.Fixture) {
 	t.Helper()
 	root := mkPanelTestRoot(t, cfg)
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	subjectCLIWrite(t, root, ".mindspec/specs/test/spec.md", "# Spec\n")
 	withTestChdir(t, root)
 	config.ResetCache()
@@ -25,6 +30,8 @@ func promptFixture(t *testing.T, schema int, cfg string) (string, paneltest.Fixt
 		{Slot: "R1", Family: "harness", Model: "m", Lens: "empirical-prober"},
 		{Slot: "R2", Family: "harness", Model: "other-model", Lens: "adversarial"},
 	}}
+	// panel.json matches its ledger round row, so panel prompt's hand-edit check passes.
+	p.VerdictSchema = schema
 	f := paneltest.Fixture{Dir: filepath.Join(root, ".mindspec/specs/test/reviews/p"), Panel: p}
 	if err := panel.WriteSnapshot(f.Dir, p); err != nil {
 		t.Fatal(err)
@@ -39,6 +46,14 @@ func promptFixture(t *testing.T, schema int, cfg string) (string, paneltest.Fixt
 		t.Cleanup(func() { _ = flag.Value.Set(old); flag.Changed = changed })
 	}
 	return root, f
+}
+
+// promptReround records the rewritten fixture roster in a later ledger round
+// row, as panel create would, so panel.json stays backed by its ledger.
+func promptReround(t *testing.T, f paneltest.Fixture) {
+	t.Helper()
+	p := f.Panel
+	paneltest.Seed(t, f.Dir, panel.RoundRecord{Record: panel.RecordRound, VerdictSchema: p.VerdictSchema, Spec: p.Spec, Panel: filepath.Base(f.Dir), Round: p.Round, ReviewedHeadSHA: p.ReviewedHeadSHA, SubjectDigest: p.SubjectDigest, Target: p.Target, Gate: p.Gate, BeadID: p.BeadID, Roster: p.Roster, ExpectedReviewers: p.ExpectedReviewers, Telemetry: p.Telemetry, CreatedAt: "2026-10-21T00:00:01Z"})
 }
 
 func promptRun(t *testing.T, root, slot string) string {
@@ -124,6 +139,7 @@ func TestPanelPrompt_Render(t *testing.T) {
 		if err := panel.WriteSnapshot(f.Dir, f.Panel); err != nil {
 			t.Fatal(err)
 		}
+		promptReround(t, f)
 		out := promptRun(t, root, "R1")
 		var begin, end string
 		for _, line := range strings.Split(out, "\n") {
@@ -148,6 +164,7 @@ func TestPanelPrompt_Render(t *testing.T) {
 		if err := panel.WriteSnapshot(f.Dir, f.Panel); err != nil {
 			t.Fatal(err)
 		}
+		promptReround(t, f)
 		subjectCLIWrite(t, filepath.Join(root, ".mindspec-scratch/test/p/r1/R1/attempt-4"), "scratch", "old")
 		out := promptRun(t, root, "R1")
 		want := filepath.Join(root, ".mindspec-scratch/test/p/r1/R1/attempt-5/verdict.json")
@@ -169,6 +186,7 @@ func TestPanelPrompt_Render(t *testing.T) {
 		if err := panel.WriteSnapshot(f.Dir, f.Panel); err != nil {
 			t.Fatal(err)
 		}
+		promptReround(t, f)
 		out := promptRun(t, root, "R1")
 		if strings.ContainsRune(out, '\x1b') || !strings.Contains(out, "model\\x1b[31m") || !strings.Contains(out, "focus\\x1b[31m") {
 			t.Fatalf("unsafe prompt strings:\n%s", out)
@@ -267,7 +285,7 @@ func TestPanelPrompt_PriorRoundV1(t *testing.T) {
 				subjectCLIWrite(t, f.Dir, "R1-round-1.json", tc.file)
 			}
 			subjectCLIWrite(t, f.Dir, "R2-round-1.json", `{"verdict":"REQUEST_CHANGES","concrete_changes_required":["other slot"]}`)
-			f.Panel.Round = 2
+			f.Panel.Round, f.Panel.VerdictSchema = 2, 2
 			if err := panel.WriteSnapshot(f.Dir, f.Panel); err != nil {
 				t.Fatal(err)
 			}
@@ -297,5 +315,40 @@ func TestPanelPrompt_FromSlotTree(t *testing.T) {
 	out := promptRun(t, root, "R1")
 	if !strings.Contains(out, "Review this fixture.") || !strings.Contains(out, filepath.Join(layout.Dir, "attempt-2/verdict.json")) {
 		t.Fatalf("slot root was not resolved:\n%s", out)
+	}
+}
+
+func TestPanelPrompt_UnfilledBriefRecovery(t *testing.T) {
+	_, f := promptFixture(t, 2, "")
+	subjectCLIWrite(t, f.Dir, "BRIEF.md", "<!-- TODO(skill): fill this brief -->\n")
+	_, err := runPanelVerbCmd("prompt", "p", "--slot", "R1")
+	if err == nil {
+		t.Fatal("unfilled brief was accepted")
+	}
+	message := err.Error()
+	for _, text := range []string{"fill " + shellQuoteTarget(filepath.Join(f.Dir, "BRIEF.md")), "mindspec panel prompt " + shellQuoteTarget("p") + " --slot " + shellQuoteTarget("R1") + " --spec " + shellQuoteTarget("test")} {
+		if !strings.Contains(message, text) {
+			t.Fatalf("unfilled brief has no working recovery: %s", message)
+		}
+	}
+	recovery := message[strings.LastIndex(message, "recovery: ")+len("recovery: "):]
+	if matches := guard.FindFloorMatches(recovery); len(matches) != 0 {
+		t.Fatalf("brief recovery crossed the command floor: %+v", matches)
+	}
+}
+
+// A kernel slot prompt prints the leased submit command, or the exact attempt
+// and prompt commands when the slot has no attempt.
+func TestPanelPrompt_KernelSlotCommands(t *testing.T) {
+	slotDir := filepath.Join(t.TempDir(), "R1")
+	out := panel.RenderSlotPrompt(panel.PromptInput{Kind: "harness", SlotDir: slotDir, Attempt: 2, LeaseStep: "kernel-1.1.review.r1.R1"})
+	want := "Submit the verdict JSON through this command:\nmindspec panel submit --file '" + filepath.Join(slotDir, "attempt-2", "verdict.json") + "' --lease <token>\nReplace <token> with the token that mindspec lease 'kernel-1.1.review.r1.R1' printed.\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("leased submit command missing:\n%s\nwant:\n%s", out, want)
+	}
+	out = panel.RenderSlotPrompt(panel.PromptInput{Kind: "harness", SlotDir: slotDir, LeaseStep: "kernel-1.1.review.r1.R1", Checkout: "mindspec panel checkout 'p' --spec 'test' --slot 'R1' --dispatch", Prompt: "mindspec panel prompt 'p' --spec 'test' --slot 'R1'"})
+	want = "Make the slot attempt through this command:\nmindspec panel checkout 'p' --spec 'test' --slot 'R1' --dispatch\nThen run this command for the submission command:\nmindspec panel prompt 'p' --spec 'test' --slot 'R1'\n"
+	if !strings.Contains(out, want) || strings.Contains(out, "Use mindspec panel checkout with --slot") {
+		t.Fatalf("attempt commands missing:\n%s\nwant:\n%s", out, want)
 	}
 }

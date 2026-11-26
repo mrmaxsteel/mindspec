@@ -1,0 +1,39 @@
+{
+  "id": "test-1.1.review",
+  "parent": "test-1.1",
+  "title": "[mindspec] bead-gate",
+  "issue_type": "step",
+  "status": "open",
+  "labels": [
+    "mindspec"
+  ],
+  "metadata": {
+    "mindspec_key": "test-1.1.review",
+    "mindspec_tuple": {
+      "epic": "test-1",
+      "kind": "bead-gate",
+      "attempt": 1,
+      "work_item": "test-1.1",
+      "gate": "test-1.1.review"
+    },
+    "mindspec_round": {
+      "round": 2,
+      "subject": "subject",
+      "slot_count": 2,
+      "slots": [
+        "R1",
+        "R2"
+      ],
+      "paths": [
+        "app.go"
+      ],
+      "lens": "test-1.1.review.r2.lens",
+      "lenses": [
+        {
+          "slot": "R1",
+          "lens": "Review author-of-record."
+        }
+      ]
+    }
+  }
+}

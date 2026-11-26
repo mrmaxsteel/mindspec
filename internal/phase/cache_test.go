@@ -413,3 +413,126 @@ func TestFetchChildrenEpicIDGate(t *testing.T) {
 		t.Errorf("argv = %v, want [--parent mindspec-s2mf ...]", gotArgs)
 	}
 }
+
+func TestCache_WithRootKeepsReadPolicy(t *testing.T) {
+	root := t.TempDir()
+	for _, memoized := range []bool{false, true} {
+		t.Run(map[bool]string{false: "nil", true: "cache"}[memoized], func(t *testing.T) {
+			var c *Cache
+			if memoized {
+				c = NewCache()
+			}
+			original := c
+			c = c.WithRoot(root)
+			if memoized && c != original {
+				t.Fatal("WithRoot did not return the receiver")
+			}
+			c = c.WithRoot("")
+			if got, err := c.repositoryRoot(); err != nil || got != root {
+				t.Fatal("empty root cleared the context")
+			}
+			calls := 0
+			t.Cleanup(SetListJSONForTest(func(args ...string) ([]byte, error) {
+				calls++
+				return []byte(`[]`), nil
+			}))
+			t.Cleanup(SetRunBDForTest(func(args ...string) ([]byte, error) {
+				calls++
+				return []byte(`[]`), nil
+			}))
+			for range 2 {
+				if _, err := c.AllEpics(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.OpenBeads(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.FindEpic("epic-1"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.GetChildren("epic-1"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.allRecords(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.FindEpicBySpecID("001-x"); !errors.Is(err, ErrNoEpicForSpec) {
+					t.Fatalf("spec lookup: %v", err)
+				}
+			}
+			want := 12
+			if memoized {
+				want = 5
+			}
+			if calls != want {
+				t.Fatalf("tracker reads = %d, want %d", calls, want)
+			}
+		})
+	}
+}
+
+func TestCache_AllRecordsRetriesErrors(t *testing.T) {
+	for _, bad := range []string{"read", "parse"} {
+		t.Run(bad, func(t *testing.T) {
+			calls := 0
+			t.Cleanup(SetListJSONForTest(func(args ...string) ([]byte, error) {
+				calls++
+				if calls == 1 {
+					if bad == "read" {
+						return nil, errors.New("read failed")
+					}
+					return []byte(`{bad`), nil
+				}
+				return []byte(`[]`), nil
+			}))
+			c := NewCache()
+			if _, err := c.allRecords(); err == nil {
+				t.Fatal("missing error")
+			}
+			for range 2 {
+				if _, err := c.allRecords(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if calls != 2 {
+				t.Fatalf("tracker reads = %d, want 2", calls)
+			}
+		})
+	}
+}
+
+func TestCache_WithRootInvalidatesRecords(t *testing.T) {
+	calls := 0
+	payload := `[{"id":"record-a"}]`
+	t.Cleanup(SetListJSONForTest(func(args ...string) ([]byte, error) {
+		calls++
+		return []byte(payload), nil
+	}))
+	rootA, rootB := t.TempDir(), t.TempDir()
+	c := NewCache().WithRoot(rootA)
+	for _, root := range []string{rootA, rootA, ""} {
+		c.WithRoot(root)
+		records, err := c.allRecords()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) != 1 || records[0].ID != "record-a" {
+			t.Fatalf("records = %+v, want record-a", records)
+		}
+		if calls != 1 {
+			t.Fatalf("tracker reads = %d, want 1", calls)
+		}
+	}
+	payload = `[{"id":"record-b"}]`
+	c.WithRoot(rootB)
+	records, err := c.allRecords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("tracker reads after root change = %d, want 2", calls)
+	}
+	if len(records) != 1 || records[0].ID != "record-b" {
+		t.Fatalf("records = %+v, want record-b", records)
+	}
+}

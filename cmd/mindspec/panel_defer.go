@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/bead"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -18,7 +19,11 @@ import (
 var panelDeferCmd = &cobra.Command{Use: "defer <slug>", Short: "Defer a latest-round finding to the plan or an open follow-up bead", Args: cobra.ExactArgs(1), SilenceUsage: true, RunE: runPanelDefer}
 
 func runPanelDefer(cmd *cobra.Command, args []string) error {
-	_, reg, err := resolvePanelVerb(cmd, args[0])
+	return withKernelPanelVerb(cmd, args[0], false, func() error { return runPanelDeferBody(cmd, args) })
+}
+
+func runPanelDeferBody(cmd *cobra.Command, args []string) error {
+	root, reg, err := resolvePanelVerb(cmd, args[0])
 	if err != nil {
 		return panelVerbFailure(err)
 	}
@@ -38,7 +43,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		return panelVerbFailure(fmt.Errorf("--by must not be empty"))
 	}
 	if toPlan {
-		return runPanelDeferToPlan(cmd, reg, slot, round, finding, by)
+		return runPanelDeferToPlan(cmd, root, reg, slot, round, finding, by)
 	}
 	if reg.Panel.Gate == "spec_approve" || reg.Panel.Gate == "adhoc" || reg.Panel.Gate == "" {
 		return guard.NewFailure("this panel has no owning epic for a deferral", "fix the finding or use mindspec panel refute")
@@ -47,14 +52,14 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return panelVerbFailure(err)
 	}
-	res, err := panelVerbSnapshot(reg.Dir)
+	res, err := panelVerbSnapshot(root, reg.Dir)
 	if err != nil {
 		return panelVerbFailure(err)
 	}
 	if res.Panel.Abandoned {
 		return panelVerbFailure(fmt.Errorf("panel is abandoned"))
 	}
-	f, verdict, err := deferFinding(reg.Dir, slot, round, finding)
+	f, verdict, err := deferFinding(root, reg.Dir, slot, round, finding)
 	if err != nil {
 		return panelVerbFailure(err)
 	}
@@ -69,7 +74,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	check := func() error {
 		texts := []string{f.Text}
 		if f.ID == "slot" {
-			v, _, err := deferVerdict(reg.Dir, slot, round)
+			v, _, err := deferVerdict(root, reg.Dir, slot, round)
 			if err != nil {
 				return err
 			}
@@ -104,9 +109,19 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	if sourceHash == "" {
 		return panelVerbFailure(fmt.Errorf("source verdict changed; retry against the current verdict"))
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	view, enrolled, err := panelDispositionView(root, res)
+	if err != nil {
+		return err
+	}
+	for _, old := range view.Panel.Deferrals {
+		if enrolled && old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 && old.SourceVerdict == verdict && old.SourceFileSHA256 == sourceHash {
+			fmt.Fprintln(cmd.OutOrStdout(), panel.RuleLine(view))
+			return nil
+		}
+	}
+	now := kernel.Now().UTC().Format(time.RFC3339Nano)
 	ref := panel.Deferral{Slot: slot, Round: round, Finding: f.ID, FindingSHA256: f.SHA256,
-		FindingText: f.Text, Bead: beadID, By: by, CreatedAt: now, SourceVerdict: verdict, SourceFileSHA256: sourceHash}
+		FindingText: f.Text, Bead: beadID, By: by, CreatedAt: now, SourceVerdict: verdict, SourceFileSHA256: sourceHash, Enrolled: enrolled}
 	event, err := json.Marshal(panel.DeferralRecord{Record: panel.RecordDeferral, Spec: panelRecordSpec(*res.Panel), Panel: args[0], Deferral: ref})
 	if err != nil {
 		return panelVerbFailure(err)
@@ -122,14 +137,14 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		return panelVerbFailure(err)
 	}
 	err = panel.AppendRecordsWithCheck(reg.Dir, func() error {
-		current, err := panelVerbSnapshot(reg.Dir)
+		current, err := panelVerbSnapshot(root, reg.Dir)
 		if err != nil {
 			return err
 		}
 		if current.Panel.Abandoned {
 			return fmt.Errorf("panel is abandoned")
 		}
-		latest, _, err := deferFinding(reg.Dir, slot, round, finding)
+		latest, _, err := deferFinding(root, reg.Dir, slot, round, finding)
 		if err != nil {
 			return err
 		}
@@ -149,7 +164,11 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 		return panelVerbFailure(err)
 	}
 	found := false
-	for _, old := range res.Panel.Deferrals {
+	view, _, err = panelDispositionView(root, res)
+	if err != nil {
+		return err
+	}
+	for _, old := range view.Panel.Deferrals {
 		if old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 && old.SourceVerdict == verdict && old.SourceFileSHA256 == sourceHash {
 			found = true
 		}
@@ -160,7 +179,7 @@ func runPanelDefer(cmd *cobra.Command, args []string) error {
 	if err := panel.WriteSnapshot(reg.Dir, *res.Panel); err != nil {
 		return panelVerbFailure(err)
 	}
-	updated, err := panel.Tally(reg.Dir)
+	updated, err := panelTally(root, reg.Dir)
 	if err != nil {
 		return panelVerbFailure(err)
 	}

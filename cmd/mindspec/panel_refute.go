@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
 	"github.com/mrmaxsteel/mindspec/internal/workspace"
@@ -48,8 +49,8 @@ func resolvePanelVerb(cmd *cobra.Command, slug string) (string, panel.Registrati
 	return root, reg, nil
 }
 
-func panelVerbSnapshot(dir string) (*panel.Result, error) {
-	res, err := panel.Tally(dir)
+func panelVerbSnapshot(root, dir string) (*panel.Result, error) {
+	res, err := panelTally(root, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -115,8 +116,8 @@ func panelAcceptanceExists(root, spec, ac string) bool {
 	return regexp.MustCompile(`\b` + regexp.QuoteMeta(ac) + `\b`).Match(data)
 }
 
-func refuteFinding(dir, slot string, round int, id string) (panel.Finding, error) {
-	v, err := panel.ReadSubmittedFindingVerdict(dir, slot, round)
+func refuteFinding(root, dir, slot string, round int, id string) (panel.Finding, error) {
+	v, err := panelFindingVerdict(root, dir, slot, round)
 	if err != nil {
 		return panel.Finding{}, err
 	}
@@ -132,8 +133,8 @@ func refuteFinding(dir, slot string, round int, id string) (panel.Finding, error
 // cannot. An APPROVE
 // verdict's items get the same ccr[i] ids and hashes as REQUEST_CHANGES
 // items. The second value is the verdict word, which sets the severity.
-func deferVerdict(dir, slot string, round int) (panel.FindingVerdict, string, error) {
-	v, err := panel.ReadSubmittedFindingVerdict(dir, slot, round)
+func deferVerdict(root, dir, slot string, round int) (panel.FindingVerdict, string, error) {
+	v, err := panelFindingVerdict(root, dir, slot, round)
 	if err != nil {
 		return panel.FindingVerdict{}, "", err
 	}
@@ -151,8 +152,8 @@ func deferVerdict(dir, slot string, round int) (panel.FindingVerdict, string, er
 }
 
 // deferFinding resolves one finding (or the slot) for panel defer.
-func deferFinding(dir, slot string, round int, id string) (panel.Finding, string, error) {
-	v, verdict, err := deferVerdict(dir, slot, round)
+func deferFinding(root, dir, slot string, round int, id string) (panel.Finding, string, error) {
+	v, verdict, err := deferVerdict(root, dir, slot, round)
 	if err != nil {
 		return panel.Finding{}, "", err
 	}
@@ -177,6 +178,10 @@ func pickFinding(v panel.FindingVerdict, id string) (panel.Finding, error) {
 }
 
 func runPanelRefute(cmd *cobra.Command, args []string) error {
+	return withKernelPanelVerb(cmd, args[0], false, func() error { return runPanelRefuteBody(cmd, args) })
+}
+
+func runPanelRefuteBody(cmd *cobra.Command, args []string) error {
 	root, reg, err := resolvePanelVerb(cmd, args[0])
 	if err != nil {
 		return panelVerbFailure(err)
@@ -220,14 +225,14 @@ func runPanelRefute(cmd *cobra.Command, args []string) error {
 		}
 		evidence = filepath.ToSlash(relative)
 	}
-	res, err := panelVerbSnapshot(reg.Dir)
+	res, err := panelVerbSnapshot(root, reg.Dir)
 	if err != nil {
 		return panelVerbFailure(err)
 	}
 	if res.Panel.Abandoned {
 		return panelVerbFailure(fmt.Errorf("panel is abandoned"))
 	}
-	f, err := refuteFinding(reg.Dir, slot, round, finding)
+	f, err := refuteFinding(root, reg.Dir, slot, round, finding)
 	if err != nil {
 		return panelVerbFailure(err)
 	}
@@ -235,9 +240,19 @@ func runPanelRefute(cmd *cobra.Command, args []string) error {
 	if model == "" {
 		return panelVerbFailure(fmt.Errorf("slot must belong to the recorded roster"))
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	view, enrolled, err := panelDispositionView(root, res)
+	if err != nil {
+		return err
+	}
+	for _, old := range view.Panel.Refutations {
+		if enrolled && old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 {
+			fmt.Fprintln(cmd.OutOrStdout(), panel.RuleLine(view))
+			return nil
+		}
+	}
+	now := kernel.Now().UTC().Format(time.RFC3339Nano)
 	ref := panel.Refutation{Slot: slot, Round: round, Finding: f.ID, FindingSHA256: f.SHA256,
-		FindingText: f.Text, Ground: ground, AC: ac, Reason: reason, Evidence: evidence, By: by, CreatedAt: now}
+		FindingText: f.Text, Ground: ground, AC: ac, Reason: reason, Evidence: evidence, By: by, CreatedAt: now, Enrolled: enrolled}
 	event, err := json.Marshal(panel.RefutationRecord{Record: panel.RecordRefutation, Spec: panelRecordSpec(*res.Panel), Panel: args[0], Refutation: ref})
 	if err != nil {
 		return panelVerbFailure(err)
@@ -246,21 +261,21 @@ func runPanelRefute(cmd *cobra.Command, args []string) error {
 	if gate == "" {
 		gate = "adhoc"
 	}
-	row, err := json.Marshal(panel.DispositionRow{Record: "disposition", ID: fmt.Sprintf("%s:%s:r%d:%s:%s:refutation", args[0], slot, round, f.ID, f.SHA256[:12]),
+	row, err := json.Marshal(panel.DispositionRow{Record: "disposition", ID: panel.RefutationRowID(args[0], ref),
 		Spec: panelRecordSpec(*res.Panel), Gate: gate, Panel: args[0], Reviewer: slot, Model: model, Severity: "blocking",
 		Summary: termsafe.Escape(f.Text), ConvergentWith: []string{}, Disposition: "audited-refuted", EvidenceRef: evidence, CreatedAt: now, Round: &round})
 	if err != nil {
 		return panelVerbFailure(err)
 	}
 	err = panel.AppendRecordsWithCheck(reg.Dir, func() error {
-		current, err := panelVerbSnapshot(reg.Dir)
+		current, err := panelVerbSnapshot(root, reg.Dir)
 		if err != nil {
 			return err
 		}
 		if current.Panel.Abandoned {
 			return fmt.Errorf("panel is abandoned")
 		}
-		latest, err := refuteFinding(reg.Dir, slot, round, finding)
+		latest, err := refuteFinding(root, reg.Dir, slot, round, finding)
 		if err != nil {
 			return err
 		}
@@ -274,7 +289,11 @@ func runPanelRefute(cmd *cobra.Command, args []string) error {
 		return panelVerbFailure(err)
 	}
 	found := false
-	for _, old := range res.Panel.Refutations {
+	view, _, err = panelDispositionView(root, res)
+	if err != nil {
+		return err
+	}
+	for _, old := range view.Panel.Refutations {
 		if old.Slot == slot && old.Round == round && old.Finding == f.ID && old.FindingSHA256 == f.SHA256 {
 			found = true
 		}
@@ -285,7 +304,7 @@ func runPanelRefute(cmd *cobra.Command, args []string) error {
 	if err := panel.WriteSnapshot(reg.Dir, *res.Panel); err != nil {
 		return panelVerbFailure(err)
 	}
-	updated, err := panel.Tally(reg.Dir)
+	updated, err := panelTally(root, reg.Dir)
 	if err != nil {
 		return panelVerbFailure(err)
 	}

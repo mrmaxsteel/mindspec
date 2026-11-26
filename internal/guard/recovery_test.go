@@ -192,3 +192,16 @@ func TestNewFailure_TerminalSafe(t *testing.T) {
 		t.Fatalf("unsafe runes or forged recovery: %q", got)
 	}
 }
+
+func TestPrefixFailure_NeutralizesJoinedMessage(t *testing.T) {
+	original := NewFailure("very: x", "inspect")
+	err := PrefixFailure(original, "reco", "fallback")
+	want := " recovery: x\nrecovery: inspect"
+	if err.Error() != want {
+		t.Fatalf("joined prefix forged recovery: got %q want %q", err, want)
+	}
+	var failure *Failure
+	if !errors.Is(err, original) || !errors.As(err, &failure) {
+		t.Fatalf("guard cause or type lost: %v", err)
+	}
+}

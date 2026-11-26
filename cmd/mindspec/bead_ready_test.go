@@ -427,25 +427,9 @@ func TestBeadReadyCheck_HostileDescriptionEscaped(t *testing.T) {
 	}
 }
 
-// TestBeadReadyCheck_TemporalFlow_RealPlanApproveAndComplete pins AC-10:
-// readiness is a TEMPORAL fact re-derived per invocation, not a cached
-// approval-time judgment. A real two-bead plan (bead 2 depends_on bead 1)
-// is approved via the real `mindspec plan approve` path (real bd, real
-// git): immediately after approval, `ready-check` PASSes bead 1 and FAILs
-// bead 2 on MF-3 (dependency not yet landed-merged); after bead 1 is
-// landed via a real `mindspec complete` (branch deleted), `ready-check`
-// PASSes bead 2 — proving MF-3 tolerates the deleted branch on the real
-// completion path, not just the fixture's synthetic corroboration.
-//
-// This drives the REAL mindspec binary end-to-end (a freshly-built copy,
-// spec 084 Bead 3's buildMindspecBinary helper) against a real bd +
-// git sandbox (internal/harness.NewSandbox) — no fake-bd shim substitutes
-// for `plan approve`/`complete`'s own bd/git mutation chain, which cannot
-// be faithfully faked without reimplementing bd. Per the repo's own
-// no-skip-gating convention for real-bd/real-git flows (see
-// internal/harness/scenario_finalize_pr_test.go's hideRealGH,
-// internal/harness/sandbox.go's initBeads), a missing `bd`/`git` on PATH
-// is a hard failure (t.Fatalf), never a t.Skip.
+// TestBeadReadyCheck_TemporalFlow_RealPlanApproveAndComplete pins readiness
+// and completion for an approval from the earlier lifecycle. New enrolment
+// has separate kernel acceptance tests.
 func TestBeadReadyCheck_TemporalFlow_RealPlanApproveAndComplete(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real-bd/real-git end-to-end flow under -short (matches internal/harness's own -short gating convention)")
@@ -563,9 +547,7 @@ Bead 1
 	}
 	sb.Commit("setup: spec worktree state")
 
-	if out, err := sb.Run("mindspec", "plan", "approve", specID); err != nil {
-		t.Fatalf("mindspec plan approve %s: %v\n%s", specID, err, out)
-	}
+	seedPreKernelPlan(t, sb, specID)
 
 	bead1 := epicID + ".1"
 	bead2 := epicID + ".2"
@@ -898,7 +880,22 @@ func TestReadyCheck_CycleSkillCopiesMatch(t *testing.T) {
 	if strings.Contains(string(source), "--allow-not-ready"+string(rune(96))) {
 		t.Fatal("cycle skill still offers bare override")
 	}
-	requireText(t, string(source), "--allow-not-ready=<ids> --evidence <path>")
+	// The cycle adapter no longer names the override. The
+	// readiness.not-ready-route rule that mindspec instruct prints
+	// carries the evidence-backed form, and the bead ready-check report
+	// prints the exact command.
+	rulesYAML, err := os.ReadFile("../../internal/rules/rules.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, route, ok := strings.Cut(string(rulesYAML), "id: readiness.not-ready-route")
+	if !ok {
+		t.Fatal("rules.yaml lacks readiness.not-ready-route")
+	}
+	if next := strings.Index(route, "\n- id: "); next >= 0 {
+		route = route[:next]
+	}
+	requireText(t, route, "--allow-not-ready=<signals> --evidence <path>")
 }
 
 func TestReadyCheck_ReadinessDocContracts(t *testing.T) {

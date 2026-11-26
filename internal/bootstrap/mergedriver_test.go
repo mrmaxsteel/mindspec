@@ -329,12 +329,24 @@ func setupBeadsMergeRepo(t *testing.T) (string, []string) {
 	// Base on main.
 	ids = append(ids, commitBead("base", "base bead"))
 
+	// Both branches change the same base row. Random new ids alone can sort
+	// on opposite sides of that row, which lets a plain text merge succeed.
+	changeBase := func(title string) {
+		cmd := exec.Command("bd", "update", ids[0], "--title", title)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("bd update: %v\n%s", err, out)
+		}
+	}
+
 	// Diverge: a bead on side.
 	mustGit(t, root, "checkout", "-q", "-b", "side")
+	changeBase("side base bead")
 	ids = append(ids, commitBead("side", "side bead"))
 
 	// A different bead on main.
 	mustGit(t, root, "checkout", "-q", "main")
+	changeBase("main base bead")
 	ids = append(ids, commitBead("main", "main bead"))
 
 	return root, ids

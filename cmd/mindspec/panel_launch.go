@@ -223,11 +223,7 @@ func launchSubmit(root string, reg panel.Registration, slot string, k int, data 
 }
 
 func launchStatus(cmd *cobra.Command, root string, reg panel.Registration, slot string) error {
-	res, err := panel.Tally(reg.Dir)
-	if err != nil {
-		return err
-	}
-	statuses, err := panelSlotStatuses(root, res)
+	_, statuses, err := panelTallyStatuses(root, reg.Dir)
 	if err != nil {
 		return err
 	}
@@ -262,7 +258,7 @@ func runPanelLaunch(cmd *cobra.Command, args []string) (runErr error) {
 	if err != nil {
 		return err
 	}
-	if _, err := panel.ReadFilledBrief(filepath.Join(reg.Dir, "BRIEF.md")); err != nil {
+	if _, err := panel.ReadPanelBrief(reg.Dir, reg.Panel); err != nil {
 		return checkoutFailure(err.Error(), "run panel create to render the brief")
 	}
 	replace, _ := cmd.Flags().GetBool("replace")

@@ -11,6 +11,8 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/executor"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 	"github.com/mrmaxsteel/mindspec/internal/phase"
@@ -52,10 +54,12 @@ type s133DocumentFixture struct {
 	mutations            []string
 	children             []string
 	creates, closes      int
+	fake                 *kerneltest.FakeBD
 }
 
 func s133Document(t *testing.T, policy, gate, state string) *s133DocumentFixture {
 	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
 	for k, v := range map[string]string{"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/usr/bin/false", panel.SkipPanelEnv: ""} {
 		t.Setenv(k, v)
 	}
@@ -66,6 +70,7 @@ func s133Document(t *testing.T, policy, gate, state string) *s133DocumentFixture
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	f := &s133DocumentFixture{t: t, root: t.TempDir(), meta: map[string]interface{}{"spec_id": s133DocID, "mindspec_phase": "plan", phase.PhaseSemanticsV2MarkerKey: "v2"}}
 	f.dir = filepath.Join(f.root, ".mindspec/specs", s133DocID)
+	f.write(".beads/config.yaml", "types.custom: gate,step\n")
 	f.write(".mindspec/config.yaml", "enforcement:\n  panel_presence: "+policy+"\n")
 	f.write(".gitignore", ".mindspec/specs/*/reviews/\n")
 	text := specE2EValidSpecMD(s133DocID)
@@ -167,16 +172,34 @@ func s133Document(t *testing.T, policy, gate, state string) *s133DocumentFixture
 		}
 		return nil, nil
 	}))
+	f.fake = kerneltest.NewFakeBD()
 	t.Cleanup(SetPlanRunBDForTest(func(args ...string) ([]byte, error) {
-		if args[0] == "create" {
+		if old, ok := f.fake.Records["epic-doc"]; ok {
+			if _, before := old.Metadata[kernel.KeyRun]; before {
+				if _, now := f.meta[kernel.KeyRun]; !now {
+					f.fake.Records = map[string]kernel.Record{}
+				}
+			}
+		}
+		f.fake.Records["epic-doc"] = kernel.Record{ID: "epic-doc", Type: "epic", Status: "open", Metadata: f.meta}
+		task := false
+		for i, arg := range args {
+			if arg == "--type" && i+1 < len(args) && args[i+1] == "task" {
+				task = true
+			}
+		}
+		if args[0] == "create" && task {
 			if f.failCreate {
 				return nil, fmt.Errorf("injected create fault")
 			}
 			f.creates++
 			f.mutations = append(f.mutations, "bead-create")
-			return []byte(fmt.Sprintf(`{"id":"doc-%d"}`, f.creates)), nil
 		}
-		return nil, nil
+		out, err := f.fake.Run(args...)
+		if r, ok := f.fake.Records["epic-doc"]; ok {
+			f.meta = r.Metadata
+		}
+		return out, err
 	}))
 	return f
 }
@@ -490,7 +513,7 @@ func TestS133DocGate_ReApproveEditedPlanRunsGateBeforeSupersede(t *testing.T) {
 	if _, e := f.approve("plan_approve"); e != nil {
 		t.Fatal(e)
 	}
-	if f.closes != 1 || f.creates != 1 {
-		t.Fatalf("did not replace bead: close=%d create=%d", f.closes, f.creates)
+	if f.closes != 0 || f.creates != 0 {
+		t.Fatalf("pre-kernel rerun changed work items: close=%d create=%d", f.closes, f.creates)
 	}
 }

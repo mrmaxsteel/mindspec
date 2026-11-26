@@ -92,22 +92,18 @@ func TestKnownSitesExemptionList_EveryEntryHasRationaleAndObligation(t *testing.
 // drifts from what the exported count vars themselves compute — which
 // can only happen if this test is stale against a code change that
 // also updated the vars, since both are derived from the same slice.
-// Its real value is pinning the CURRENT correct numbers (ten live, ten
-// total, as of bead 7's exit of the four seed-only orchestrator-block
-// entries — fourteen total was the pre-bead-7 state) so a reviewer
+// Its real value is pinning the CURRENT correct numbers (five live, five
+// total, as wantKnownSitesLiveCount below states; earlier exits of
+// orchestrator-block entries made the count smaller) so a reviewer
 // sees them fail loudly if a future edit to the slice's structure
 // (e.g. renaming the seed-only surface, or a leftover orchestrator
 // entry surviving the exit) silently changes what "live" means.
-// wantKnownSitesLiveCount is the ONE hand-typed number this sentinel
-// pins (bead-7 fix round 1, G1's brief-error correction): eight
-// Background-cited entries plus two background-justified widening
-// entries (spec.md R5(c)), with the four seed-only orchestrator-block
-// entries already exited by bead 7 — so live and total coincide.
-// Declared once and read three times below, rather than re-typed at
-// each assertion, so the three checks cannot silently drift apart from
-// one another even though the underlying "10" is still, unavoidably,
-// a hand-pinned sentinel value (that's what a sentinel is).
-const wantKnownSitesLiveCount = 11
+// wantKnownSitesLiveCount is the one hand-typed number this sentinel
+// pins: the entries of KnownSitesExemptionList that are live. Every entry
+// is live, so the live count and the total count are the same. It is
+// declared once and read three times below, so the three checks cannot
+// drift apart from one another.
+const wantKnownSitesLiveCount = 5
 
 func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
 	if got, want := len(KnownSitesExemptionList), wantKnownSitesLiveCount; got != want {
@@ -128,7 +124,7 @@ func TestKnownSitesExemptionList_CountSentinel(t *testing.T) {
 // orchestrator-block entry (or a reintroduced one) ever exists in
 // KnownSitesExemptionList, this REDs — independent of the derived
 // count sentinel above, so a future edit that removes one seed-only
-// entry AND adds one unrelated live one (keeping len() at 10 by
+// entry AND adds one unrelated live one (keeping len() the same by
 // coincidence) is still caught.
 func TestKnownSitesExemptionList_NoOrchestratorSeedSurvives(t *testing.T) {
 	for _, e := range KnownSitesExemptionList {
@@ -710,16 +706,16 @@ func TestOpaqueOperandRegistry_RecoveryCommandTemplatesAgainstFloor(t *testing.T
 }
 
 // TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor is the
-// named obligation for cmd/mindspec/panel.go's tallyExitActionNonBead
-// (bead-2 rework): representative renderings of its own `"re-run the
-// panel: " + "mindspec panel create %s --round <N+1> --spec <id>"`
-// template, with and without the optional `--target`/`--gate`
-// fragments, checked against the classifier.
+// named obligation for cmd/mindspec/panel.go's tallyNextBlockExit:
+// representative renderings of its tally re-run recovery line and of the
+// Next block create line, checked against the classifier.
 func TestOpaqueOperandRegistry_PanelRecreateRerunAgainstFloor(t *testing.T) {
 	renderings := []string{
-		`re-run the panel: mindspec panel create bead-127.2 --round <N+1> --spec <id>`,
-		`re-run the panel: mindspec panel create bead-127.2 --round <N+1> --spec <id> --target main`,
-		`re-run the panel: mindspec panel create bead-127.2 --round <N+1> --spec <id> --target main --gate impl`,
+		`mindspec panel tally 'bead-127.2'   (after the Next steps above)`,
+		`mindspec panel tally <panel-slug>   (after the Next steps above)`,
+		`mindspec panel create 'demo' --gate 'adhoc' --target 'main' --round 2 --brief-file <absolute path>`,
+		`mindspec panel create 'demo' --spec '901-demo' --gate 'final_review' --target 'main' --round <N+1> --brief-file <absolute path>`,
+		`mindspec panel create 'demo' --spec '901-demo' --gate 'bead' --target 'bead/mindspec-ab01.2' --bead mindspec-ab01.2 --round 3 --brief-file <absolute path>`,
 	}
 	for _, r := range renderings {
 		if matches := FindFloorMatches(r); len(matches) > 0 {

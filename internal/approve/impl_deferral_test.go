@@ -85,11 +85,11 @@ func TestGateTime_DeferralRecheck(t *testing.T) {
 		for _, change := range []string{"reparented", "deleted", "edge removed", "text removed", "bd error"} {
 			t.Run(gate+"/"+change, func(t *testing.T) {
 				root, _, fake := implDeferralFixture(t, gate)
-				if err := implPanelDeferralPreflight(root, "130-core3"); err != nil {
+				if err := implPanelDeferralPreflight(root, "130-core3", nil); err != nil {
 					t.Fatalf("open baseline: %v", err)
 				}
 				implDeferralIssue(t, fake, change)
-				err := implPanelDeferralPreflight(root, "130-core3")
+				err := implPanelDeferralPreflight(root, "130-core3", nil)
 				if change == "reparented" && (err == nil || !strings.Contains(err.Error(), "outside the owning epic")) {
 					t.Fatalf("reparented deferral must reach epic comparison: %v", err)
 				}
@@ -107,7 +107,7 @@ func TestGateTime_DeferralClosedBead(t *testing.T) {
 		t.Run(gate, func(t *testing.T) {
 			root, _, fake := implDeferralFixture(t, gate)
 			implDeferralIssue(t, fake, "closed")
-			err := implPanelDeferralPreflight(root, "130-core3")
+			err := implPanelDeferralPreflight(root, "130-core3", nil)
 			if err == nil || !strings.Contains(err.Error(), "bd reopen 'follow-up'") {
 				t.Fatalf("closed deferral allowed: %v", err)
 			}
@@ -144,7 +144,7 @@ func TestGateTime_RefuteSupersedesDeferral(t *testing.T) {
 				root, reg, fake := implDeferralFixture(t, gate)
 				implDeferralIssue(t, fake, "closed")
 				implRefuteDeferred(t, &reg, kind)
-				err := implPanelDeferralPreflight(root, "130-core3")
+				err := implPanelDeferralPreflight(root, "130-core3", nil)
 				wantAllowed := gate != "bead" && (kind == "same" || kind == "slot")
 				if (err == nil) != wantAllowed {
 					t.Fatalf("audit/current supersession %s %s: %v", gate, kind, err)
@@ -165,12 +165,12 @@ func TestGateTime_SlotLevelDeferralRecovery(t *testing.T) {
 	core3Append(t, reg.Dir, panel.DeferralRecord{Record: panel.RecordDeferral, Spec: reg.Panel.Spec, Panel: reg.Slug(), Deferral: d})
 	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
 	implDeferralIssue(t, fake, "closed")
-	err := implPanelDeferralPreflight(root, "130-core3")
+	err := implPanelDeferralPreflight(root, "130-core3", nil)
 	if err == nil || strings.Contains(err.Error(), "--finding") || !strings.Contains(err.Error(), "mindspec panel refute") {
 		t.Fatalf("slot recovery: %v", err)
 	}
 	implRefuteDeferred(t, &reg, "slot")
-	if err := implPanelDeferralPreflight(root, "130-core3"); err != nil {
+	if err := implPanelDeferralPreflight(root, "130-core3", nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -180,11 +180,11 @@ func TestGateTime_DeferralAbandonedSkipped(t *testing.T) {
 	reg.Panel.Abandoned = true
 	reg.Panel.AbandonReason = "rework"
 	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
-	if err := implPanelDeferralPreflight(root, "130-core3"); err == nil || !strings.Contains(err.Error(), "outside the panel verbs") {
+	if err := implPanelDeferralPreflight(root, "130-core3", nil); err == nil || !strings.Contains(err.Error(), "outside the panel verbs") {
 		t.Fatalf("integrity must precede abandonment: %v", err)
 	}
 	core3Append(t, reg.Dir, panel.AbandonRecord{Record: panel.RecordAbandon, Spec: reg.Panel.Spec, Panel: reg.Slug(), Reason: "rework", By: "max", CreatedAt: core3Time})
-	if err := implPanelDeferralPreflight(root, "130-core3"); err != nil {
+	if err := implPanelDeferralPreflight(root, "130-core3", nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -192,7 +192,7 @@ func TestGateTime_DeferralRedactedText(t *testing.T) {
 	for _, gate := range []string{"bead", "final_review"} {
 		t.Run(gate, func(t *testing.T) {
 			root, _, _ := implDeferralFixture(t, gate)
-			if err := implPanelDeferralPreflight(root, "130-core3"); err != nil {
+			if err := implPanelDeferralPreflight(root, "130-core3", nil); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -210,7 +210,7 @@ func TestGateTime_DeferralHatches(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := implPanelDeferralPreflight(root, "130-core3"); err != nil {
+			if err := implPanelDeferralPreflight(root, "130-core3", nil); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -222,7 +222,7 @@ func TestGateTime_DeferralCorruptAudit(t *testing.T) {
 		implGetMetadataFn = func(string) (map[string]interface{}, error) {
 			return map[string]interface{}{"panel_deferred_entries": raw}, nil
 		}
-		if err := implPanelDeferralPreflight(root, "130-core3"); err == nil {
+		if err := implPanelDeferralPreflight(root, "130-core3", nil); err == nil {
 			b, _ := json.Marshal(raw)
 			t.Fatalf("corrupt audit allowed: %s", b)
 		}
@@ -259,7 +259,7 @@ func TestGateTime_DeferralPreflightBeforeMutation(t *testing.T) {
 			}
 			t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
 			core3JSON(t, fake, "issue.json", []interface{}{map[string]interface{}{"id": "follow-up", "status": "open", "description": "test finding", "dependencies": []map[string]string{{"id": "epic-parent", "dependency_type": "discovered-from"}}}})
-			if err := implPanelDeferralPreflight(root, "010-test"); err != nil {
+			if err := implPanelDeferralPreflight(root, "010-test", nil); err != nil {
 				t.Fatalf("open baseline: %v", err)
 			}
 			// The edge disappears after completion recorded the durable bead audit.
@@ -327,7 +327,7 @@ func TestImplPreflight_BeadAuditPanelScope(t *testing.T) {
 					}
 				}
 				setIssue("open")
-				if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err != nil {
+				if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err != nil {
 					t.Fatalf("open baseline: %v", err)
 				}
 				if abandoned {
@@ -340,7 +340,7 @@ func TestImplPreflight_BeadAuditPanelScope(t *testing.T) {
 				core3Fixture(t, root, "second-panel", "bead", false)
 				setIssue("closed")
 				reads = 0
-				err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+				err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil)
 				if reads != 1 {
 					t.Errorf("read bead audit %d times; want once", reads)
 				}
@@ -370,7 +370,7 @@ func TestImplPreflight_BeadAuditSurvivesMissingRegistration(t *testing.T) {
 			if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err != nil {
 				t.Fatalf("coverage baseline: %v", err)
 			}
-			if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil || !strings.Contains(err.Error(), "bd reopen") {
+			if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err == nil || !strings.Contains(err.Error(), "bd reopen") {
 				t.Fatalf("closed baseline must block: %v", err)
 			}
 			if change == "renamed" {
@@ -395,7 +395,7 @@ func TestImplPreflight_BeadAuditSurvivesMissingRegistration(t *testing.T) {
 			if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err != nil {
 				t.Fatalf("coverage must pass after tally recovery: %v", err)
 			}
-			if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil || !strings.Contains(err.Error(), "bd reopen") || !strings.Contains(err.Error(), "panel "+entry.Panel+" slot") {
+			if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err == nil || !strings.Contains(err.Error(), "bd reopen") || !strings.Contains(err.Error(), "panel "+entry.Panel+" slot") {
 				t.Fatalf("audit must block and name its stored panel: %v", err)
 			}
 		})
@@ -431,7 +431,7 @@ func TestImplPreflight_PlanBeadAuditWithoutRegistration(t *testing.T) {
 					if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err != nil {
 						t.Fatalf("coverage: %v", err)
 					}
-					err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+					err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil)
 					if reads != 1 {
 						t.Errorf("audit reads=%d; want 1", reads)
 					}
@@ -462,7 +462,7 @@ func TestImplPreflight_PlanBeadAuditWithoutRegistration(t *testing.T) {
 func TestImplPreflight_PlanBeadReadFailure(t *testing.T) {
 	root, reg, _ := implDeferralFixture(t, "bead")
 	writePlanWithBeads(t, root, reg.Panel.Spec, []string{"bad/id"})
-	err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+	err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil)
 	if err == nil {
 		t.Fatal("unreadable plan bead list must block")
 	}
@@ -479,7 +479,7 @@ func TestImplPreflight_EmptySpecMatchesAbandonedRegistration(t *testing.T) {
 	reg.Panel.AbandonReason = "rework"
 	core3Append(t, reg.Dir, panel.AbandonRecord{Record: panel.RecordAbandon, Spec: reg.Panel.Spec, Panel: reg.Slug(), Reason: "rework", By: "max", CreatedAt: core3Time})
 	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
-	if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err != nil {
+	if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err != nil {
 		t.Fatalf("empty spec must use current spec: %v", err)
 	}
 }
@@ -494,7 +494,7 @@ func TestImplPreflight_ClosedBeadAuditRecovery(t *testing.T) {
 				}
 				return map[string]interface{}{"panel_deferred_entries": "bad"}, nil
 			}
-			err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+			err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil)
 			want := "recovery: bd reopen " + *reg.Panel.BeadID
 			if err == nil || !strings.HasSuffix(err.Error(), want) || strings.Contains(err.Error(), "mindspec complete") {
 				t.Fatalf("closed bead recovery: %v; want %q", err, want)
@@ -526,15 +526,15 @@ func TestImplPreflight_FinalReviewRefutationLeavesOtherFinding(t *testing.T) {
 	reg.Panel.Refutations = []panel.Refutation{ref}
 	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
 	implDeferralIssue(t, fake, "closed")
-	if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil || !strings.Contains(err.Error(), "bd reopen") {
+	if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err == nil || !strings.Contains(err.Error(), "bd reopen") {
 		t.Fatalf("remaining finding must block: %v", err)
 	}
 	implDeferralIssue(t, fake, "open") // Description has only the refuted finding.
-	if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil {
+	if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err == nil {
 		t.Fatal("missing unrefuted text must block")
 	}
 	core3JSON(t, fake, "follow-up.json", []interface{}{map[string]interface{}{"id": "follow-up", "status": "open", "description": "second ask", "dependencies": []map[string]string{{"id": "epic-x", "dependency_type": "discovered-from"}}}})
-	if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err != nil {
+	if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err != nil {
 		t.Fatalf("only effective member is required: %v", err)
 	}
 }
@@ -556,7 +556,7 @@ func TestImplPreflight_AuditRegistrationLedgerIdentity(t *testing.T) {
 			core3Cover(t, reg)
 			core3Manifest(t, reg)
 			implDeferralIssue(t, fake, "closed")
-			if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil || !strings.Contains(err.Error(), "bd reopen") {
+			if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err == nil || !strings.Contains(err.Error(), "bd reopen") {
 				t.Fatalf("live panel must block: %v", err)
 			}
 			abandoned := reg
@@ -587,7 +587,7 @@ func TestImplPreflight_AuditRegistrationLedgerIdentity(t *testing.T) {
 			if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err != nil {
 				t.Fatalf("coverage after tally: %v", err)
 			}
-			err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+			err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil)
 			if swap {
 				if err == nil || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") {
 					t.Fatalf("renamed abandonment must not skip the audit: %v", err)
@@ -608,7 +608,7 @@ func TestImplPreflight_PendingDeferralAudit(t *testing.T) {
 				return map[string]interface{}{"deferral_pending_entries": []complete.PanelDeferredEntry{entry}}, nil
 			}
 			implDeferralIssue(t, fake, status)
-			err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+			err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil)
 			if status == "closed" {
 				if err == nil || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") {
 					t.Fatalf("pending deferral must block: %v", err)
@@ -667,7 +667,7 @@ func TestImplPreflight_RejectsDuplicatePanelIdentity(t *testing.T) {
 					}
 					reg.Dir, specDir = live, flatDir
 				}
-				if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err == nil || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") {
+				if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err == nil || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") {
 					t.Fatalf("closed follow-up must block before the copy: %v", err)
 				}
 				live := reg.Dir
@@ -706,7 +706,7 @@ func TestImplPreflight_RejectsDuplicatePanelIdentity(t *testing.T) {
 				if err := implPanelCore3Preflight(root, reg.Panel.Spec, nil); err != nil {
 					t.Fatalf("registration integrity must pass: %v", err)
 				}
-				err := implPanelDeferralPreflight(root, reg.Panel.Spec)
+				err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil)
 				for _, want := range []string{"panel " + reg.Slug() + " for spec " + reg.Panel.Spec + " is registered at 2 paths:", live, duplicate, "remove the duplicates"} {
 					if err == nil || !strings.Contains(err.Error(), want) {
 						t.Errorf("duplicate identity must block and name both paths; want %q: %v", want, err)
@@ -716,7 +716,7 @@ func TestImplPreflight_RejectsDuplicatePanelIdentity(t *testing.T) {
 				if err := os.Rename(live, filepath.Join(t.TempDir(), "live")); err != nil {
 					t.Fatal(err)
 				}
-				if err := implPanelDeferralPreflight(root, reg.Panel.Spec); err != nil {
+				if err := implPanelDeferralPreflight(root, reg.Panel.Spec, nil); err != nil {
 					t.Fatalf("single abandoned registration must skip: %v", err)
 				}
 			})

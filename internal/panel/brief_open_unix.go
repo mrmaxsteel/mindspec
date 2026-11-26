@@ -12,5 +12,5 @@ func openBriefFile(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return os.NewFile(uintptr(fd), path), nil
+	return os.NewFile(uintptr(fd), path), nil // #nosec G115 -- A successful syscall.Open returns a nonnegative file descriptor.
 }

@@ -1,0 +1,31 @@
+{
+  "verdict_schema": 2,
+  "bead_id": "test-1.1",
+  "spec": "001-x",
+  "target": "bead/test-1.1",
+  "round": 2,
+  "expected_reviewers": 2,
+  "reviewer_count_source": "explicit",
+  "reviewed_head_sha": "subject",
+  "subject_digest": "subject-digest",
+  "gate": "bead",
+  "roster": [
+    {
+      "slot": "R1",
+      "model": "harness",
+      "lens": "author-of-record",
+      "family": "harness"
+    },
+    {
+      "slot": "R2",
+      "model": "harness",
+      "lens": "empirical-prober",
+      "family": "harness"
+    }
+  ],
+  "telemetry": "required",
+  "record": "round",
+  "panel": "panel",
+  "carried": {},
+  "created_at": "2026-01-02T03:04:05Z"
+}

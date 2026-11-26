@@ -3,6 +3,8 @@ package approve
 import (
 	"os"
 	"testing"
+
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 )
 
 // TestMain defaults planListJSONFn to a bd-independent stub (an empty
@@ -26,6 +28,8 @@ import (
 // override this default per-test and restore it via t.Cleanup, so they are
 // unaffected by this change.
 func TestMain(m *testing.M) {
+	// Existing approval fixtures model the pre-kernel lifecycle.
+	implKernelStateFn = func(string, string) (*kernel.State, error) { return nil, nil }
 	planListJSONFn = func(args ...string) ([]byte, error) {
 		return []byte(`[]`), nil
 	}

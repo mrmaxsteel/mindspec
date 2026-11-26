@@ -27,7 +27,7 @@
   scope: [orchestrator]
   prohibition: Do not start more than one fix agent per panel round or run it in a slot tree.
   replacement: Run one fix agent per round in the target's own worktree.
-  enforced_by: advisory
+  enforced_by: lease
 - id: panel.artifact-gate
   scope: [orchestrator]
   prohibition: Do not close a finding about a missing measurement artifact with a text edit.
@@ -66,8 +66,8 @@
   enforced_by: advisory
 - id: review.reproduce
   scope: [orchestrator]
-  prohibition: Do not dispatch a fix agent or refute a blocking finding before you reproduce it in isolation.
-  replacement: Reproduce each blocking finding in an isolated checkout and give more weight to the deeper trace.
+  prohibition: On a spec that is not enrolled, do not dispatch a fix agent or refute a blocking finding before you reproduce it in isolation.
+  replacement: Reproduce each blocking finding in an isolated checkout and give more weight to the deeper trace. An enrolled spec runs the verify step instead.
   enforced_by: advisory
 - id: review.no-vote
   scope: [orchestrator, implementer, reviewer, fixer]
@@ -93,10 +93,35 @@
   scope: [implementer, fixer]
   prohibition: A subagent must not run mindspec complete, bd close or a raw bead merge.
   replacement: Return the implementation or fix to the orchestrator for completion.
-  enforced_by: advisory
+  enforced_by: submit
 - id: sequence.bead-impl-prompt
   scope: [orchestrator]
   prohibition: Do not dispatch an implementer before the implementation prompt is staged.
   replacement: Stage the implementation prompt before dispatch.
   enforced_by: advisory
   target: next-action
+- id: dispatch.fresh-agent
+  scope: [orchestrator]
+  prohibition: Do not reuse an agent for a second actor step, give a verify step to a slot reviewer of its round or an author of its subject, give a fix step to its verifier, or take a lease that a still-running agent of this loop holds.
+  replacement: Start a fresh agent for each actor step and choose a verifier and a fixer that did not do the work they judge.
+  enforced_by: advisory
+- id: decision.operator-answer
+  scope: [orchestrator]
+  prohibition: Do not let an agent answer an open decision or submit an option that the operator did not choose.
+  replacement: Give each open decision to the operator with its options and submit only the option that the operator chooses.
+  enforced_by: advisory
+- id: loop.stop-on-failed-run
+  scope: [orchestrator]
+  prohibition: Do not continue the loop when a run entry failed, a failed merge or a dependency mismatch included, and the next pass lists the same entry.
+  replacement: Stop the loop and give the failed entry to the operator.
+  enforced_by: advisory
+- id: readiness.not-ready-route
+  scope: [orchestrator]
+  prohibition: Do not dispatch again after a NOT READY return without a change, and do not start an agent when mindspec next <w> --emit-only exits non-zero.
+  replacement: "On a NOT READY return, accept it and revise the plan, or answer each cited reason once with mindspec bead clarify and dispatch again with the brief that the binary prints. On a non-zero exit of mindspec next <w> --emit-only, release a held lease with mindspec lease <step> --release <t> and follow the printed report: revise the plan, or the operator runs mindspec next <w> --allow-not-ready=<signals> --evidence <path>, which on an enrolled spec also writes the override marker and then takes the lease."
+  enforced_by: advisory
+- id: panel.no-self-skip
+  scope: [orchestrator]
+  prohibition: Do not set an environment variable that skips a panel gate.
+  replacement: Return a blocked gate to the operator.
+  enforced_by: advisory

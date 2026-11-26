@@ -25,7 +25,7 @@ var planApproveCmd = &cobra.Command{
 	Long: `Validates the plan, updates YAML frontmatter to Approved,
 and creates implementation beads (if not already present).
 
-After approval, run /clear then 'mindspec next' to claim your first bead.`,
+After approval, run 'mindspec next-action <spec> --apply' to see the authorized work.`,
 	Args: cobra.ExactArgs(1),
 	RunE: approvePlanRunE,
 }
@@ -76,9 +76,15 @@ func approvePlanRunE(cmd *cobra.Command, args []string) error {
 	// Spec 080: stop after approval — do NOT auto-claim beads.
 	fmt.Println("Next steps:")
 	fmt.Println("  1. Run /clear to reset your context")
-	fmt.Printf("  2. Run `mindspec next` to claim your first bead\n")
+	nextAction := ""
+	if result.Enrolled {
+		nextAction = fmt.Sprintf("mindspec next-action %s --apply", shellQuoteTarget(idrender.Spec(specID)))
+		fmt.Printf("  2. Run `%s` to see the authorized work\n", nextAction)
+	} else {
+		fmt.Println("  2. Run `mindspec next` to claim your first bead")
+	}
 	fmt.Println()
-	if err := emitInstruct(root); err != nil {
+	if err := emitInstructWithNextAction(root, nextAction); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not emit guidance: %v\n", next.RenderBDError(err))
 	}
 

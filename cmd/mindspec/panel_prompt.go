@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrmaxsteel/mindspec/internal/config"
 	"github.com/mrmaxsteel/mindspec/internal/guard"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/rules"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -87,10 +88,14 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 		return in, reg.Err
 	}
 	p := reg.Panel
+	// A hand edit of panel.json (focus included) must not reach a reviewer prompt.
+	if err := checkHandEdits(reg); err != nil {
+		return in, err
+	}
 	found := false
 	for _, slot := range p.Roster {
 		if slot.Slot == slotID {
-			in.Slot, in.Family, in.Model, in.Lens = slot.Slot, slot.Family, slot.Model, slot.Lens
+			in.Slot, in.Family, in.Model, in.Lens, in.Focus = slot.Slot, slot.Family, slot.Model, slot.Lens, slot.Focus
 			found = true
 			break
 		}
@@ -118,15 +123,18 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 	if !ok {
 		return in, guard.NewFailure("slot family has no runner: "+termsafe.Escape(in.Family), "add a runner for the family to panel.runners")
 	}
-	in.Kind, in.Output, in.Focus = runner.Kind, runner.Output, cfg.Panel.Lenses[in.Lens]
+	in.Kind, in.Output = runner.Kind, runner.Output
+	if in.Focus == "" || in.Lens == "adversarial" {
+		in.Focus = cfg.Panel.Lenses[in.Lens]
+	}
 	layout, err := panel.NewSlotLayout(root, cfg.Panel.IsolationRoot, p.Spec, reg.Slug(), p.Round, slotID)
 	if err != nil {
 		return in, err
 	}
 	in.SlotDir, in.Tree = layout.Dir, layout.Tree
-	brief, err := panel.ReadFilledBrief(filepath.Join(reg.Dir, "BRIEF.md"))
+	brief, err := panel.ReadPanelBrief(reg.Dir, reg.Panel)
 	if err != nil {
-		return in, guard.NewFailure(err.Error(), "run panel create to render the brief")
+		return in, guard.NewFailure(err.Error(), fmt.Sprintf("fill %s, then run mindspec panel prompt %s --slot %s --spec %s", shellQuoteTarget(filepath.Join(reg.Dir, "BRIEF.md")), shellQuoteTarget(reg.Slug()), shellQuoteTarget(slotID), shellQuoteTarget(reg.Panel.Spec)))
 	}
 	in.Brief = string(brief)
 	if runner.Kind == "process" {
@@ -150,6 +158,25 @@ func resolvePanelPrompt(root string, reg panel.Registration, slotID string, cfg 
 			}
 		}
 	}
+	if p.Gate == "bead" || p.Gate == "final_review" {
+		// A prompt is read-only. Without a kernel state it keeps the panel command.
+		if state, err := panelKernelStateFn(root, p.Spec); err == nil && state != nil {
+			if step, err := kernelSlotStep(*state, p, slotID); err == nil {
+				in.LeaseStep = step
+				spec := ""
+				if p.Spec != "" {
+					spec = " --spec " + shellQuoteTarget(p.Spec)
+				}
+				target := shellQuoteTarget(reg.Slug()) + spec + " --slot " + shellQuoteTarget(slotID)
+				in.Checkout = "mindspec panel checkout " + target + " --dispatch"
+				in.Prompt = "mindspec panel prompt " + target
+			}
+		}
+	}
+	if p.Orchestrated {
+		in.DurablePrior = true
+		return in, nil
+	}
 	in.PriorItems, err = panel.PriorRoundItems(reg.Dir, slotID, p.Round)
 	return in, err
 }
@@ -158,4 +185,24 @@ func init() {
 	panelPromptCmd.Flags().String("slot", "", "Roster slot to review")
 	panelPromptCmd.Flags().String("spec", "", "Select the owning spec when the slug is ambiguous")
 	panelCmd.AddCommand(panelPromptCmd)
+}
+
+// kernelSlotStep returns the current kernel step of a roster slot.
+func kernelSlotStep(state kernel.State, p panel.Panel, slot string) (string, error) {
+	index := -1
+	for i, reviewer := range p.Roster {
+		if reviewer.Slot == slot {
+			index = i
+			break
+		}
+	}
+	if index < 0 || slot != fmt.Sprintf("R%d", index+1) {
+		return "", guard.NewFailure("slot identity differs from its roster position", "select a slot from the panel roster")
+	}
+	gate := kernelPanelGate(state, p)
+	head, err := kernel.SlotLineageHead(state, fmt.Sprintf("%s.r%d.R%d", gateBase(state, gate), p.Round, index+1))
+	if err != nil {
+		return "", err
+	}
+	return head.Key(), nil
 }
