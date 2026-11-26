@@ -235,12 +235,13 @@ func TestS134Judge_WithdrawAuthorisedRound(t *testing.T) {
 	for i, id := range r.Slots {
 		v := paneltest.Verdict("APPROVE")
 		v.Slot, v.Round, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i+1), 2, newest, "test-model"
-		_, err := panel.Submit(panel.SubmitTarget{Dir: filepath.Join(f.SpecDir, "reviews/round-two"), Spec: f.SpecID, Panel: "round-two", Slot: v.Slot, Round: 2}, paneltest.Bytes(t, v), func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: filepath.Join(f.SpecDir, "reviews/round-two"), Spec: f.SpecID, Panel: "round-two", Slot: v.Slot, Round: 2}, data, func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
 			return panel.SubmitResolution{Family: "harness", Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
 		})
 		f.Must(err)
 		f.Create(id, gate)
-		closePass(t, f, id)
+		closeSlotPass(t, f, id, data)
 	}
 	reduce(t, f, true)
 	if record(t, f, gate).Status != "closed" {

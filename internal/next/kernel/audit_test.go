@@ -22,11 +22,11 @@ func TestS134Audit_TypedRecordsAndLocalJournal(t *testing.T) {
 	reduce(t, f, true)
 	// A repaired close, a receipt under a repair submit, and a late submission.
 	seedClosed(t, f, gate+".r1.R1", nil)
-	kerneltest.Repaired(f, gate+".r1.R1", kernel.Receipt{Kind: "passed", Retally: "repair"})
-	seedClosed(t, f, gate+".r1.R2", &kernel.Receipt{Kind: "passed", Retally: "repair-submit", Via: "repair", Repaired: true, Generation: 2})
-	seedClosed(t, f, gate+".r1.R3", &kernel.Receipt{Kind: "passed", Retally: "late", Generation: 1, SupersededGeneration: 2})
+	kerneltest.Repaired(f, gate+".r1.R1", slotReceipt(t, f, gate+".r1.R1", kernel.Receipt{Kind: "passed"}))
+	seedSlotClosed(t, f, gate+".r1.R2", kernel.Receipt{Kind: "passed", Via: "repair", Repaired: true, Generation: 2})
+	seedSlotClosed(t, f, gate+".r1.R3", kernel.Receipt{Kind: "passed", Generation: 1, SupersededGeneration: 2})
 	// A completed retry without Repaired does not count as an unreceipted close.
-	seedClosed(t, f, gate+".r1.R3.a2", &kernel.Receipt{Kind: "passed", Retally: "retry"})
+	seedSlotClosed(t, f, gate+".r1.R3.a2", kernel.Receipt{Kind: "passed"})
 	// One lens attempt per gate round.
 	for _, lens := range []string{gate + ".r1.lens", gate + ".r2.lens"} {
 		f.Create(lens, gate)
@@ -267,13 +267,13 @@ func TestS134Audit_CountRules(t *testing.T) {
 	// A valid repaired receipt on a step that is not closed still counts as an unreceipted close.
 	openRepaired := gate + ".r2.R3"
 	f.Create(openRepaired, gate)
-	f.Must(f.Store.WriteReceipt(openRepaired, kernel.Receipt{Kind: "passed", Retally: "repair-submit", Repaired: true}))
+	openReceipt := slotReceipt(t, f, openRepaired, kernel.Receipt{Kind: "passed", Repaired: true})
+	f.Must(f.Store.WriteReceipt(openRepaired, openReceipt))
 	// A judge step is not a lens step.
 	judgeStep := gate + ".judge.a1"
 	f.Create(judgeStep, gate)
 	// One valid receipt with each property, and one receipt that fails validation with the same properties.
-	valid := kernel.Receipt{Kind: "passed", Retally: "repair-submit", Via: "repair", Repaired: true, Generation: 3, SupersededGeneration: 2}
-	seedClosed(t, f, gate+".r1.R1", &valid)
+	seedSlotClosed(t, f, gate+".r1.R1", kernel.Receipt{Kind: "passed", Via: "repair", Repaired: true, Generation: 3, SupersededGeneration: 2})
 	invalid := kernel.Receipt{Kind: "passed", Via: "repair", Repaired: true, Generation: 3, SupersededGeneration: 2}
 	seedClosed(t, f, gate+".r1.R2", &invalid)
 	if kernel.ValidReceipt(f.Root, invalid, f.State().Records[gate+".r1.R2"].Metadata) == nil {
@@ -281,13 +281,13 @@ func TestS134Audit_CountRules(t *testing.T) {
 	}
 	// An invalid close whose linked retry completed without Repaired adds no count.
 	seedClosed(t, f, gate+".r1.R3", nil)
-	seedClosed(t, f, gate+".r1.R3.a2", &kernel.Receipt{Kind: "passed", Retally: "retry"})
+	seedSlotClosed(t, f, gate+".r1.R3.a2", kernel.Receipt{Kind: "passed"})
 	f.Must(f.Store.WriteMetadata(gate+".r1.R3.a2", kernel.Metadata(kernel.KeyFrom, kernel.From(gate+".r1.R3"))))
 	if !kernel.RepairedClose(f.State(), gate+".r1.R3") {
 		t.Fatal("fixture retry must repair the invalid close")
 	}
 	state := f.State()
-	if r := state.Records[openRepaired]; r.Status == "closed" || kernel.ValidReceipt(f.Root, kernel.Receipt{Kind: "passed", Retally: "repair-submit", Repaired: true}, r.Metadata) != nil {
+	if r := state.Records[openRepaired]; r.Status == "closed" || kernel.ValidReceipt(f.Root, openReceipt, r.Metadata) != nil {
 		t.Fatalf("fixture %s must be open with a valid repaired receipt, status %q", openRepaired, r.Status)
 	}
 	for _, id := range []string{legacyOnly, legacyBoth} {

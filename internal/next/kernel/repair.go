@@ -33,7 +33,24 @@ func repairEvidence(s State, r Record) (SubmitOptions, error) {
 	t, _, _ := r.Tuple()
 	receipt := Receipt{Kind: "passed", Generation: lease.Generation}
 	switch t.Kind {
-	case "lens", "verify", "change-judge", "review-slot":
+	case "review-slot":
+		if hasRecord(r) {
+			return o, repairRecord(s, r, receipt, t.Kind)
+		}
+		// A raw close before a submit leaves no stored record. The verdict
+		// file at the registered path supplies it, with the submit checks.
+		path, err := slotVerdictPath(s, t)
+		if err != nil {
+			return o, err
+		}
+		data, err := slotRecord(s, t, path)
+		if err != nil {
+			return o, err
+		}
+		o.Artifact = path
+		receipt.RecordSHA256 = recordDigest([]byte(data))
+		r.Metadata = mergedMetadata(r.Metadata, Metadata(KeyRecord, data))
+	case "lens", "verify", "change-judge":
 		data, err := recordBytes(r)
 		if err != nil {
 			return o, err
@@ -65,6 +82,20 @@ func repairEvidence(s State, r Record) (SubmitOptions, error) {
 		return o, actorFailure("artifact check is not available for " + t.Kind)
 	}
 	return o, check(s, r, receipt)
+}
+
+// repairRecord checks the stored record of r as the repair evidence.
+func repairRecord(s State, r Record, receipt Receipt, kind string) error {
+	data, err := recordBytes(r)
+	if err != nil {
+		return err
+	}
+	receipt.RecordSHA256 = recordDigest(data)
+	check := artifactChecks[kind]
+	if check == nil {
+		return actorFailure("artifact check is not available for " + kind)
+	}
+	return check(s, r, receipt)
 }
 
 func repairRun(o SubmitOptions) Run {

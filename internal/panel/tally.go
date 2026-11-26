@@ -58,6 +58,48 @@ func RoundVerdictFiles(dir string, round int) ([]string, error) {
 	return names, nil
 }
 
+// RoundVerdictBytes returns the verdict bytes of round, keyed by verdict
+// file name. A stored record gives the bytes of its name, also when a file of
+// that name is on disk. A file with no record gives its own bytes. So the
+// record-backed names read the same in every checkout. A nil records map
+// gives the disk files only.
+func RoundVerdictBytes(dir string, round int, records map[string][]byte) (map[string][]byte, error) {
+	names, err := RoundVerdictFiles(dir, round)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]byte{}
+	for name, data := range records {
+		match := verdictFileRE.FindStringSubmatch(name)
+		if match == nil {
+			continue
+		}
+		if n, err := strconv.Atoi(match[2]); err == nil && n == round {
+			out[name] = data
+		}
+	}
+	for _, name := range names {
+		if _, ok := out[name]; ok {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, &VerdictReadError{Name: name, Err: err}
+		}
+		out[name] = data
+	}
+	return out, nil
+}
+
+// VerdictReadError reports a listed verdict file that cannot be read.
+type VerdictReadError struct {
+	Name string
+	Err  error
+}
+
+func (e *VerdictReadError) Error() string { return e.Err.Error() }
+func (e *VerdictReadError) Unwrap() error { return e.Err }
+
 // ConsolidatedName returns the basename of the consolidated
 // concrete_changes_required list for a round, as written by
 // /ms-panel-tally: consolidated-round-<N>.md.
@@ -347,11 +389,34 @@ func Tally(dir string) (*Result, error) {
 }
 
 // TallyRecords tallies dir with verdict bytes from records, keyed by verdict
-// file name. A record supplies the verdict of a name with no file in dir. A
-// file on disk wins, so a hand edit still shows as a digest mismatch. The
-// caller stores the records and checks their hashes.
+// file name. A record supplies the verdict of its name, with or without a
+// file in dir. A file in dir that differs from its record is not counted, so
+// a hand edit leaves the slot uncounted. The caller stores the records and
+// checks their hashes. A nil records map gives the plain disk tally.
 func TallyRecords(dir string, records map[string][]byte) (*Result, error) {
 	return tallyWithPanel(dir, ReadLedger, nil, records)
+}
+
+// RecordSource gives the stored verdict records of a panel directory. A nil
+// source, or a nil map, means the disk files only. An error means the
+// records are required and cannot be read.
+type RecordSource func(dir string) (map[string][]byte, error)
+
+// For returns the records of dir, or nil for a nil source.
+func (r RecordSource) For(dir string) (map[string][]byte, error) {
+	if r == nil {
+		return nil, nil
+	}
+	return r(dir)
+}
+
+// TallySource tallies dir with the records of source.
+func TallySource(dir string, source RecordSource) (*Result, error) {
+	records, err := source.For(dir)
+	if err != nil {
+		return nil, err
+	}
+	return TallyRecords(dir, records)
 }
 
 func tally(dir string, readLedger func(string) ([][]byte, error)) (*Result, error) {
@@ -417,14 +482,16 @@ func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), regis
 		names[e.Name()] = true
 		listed = append(listed, entry{name: e.Name(), dir: e.IsDir()})
 	}
-	absent := map[string][]byte{}
-	for name, data := range records {
-		if !names[name] {
-			absent[name] = data
+	// A stored record is the authority for its name. A file on disk with the
+	// same name counts only when its bytes equal the record.
+	onDisk := map[string]bool{}
+	for name := range records {
+		if names[name] {
+			onDisk[name] = true
+		} else {
 			listed = append(listed, entry{name: name})
 		}
 	}
-	records = absent
 	sort.Slice(listed, func(i, j int) bool { return listed[i].name < listed[j].name })
 	for _, e := range listed {
 		m := verdictFileRE.FindStringSubmatch(e.name)
@@ -476,6 +543,10 @@ func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), regis
 			continue
 		}
 		offRoster := len(roster) > 0 && !roster[vf.slot]
+		if onDisk[vf.name] && !fileMatchesRecord(filepath.Join(dir, vf.name), records[vf.name]) {
+			res.NotIn = append(res.NotIn, ExcludedVerdict{File: vf.name, Reason: "file differs from the stored record"})
+			continue
+		}
 		data, err := verdictBytes(dir, vf.name, round.VerdictSchema, records)
 		if err != nil {
 			if round.VerdictSchema != 2 {
@@ -585,7 +656,14 @@ func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), regis
 // ReadSubmittedFindingVerdict reads only a counted v2 submission. Historical
 // rounds retain their file-based finding contract.
 func ReadSubmittedFindingVerdict(dir, slot string, round int) (FindingVerdict, error) {
-	res, err := Tally(dir)
+	return ReadSubmittedFindingVerdictRecords(dir, slot, round, nil)
+}
+
+// ReadSubmittedFindingVerdictRecords reads a counted v2 submission as
+// TallyRecords counts it: a stored record gives the bytes of its name. A nil
+// records map reads the disk files only.
+func ReadSubmittedFindingVerdictRecords(dir, slot string, round int, records map[string][]byte) (FindingVerdict, error) {
+	res, err := TallyRecords(dir, records)
 	if err != nil {
 		return FindingVerdict{}, err
 	}
@@ -597,7 +675,7 @@ func ReadSubmittedFindingVerdict(dir, slot string, round int) (FindingVerdict, e
 	}
 	for _, v := range res.Verdicts {
 		if v.Slot == slot && v.Round == round && v.ReadError == "" {
-			data, err := ReadVerdictFile(filepath.Join(dir, v.File), res.VerdictSchema)
+			data, err := verdictBytes(dir, v.File, res.VerdictSchema, records)
 			if err != nil {
 				return FindingVerdict{}, err
 			}
@@ -704,8 +782,19 @@ func TallyRegisteredRoundRecords(dir, spec string, number int, subject string, r
 	return tallyWithPanel(dir, func(string) ([][]byte, error) { return filtered, nil }, registered, records)
 }
 
-// verdictBytes returns the verdict of name from records, which hold only
-// names with no file in dir, or else from the file in dir.
+// fileMatchesRecord reports whether the file at path holds exactly the
+// stored record bytes.
+func fileMatchesRecord(path string, record []byte) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() != int64(len(record)) {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	return err == nil && findingHash(data) == findingHash(record)
+}
+
+// verdictBytes returns the verdict of name from records, or else from the
+// file in dir. A caller checks first that a file beside a record matches it.
 func verdictBytes(dir, name string, schema int, records map[string][]byte) ([]byte, error) {
 	data, ok := records[name]
 	if !ok {

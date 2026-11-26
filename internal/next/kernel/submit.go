@@ -129,7 +129,23 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 				if err = repairable(r, lease, valid); err != nil {
 					return err
 				}
-				if stored {
+				if slot && !hasRecord(r) {
+					// A raw close before a submit leaves no stored record. The
+					// slot verdict file supplies it, and the plain submit
+					// checks below run on it.
+					if options.Record != "" {
+						return actorFailure("slot has no mindspec_record; repair it with --artifact and its verdict file")
+					}
+					if options.Artifact == "" {
+						path, err := slotVerdictPath(s, tuple)
+						if err != nil {
+							return err
+						}
+						if record, err = slotRecord(s, tuple, path); err != nil {
+							return err
+						}
+					}
+				} else if stored {
 					data, err := recordBytes(r)
 					if err != nil {
 						return err
@@ -240,9 +256,6 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 					updates[KeyLease] = lease
 				}
 				if slot {
-					// The verdict record and its receipt share the one durable
-					// write below, after the publication hook.
-					updates[KeyRecord] = record
 					final := mergedMetadata(mergedMetadata(r.Metadata, updates), Metadata(KeyClose, receipt))
 					if _, err = CheckMetadataSize(r.Key(), final); err != nil {
 						return err
@@ -268,8 +281,16 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 				if err = checkClosingConflict(s, r); err != nil {
 					return err
 				}
+				if slot {
+					// The verdict record has its own write after publication and
+					// before the receipt. A failure after it leaves a record and
+					// no receipt, and repair uses that record.
+					if err = s.Store.WriteMetadata(r.Key(), Metadata(KeyRecord, record)); err != nil {
+						return err
+					}
+				}
 
-				// The receipt, repair event, superseded lease and slot record share one
+				// The receipt, repair event and superseded lease share one
 				// durable write.
 				updates[KeyClose] = receipt
 				if err = s.Store.WriteMetadata(r.Key(), updates); err != nil {

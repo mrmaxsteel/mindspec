@@ -985,10 +985,10 @@ func Run(root, beadID, specIDHint, commitMsg string, exec executor.Executor, opt
 	if gateCfgErr != nil {
 		return nil, completionFailure(beadID, opts, "reading configuration", gateCfgErr)
 	}
-	presence := &beadPanelPresence{policy: gateCfg.Enforcement.PanelPresence, specID: specID, ignore: reconcile != nil, closed: closedAtEntry}
+	presence := &beadPanelPresence{policy: gateCfg.Enforcement.PanelPresence, specID: specID, ignore: reconcile != nil, closed: closedAtEntry, records: kernel.PanelRecordSource(kernelState)}
 	panelGateEnabled := gateCfg.Enforcement.PanelGate && kernelState == nil
 	if resumeStage != "" {
-		if err := recheckResumedPanelDeferrals(beadID, specID, panelGateRoots(root, wtPath, specID), panelGateEnabled); err != nil {
+		if err := recheckResumedPanelDeferrals(beadID, specID, panelGateRoots(root, wtPath, specID), panelGateEnabled, presence.records); err != nil {
 			return nil, err
 		}
 		// A closed retry reaches the merged handler after landing. Check

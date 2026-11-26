@@ -2,8 +2,10 @@ package approve
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -90,9 +92,26 @@ func s134ApproveFixture(t *testing.T) (*kerneltest.Fixture, *executor.MockExecut
 func s134Close(t *testing.T, f *kerneltest.Fixture, id string, receipt *kernel.Receipt) {
 	t.Helper()
 	if receipt != nil {
+		s134SlotRecord(f, id, receipt)
 		f.Must(f.Store.WriteReceipt(id, *receipt))
 	}
 	f.Must(f.Store.SetStatusIf(id, "open", "closed"))
+}
+
+// s134SlotRecord names the seeded verdict record of a slot in its receipt, as
+// a slot submit does. A retry attempt stores the verdict of its first attempt.
+func s134SlotRecord(f *kerneltest.Fixture, id string, receipt *kernel.Receipt) {
+	if !strings.Contains(id, ".review.r") {
+		return
+	}
+	base, _, _ := strings.Cut(id, ".a")
+	data, _, err := kernel.Decode[string](f.State().Records[base].Metadata, kernel.KeyRecord)
+	f.Must(err)
+	if data == "" {
+		f.Must(errors.New("slot has no seeded verdict record"))
+	}
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
+	receipt.RecordSHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(data)))
 }
 func s134Slot(f *kerneltest.Fixture) string {
 	id := f.Items[0] + ".review.r1.R1"
@@ -207,7 +226,9 @@ func TestS134ImplApprove_AuditAndRerun(t *testing.T) {
 	kerneltest.Answer(f, decision, "fix")
 	slot := s134Slot(f)
 	s134Close(t, f, slot, nil)
-	kerneltest.Repaired(f, slot, kernel.Receipt{Kind: "passed", Retally: "repair"})
+	repaired := kernel.Receipt{Kind: "passed", Retally: "repair"}
+	s134SlotRecord(f, slot, &repaired)
+	kerneltest.Repaired(f, slot, repaired)
 	// A receipt under a repair submit, and a late submission, each on its own slot.
 	for i, receipt := range []kernel.Receipt{
 		{Kind: "passed", Retally: "repair-submit", Via: "repair", Repaired: true, Generation: 2},

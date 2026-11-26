@@ -477,6 +477,9 @@ type GateIO struct {
 	// circuits that exit before the dirty check. Subject reads add one
 	// subprocess only on a SHA mismatch (Spec 130 R3.3).
 	Worktree func() string
+	// Records gives the stored slot verdicts of an enrolled spec. Nil reads
+	// the disk files only.
+	Records RecordSource
 }
 
 // ResolveGateFacts gathers the git facts (Req 11) for one matched
@@ -489,7 +492,7 @@ type GateIO struct {
 func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) GateFacts {
 	f := GateFacts{BeadID: beadID, Reg: &reg}
 
-	res, err := Tally(reg.Dir)
+	res, err := TallySource(reg.Dir, deps.Records)
 	if err != nil {
 		// Directory unreadable — treat as malformed registration (Block),
 		// not "no panel": surface a non-nil Result with PanelErr so the

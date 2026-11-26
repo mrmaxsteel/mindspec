@@ -660,3 +660,42 @@ func closeRetalliedChildren(s kernel.State, gate, dir string) error {
 	}
 	return nil
 }
+
+// panelRecords returns the stored slot verdicts of the panel at dir when its
+// spec is enrolled. A pre-kernel panel gives nil, so it reads the disk files
+// only. An enrolled panel with no tracker store is refused.
+func panelRecords(root, dir string) (map[string][]byte, error) {
+	reg := panel.ReadRegistration(dir)
+	if reg.Err != nil || reg.Panel.Spec == "" {
+		return nil, nil
+	}
+	s, err := panelKernelStateFn(root, reg.Panel.Spec)
+	if err != nil {
+		if reg.Panel.Orchestrated {
+			return nil, err
+		}
+		return nil, nil
+	}
+	return kernel.PanelRecords(s, dir), nil
+}
+
+// panelRecordSource gives panelRecords for each panel directory.
+func panelRecordSource(root string) panel.RecordSource {
+	return func(dir string) (map[string][]byte, error) { return panelRecords(root, dir) }
+}
+
+// panelTally is the tally of every panel verb. It counts the records that
+// the kernel tally counts.
+func panelTally(root, dir string) (*panel.Result, error) {
+	return panel.TallySource(dir, panelRecordSource(root))
+}
+
+// panelFindingVerdict reads the counted submission of slot with the records
+// of panelTally.
+func panelFindingVerdict(root, dir, slot string, round int) (panel.FindingVerdict, error) {
+	records, err := panelRecords(root, dir)
+	if err != nil {
+		return panel.FindingVerdict{}, err
+	}
+	return panel.ReadSubmittedFindingVerdictRecords(dir, slot, round, records)
+}

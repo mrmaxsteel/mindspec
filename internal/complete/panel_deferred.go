@@ -37,7 +37,14 @@ func CheckPanelDeferrals(reg panel.Registration, entries []panel.Deferral, audit
 		}
 		return CheckAuditedPanelDeferrals(reg, audit)
 	}
-	_, err := checkedPanelDeferrals(reg, entries)
+	_, err := checkedPanelDeferrals(reg, nil, entries)
+	return err
+}
+
+// CheckPanelDeferralsSource is CheckPanelDeferrals with the verdicts of
+// source. An enrolled spec gives its stored slot verdicts.
+func CheckPanelDeferralsSource(reg panel.Registration, source panel.RecordSource, entries []panel.Deferral) error {
+	_, err := checkedPanelDeferrals(reg, source, entries)
 	return err
 }
 
@@ -68,11 +75,11 @@ func checkDeferral(reg panel.Registration, d panel.Deferral, texts []string, epi
 	return bead.CheckDeferral(d.Bead, epic, reviewedBead, texts, panel.RedactFindingPaths)
 }
 
-func checkedPanelDeferrals(reg panel.Registration, entries []panel.Deferral) ([]PanelDeferredEntry, error) {
+func checkedPanelDeferrals(reg panel.Registration, source panel.RecordSource, entries []panel.Deferral) ([]PanelDeferredEntry, error) {
 	if reg.Panel.Abandoned || len(entries) == 0 {
 		return nil, nil
 	}
-	res, err := panel.Tally(reg.Dir)
+	res, err := panel.TallySource(reg.Dir, source)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +363,7 @@ func checkAndRecordPanelDeferrals(beadID string, results []PanelGateResult, enab
 		if result.Decision.Action != panel.Allow {
 			continue
 		}
-		checked, err := checkedPanelDeferrals(result.Registration, result.Decision.AppliedDeferrals)
+		checked, err := checkedPanelDeferrals(result.Registration, result.Records, result.Decision.AppliedDeferrals)
 		if err != nil {
 			return err
 		}
@@ -439,7 +446,7 @@ func PanelDeferredAuditFailure(beadID string, err error, closed ...bool) error {
 
 // recheckResumedPanelDeferrals checks live tracker facts from the durable audit.
 // A materialization marker attests content, not the follow-up's current status.
-func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled bool) error {
+func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled bool, source panel.RecordSource) error {
 	if !enabled || panelSkipEnvFn() {
 		return nil
 	}
@@ -501,7 +508,7 @@ func recheckResumedPanelDeferrals(beadID, specID string, roots []string, enabled
 				group = nil
 				break
 			}
-			res, err := panel.Tally(current.Dir)
+			res, err := panel.TallySource(current.Dir, source)
 			if err != nil {
 				return err
 			}

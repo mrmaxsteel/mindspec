@@ -274,7 +274,8 @@ func gatherPanelState(resolve BranchSHAResolver, roots ...string) []PanelStateEn
 				notice = "notice: kernel panel state is unavailable: " + termsafe.Escape(stateErr.Error())
 			}
 			if stateErr == nil && state != nil && state.Enrolled || stateErr != nil && reg.Panel.Orchestrated {
-				res, err := panel.Tally(reg.Dir)
+				// The display counts the stored slot verdicts, as the gate does.
+				res, err := kernel.PanelTally(state, reg.Dir)
 				if err != nil {
 					continue
 				}

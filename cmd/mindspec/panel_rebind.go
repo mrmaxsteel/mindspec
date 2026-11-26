@@ -70,7 +70,7 @@ func panelRebindRunEBody(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return refuse(err)
 	}
-	res, err := panel.Tally(reg.Dir)
+	res, err := panelTally(root, reg.Dir)
 	if err != nil {
 		return refuse(err)
 	}

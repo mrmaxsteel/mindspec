@@ -2,8 +2,8 @@ package kernel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -53,7 +53,13 @@ func returnsCover(findings []Finding, returns []VerifyReturn) bool {
 // roundFindings uses the counted tally for findings and the actual file bytes
 // for veto identity and the read set. It never stores a shortened finding.
 func roundFindings(s State, res *panel.Result) ([]Finding, map[string]string, error) {
-	names, err := panel.RoundVerdictFiles(res.Dir, res.LatestRound)
+	// The stored slot records are the authority, as in the tally. A fresh
+	// clone with no verdict file reads the same bytes.
+	bytesByName, err := panel.RoundVerdictBytes(res.Dir, res.LatestRound, SlotRecords(s, panel.Registration{Dir: res.Dir}))
+	var unreadable *panel.VerdictReadError
+	if errors.As(err, &unreadable) {
+		return nil, nil, pathFailure(err, "cannot read round verdict: ", "restore the panel verdict file and retry")
+	}
 	if err != nil {
 		return nil, nil, pathFailure(err, "cannot read round verdict files: ", "restore the panel directory and retry")
 	}
@@ -62,18 +68,12 @@ func roundFindings(s State, res *panel.Result) ([]Finding, map[string]string, er
 		root = s.Root
 	}
 	read := map[string]string{}
-	bytesByName := map[string][]byte{}
-	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(res.Dir, name))
-		if err != nil {
-			return nil, nil, pathFailure(err, "cannot read round verdict: ", "restore the panel verdict file and retry")
-		}
+	for name, data := range bytesByName {
 		rel, err := filepath.Rel(root, filepath.Join(res.Dir, name))
 		if err != nil {
 			return nil, nil, pathFailure(err, "cannot locate round verdict: ", "restore the panel directory and retry")
 		}
 		read[filepath.ToSlash(rel)] = recordDigest(data)
-		bytesByName[name] = data
 	}
 	var findings []Finding
 	addVeto := func(v panel.Verdict) {

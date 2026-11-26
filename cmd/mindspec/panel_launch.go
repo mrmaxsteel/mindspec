@@ -223,7 +223,7 @@ func launchSubmit(root string, reg panel.Registration, slot string, k int, data 
 }
 
 func launchStatus(cmd *cobra.Command, root string, reg panel.Registration, slot string) error {
-	res, err := panel.Tally(reg.Dir)
+	res, err := panelTally(root, reg.Dir)
 	if err != nil {
 		return err
 	}

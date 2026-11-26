@@ -144,7 +144,9 @@ func binaryLateRepairRefusal(t *testing.T, bin, producer string) {
 			f.Must(err)
 			f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))
 			args[1] = id
-			want = "mindspec_record is absent or invalid"
+			// A raw-closed slot with no record and no registered panel has no
+			// verdict path.
+			want = "slot gate has no registered panel"
 		case "repair.stale-evidence":
 			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: "wrong"})))
 			want = "verify record needs its step, subject and returns"
@@ -233,9 +235,9 @@ func binaryRepairSlot(t *testing.T, bin string) {
 	v := paneltest.Verdict("APPROVE")
 	v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "wrong-model"
 	file := filepath.Join(f.SpecDir, "reviews", "review", "R1-round-1.json")
-	// A stored verdict record with no receipt is what an interrupted submit
-	// leaves; repair closes the step from it.
-	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(paneltest.Bytes(t, v)))))
+	// A raw close before any submit leaves no stored record. Repair takes the
+	// verdict file at the registered path and runs the submit checks on it.
+	f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0644))
 	f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))
 	store := actorCmdStore(t, f)
 	before := actorCmdRead(t, store, id)
@@ -250,7 +252,6 @@ func binaryRepairSlot(t *testing.T, bin string) {
 	v.Model = "test-model"
 	data := paneltest.Bytes(t, v)
 	f.Must(os.WriteFile(file, data, 0644))
-	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(data))))
 	store = actorCmdStore(t, f)
 	out, code := actorCmdRun(t, f, bin, "submit", id, "--repair", "--reason", "raw close", "--artifact", file)
 	if code != 0 {
@@ -263,6 +264,9 @@ func binaryRepairSlot(t *testing.T, bin string) {
 	f.Must(err)
 	if !receipt.Repaired || receipt.Via != "repair" || receipt.Generation != 1 || !reflect.DeepEqual(current, lease.Lease) {
 		t.Fatalf("binary slot repair changed generation or lost receipt: %+v", r)
+	}
+	if r.Metadata[kernel.KeyRecord] != string(data) || receipt.RecordSHA256 != fmt.Sprintf("%x", sha256.Sum256(data)) {
+		t.Fatalf("binary slot repair did not store the verdict record: %+v", r)
 	}
 	events, _, err := kernel.Decode[[]kernel.TakeReason](r.Metadata, kernel.KeyTakes)
 	f.Must(err)
@@ -416,9 +420,6 @@ func binaryAttemptRefusal(t *testing.T, bin, producer string) {
 		v.Slot, v.Round, v.ReviewedSHA, v.Model = "R1", 1, head, "test-model"
 		f.Must(os.WriteFile(file, paneltest.Bytes(t, v), 0600))
 		args = append(args, "--artifact", file)
-		if strings.HasSuffix(producer, "-repair") {
-			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(paneltest.Bytes(t, v)))))
-		}
 	}
 	if strings.HasSuffix(producer, "-repair") {
 		f.Must(f.Store.SetStatusIf(id, "in_progress", "closed"))

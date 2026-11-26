@@ -145,11 +145,25 @@ func TestS134PanelRefute_FrozenSubjectAndReadSet(t *testing.T) {
 				if g.Status == "closed" || kernelPanelRecord(t, f, fix).Status != "open" {
 					t.Fatal("changed frozen verdict set passed the gate or closed the fix")
 				}
-				result, err := panel.Tally(dir)
-				f.Must(err)
-				err = kernel.VerifyRetallyFits(f.State(), gate, result)
-				if err == nil || !strings.Contains(err.Error(), filepath.Base(changedPath)) {
-					t.Fatalf("read set did not name changed path: %v", err)
+				if change == "edited" || change == "retry-edited" {
+					// The stored record stays the verdict. The edited file
+					// differs from it, so the tally does not count it.
+					result, err := kernel.TallyPanel(f.State(), panel.Registration{Dir: dir})
+					f.Must(err)
+					uncounted := false
+					for _, v := range result.NotIn {
+						uncounted = uncounted || v.File == filepath.Base(changedPath) && strings.Contains(v.Reason, "differs from the stored record")
+					}
+					if !uncounted {
+						t.Fatalf("edited verdict file was counted: %+v", result.NotIn)
+					}
+				} else {
+					result, err := panel.Tally(dir)
+					f.Must(err)
+					err = kernel.VerifyRetallyFits(f.State(), gate, result)
+					if err == nil || !strings.Contains(err.Error(), filepath.Base(changedPath)) {
+						t.Fatalf("read set did not name changed path: %v", err)
+					}
 				}
 			}
 			forbidden := gate + ".r1.verify.a2"

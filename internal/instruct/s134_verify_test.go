@@ -48,12 +48,13 @@ func instructVerifiedReject(t *testing.T, fake bool) {
 	for i, id := range slots {
 		v := paneltest.Verdict(panel.VerdictReject)
 		v.Slot, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i+1), head, "test-model"
-		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, data, func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
 			return panel.SubmitResolution{Family: "harness", Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
 		})
 		f.Must(err)
 		f.Create(id, gate)
-		f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Retally: "seeded-slot"}))
+		kerneltest.SlotReceipt(f, id, data)
 		f.Must(f.Store.SetStatusIf(id, "open", "closed"))
 	}
 	_, err = kernel.NextAction(f.State(), true)

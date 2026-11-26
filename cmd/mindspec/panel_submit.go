@@ -258,7 +258,7 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := panel.Tally(reg.Dir)
+	res, err := panelTally(root, reg.Dir)
 	if err != nil {
 		return err
 	}
@@ -277,7 +277,7 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 
 func init() {
 	panelSubmitCmd.Flags().String("lease", "", "Current slot lease token")
-	panelSubmitCmd.Flags().String("file", "", "Verdict file, or - for stdin; a slot of a governed spec takes the verdict file in its attempt directory or a committed file, not stdin")
+	panelSubmitCmd.Flags().String("file", "", "Verdict file, or - for stdin; a slot of a governed spec takes the file in its attempt directory or the file at its registered panel path, not stdin")
 	panelSubmitCmd.Flags().String("slot", "", "Roster slot")
 	panelSubmitCmd.Flags().Int("round", 0, "Panel round")
 	panelSubmitCmd.Flags().String("spec", "", "Owning spec")

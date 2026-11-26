@@ -111,6 +111,9 @@ var (
 type PanelGateResult struct {
 	Registration panel.Registration
 	Decision     panel.Decision
+	// Records is the record source of the decision. The deferral check
+	// reads the same verdicts.
+	Records panel.RecordSource
 }
 
 // panelGate is the AUTHORITATIVE in-binary panel gate (Spec 099 Bead 2,
@@ -228,9 +231,10 @@ func panelGateWithPresence(beadID string, roots []string, wtPath string, panelGa
 			// circuits pay no extra cost. complete.Run already resolved the
 			// bead worktree (wtPath); "" means absent → dirty check skipped.
 			Worktree: func() string { return wtPath },
+			Records:  presence.source(),
 		})
 		d := panel.PanelGateDecision(facts)
-		matched = append(matched, PanelGateResult{Registration: regs[i], Decision: d})
+		matched = append(matched, PanelGateResult{Registration: regs[i], Decision: d, Records: presence.source()})
 		switch d.Action {
 		case panel.Block:
 			// A Block from any matched panel wins (R5). The decision.Message

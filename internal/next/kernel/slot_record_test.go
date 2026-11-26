@@ -2,6 +2,7 @@ package kernel_test
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -242,24 +243,65 @@ func TestS134Submit_SlotVerdictSizeBound(t *testing.T) {
 	}
 }
 
-// rawSlotClose stores the verdict as a record and closes the step with no
-// receipt, as a crash after the record write does.
-func rawSlotClose(t *testing.T, f *kerneltest.Fixture, id, data string, stored bool) {
+// rawSlotClose closes the step outside the kernel. With stored, a submit
+// first fails after its record write, so the step keeps the record and no
+// receipt. Without it, the slot was never submitted.
+func rawSlotClose(t *testing.T, f *kerneltest.Fixture, id string, lease kernel.LeaseResult, data string, stored bool) {
 	t.Helper()
 	if stored {
-		f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
+		failAfterSlotRecord(t, f, id, lease, attemptVerdict(t, f, "R1", data))
 	}
 	f.Must(f.Store.SetStatusIf(id, actorRecord(t, f, id).Status, "closed"))
 }
 
+// failAfterSlotRecord runs a slot submit that fails after the record write
+// and before the receipt, as a crash there does.
+func failAfterSlotRecord(t *testing.T, f *kerneltest.Fixture, id string, lease kernel.LeaseResult, artifact string) {
+	t.Helper()
+	// The record write succeeds. The next write, which carries the receipt,
+	// fails.
+	f.Fake.Hook = func(args []string) error {
+		for i, a := range args {
+			if a != "--metadata" || i+1 >= len(args) {
+				continue
+			}
+			m := args[i+1]
+			if strings.HasPrefix(m, "@") {
+				raw, err := os.ReadFile(strings.TrimPrefix(m, "@"))
+				if err != nil {
+					return err
+				}
+				m = string(raw)
+			}
+			if strings.Contains(m, `"`+kernel.KeyClose+`"`) {
+				return errors.New("killed after the record write")
+			}
+		}
+		return nil
+	}
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: artifact})
+	f.Fake.Hook = nil
+	if err == nil || !strings.Contains(err.Error(), "killed after the record write") {
+		t.Fatalf("injected failure did not stop the submit: %v", err)
+	}
+	r := actorRecord(t, f, id)
+	if _, has := r.Metadata[kernel.KeyRecord]; !has {
+		t.Fatal("submit wrote no record before the failure")
+	}
+	if _, has := r.Metadata[kernel.KeyClose]; has {
+		t.Fatal("failed submit wrote a receipt")
+	}
+}
+
 // Repair of a slot uses the stored record. A supplied record or artifact
-// must have its hash; a step with no stored record keeps the refusal.
+// must have its hash. A step with no stored record takes its verdict file,
+// named or at the registered path, with the plain submit checks.
 func TestS134Submit_SlotRepairUsesStoredRecord(t *testing.T) {
-	for _, name := range []string{"stored", "same-record", "same-artifact", "other-record", "other-artifact", "no-record"} {
+	for _, name := range []string{"stored", "same-record", "same-artifact", "other-record", "other-artifact", "no-record", "no-record-artifact", "no-record-record", "no-record-registered", "no-record-wrong-round"} {
 		t.Run(name, func(t *testing.T) {
-			f, id, _, subject := slotRecordFixture(t)
+			f, id, lease, subject := slotRecordFixture(t)
 			data := verdictBytes(subject, "R1")
-			rawSlotClose(t, f, id, data, name != "no-record")
+			rawSlotClose(t, f, id, lease, data, !strings.HasPrefix(name, "no-record"))
 			other := strings.Replace(data, `"reviewed"`, `"reviewed again"`, 1)
 			o := kernel.SubmitOptions{Step: id, Repair: true, Reason: "recover"}
 			switch name {
@@ -271,6 +313,17 @@ func TestS134Submit_SlotRepairUsesStoredRecord(t *testing.T) {
 				o.Record = recordFile(t, other)
 			case "other-artifact":
 				o.Artifact = attemptVerdict(t, f, "R1", other)
+			case "no-record-artifact":
+				o.Artifact = attemptVerdict(t, f, "R1", data)
+			case "no-record-record":
+				o.Record = recordFile(t, data)
+			case "no-record-registered":
+				path, err := kernel.SlotVerdictPath(f.State(), id)
+				f.Must(err)
+				f.Must(os.MkdirAll(filepath.Dir(filepath.Join(f.Root, path)), 0755))
+				f.Must(os.WriteFile(filepath.Join(f.Root, path), []byte(data), 0644))
+			case "no-record-wrong-round":
+				o.Artifact = attemptVerdict(t, f, "R1", strings.Replace(data, `"round":1`, `"round":2`, 1))
 			}
 			before := kerneltest.Snapshot(t, f)
 			_, err := kernel.Submit(f.State(), o)
@@ -280,7 +333,11 @@ func TestS134Submit_SlotRepairUsesStoredRecord(t *testing.T) {
 			case "other-artifact":
 				assertSubmitRefusal(t, err, "repair --artifact differs from mindspec_record", "mindspec next-action")
 			case "no-record":
-				assertSubmitRefusal(t, err, "mindspec_record is absent or invalid", "mindspec next-action")
+				assertSubmitRefusal(t, err, "verdict file is not readable", kernel.SlotPromptRecovery(f.State(), id))
+			case "no-record-record":
+				assertSubmitRefusal(t, err, "slot has no mindspec_record", "mindspec next-action")
+			case "no-record-wrong-round":
+				assertSubmitRefusal(t, err, "verdict slot, round or subject does not match the step", "mindspec next-action")
 			default:
 				if err != nil {
 					t.Fatalf("repair from the stored record was refused: %v", err)
@@ -332,7 +389,7 @@ func slotTally(t *testing.T, f *kerneltest.Fixture, slot string) string {
 
 // A tally takes the verdict of a slot from its stored record when the
 // verdict file is absent, as in a fresh clone. The receipt hash must match
-// the record. A verdict file on disk wins, so a hand edit stays visible.
+// the record. A verdict file that differs from the record does not count.
 func TestS134Submit_TallyReadsStoredSlotRecord(t *testing.T) {
 	f, id, lease, subject := slotRecordFixture(t)
 	data := verdictBytes(subject, "R1")
@@ -356,8 +413,8 @@ func TestS134Submit_TallyReadsStoredSlotRecord(t *testing.T) {
 		t.Fatalf("tally with no verdict file: %q, want APPROVE from the stored record", got)
 	}
 	f.Must(os.WriteFile(path, []byte(strings.Replace(data, "reviewed", "edited", 1)), 0644))
-	if got := slotTally(t, f, "R1"); got != "file digest differs from the latest submission" {
-		t.Fatalf("tally with an edited verdict file: %q, want the digest refusal", got)
+	if got := slotTally(t, f, "R1"); got != "file differs from the stored record" {
+		t.Fatalf("tally with an edited verdict file: %q, want the record refusal", got)
 	}
 	f.Must(os.Rename(path, filepath.Join(t.TempDir(), "edited.json")))
 	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, strings.Replace(data, "reviewed", "changed", 1))))

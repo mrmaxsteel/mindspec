@@ -51,7 +51,7 @@ func TestS133DeferToPlan_DeferralPreflightIgnoresPlanEntries(t *testing.T) {
 				panel.DispositionRow{Record: panel.RecordDisposition, ID: d.ID + ":disposition", Spec: reg.Panel.Spec, Gate: reg.Panel.Gate, Panel: reg.Slug(), Reviewer: "R1", Model: "model-a", Severity: "blocking", Summary: f.Text, ConvergentWith: []string{}, Disposition: "confirmed-deferred", EvidenceRef: "plan:" + d.ID, CreatedAt: core3Time})
 			core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
 			core3Manifest(t, reg)
-			if err := implPanelDeferralPreflight(root, "010-test"); err != nil {
+			if err := implPanelDeferralPreflight(root, "010-test", nil); err != nil {
 				t.Fatalf("plan entry entered bead checks: %v", err)
 			}
 			mock := &executor.MockExecutor{CommitCountResult: 5, FinalizeEpicResult: executor.FinalizeResult{MergeStrategy: "direct", CommitCount: 5}}

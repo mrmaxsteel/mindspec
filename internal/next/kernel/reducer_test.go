@@ -1,6 +1,7 @@
 package kernel_test
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -82,6 +83,33 @@ func seedClosed(t *testing.T, f *kerneltest.Fixture, id string, receipt *kernel.
 		f.Must(f.Store.WriteReceipt(id, *receipt))
 	}
 	f.Must(f.Store.SetStatusIf(id, "open", "closed"))
+}
+
+// slotReceipt stores a record on the slot step id and returns receipt with
+// its hash in place of a close reason, as a slot receipt needs.
+func slotReceipt(t *testing.T, f *kerneltest.Fixture, id string, receipt kernel.Receipt) kernel.Receipt {
+	t.Helper()
+	data := "verdict of " + id
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
+	receipt.Retally = ""
+	receipt.RecordSHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(data)))
+	return receipt
+}
+
+// seedSlotClosed creates and closes the slot step id with a stored record
+// and receipt.
+func seedSlotClosed(t *testing.T, f *kerneltest.Fixture, id string, receipt kernel.Receipt) {
+	t.Helper()
+	seedClosed(t, f, id, nil)
+	f.Must(f.Store.WriteReceipt(id, slotReceipt(t, f, id, receipt)))
+}
+
+// closeSlotPass creates and closes the slot step id with data as its stored
+// verdict and a receipt that names its hash.
+func closeSlotPass(t *testing.T, f *kerneltest.Fixture, id string, data []byte) {
+	t.Helper()
+	seedClosed(t, f, id, nil)
+	kerneltest.SlotReceipt(f, id, data)
 }
 func closePass(t *testing.T, f *kerneltest.Fixture, id string) {
 	t.Helper()
@@ -395,12 +423,13 @@ func passingPanel(t *testing.T, f *kerneltest.Fixture) {
 		v.Slot = slot
 		v.ReviewedSHA = head
 		v.Model = "test-model"
-		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "panel", Slot: slot, Round: 1}, paneltest.Bytes(t, v), func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "panel", Slot: slot, Round: 1}, data, func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
 			return panel.SubmitResolution{Family: "harness", Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
 		})
 		f.Must(err)
 		id := gate + ".r1." + slot
-		f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Retally: "seeded-verdict"}))
+		kerneltest.SlotReceipt(f, id, data)
 		f.Must(f.Store.SetStatusIf(id, "open", "closed"))
 	}
 	res, err := panel.Tally(dir)

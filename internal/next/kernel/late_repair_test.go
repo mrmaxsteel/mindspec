@@ -3,6 +3,7 @@ package kernel_test
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -187,19 +188,25 @@ func TestS134Submit_AbsentRevokedHashMatchesNoToken(t *testing.T) {
 }
 
 func TestS134Closes_RepairSlot(t *testing.T) {
-	for _, mode := range []string{"fitting", "missing", "another-subject"} {
+	for _, mode := range []string{"fitting", "file", "missing", "another-subject"} {
 		t.Run(mode, func(t *testing.T) {
 			f, id, lease, subject := slotFixture(t)
 			put(t, filepath.Join(f.Root, ".beads", "config.yaml"), "types.custom: gate,step\n")
 			gate := f.Items[0] + ".review"
 			kerneltest.Register(f, gate, kernel.RegistrationRecord{Slug: "review", Round: 1, Subject: subject, Slots: []string{"R1", "R2"}})
-			// A crash after the record write leaves the stored verdict and no receipt.
-			if mode != "missing" {
-				verdictSubject := subject
-				if mode == "another-subject" {
-					verdictSubject = strings.Repeat("b", 40)
-				}
-				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, verdictBytes(verdictSubject, "R1"))))
+			path, err := kernel.SlotVerdictPath(f.State(), id)
+			f.Must(err)
+			switch mode {
+			case "fitting":
+				// A crash after the record write leaves the stored verdict and no receipt.
+				put(t, filepath.Join(f.Root, path), verdictBytes(subject, "R1"))
+				failAfterSlotRecord(t, f, id, lease, filepath.Join(f.Root, path))
+				f.Must(os.Remove(filepath.Join(f.Root, path)))
+			case "file":
+				// The verdict is at the registered path but was never submitted.
+				put(t, filepath.Join(f.Root, path), verdictBytes(subject, "R1"))
+			case "another-subject":
+				put(t, filepath.Join(f.Root, path), verdictBytes(strings.Repeat("b", 40), "R1"))
 			}
 			useDefaultRules(t)
 			reduce(t, f, true)
@@ -210,7 +217,10 @@ func TestS134Closes_RepairSlot(t *testing.T) {
 				t.Fatal("repair probe wrote")
 			}
 			argv := []string{"mindspec", "submit", id, "--repair", "--reason", "<text>"}
-			fitting := mode == "fitting"
+			if mode == "file" {
+				argv = append(argv, "--artifact", path)
+			}
+			fitting := mode == "fitting" || mode == "file"
 			if hasRun(out, argv...) != fitting {
 				t.Fatalf("repair run entry differs: %+v", out.Run)
 			}
@@ -219,14 +229,21 @@ func TestS134Closes_RepairSlot(t *testing.T) {
 				actorRefusal(t, f, func() error {
 					_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "raw close"})
 					return err
-				}, map[string]string{"missing": "mindspec_record is absent or invalid", "another-subject": "verdict slot, round or subject"}[mode])
+				}, map[string]string{"missing": "verdict file is not readable", "another-subject": "verdict slot, round or subject"}[mode])
 				reduce(t, f, true)
 				assertRetry(t, f, id, id+".a2", true)
 				return
 			}
-			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "raw close"})
+			o := kernel.SubmitOptions{Step: id, Repair: true, Reason: "raw close"}
+			if mode == "file" {
+				o.Artifact = filepath.Join(f.Root, path)
+			}
+			_, err = kernel.Submit(f.State(), o)
 			f.Must(err)
 			receipt := actorReceipt(t, f, id)
+			if receipt.RecordSHA256 != digestOf(verdictBytes(subject, "R1")) || actorRecord(t, f, id).Metadata[kernel.KeyRecord] != verdictBytes(subject, "R1") {
+				t.Fatalf("repair did not store the verdict record: %+v", receipt)
+			}
 			r := actorRecord(t, f, id)
 			current, _, err := kernel.Decode[kernel.LeaseRecord](r.Metadata, kernel.KeyLease)
 			f.Must(err)

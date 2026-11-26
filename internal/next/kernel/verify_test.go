@@ -144,9 +144,10 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 					v.ConcreteChangesRequired[1].Text = "retain the second full veto change"
 				}
 				v.Slot, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i), gateHead(t, f, gate), "test-model"
-				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+				data := paneltest.Bytes(t, v)
+				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, data, verifyResolution)
 				f.Must(err)
-				closePass(t, f, gate+".r1."+v.Slot)
+				closeSlotPass(t, f, gate+".r1."+v.Slot, data)
 			}
 			if unexpected {
 				put(t, filepath.Join(dir, "R9-round-1.json"), `{"verdict":"REJECT","rationale":"stray veto /Users/example/private/source.go","concrete_changes_required":["stray change /tmp/private/change.txt"]}`)
@@ -210,9 +211,10 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 			for i := 1; i <= 3; i++ {
 				v := paneltest.Verdict(panel.VerdictApprove)
 				v.Slot, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i), gateHead(t, f, gate), "test-model"
-				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+				data := paneltest.Bytes(t, v)
+				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, data, verifyResolution)
 				f.Must(err)
-				closePass(t, f, gate+".r1."+v.Slot)
+				closeSlotPass(t, f, gate+".r1."+v.Slot, data)
 			}
 			put(t, filepath.Join(dir, "R9-round-1.json"), tc.body)
 			reduce(t, f, true)
@@ -243,9 +245,10 @@ func TestS134Verify_VetoFiles(t *testing.T) {
 		for i := 1; i <= 3; i++ {
 			v := paneltest.Verdict(panel.VerdictApprove)
 			v.Slot, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i), gateHead(t, f, gate), "test-model"
-			_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+			data := paneltest.Bytes(t, v)
+			_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, data, verifyResolution)
 			f.Must(err)
-			closePass(t, f, gate+".r1."+v.Slot)
+			closeSlotPass(t, f, gate+".r1."+v.Slot, data)
 		}
 		put(t, filepath.Join(dir, "R9-round-1.json"), `{"verdict":"REQUEST_CHANGES","rationale":"stray malformed request","concrete_changes_required":5}`)
 		res, err := panel.Tally(dir)
@@ -303,8 +306,10 @@ func TestS134Verify_CrashAndConflict(t *testing.T) {
 			refusedPanel(t, f, gate, "review", 1, panel.VerdictRequestChanges)
 			approval := paneltest.Verdict(panel.VerdictApprove)
 			approval.Slot, approval.ReviewedSHA, approval.Model = "R3", gateHead(t, f, gate), "test-model"
-			_, err := panel.Submit(panel.SubmitTarget{Dir: filepath.Join(f.SpecDir, "reviews", "review"), Spec: f.SpecID, Panel: "review", Slot: "R3", Round: 1}, paneltest.Bytes(t, approval), verifyResolution)
+			data := paneltest.Bytes(t, approval)
+			_, err := panel.Submit(panel.SubmitTarget{Dir: filepath.Join(f.SpecDir, "reviews", "review"), Spec: f.SpecID, Panel: "review", Slot: "R3", Round: 1}, data, verifyResolution)
 			f.Must(err)
+			kerneltest.SlotReceipt(f, gate+".r1.R3", data)
 			reduce(t, f, true)
 			id, v := verifyRecord(t, f, gate, 0)
 			lease, err := kernel.Lease(f.State(), kernel.LeaseOptions{Step: id}, kernel.LeaseDeps{})
@@ -472,9 +477,10 @@ func TestS134Verify_Incomplete(t *testing.T) {
 				}
 				v := paneltest.Verdict(word)
 				v.Slot, v.ReviewedSHA, v.Model = fmt.Sprintf("R%d", i), head, "test-model"
-				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+				data := paneltest.Bytes(t, v)
+				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, data, verifyResolution)
 				f.Must(err)
-				closePass(t, f, gate+".r1."+v.Slot)
+				closeSlotPass(t, f, gate+".r1."+v.Slot, data)
 				if i == 1 && bad != "VOID" {
 					content := `{"verdict":"INVALID"}`
 					if bad == "edited" {
@@ -524,8 +530,10 @@ func TestS134Verify_ChangedBeforeApply(t *testing.T) {
 			slot := fmt.Sprintf("R%d", i)
 			verdict := paneltest.Verdict(panel.VerdictApprove)
 			verdict.Slot, verdict.ReviewedSHA, verdict.Model = slot, v.Subject, "test-model"
-			_, err := panel.Submit(panel.SubmitTarget{Dir: filepath.Join(f.SpecDir, "reviews", "review"), Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, paneltest.Bytes(t, verdict), verifyResolution)
+			data := paneltest.Bytes(t, verdict)
+			_, err := panel.Submit(panel.SubmitTarget{Dir: filepath.Join(f.SpecDir, "reviews", "review"), Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, data, verifyResolution)
 			f.Must(err)
+			kerneltest.SlotReceipt(f, gate+".r1."+slot, data)
 		}
 		return nil
 	})
@@ -651,9 +659,10 @@ func TestS134Verify_MetadataBound(t *testing.T) {
 		for j := 0; j < 100; j++ {
 			v.ConcreteChangesRequired = append(v.ConcreteChangesRequired, panel.ChangeRequired{Text: strings.Repeat("x", 4096), Basis: "traced"})
 		}
-		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, data, verifyResolution)
 		f.Must(err)
-		closePass(t, f, ids[i])
+		closeSlotPass(t, f, ids[i], data)
 	}
 	reduce(t, f, true)
 	id, v := verifyRecord(t, f, gate, 0)

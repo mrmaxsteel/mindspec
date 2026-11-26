@@ -34,9 +34,10 @@ func TestS134Verify_CloseRows(t *testing.T) {
 				if i == 1 {
 					v.ConcreteChangesRequired[0].Text = text
 				}
-				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+				data := paneltest.Bytes(t, v)
+				_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, data, verifyResolution)
 				f.Must(err)
-				closePass(t, f, gate+".r1."+v.Slot)
+				closeSlotPass(t, f, gate+".r1."+v.Slot, data)
 			}
 			reduce(t, f, true)
 			id, v := verifyRecord(t, f, gate, 0)
@@ -179,31 +180,33 @@ func TestS134Verify_UncountedSubmitPrepass(t *testing.T) {
 	gate := f.Items[0] + ".review"
 	registerGate(t, f, gate, "review", 1)
 	dir := filepath.Join(f.SpecDir, "reviews", "review")
-	submit := func(slot, word string) {
+	submit := func(slot, word string) []byte {
 		t.Helper()
 		v := paneltest.Verdict(word)
 		v.Slot, v.ReviewedSHA, v.Model = slot, gateHead(t, f, gate), "test-model"
-		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, data, verifyResolution)
 		f.Must(err)
+		return data
 	}
 	for _, slot := range []string{"R2", "R3"} {
-		submit(slot, panel.VerdictApprove)
-		closePass(t, f, gate+".r1."+slot)
+		closeSlotPass(t, f, gate+".r1."+slot, submit(slot, panel.VerdictApprove))
 	}
 	for attempt := 1; attempt <= 3; attempt++ {
-		submit("R1", "VOID")
+		data := submit("R1", "VOID")
 		id := gate + ".r1.R1"
 		if attempt > 1 {
 			id += fmt.Sprintf(".a%d", attempt)
 		}
-		closePass(t, f, id)
+		closeSlotPass(t, f, id, data)
 		reduce(t, f, true)
 	}
 	decision := record(t, f, gate+".decide.uncounted.r1")
 	// Verdicts can change while the decision is held. No listed slot is now
 	// capped, so the pre-pass must still hold the newly uncounted R2.
-	submit("R1", panel.VerdictApprove)
-	submit("R2", "VOID")
+	// A verdict changes through a stored record, not a file edit.
+	kerneltest.SlotReceipt(f, gate+".r1.R1.a3", submit("R1", panel.VerdictApprove))
+	kerneltest.SlotReceipt(f, gate+".r1.R2", submit("R2", "VOID"))
 	run := f.Store.Run
 	sawAnswer := false
 	f.Store.Run = func(args ...string) ([]byte, error) {

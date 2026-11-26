@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func runPanelDeferToPlan(cmd *cobra.Command, reg panel.Registration, slot string, round int, finding, by string) error {
+func runPanelDeferToPlan(cmd *cobra.Command, root string, reg panel.Registration, slot string, round int, finding, by string) error {
 	read := func() (*panel.Result, []panel.Finding, string, error) {
-		res, err := panelVerbSnapshot(reg.Dir)
+		res, err := panelVerbSnapshot(root, reg.Dir)
 		if err != nil {
 			return nil, nil, "", err
 		}
@@ -33,10 +33,10 @@ func runPanelDeferToPlan(cmd *cobra.Command, reg panel.Registration, slot string
 			return nil, nil, "", fmt.Errorf("slot must belong to the recorded roster")
 		}
 		// Keep the shared finding checks.
-		if _, _, err := deferFinding(reg.Dir, slot, round, finding); err != nil {
+		if _, _, err := deferFinding(root, reg.Dir, slot, round, finding); err != nil {
 			return nil, nil, "", err
 		}
-		v, verdict, err := deferVerdict(reg.Dir, slot, round)
+		v, verdict, err := deferVerdict(root, reg.Dir, slot, round)
 		if err != nil {
 			return nil, nil, "", err
 		}
@@ -114,7 +114,7 @@ func runPanelDeferToPlan(cmd *cobra.Command, reg panel.Registration, slot string
 	if err := panel.WriteSnapshot(reg.Dir, *res.Panel); err != nil {
 		return panelVerbFailure(err)
 	}
-	updated, err := panel.Tally(reg.Dir)
+	updated, err := panelTally(root, reg.Dir)
 	if err != nil {
 		return panelVerbFailure(err)
 	}

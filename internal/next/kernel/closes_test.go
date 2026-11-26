@@ -2,6 +2,8 @@ package kernel_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +45,10 @@ func TestS134Closes_UnreceiptedSlot(t *testing.T) {
 				passingPanel(t, f)
 				physical := f.ID(id)
 				r := f.Fake.Records[physical]
+				// A raw close of a leased slot whose verdict file was never
+				// submitted leaves no record and no receipt.
 				delete(r.Metadata, kernel.KeyClose)
+				delete(r.Metadata, kernel.KeyRecord)
 				f.Fake.Records[physical] = r
 			} else {
 				seedClosed(t, f, id, nil)
@@ -59,7 +64,7 @@ func TestS134Closes_UnreceiptedSlot(t *testing.T) {
 			}
 			repaired := mode == "repaired"
 			if repaired {
-				kerneltest.Repaired(f, id, kernel.Receipt{Kind: "passed", Retally: "valid-repair"})
+				kerneltest.Repaired(f, id, slotReceipt(t, f, id, kernel.Receipt{Kind: "passed"}))
 			}
 			before := kerneltest.Snapshot(t, f)
 			out := reduce(t, f, false)
@@ -69,8 +74,14 @@ func TestS134Closes_UnreceiptedSlot(t *testing.T) {
 			assertCloseFlag(t, out, "unreceipted-close", id, !repaired)
 			out = reduce(t, f, true)
 			assertCloseFlag(t, out, "unreceipted-close", id, !repaired)
-			assertRetry(t, f, id, id+".a2", !repaired)
-			if !repaired {
+			// The verdict file at the registered path is repair evidence, so
+			// the reducer prints a repair and makes no retry.
+			fromFile := mode == "verdict-old-token"
+			assertRetry(t, f, id, id+".a2", !repaired && !fromFile)
+			if fromFile && !hasRun(out, "mindspec", "submit", id, "--repair", "--reason", "<text>", "--artifact", ".mindspec/specs/"+f.SpecID+"/reviews/panel/R1-round-1.json") {
+				t.Fatalf("verdict file did not give a repair: %+v", out.Run)
+			}
+			if !repaired && !fromFile {
 				found := false
 				for _, a := range out.Actions {
 					found = found || a.Step == id+".a2"
@@ -116,7 +127,7 @@ func TestS134Closes_RetryRepairsLineage(t *testing.T) {
 	seedClosed(t, f, id, nil)
 	reduce(t, f, true)
 	retry := id + ".a2"
-	f.Must(f.Store.WriteReceipt(retry, kernel.Receipt{Kind: "passed", Retally: "retry-verdict"}))
+	f.Must(f.Store.WriteReceipt(retry, slotReceipt(t, f, retry, kernel.Receipt{Kind: "passed"})))
 	f.Must(f.Store.SetStatusIf(retry, "open", "closed"))
 	out := reduce(t, f, true)
 	assertCloseFlag(t, out, "unreceipted-close", id, false)
@@ -248,6 +259,7 @@ func TestS134Closes_RawSlotsCannotPassTally(t *testing.T) {
 		physical := f.ID(id)
 		r := f.Fake.Records[physical]
 		delete(r.Metadata, kernel.KeyClose)
+		delete(r.Metadata, kernel.KeyRecord)
 		f.Fake.Records[physical] = r
 	}
 	out := reduce(t, f, true)
@@ -258,7 +270,9 @@ func TestS134Closes_RawSlotsCannotPassTally(t *testing.T) {
 		id := fmt.Sprintf("%s.r1.R%d", gate, i)
 		assertCloseFlag(t, out, "unreceipted-close", id, true)
 		assertRetry(t, f, id, id+".a2", true)
-		f.Must(f.Store.WriteReceipt(id+".a2", kernel.Receipt{Kind: "passed", Retally: "repaired-verdict"}))
+		data, err := os.ReadFile(filepath.Join(f.SpecDir, "reviews", "panel", fmt.Sprintf("R%d-round-1.json", i)))
+		f.Must(err)
+		kerneltest.SlotReceipt(f, id+".a2", data)
 		f.Must(f.Store.SetStatusIf(id+".a2", "open", "closed"))
 	}
 	out = reduce(t, f, true)

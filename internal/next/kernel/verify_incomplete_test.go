@@ -35,13 +35,14 @@ func verifyUncountedCap(t *testing.T, mode string) {
 		t.Helper()
 		v := paneltest.Verdict(word)
 		v.Slot, v.ReviewedSHA, v.Model = slot, head, "test-model"
-		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, data, verifyResolution)
 		f.Must(err)
 		id := gate + ".r1." + slot
 		if attempt > 1 {
 			id += fmt.Sprintf(".a%d", attempt)
 		}
-		closePass(t, f, id)
+		closeSlotPass(t, f, id, data)
 	}
 	for _, slot := range []string{"R1", "R3", "R4"} {
 		submitSlot(slot, panel.VerdictApprove, 1)
@@ -142,7 +143,8 @@ func TestS134Verify_UncountedCapInterleavedSubmits(t *testing.T) {
 		t.Helper()
 		v := paneltest.Verdict(word)
 		v.Slot, v.ReviewedSHA, v.Model = slot, head, "test-model"
-		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, data, verifyResolution)
 		f.Must(err)
 		id := slotID(slot, attempt)
 		if r, err := f.Store.Lookup(id); err != nil || r == nil {
@@ -150,7 +152,7 @@ func TestS134Verify_UncountedCapInterleavedSubmits(t *testing.T) {
 		}
 		_, err = kernel.PassExcept(kernel.Rules(), f.State(), true, id)
 		f.Must(err)
-		f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Retally: "seeded-artifact"}))
+		kerneltest.SlotReceipt(f, id, data)
 		r, err := f.Store.Lookup(id)
 		f.Must(err)
 		f.Must(f.Store.SetStatusIf(id, r.Status, "closed"))

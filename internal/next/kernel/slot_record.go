@@ -198,8 +198,8 @@ func slotRecovery(s State, t Tuple) string {
 // SlotRecords returns the stored verdict of each current slot step of the
 // panel p, keyed by its verdict file name. The receipt hash must match the
 // record, or the step supplies nothing. A fresh clone thus tallies the votes
-// that the bd store holds, with no verdict file on disk. A verdict file on
-// disk still wins, so a hand edit stays visible to the tally.
+// that the bd store holds, with no verdict file on disk. A verdict file that
+// differs from its record does not count, so its slot gets a retry.
 func SlotRecords(s State, p panel.Registration) map[string][]byte {
 	out := map[string][]byte{}
 	for key, r := range s.Records {
@@ -231,8 +231,41 @@ func SlotRecords(s State, p panel.Registration) map[string][]byte {
 	return out
 }
 
-// TallyPanel tallies the panel p. A stored slot verdict supplies each
-// verdict file that is absent from the panel directory.
+// TallyPanel tallies the panel p from the stored slot verdicts. A verdict
+// file with no record counts as before; one that differs from its record
+// does not count.
 func TallyPanel(s State, p panel.Registration) (*panel.Result, error) {
 	return panel.TallyRecords(p.Dir, SlotRecords(s, p))
+}
+
+// PanelRecords returns the stored slot verdicts of the panel directory dir.
+// A nil state or a spec that is not enrolled gives nil, so the caller reads
+// the disk files only.
+func PanelRecords(s *State, dir string) map[string][]byte {
+	if s == nil || !s.Enrolled {
+		return nil
+	}
+	return SlotRecords(*s, panel.Registration{Dir: dir})
+}
+
+// PanelRecordSource returns the record source of s for every panel directory.
+// A nil state or a spec that is not enrolled gives nil.
+func PanelRecordSource(s *State) panel.RecordSource {
+	if s == nil || !s.Enrolled {
+		return nil
+	}
+	return func(dir string) (map[string][]byte, error) { return PanelRecords(s, dir), nil }
+}
+
+// PanelTally is the one tally reader for a panel directory. On an enrolled
+// spec it counts the stored slot verdicts, as TallyPanel does. Otherwise it
+// is panel.Tally.
+func PanelTally(s *State, dir string) (*panel.Result, error) {
+	return panel.TallyRecords(dir, PanelRecords(s, dir))
+}
+
+// PanelFindingVerdict reads the counted submission of slot in round with the
+// same records as PanelTally.
+func PanelFindingVerdict(s *State, dir, slot string, round int) (panel.FindingVerdict, error) {
+	return panel.ReadSubmittedFindingVerdictRecords(dir, slot, round, PanelRecords(s, dir))
 }

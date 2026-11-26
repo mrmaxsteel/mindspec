@@ -32,11 +32,12 @@ func TestS134Submit_RepairEventAfterChecks(t *testing.T) {
 			var o kernel.SubmitOptions
 			if kind == "slot" {
 				var subject string
-				f, id, _, subject = slotFixture(t)
+				var lease kernel.LeaseResult
+				f, id, lease, subject = slotFixture(t)
 				data := verdictBytes(subject, "R1")
 				actorCommit(t, f, "verdict.json", data, "")
 				// A crash after the record write leaves the stored verdict.
-				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
+				failAfterSlotRecord(t, f, id, lease, "verdict.json")
 				o.Artifact = "verdict.json"
 				o.BeforeClose = func(kernel.State, kernel.Receipt) error { return errors.New("publish failed") }
 			} else {
@@ -117,7 +118,7 @@ func actorAttemptFixture(t *testing.T, kind string, repair bool) (*kerneltest.Fi
 		actorCommit(t, f, "verdict.json", data, "")
 		if repair {
 			// A crash after the record write leaves the stored verdict.
-			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, data)))
+			failAfterSlotRecord(t, f, id, lease, "verdict.json")
 		}
 	}
 	o.Step = id
@@ -245,9 +246,19 @@ func TestS134Submit_LateLeaseAndReceiptTogether(t *testing.T) {
 	if err == nil {
 		t.Fatal("receipt failure accepted")
 	}
-	// The verdict record and the superseded lease share the failed receipt write.
-	if !reflect.DeepEqual(before, actorRecord(t, f, id)) {
-		t.Fatal("failed receipt left a superseded lease or a stored verdict")
+	// The verdict record has its own write before the receipt. The
+	// superseded lease shares the failed receipt write, so only the record
+	// stays.
+	after := actorRecord(t, f, id)
+	if _, has := after.Metadata[kernel.KeyRecord]; !has {
+		t.Fatal("failed receipt lost the verdict record written before it")
+	}
+	if _, has := after.Metadata[kernel.KeyClose]; has {
+		t.Fatal("failed receipt left a receipt")
+	}
+	delete(after.Metadata, kernel.KeyRecord)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("failed receipt left a superseded lease")
 	}
 }
 

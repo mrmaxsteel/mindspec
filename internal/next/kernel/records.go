@@ -258,7 +258,13 @@ func ValidReceipt(root string, r Receipt, metadata map[string]any) error {
 		return fmt.Errorf("unknown receipt kind")
 	}
 	tuple, _, _ := Decode[Tuple](metadata, KeyTuple)
-	if r.RecordSHA256 != "" || (recordKind(tuple.Kind) && (r.Kind == "passed" || r.Kind == "refused")) {
+	// A slot verdict is a stored record, so a passed or refused slot receipt
+	// names its record. A close reason alone does not receipt a slot.
+	stored := recordKind(tuple.Kind) || tuple.Kind == "review-slot"
+	if tuple.Kind == "review-slot" && r.RecordSHA256 == "" && (r.Kind == "passed" || r.Kind == "refused" || r.Path != "" || r.Commit != "" || r.Blob != "") {
+		return fmt.Errorf("slot receipt must name record_sha256, not a path, commit, blob or close reason")
+	}
+	if r.RecordSHA256 != "" || (stored && (r.Kind == "passed" || r.Kind == "refused")) {
 		record, present, err := Decode[string](metadata, KeyRecord)
 		if err != nil || !present || r.RecordSHA256 == "" || r.RecordSHA256 != recordDigest([]byte(record)) {
 			return fmt.Errorf("receipt record_sha256 does not match mindspec_record")
@@ -267,10 +273,6 @@ func ValidReceipt(root string, r Receipt, metadata map[string]any) error {
 			return fmt.Errorf("record receipt cannot name a path, commit or blob")
 		}
 		return nil
-	}
-	if tuple.Kind == "review-slot" && (r.Path != "" || r.Commit != "" || r.Blob != "") {
-		// A slot verdict is a stored record; git holds no verdict commit.
-		return fmt.Errorf("slot receipt must name record_sha256, not a path, commit or blob")
 	}
 	if r.Path != "" || r.Commit != "" || r.Blob != "" {
 		if r.Path == "" || !objectID(r.Commit) || !objectID(r.Blob) {

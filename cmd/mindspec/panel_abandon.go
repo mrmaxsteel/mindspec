@@ -25,7 +25,7 @@ var panelAbandonCmd = &cobra.Command{
 		if strings.TrimSpace(reason) == "" || strings.TrimSpace(by) == "" {
 			return panelVerbFailure(fmt.Errorf("--reason and --by must not be empty"))
 		}
-		res, err := panelAbandonSnapshot(reg.Dir, reason)
+		res, err := panelAbandonSnapshot(root, reg.Dir, reason)
 		if err != nil {
 			return panelVerbFailure(err)
 		}
@@ -92,7 +92,7 @@ var panelAbandonCmd = &cobra.Command{
 		}
 		defer releaseCheckouts()
 		if err := panel.AppendRecordsWithCheck(reg.Dir, func() error {
-			current, err := panelAbandonSnapshot(reg.Dir, reason)
+			current, err := panelAbandonSnapshot(root, reg.Dir, reason)
 			if err != nil {
 				return err
 			}
@@ -105,7 +105,7 @@ var panelAbandonCmd = &cobra.Command{
 		if err := panel.WriteSnapshot(reg.Dir, *res.Panel); err != nil {
 			return panelVerbFailure(err)
 		}
-		updated, err := panel.Tally(reg.Dir)
+		updated, err := panelTally(root, reg.Dir)
 		if err != nil {
 			return panelVerbFailure(err)
 		}
@@ -116,8 +116,8 @@ var panelAbandonCmd = &cobra.Command{
 
 // An abandonment can end an incomplete round. A matching durable event also
 // permits recovery when its snapshot rename was interrupted.
-func panelAbandonSnapshot(dir, reason string) (*panel.Result, error) {
-	res, err := panel.Tally(dir)
+func panelAbandonSnapshot(root, dir, reason string) (*panel.Result, error) {
+	res, err := panelTally(root, dir)
 	if err != nil {
 		return nil, err
 	}

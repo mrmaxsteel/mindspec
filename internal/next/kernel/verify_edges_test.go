@@ -54,7 +54,7 @@ func TestS134Verify_Schema1SlotRedaction(t *testing.T) {
 		f.Must(err)
 		put(t, filepath.Join(dir, slot+"-round-1.json"), string(data))
 		f.Create(gate+".r1."+slot, gate)
-		closePass(t, f, gate+".r1."+slot)
+		closeSlotPass(t, f, gate+".r1."+slot, data)
 	}
 	res, err := panel.Tally(dir)
 	f.Must(err)

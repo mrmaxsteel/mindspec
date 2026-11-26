@@ -105,9 +105,10 @@ func TestS134Brief_FrozenPrior(t *testing.T) {
 		if i == 1 {
 			v.ConcreteChangesRequired[0].Text = long
 		}
-		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, paneltest.Bytes(t, v), verifyResolution)
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: v.Slot, Round: 1}, data, verifyResolution)
 		f.Must(err)
-		closePass(t, f, gate+".r1."+v.Slot)
+		closeSlotPass(t, f, gate+".r1."+v.Slot, data)
 	}
 	reduce(t, f, true)
 	id, v := verifyRecord(t, f, gate, 1)

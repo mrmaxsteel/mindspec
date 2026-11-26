@@ -49,8 +49,8 @@ func resolvePanelVerb(cmd *cobra.Command, slug string) (string, panel.Registrati
 	return root, reg, nil
 }
 
-func panelVerbSnapshot(dir string) (*panel.Result, error) {
-	res, err := panel.Tally(dir)
+func panelVerbSnapshot(root, dir string) (*panel.Result, error) {
+	res, err := panelTally(root, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -116,8 +116,8 @@ func panelAcceptanceExists(root, spec, ac string) bool {
 	return regexp.MustCompile(`\b` + regexp.QuoteMeta(ac) + `\b`).Match(data)
 }
 
-func refuteFinding(dir, slot string, round int, id string) (panel.Finding, error) {
-	v, err := panel.ReadSubmittedFindingVerdict(dir, slot, round)
+func refuteFinding(root, dir, slot string, round int, id string) (panel.Finding, error) {
+	v, err := panelFindingVerdict(root, dir, slot, round)
 	if err != nil {
 		return panel.Finding{}, err
 	}
@@ -133,8 +133,8 @@ func refuteFinding(dir, slot string, round int, id string) (panel.Finding, error
 // cannot. An APPROVE
 // verdict's items get the same ccr[i] ids and hashes as REQUEST_CHANGES
 // items. The second value is the verdict word, which sets the severity.
-func deferVerdict(dir, slot string, round int) (panel.FindingVerdict, string, error) {
-	v, err := panel.ReadSubmittedFindingVerdict(dir, slot, round)
+func deferVerdict(root, dir, slot string, round int) (panel.FindingVerdict, string, error) {
+	v, err := panelFindingVerdict(root, dir, slot, round)
 	if err != nil {
 		return panel.FindingVerdict{}, "", err
 	}
@@ -152,8 +152,8 @@ func deferVerdict(dir, slot string, round int) (panel.FindingVerdict, string, er
 }
 
 // deferFinding resolves one finding (or the slot) for panel defer.
-func deferFinding(dir, slot string, round int, id string) (panel.Finding, string, error) {
-	v, verdict, err := deferVerdict(dir, slot, round)
+func deferFinding(root, dir, slot string, round int, id string) (panel.Finding, string, error) {
+	v, verdict, err := deferVerdict(root, dir, slot, round)
 	if err != nil {
 		return panel.Finding{}, "", err
 	}
@@ -225,14 +225,14 @@ func runPanelRefuteBody(cmd *cobra.Command, args []string) error {
 		}
 		evidence = filepath.ToSlash(relative)
 	}
-	res, err := panelVerbSnapshot(reg.Dir)
+	res, err := panelVerbSnapshot(root, reg.Dir)
 	if err != nil {
 		return panelVerbFailure(err)
 	}
 	if res.Panel.Abandoned {
 		return panelVerbFailure(fmt.Errorf("panel is abandoned"))
 	}
-	f, err := refuteFinding(reg.Dir, slot, round, finding)
+	f, err := refuteFinding(root, reg.Dir, slot, round, finding)
 	if err != nil {
 		return panelVerbFailure(err)
 	}
@@ -268,14 +268,14 @@ func runPanelRefuteBody(cmd *cobra.Command, args []string) error {
 		return panelVerbFailure(err)
 	}
 	err = panel.AppendRecordsWithCheck(reg.Dir, func() error {
-		current, err := panelVerbSnapshot(reg.Dir)
+		current, err := panelVerbSnapshot(root, reg.Dir)
 		if err != nil {
 			return err
 		}
 		if current.Panel.Abandoned {
 			return fmt.Errorf("panel is abandoned")
 		}
-		latest, err := refuteFinding(reg.Dir, slot, round, finding)
+		latest, err := refuteFinding(root, reg.Dir, slot, round, finding)
 		if err != nil {
 			return err
 		}
@@ -304,7 +304,7 @@ func runPanelRefuteBody(cmd *cobra.Command, args []string) error {
 	if err := panel.WriteSnapshot(reg.Dir, *res.Panel); err != nil {
 		return panelVerbFailure(err)
 	}
-	updated, err := panel.Tally(reg.Dir)
+	updated, err := panelTally(root, reg.Dir)
 	if err != nil {
 		return panelVerbFailure(err)
 	}

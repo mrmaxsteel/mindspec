@@ -810,6 +810,7 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 		Status:        exec.Status,
 		IsRefNotFound: exec.IsRefNotFound,
 		Worktree:      panelBeadWorktreePath(beadID),
+		Records:       panelRecordSource(root),
 	})
 }
 

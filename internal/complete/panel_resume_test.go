@@ -569,7 +569,7 @@ func TestComplete_ResumeAuditRegistrationLedgerIdentity(t *testing.T) {
 			store.data[beadID] = map[string]interface{}{"panel_deferred_entries": entries}
 			roots := PanelGateRoots(root, "", reg.Panel.Spec)
 			setDeferredIssue(t, fake, "closed")
-			if err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true); err == nil || !strings.Contains(err.Error(), "bd reopen") {
+			if err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true, nil); err == nil || !strings.Contains(err.Error(), "bd reopen") {
 				t.Fatalf("live panel must block: %v", err)
 			}
 			abandoned := reg
@@ -589,7 +589,7 @@ func TestComplete_ResumeAuditRegistrationLedgerIdentity(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true)
+			err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true, nil)
 			audit, decodeErr := DecodePanelDeferred(store.data[beadID], "panel_deferred_entries")
 			if decodeErr != nil {
 				t.Fatal(decodeErr)
@@ -644,7 +644,7 @@ func TestComplete_DuplicatePanelIdentityPreservesAudit(t *testing.T) {
 			store.data[beadID] = map[string]interface{}{"panel_deferred_entries": entries, "deferral_pending_entries": pending}
 			roots := PanelGateRoots(root, "", reg.Panel.Spec)
 			setDeferredIssue(t, fake, "closed")
-			if err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true); err == nil || !strings.Contains(err.Error(), "bd reopen") {
+			if err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true, nil); err == nil || !strings.Contains(err.Error(), "bd reopen") {
 				t.Fatalf("closed follow-up must block before the copy: %v", err)
 			}
 			live := reg.Dir
@@ -687,7 +687,7 @@ func TestComplete_DuplicatePanelIdentityPreservesAudit(t *testing.T) {
 				results = append(results, PanelGateResult{Registration: current, Decision: panel.Decision{Action: panel.Allow}})
 			}
 			if strings.HasPrefix(attempt, "resume-") {
-				err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true)
+				err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true, nil)
 				for _, want := range []string{"panel " + reg.Slug() + " for spec " + reg.Panel.Spec + " is registered at 2 paths:", live, duplicate, "remove the duplicates"} {
 					if err == nil || !strings.Contains(err.Error(), want) {
 						t.Errorf("duplicate identity must block and name both paths; want %q: %v", want, err)
@@ -710,7 +710,7 @@ func TestComplete_DuplicatePanelIdentityPreservesAudit(t *testing.T) {
 				if err := os.Rename(live, filepath.Join(t.TempDir(), "live")); err != nil {
 					t.Fatal(err)
 				}
-				if err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true); err != nil {
+				if err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, roots, true, nil); err != nil {
 					t.Fatalf("single abandoned registration must skip: %v", err)
 				}
 				for _, key := range []string{"panel_deferred_entries", "deferral_pending_entries"} {
@@ -740,7 +740,7 @@ func TestComplete_ResumeMissingPanelNamesBeadRecovery(t *testing.T) {
 	if err := os.Rename(reg.Dir, filepath.Join(t.TempDir(), "saved-panel")); err != nil {
 		t.Fatal(err)
 	}
-	err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, []string{root}, true)
+	err := recheckResumedPanelDeferrals(beadID, reg.Panel.Spec, []string{root}, true, nil)
 	if err == nil || !strings.HasPrefix(err.Error(), "bead "+beadID+" slot R1 finding ccr[0] follow-up follow-up:") || !strings.HasSuffix(err.Error(), "recovery: bd reopen 'follow-up'") || strings.Contains(err.Error(), "panel refute") {
 		t.Fatalf("missing registration must name the bead and offer reopen only: %v", err)
 	}

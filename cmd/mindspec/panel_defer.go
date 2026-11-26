@@ -43,7 +43,7 @@ func runPanelDeferBody(cmd *cobra.Command, args []string) error {
 		return panelVerbFailure(fmt.Errorf("--by must not be empty"))
 	}
 	if toPlan {
-		return runPanelDeferToPlan(cmd, reg, slot, round, finding, by)
+		return runPanelDeferToPlan(cmd, root, reg, slot, round, finding, by)
 	}
 	if reg.Panel.Gate == "spec_approve" || reg.Panel.Gate == "adhoc" || reg.Panel.Gate == "" {
 		return guard.NewFailure("this panel has no owning epic for a deferral", "fix the finding or use mindspec panel refute")
@@ -52,14 +52,14 @@ func runPanelDeferBody(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return panelVerbFailure(err)
 	}
-	res, err := panelVerbSnapshot(reg.Dir)
+	res, err := panelVerbSnapshot(root, reg.Dir)
 	if err != nil {
 		return panelVerbFailure(err)
 	}
 	if res.Panel.Abandoned {
 		return panelVerbFailure(fmt.Errorf("panel is abandoned"))
 	}
-	f, verdict, err := deferFinding(reg.Dir, slot, round, finding)
+	f, verdict, err := deferFinding(root, reg.Dir, slot, round, finding)
 	if err != nil {
 		return panelVerbFailure(err)
 	}
@@ -74,7 +74,7 @@ func runPanelDeferBody(cmd *cobra.Command, args []string) error {
 	check := func() error {
 		texts := []string{f.Text}
 		if f.ID == "slot" {
-			v, _, err := deferVerdict(reg.Dir, slot, round)
+			v, _, err := deferVerdict(root, reg.Dir, slot, round)
 			if err != nil {
 				return err
 			}
@@ -137,14 +137,14 @@ func runPanelDeferBody(cmd *cobra.Command, args []string) error {
 		return panelVerbFailure(err)
 	}
 	err = panel.AppendRecordsWithCheck(reg.Dir, func() error {
-		current, err := panelVerbSnapshot(reg.Dir)
+		current, err := panelVerbSnapshot(root, reg.Dir)
 		if err != nil {
 			return err
 		}
 		if current.Panel.Abandoned {
 			return fmt.Errorf("panel is abandoned")
 		}
-		latest, _, err := deferFinding(reg.Dir, slot, round, finding)
+		latest, _, err := deferFinding(root, reg.Dir, slot, round, finding)
 		if err != nil {
 			return err
 		}
@@ -179,7 +179,7 @@ func runPanelDeferBody(cmd *cobra.Command, args []string) error {
 	if err := panel.WriteSnapshot(reg.Dir, *res.Panel); err != nil {
 		return panelVerbFailure(err)
 	}
-	updated, err := panel.Tally(reg.Dir)
+	updated, err := panelTally(root, reg.Dir)
 	if err != nil {
 		return panelVerbFailure(err)
 	}

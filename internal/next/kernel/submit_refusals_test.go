@@ -542,8 +542,9 @@ func lateRepairRefusal(t *testing.T, producer string) {
 			leaseActor(t, f, id, kernel.LeaseDeps{})
 			changeActorMetadata(t, f, id, "closed")
 			o.Step = id
-			// A slot repair with no evidence needs the stored verdict.
-			want = "mindspec_record is absent or invalid"
+			// A slot repair with no stored record and no file needs the
+			// registered panel that names the verdict path.
+			want = "slot gate has no registered panel"
 		case "repair.stale-evidence":
 			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: "wrong"})))
 			want = "verify record needs its step, subject and returns"

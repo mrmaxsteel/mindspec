@@ -139,6 +139,12 @@ func readRecordBytes(step string, reader io.Reader) (string, error) {
 	return string(data), nil
 }
 
+// hasRecord reports whether the step metadata holds mindspec_record.
+func hasRecord(r Record) bool {
+	_, has := r.Metadata[KeyRecord]
+	return has
+}
+
 func recordBytes(r Record) ([]byte, error) {
 	text, present, err := Decode[string](r.Metadata, KeyRecord)
 	if err != nil || !present {

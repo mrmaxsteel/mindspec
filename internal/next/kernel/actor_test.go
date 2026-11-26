@@ -923,13 +923,19 @@ func TestS134Lease_UnrecordedWorkItem(t *testing.T) {
 func TestS134Submit_SlotReceiptCannotSubstituteRetally(t *testing.T) {
 	f, id, lease, subject := slotFixture(t)
 	actorCommit(t, f, "verdict.json", verdictBytes(subject, "R1"), "")
-	f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Retally: "forged-tally"}))
-	actorRefusal(t, f, func() error {
-		_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: "verdict.json"})
-		return err
-	}, "different result")
-	if actorRecord(t, f, id).Status == "closed" {
-		t.Fatal("slot accepted a gate's receipt kind without its verdict")
+	forged := kernel.Receipt{Kind: "passed", Retally: "forged-tally"}
+	f.Must(f.Store.WriteReceipt(id, forged))
+	// A slot receipt must name its record hash. A tally reason alone is
+	// not a valid slot receipt, so it cannot stand in for the verdict.
+	if err := kernel.ValidReceipt(f.Root, forged, actorRecord(t, f, id).Metadata); err == nil || !strings.Contains(err.Error(), "slot receipt must name record_sha256") {
+		t.Fatalf("slot receipt with only a tally reason: %v, want the record_sha256 refusal", err)
+	}
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: "verdict.json"})
+	f.Must(err)
+	receipt, _, err := kernel.Decode[kernel.Receipt](actorRecord(t, f, id).Metadata, kernel.KeyClose)
+	f.Must(err)
+	if receipt.Retally != "" || receipt.RecordSHA256 == "" {
+		t.Fatalf("slot kept a receipt without its verdict record: %+v", receipt)
 	}
 }
 

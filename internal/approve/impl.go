@@ -514,7 +514,7 @@ func ApproveImpl(root, specID string, exec executor.Executor, opts ...ImplOpts) 
 	if err := implPanelCore3Preflight(root, specID, warnWriter); err != nil {
 		return nil, err
 	}
-	if err := implPanelDeferralPreflight(root, specID); err != nil {
+	if err := implPanelDeferralPreflight(root, specID, kernelState); err != nil {
 		return nil, err
 	}
 	var seedDomains []string
@@ -1159,7 +1159,9 @@ func implAdvisorySlotLine(root, specID, beadID string) string {
 	if len(regs) == 0 {
 		return ""
 	}
-	res, err := panel.Tally(regs[0].Dir)
+	// The line is advisory: a tracker failure reads the disk files.
+	s, _ := implKernelStateFn(root, specID)
+	res, err := kernel.PanelTally(s, regs[0].Dir)
 	if err != nil {
 		return ""
 	}
@@ -1315,7 +1317,8 @@ func implPanelCore3Preflight(root, specID string, out io.Writer) error {
 
 // implPanelDeferralPreflight checks integrity before abandonment. Bead panels
 // use the immutable completion audit; non-bead panels use current discharges.
-func implPanelDeferralPreflight(root, specID string) error {
+// An enrolled spec state s gives the stored slot verdicts; nil reads the disk.
+func implPanelDeferralPreflight(root, specID string, s *kernel.State) error {
 	if implPanelSkipEnvFn() {
 		return nil
 	}
@@ -1367,11 +1370,12 @@ func implPanelDeferralPreflight(root, specID string) error {
 		if reg.Panel.Abandoned {
 			continue
 		}
-		res, err := panel.Tally(reg.Dir)
+		source := kernel.PanelRecordSource(s)
+		res, err := panel.TallySource(reg.Dir, source)
 		if err != nil {
 			return err
 		}
-		if err := complete.CheckPanelDeferrals(reg, res.EffectiveDeferrals(), false); err != nil {
+		if err := complete.CheckPanelDeferralsSource(reg, source, res.EffectiveDeferrals()); err != nil {
 			return err
 		}
 	}

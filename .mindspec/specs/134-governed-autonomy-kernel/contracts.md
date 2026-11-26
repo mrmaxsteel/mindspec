@@ -131,11 +131,16 @@ exactly (the metadata route and bound, §13.10); a reader decodes the string, th
 sha256 of those bytes on every path: the receipt (B13), the closing pin, `ValidReceipt` (which reads the step
 metadata; a record receipt on a step with no `mindspec_record` is invalid) and the repair (§9). The
 receipt names no path, commit or blob id. The actor commits no record. **Slot verdict.** A slot verdict is a record:
-`submit` reads the `--artifact` file once and writes `mindspec_record` and the receipt in one write, after the
-publication hook. It makes no commit, moves no ref and writes no index or file outside the registered panel directory.
-The verdict file stays in the panel directory. The tally reads a verdict file that is on disk, so a hand edit fails
-its digest (§13.10); for an absent file, as in a fresh clone, it reads `mindspec_record` of the current slot attempt
-when the receipt `record_sha256` matches. A slot repair uses `mindspec_record`, and a supplied file must match it. Each reader of a record (the brief
+`submit` reads the `--artifact` file once. After the publication hook it writes `mindspec_record` in its own write,
+then the receipt, so a stop between them leaves a record and no receipt. It makes no commit, moves no ref and writes no
+index or file outside the registered panel directory. The verdict file stays in the panel directory. When the slot has
+a receipted `mindspec_record`, the tally and the verify read set use its bytes. They count a verdict file on disk only
+when its sha256 equals the receipt `record_sha256`; a file that differs is not counted, so a hand edit gets a retry. For
+an absent file, as in a fresh clone, they read the same record bytes, so the findings and the read set do not change. A
+slot receipt (`passed` or `refused`) must name `record_sha256`. A slot repair uses the stored `mindspec_record`, and a
+supplied `--artifact` or `--record` must match it. With no stored record, the repair takes the verdict from
+`--artifact`, or else from the attempt file or the registered path, runs every check of a slot submit, and then
+writes the record and the receipt. Each reader of a record (the brief
 render, the tally, the verify retally, the audit, the closing pin) reads `mindspec_record` and the close writes of
 its kind, never a file. Each `submit` and `panel submit` runs under the phase lock, so no two writes of one step
 interleave. On a step with a valid receipt no submit makes a close write; the closed-step rules below apply. Else, for

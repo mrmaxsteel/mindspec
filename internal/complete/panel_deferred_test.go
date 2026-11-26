@@ -447,7 +447,7 @@ func TestGateTime_AnotherDeferralCoversVoidedEntry(t *testing.T) {
 	core3JSON(t, reg.Dir, panel.FileName, reg.Panel)
 	core3JSON(t, fake, "other-followup.json", []interface{}{map[string]interface{}{"id": "other-followup", "status": "open", "description": "test finding /tmp/x\nsecond ask", "dependencies": []map[string]string{{"id": "epic-130-core3", "dependency_type": "discovered-from"}}}})
 	setDeferredIssue(t, fake, "closed")
-	valid, err := checkedPanelDeferrals(reg, deferredResults(t, reg)[0].Decision.AppliedDeferrals)
+	valid, err := checkedPanelDeferrals(reg, nil, deferredResults(t, reg)[0].Decision.AppliedDeferrals)
 	if err != nil || len(valid) != 2 {
 		t.Fatalf("valid alternate discharge lost: %+v %v", valid, err)
 	}

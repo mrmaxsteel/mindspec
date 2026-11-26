@@ -47,13 +47,14 @@ func refusedPanel(t *testing.T, f *kerneltest.Fixture, gate, slug string, n int,
 		v.Round = n
 		v.ReviewedSHA = gateHead(t, f, gate)
 		v.Model = "test-model"
-		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: slug, Slot: slot, Round: n}, paneltest.Bytes(t, v), func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: slug, Slot: slot, Round: n}, data, func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
 			return panel.SubmitResolution{Family: "harness", Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
 		})
 		f.Must(err)
 		id := fmt.Sprintf("%s.r%d.%s", gate, n, slot)
 		f.Create(id, gate)
-		f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Retally: "seeded-verdict"}))
+		kerneltest.SlotReceipt(f, id, data)
 		f.Must(f.Store.SetStatusIf(id, "open", "closed"))
 	}
 	tally, err := panel.Tally(dir)

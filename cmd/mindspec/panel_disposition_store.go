@@ -276,7 +276,7 @@ func fillDispositionRow(record []byte, specID, panelName string, now func() time
 			return nil, fmt.Errorf("panel spec must match --spec")
 		}
 		reviewer, _ := m["reviewer"].(string)
-		res, err := panel.Tally(reg.Dir)
+		res, err := panelTally(root, reg.Dir)
 		if err != nil {
 			return nil, err
 		}

@@ -59,7 +59,8 @@ func seedPassingSlots(f *Fixture, gate string, reg kernel.RegistrationRecord) {
 	for _, slot := range reg.Slots {
 		v := paneltest.Verdict("APPROVE")
 		v.Slot, v.Round, v.ReviewedSHA, v.Model = slot, reg.Round, reg.Subject, "test-model"
-		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: reg.Slug, Slot: slot, Round: reg.Round}, paneltest.Bytes(f.t, v), func(p panel.Panel, roster panel.RosterSlot) (panel.SubmitResolution, error) {
+		data := paneltest.Bytes(f.t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: reg.Slug, Slot: slot, Round: reg.Round}, data, func(p panel.Panel, roster panel.RosterSlot) (panel.SubmitResolution, error) {
 			return panel.SubmitResolution{Family: roster.Family, Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
 		})
 		f.Must(err)
@@ -68,7 +69,7 @@ func seedPassingSlots(f *Fixture, gate string, reg kernel.RegistrationRecord) {
 			f.Create(id, gate)
 			f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeySubject, kernel.Subject{Commit: reg.Subject})))
 		}
-		f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Retally: "seeded-verdict"}))
+		SlotReceipt(f, id, data)
 		closeRecord(f, id)
 	}
 }
@@ -290,4 +291,11 @@ func Lens(f *Fixture, gate string, record kernel.LensRecord) string {
 	f.Must(f.Store.WriteMetadata(gate, kernel.Metadata(kernel.KeyRound, round)))
 	closeRecord(f, record.Step)
 	return record.Step
+}
+
+// SlotReceipt stores data as the verdict record of the slot step id and
+// writes a passed receipt that names its hash, as a slot submit does.
+func SlotReceipt(f *Fixture, id string, data []byte) {
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(data))))
+	f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", RecordSHA256: fmt.Sprintf("%x", sha256.Sum256(data))}))
 }
