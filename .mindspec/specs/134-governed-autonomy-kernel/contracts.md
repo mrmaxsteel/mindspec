@@ -270,7 +270,9 @@ step's current generation, `subject` = the step's subject, no `revoked_token_has
 (§6), and then writes the receipt (`repaired: true`, `via:
 "repair"`). Only when the step was never leased, no evidence
 fits (a record step with no `mindspec_record` included), or its `mindspec_closing` has a `conflict` or a `generation` that is not the step's current
-generation (§6), does the next pass create `<id>.a<k+1>` with `mindspec_from`. `submit --repair` refuses an open
+generation (§6), does the next pass create `<id>.a<k+1>` with `mindspec_from`. The pass also creates that retry for a
+closed slot whose stored record has a sha256 that differs from its receipt `record_sha256` or from its
+`mindspec_closing` pin; that record never counts, and the refusal names `next-action <spec> --apply`. `submit --repair` refuses an open
 step, a step that was never leased (so no record written outside a lease passes as a repair), a step with a valid receipt and
 evidence that does not fit, and names the condition. A retry keeps the keys
 of its kind: subject, round, registration and decision, for a fix `mindspec_reproduced`, and for a verify

@@ -100,7 +100,7 @@ func publishSubmittedReview(state kernel.State, step string, receipt kernel.Rece
 		if reg.Err != nil {
 			return reg.Err
 		}
-		if reg.Panel.KernelGate == "" || state.Records[reg.Panel.KernelGate].ID != row.Parent {
+		if reg.Panel.KernelGate == "" || !panelOwnsSlotParent(state, reg, row.Parent) {
 			continue
 		}
 		data, err := kernel.ReceiptBytes(row, receipt)
@@ -135,4 +135,21 @@ func publishSubmittedReview(state kernel.State, step string, receipt kernel.Rece
 		return err
 	}
 	return panelVerbFailure(fmt.Errorf("slot has no registered panel"))
+}
+
+// panelOwnsSlotParent reports whether the registered panel reg holds the
+// verdicts of slots under the gate record parent. A gate retry keeps the
+// panel that is registered on an earlier attempt of the same gate, when the
+// retry carries the registration of that panel slug.
+func panelOwnsSlotParent(state kernel.State, reg panel.Registration, parent string) bool {
+	gate := reg.Panel.KernelGate
+	if state.Records[gate].ID == parent {
+		return true
+	}
+	active := kernelPanelGate(state, reg.Panel)
+	if active == gate || state.Records[active].ID != parent || gateBase(state, active) != gateBase(state, gate) {
+		return false
+	}
+	registration, has, err := kernel.Decode[kernel.RegistrationRecord](state.Records[active].Metadata, kernel.KeyRegistration)
+	return err == nil && has && registration.Slug == reg.Slug()
 }

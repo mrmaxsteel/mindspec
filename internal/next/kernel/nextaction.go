@@ -35,20 +35,28 @@ func NextAction(state State, apply bool) (Output, error) {
 				return err
 			}
 		}
-		result, err := Pass(Rules(), state, apply)
-		if err != nil {
-			return err
-		}
-		if apply {
-			fresh, err := ReadState(state.Store, state.SpecID, state.SpecDir)
+		// A pass that writes can make work that only a later pass lists,
+		// for example a gate retry and then the slot retry under it. An
+		// applied pass that wrote and lists nothing runs again, so one
+		// --apply pass does not return a wait with nothing to wait for.
+		for passes := 1; ; passes++ {
+			result, err := Pass(Rules(), state, apply)
 			if err != nil {
 				return err
 			}
-			fresh.At = result.State.At
-			state = fresh
+			if apply {
+				fresh, err := ReadState(state.Store, state.SpecID, state.SpecDir)
+				if err != nil {
+					return err
+				}
+				fresh.At = result.State.At
+				state = fresh
+			}
+			out = OutputForPass(result, state, apply)
+			if !apply || len(result.Writes) == 0 || passes >= maxApplyPasses || !idle(out) {
+				return nil
+			}
 		}
-		out = OutputForPass(result, state, apply)
-		return nil
 	}
 	if apply {
 		if state.Store == nil {
@@ -66,6 +74,14 @@ func NextAction(state State, apply bool) (Output, error) {
 	}
 	err = run()
 	return out, actionError(state, err)
+}
+
+// maxApplyPasses bounds the passes of one applied next-action call.
+const maxApplyPasses = 4
+
+// idle reports an output with nothing to do and nothing to wait for.
+func idle(out Output) bool {
+	return out.Status == "wait" && len(out.Actions)+len(out.Decisions)+len(out.Run)+len(out.Waiting) == 0
 }
 
 func actionError(s State, err error) error {

@@ -1,6 +1,7 @@
 package kernel_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
+	"github.com/mrmaxsteel/mindspec/internal/panel/paneltest"
 )
 
 // refusedRoundVerify refuses a round of vetoes and returns the findings and
@@ -250,7 +252,8 @@ func TestRepair_RecordChangedAfterReceiptOpensRetry(t *testing.T) {
 	}
 	before := kerneltest.Snapshot(t, f)
 	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "recover"})
-	assertSubmitRefusal(t, err, "stored record differs from its receipt", "run mindspec next-action '"+f.SpecID+"'; it opens the retry "+id+".a2, then submit the verdict of that retry")
+	recovery := "run mindspec next-action '" + f.SpecID + "' --apply; it opens the retry " + id + ".a2, then submit the verdict of that retry"
+	assertSubmitRefusal(t, err, "stored record differs from its receipt", recovery)
 	if kerneltest.Snapshot(t, f) != before {
 		t.Fatal("a refused repair wrote state")
 	}
@@ -260,6 +263,52 @@ func TestRepair_RecordChangedAfterReceiptOpensRetry(t *testing.T) {
 	if got := slotTally(t, f, "R1"); got != "stored record does not match its receipt" {
 		t.Fatalf("slot tallies %q after the refused repair, want the receipt refusal", got)
 	}
-	reduce(t, f, true)
+	// Run the printed command. Without --apply, next-action writes nothing,
+	// so only the --apply form opens the retry.
+	if !strings.Contains(recovery, "next-action '"+f.SpecID+"' --apply;") {
+		t.Fatalf("printed recovery does not name the --apply form: %q", recovery)
+	}
+	reduce(t, f, false)
+	assertRetry(t, f, id, id+".a2", false)
+	if out := reduce(t, f, true); !action(out, id+".a2") {
+		t.Fatalf("the printed --apply pass does not list the retry: %+v", out.Actions)
+	}
 	assertRetry(t, f, id, id+".a2", true)
+}
+
+// A hand edit of a counted verdict file retires the passed gate. One applied
+// pass opens the gate retry and the slot retry, and lists the slot retry, so
+// a loop does not wait with nothing to wait for.
+func TestNextAction_ApplyAfterEditedVerdictListsRetry(t *testing.T) {
+	f := reducerFixture(t)
+	gate := f.Items[0] + ".review"
+	registerGate(t, f, gate, "review", 1)
+	dir := filepath.Join(f.SpecDir, "reviews", "review")
+	for i := 1; i <= 3; i++ {
+		slot := fmt.Sprintf("R%d", i)
+		v := paneltest.Verdict(panel.VerdictApprove)
+		v.Slot, v.Round, v.ReviewedSHA, v.Model = slot, 1, gateHead(t, f, gate), "test-model"
+		data := paneltest.Bytes(t, v)
+		_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "review", Slot: slot, Round: 1}, data, func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
+			return panel.SubmitResolution{Family: "harness", Model: "test-model", RunnerKind: "harness", RunnerSource: "default"}, nil
+		})
+		f.Must(err)
+		id := fmt.Sprintf("%s.r1.%s", gate, slot)
+		f.Create(id, gate)
+		f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, string(data))))
+		f.Must(f.Store.WriteReceipt(id, kernel.Receipt{Kind: "passed", Generation: 1, RecordSHA256: digestOf(string(data))}))
+		f.Must(f.Store.SetStatusIf(id, "open", "closed"))
+	}
+	if out := reduce(t, f, true); record(t, f, gate).Status != "closed" {
+		t.Fatalf("the round did not pass: %+v", out)
+	}
+	file := filepath.Join(dir, "R1-round-1.json")
+	data, err := os.ReadFile(file)
+	f.Must(err)
+	f.Must(os.WriteFile(file, []byte(strings.Replace(string(data), `"test-model"`, `"edited-model"`, 1)), 0644))
+	retry := gate + ".r1.R1.a2"
+	out := reduce(t, f, true)
+	if out.Status != "work" || !action(out, retry) {
+		t.Fatalf("one applied pass after the edit lists %+v with status %s, want the retry %s", out.Actions, out.Status, retry)
+	}
 }

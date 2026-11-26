@@ -258,11 +258,7 @@ func runPanelSubmit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	res, err := panelTally(root, reg.Dir)
-	if err != nil {
-		return err
-	}
-	statuses, err := panelSlotStatuses(root, res)
+	res, statuses, err := panelTallyStatuses(root, reg.Dir)
 	if err != nil {
 		return err
 	}

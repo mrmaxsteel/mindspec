@@ -354,9 +354,15 @@ final, 1 while a slot is pending, and 2 for other incomplete states.`,
 		if err != nil {
 			return fail(err)
 		}
-		facts := resolvePanelGateFacts(root, reg)
+		// Read the slot records once, so the verdict line and the slot table
+		// show the same records.
+		records, recordsErr := panelRecords(root, reg.Dir)
+		facts := resolvePanelGateFactsSource(root, reg, func(string) (map[string][]byte, error) { return records, recordsErr })
 		line, _ := renderPanelVerify(facts.Res, facts)
-		slots, err := panelSlotStatuses(root, facts.Res)
+		slots, err := []panel.SlotStatus(nil), recordsErr
+		if err == nil {
+			slots, err = panelSlotStatusesRecords(root, facts.Res, records)
+		}
 		if err != nil {
 			if !asJSON {
 				fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)

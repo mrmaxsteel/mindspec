@@ -33,6 +33,11 @@ func panelDispositionView(root string, res *panel.Result) (*panel.Result, bool, 
 		return res, false, nil
 	}
 	s, err := panelKernelStateFn(root, res.Panel.Spec)
+	if err != nil && !res.Panel.Orchestrated {
+		// A tracker failure on a panel that is not orchestrated keeps the
+		// disk view, as panelStateRecords does.
+		return res, false, nil
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -704,6 +709,21 @@ func panelRecordSource(root string) panel.RecordSource {
 // the kernel tally counts.
 func panelTally(root, dir string) (*panel.Result, error) {
 	return panel.TallySource(dir, panelRecordSource(root))
+}
+
+// panelTallyStatuses tallies dir and reads its slot statuses from one read
+// of the slot records, so the rule line and the slot statuses agree.
+func panelTallyStatuses(root, dir string) (*panel.Result, []panel.SlotStatus, error) {
+	records, err := panelRecords(root, dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	res, err := panel.TallyRecords(dir, records)
+	if err != nil {
+		return nil, nil, err
+	}
+	statuses, err := panelSlotStatusesRecords(root, res, records)
+	return res, statuses, err
 }
 
 // panelFindingVerdict reads the counted submission of slot with the records

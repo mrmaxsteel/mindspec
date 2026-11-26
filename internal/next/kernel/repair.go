@@ -136,9 +136,9 @@ func slotRecordReceipted(s State, r Record, data []byte) error {
 	if !differs {
 		return nil
 	}
-	recovery := "run mindspec next-action " + briefQuote(idrender.Spec(s.SpecID)) + "; it opens a retry of this slot"
+	recovery := "run mindspec next-action " + briefQuote(idrender.Spec(s.SpecID)) + " --apply; it opens a retry of this slot"
 	if next, err := nextAttempt(r.Key()); err == nil {
-		recovery = fmt.Sprintf("run mindspec next-action %s; it opens the retry %s, then submit the verdict of that retry", briefQuote(idrender.Spec(s.SpecID)), next)
+		recovery = fmt.Sprintf("run mindspec next-action %s --apply; it opens the retry %s, then submit the verdict of that retry", briefQuote(idrender.Spec(s.SpecID)), next)
 	}
 	return termsafe.NewFailure("stored record differs from its receipt", recovery)
 }
