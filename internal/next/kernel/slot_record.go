@@ -200,10 +200,11 @@ func slotRecovery(s State, t Tuple) string {
 // store holds, with no verdict file on disk. The verdict file of a slot
 // belongs to the newest attempt in its retry lineage that holds a receipted
 // record, so an open or unreceipted retry keeps the record of the attempt
-// before it. The receipt hash must match that record. When it does not, the
-// name maps to nil: the slot is not counted and no disk file substitutes for
-// the record. A verdict file that differs from its record does not count, so
-// its slot gets a retry.
+// before it. The receipt hash must match that record. When it does not, when
+// the receipt names no hash or does not decode, or when a first attempt has
+// no valid lineage, the name maps to nil: the slot is not counted and no
+// disk file substitutes for the record. A verdict file that differs from its
+// record does not count, so its slot gets a retry.
 func SlotRecords(s State, p panel.Registration) map[string][]byte {
 	out := map[string][]byte{}
 	for key, r := range s.Records {
@@ -215,7 +216,17 @@ func SlotRecords(s State, p panel.Registration) map[string][]byte {
 		if err != nil || !registered || reg.Slug != p.Slug() {
 			continue
 		}
-		if root, err := SlotLineageRoot(s, key); err != nil || root != key {
+		name := fmt.Sprintf("R%d-round-%d.json", t.Slot, t.Round)
+		root, err := SlotLineageRoot(s, key)
+		if err != nil {
+			// A first attempt whose lineage does not verify gives no record,
+			// and its file does not count in place of one.
+			if t.Attempt == 1 {
+				out[name] = nil
+			}
+			continue
+		}
+		if root != key {
 			continue
 		}
 		lineage := slotLineage(s, key)
@@ -224,11 +235,17 @@ func SlotRecords(s State, p panel.Registration) map[string][]byte {
 			if attempt.Status != "closed" {
 				continue
 			}
-			receipt, _, err := Decode[Receipt](attempt.Metadata, KeyClose)
-			if err != nil || receipt.Kind == "superseded" || receipt.RecordSHA256 == "" {
+			receipt, has, err := Decode[Receipt](attempt.Metadata, KeyClose)
+			if !has || err == nil && receipt.Kind == "superseded" {
 				continue
 			}
-			name := fmt.Sprintf("R%d-round-%d.json", t.Slot, t.Round)
+			// A receipt that does not decode, or names no record hash,
+			// matches no record. The slot is not counted, and its file does
+			// not count in place of the record.
+			if err != nil {
+				out[name] = nil
+				break
+			}
 			data, err := ReceiptBytes(attempt, receipt)
 			if err != nil {
 				out[name] = nil

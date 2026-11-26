@@ -81,10 +81,32 @@ func roundSchema(lines [][]byte) (RoundRecord, error) {
 
 // ReadSlotStatuses is read-only. Lock facts are probes taken by the adapter.
 func ReadSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time) ([]SlotStatus, error) {
-	return readSlotStatuses(res, runtime, now, ReadLedger)
+	return readSlotStatuses(res, runtime, now, ReadLedger, nil)
 }
 
-func readSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time, readLedger func(string) ([][]byte, error)) ([]SlotStatus, error) {
+// ReadSlotStatusesRecords is ReadSlotStatuses with the verdict bytes of each
+// slot read as TallyRecords reads them: a stored record gives the bytes of
+// its name, with or without a file. A nil records map reads the disk files
+// only.
+func ReadSlotStatusesRecords(res *Result, runtime map[string]SlotRuntime, now time.Time, records map[string][]byte) ([]SlotStatus, error) {
+	return readSlotStatuses(res, runtime, now, ReadLedger, records)
+}
+
+// RecordVerdictBytes reads the verdict of name as TallyRecords counts it. A
+// stored record gives its bytes. A file beside a record must equal it, and a
+// record that fails its receipt hash gives an error. A name with no record
+// reads the file in dir.
+func RecordVerdictBytes(dir, name string, schema int, records map[string][]byte) ([]byte, error) {
+	if data, ok := records[name]; ok && data != nil {
+		path := filepath.Join(dir, name)
+		if _, err := os.Lstat(path); err == nil && !fileMatchesRecord(path, data) {
+			return nil, fmt.Errorf("%s differs from the stored record", name)
+		}
+	}
+	return verdictBytes(dir, name, schema, records)
+}
+
+func readSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time, readLedger func(string) ([][]byte, error), records map[string][]byte) ([]SlotStatus, error) {
 	if res == nil || res.Panel == nil {
 		return nil, fmt.Errorf("panel registration unreadable")
 	}
@@ -118,7 +140,7 @@ func readSlotStatuses(res *Result, runtime map[string]SlotRuntime, now time.Time
 		sub := subs[roster.Slot]
 		events := attempts[roster.Slot]
 		file := fmt.Sprintf("%s-round-%d.json", roster.Slot, p.Round)
-		data, readErr := ReadVerdictFile(filepath.Join(res.Dir, file), round.VerdictSchema)
+		data, readErr := RecordVerdictBytes(res.Dir, file, round.VerdictSchema, records)
 		exists := readErr == nil
 		matches := exists && sub.Seq > 0 && findingHash(data) == sub.FileSHA256
 		if round.VerdictSchema != 2 {

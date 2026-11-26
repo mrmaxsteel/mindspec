@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
@@ -57,5 +58,66 @@ func TestPanelRefute_StoredRecordsWithoutFiles(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// On an enrolled spec, panel tally shows the findings of each stored slot
+// record, and panel verify gives each slot the status of its record. Both
+// print the same with the verdict files and without them.
+func TestPanelReaders_StoredRecordsWithoutFiles(t *testing.T) {
+	outputs := map[string][2]string{}
+	for i, remove := range []bool{false, true} {
+		f := recordOnlyPanel(t, remove)
+		tally, _ := kernelPanelRun(t, panelTallyCmd, "review", "--spec", f.SpecID)
+		verify, verifyErr := kernelPanelRun(t, panelVerifyCmd, "review", "--spec", f.SpecID)
+		if strings.Contains(tally, "could not re-read") || !strings.Contains(tally, "concrete_changes_required (aggregated):\n  R1: ") {
+			t.Fatalf("tally lost the stored findings (files removed=%v):\n%s", remove, tally)
+		}
+		if verifyErr != nil || strings.Contains(verify, "damaged") || !strings.Contains(verify, "R1 final ") || !strings.Contains(verify, "R2 final ") {
+			t.Fatalf("verify did not read the stored records (files removed=%v): %v\n%s", remove, verifyErr, verify)
+		}
+		// The fixture commits differ, so only the record lines are compared.
+		_, changes, _ := strings.Cut(tally, "concrete_changes_required (aggregated):")
+		var slots []string
+		for _, line := range strings.Split(verify, "\n") {
+			if strings.HasPrefix(line, "R1 ") || strings.HasPrefix(line, "R2 ") {
+				slots = append(slots, line)
+			}
+		}
+		for name, out := range map[string]string{"tally": changes, "verify": strings.Join(slots, "\n")} {
+			pair := outputs[name]
+			pair[i] = out
+			outputs[name] = pair
+		}
+	}
+	for name, pair := range outputs {
+		if pair[0] != pair[1] {
+			t.Fatalf("%s differs without the verdict files:\nwith files:\n%s\nwithout files:\n%s", name, pair[0], pair[1])
+		}
+	}
+}
+
+// When the tally leaves out a present verdict file because it differs from
+// its stored record, or because the record fails its receipt hash, panel
+// tally names the file and the cause.
+func TestPanelTally_NamesFileLeftOutForItsRecord(t *testing.T) {
+	for _, mode := range []string{"edited-file", "changed-record"} {
+		t.Run(mode, func(t *testing.T) {
+			f := recordOnlyPanel(t, false)
+			file := filepath.Join(f.SpecDir, "reviews", "review", "R1-round-1.json")
+			data, err := os.ReadFile(file)
+			f.Must(err)
+			want := "R1-round-1.json not counted: file differs from the stored record"
+			if mode == "edited-file" {
+				f.Must(os.WriteFile(file, append(data, '\n'), 0644))
+			} else {
+				f.Must(f.Store.WriteMetadata(f.Items[0]+".review.r1.R1", kernel.Metadata(kernel.KeyRecord, string(data)+"\n")))
+				want = "R1-round-1.json not counted: stored record does not match its receipt"
+			}
+			out, _ := kernelPanelRun(t, panelTallyCmd, "review", "--spec", f.SpecID)
+			if !strings.Contains(out, "\n  "+want+"\n") {
+				t.Fatalf("tally does not name the left-out file and its cause %q:\n%s", want, out)
+			}
+		})
 	}
 }

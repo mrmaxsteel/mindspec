@@ -189,3 +189,77 @@ func TestTally_EditedVerdictWithOpenRetryDoesNotCount(t *testing.T) {
 		t.Fatalf("edited verdict with a raw-closed retry tallies %q, want the record refusal", got)
 	}
 }
+
+// A receipted slot whose receipt names no record hash, or does not decode,
+// matches no record. The slot is not counted, the disposition reads find no
+// counted verdict, and the edited APPROVE file does not count in its place.
+// A first attempt whose lineage does not verify is not counted either.
+func TestTally_ReceiptWithoutRecordHashDoesNotCountDiskVerdict(t *testing.T) {
+	for _, name := range []string{"empty-hash", "undecodable-receipt", "broken-lineage"} {
+		t.Run(name, func(t *testing.T) {
+			f, id, lease, subject := slotRecordFixture(t)
+			rc := requestChanges(subject, "R1", "defect")
+			_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: attemptVerdict(t, f, "R1", rc)})
+			f.Must(err)
+			rel, err := kernel.SlotVerdictPath(f.State(), id)
+			f.Must(err)
+			dir := filepath.Dir(filepath.Join(f.Root, rel))
+			publishSlot(t, f, dir, "R1", verdictBytes(subject, "R1"))
+			switch name {
+			case "empty-hash":
+				receipt := actorReceipt(t, f, id)
+				receipt.RecordSHA256 = ""
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyClose, receipt)))
+			case "undecodable-receipt":
+				f.Must(f.Store.WriteMetadata(id, map[string]any{kernel.KeyClose: "not a receipt"}))
+			case "broken-lineage":
+				f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyFrom, kernel.From(id+".a0"))))
+			}
+			if got := slotTally(t, f, "R1"); got != "stored record does not match its receipt" {
+				t.Fatalf("slot tallies %q, want the receipt refusal; the stored record is REQUEST_CHANGES", got)
+			}
+			s := f.State()
+			if v, err := kernel.PanelFindingVerdict(&s, dir, "R1", 1); err == nil {
+				t.Fatalf("disposition read found a counted verdict: %+v", v)
+			}
+		})
+	}
+}
+
+// A raw metadata write changes the stored record of a receipted slot. The
+// next action lists no repair for it. A repair is refused, writes nothing
+// and names the retry. The registered verdict file keeps its bytes, the slot
+// stays uncounted, and the next action opens the retry.
+func TestRepair_RecordChangedAfterReceiptOpensRetry(t *testing.T) {
+	f, id, lease, subject := slotRecordFixture(t)
+	put(t, filepath.Join(f.Root, ".beads", "config.yaml"), "types.custom: gate,step\n")
+	useDefaultRules(t)
+	data := verdictBytes(subject, "R1")
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: attemptVerdict(t, f, "R1", data)})
+	f.Must(err)
+	rel, err := kernel.SlotVerdictPath(f.State(), id)
+	f.Must(err)
+	path := filepath.Join(f.Root, rel)
+	publishSlot(t, f, filepath.Dir(path), "R1", data)
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, strings.Replace(data, `"reviewed"`, `"reviewed forged"`, 1))))
+	if got := slotTally(t, f, "R1"); got != "stored record does not match its receipt" {
+		t.Fatalf("slot with a changed record tallies %q, want the receipt refusal", got)
+	}
+	if out := reduce(t, f, false); hasRepairRun(out, id) {
+		t.Fatalf("next action lists a repair for a changed record: %+v", out.Run)
+	}
+	before := kerneltest.Snapshot(t, f)
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Repair: true, Reason: "recover"})
+	assertSubmitRefusal(t, err, "stored record differs from its receipt", "run mindspec next-action '"+f.SpecID+"'; it opens the retry "+id+".a2, then submit the verdict of that retry")
+	if kerneltest.Snapshot(t, f) != before {
+		t.Fatal("a refused repair wrote state")
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != data {
+		t.Fatalf("registered verdict file changed: %q %v", got, err)
+	}
+	if got := slotTally(t, f, "R1"); got != "stored record does not match its receipt" {
+		t.Fatalf("slot tallies %q after the refused repair, want the receipt refusal", got)
+	}
+	reduce(t, f, true)
+	assertRetry(t, f, id, id+".a2", true)
+}

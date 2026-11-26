@@ -217,6 +217,16 @@ type Result struct {
 // ExcludedVerdict identifies a parsed roster file that cannot count.
 type ExcludedVerdict struct{ File, Reason string }
 
+// ExclusionLines names each present verdict that the tally does not count,
+// with its cause, as "<file> not counted: <reason>". Each part is escaped.
+func (r *Result) ExclusionLines() []string {
+	var out []string
+	for _, v := range r.NotIn {
+		out = append(out, termsafe.Escape(v.File)+" not counted: "+termsafe.Escape(v.Reason))
+	}
+	return out
+}
+
 // ExpectedReviewers returns the registered reviewer count, 0 when
 // unregistered/malformed.
 func (r *Result) ExpectedReviewers() int {

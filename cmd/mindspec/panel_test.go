@@ -835,7 +835,7 @@ func TestPanelTally_AggregatesConcreteChangesRequired(t *testing.T) {
 		Dir: dir, Panel: &panel.Panel{ExpectedReviewers: 1, Round: 1}, LatestRound: 1,
 		Verdicts: []panel.Verdict{{File: verdictFile, Slot: "R2", Round: 1, Verdict: panel.VerdictRequestChanges}},
 	}
-	changes := collectSlotChanges(reg, res)
+	changes := collectSlotChanges(reg, res, nil)
 
 	facts := panel.GateFacts{Reg: &reg, Res: res}
 	body, _ := renderPanelTally(res, facts, changes)

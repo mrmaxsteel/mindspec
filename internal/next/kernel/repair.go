@@ -1,5 +1,12 @@
 package kernel
 
+import (
+	"fmt"
+
+	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/termsafe"
+)
+
 func repairable(r Record, lease LeaseRecord, valid bool) error {
 	if r.Status != "closed" {
 		return actorFailure("repair requires a closed step")
@@ -47,6 +54,9 @@ func repairEvidence(s State, r Record) (SubmitOptions, error) {
 		if err != nil {
 			return o, err
 		}
+		if err := slotRecordReceipted(s, r, []byte(data)); err != nil {
+			return o, err
+		}
 		o.Artifact = path
 		receipt.RecordSHA256 = recordDigest([]byte(data))
 		r.Metadata = mergedMetadata(r.Metadata, Metadata(KeyRecord, data))
@@ -90,6 +100,11 @@ func repairRecord(s State, r Record, receipt Receipt, kind string) error {
 	if err != nil {
 		return err
 	}
+	if kind == "review-slot" {
+		if err := slotRecordReceipted(s, r, data); err != nil {
+			return err
+		}
+	}
 	receipt.RecordSHA256 = recordDigest(data)
 	check := artifactChecks[kind]
 	if check == nil {
@@ -107,4 +122,23 @@ func repairRun(o SubmitOptions) Run {
 		argv = append(argv, "--commit", o.Commit)
 	}
 	return Run{Actor: "binary", Argv: argv}
+}
+
+// slotRecordReceipted refuses the repair of a slot when its verdict bytes
+// differ from the hash that its earlier receipt or its closing pin names.
+// Such bytes changed after the receipt, so only a retry can replace them.
+func slotRecordReceipted(s State, r Record, data []byte) error {
+	digest := recordDigest(data)
+	receipt, has, err := Decode[Receipt](r.Metadata, KeyClose)
+	differs := has && (err != nil || receipt.RecordSHA256 != digest)
+	pin, pinned, err := Decode[Closing](r.Metadata, KeyClosing)
+	differs = differs || pinned && (err != nil || pin.RecordSHA256 != digest)
+	if !differs {
+		return nil
+	}
+	recovery := "run mindspec next-action " + briefQuote(idrender.Spec(s.SpecID)) + "; it opens a retry of this slot"
+	if next, err := nextAttempt(r.Key()); err == nil {
+		recovery = fmt.Sprintf("run mindspec next-action %s; it opens the retry %s, then submit the verdict of that retry", briefQuote(idrender.Spec(s.SpecID)), next)
+	}
+	return termsafe.NewFailure("stored record differs from its receipt", recovery)
 }

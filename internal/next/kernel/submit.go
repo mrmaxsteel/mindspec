@@ -165,6 +165,11 @@ func Submit(state State, options SubmitOptions) (Output, error) {
 						return actorFailure("repair record differs from mindspec_closing")
 					}
 				}
+				if slot {
+					if err = slotRecordReceipted(s, r, []byte(record)); err != nil {
+						return err
+					}
+				}
 			} else {
 				generation, err = submitGeneration(r, lease, options.Lease, old, valid)
 				if err != nil {

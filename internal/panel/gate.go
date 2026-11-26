@@ -420,6 +420,9 @@ func presentVerdictFiles(res *Result) string {
 		}
 		out += "; malformed (count as missing): " + strings.Join(malformed, ", ")
 	}
+	if lines := res.ExclusionLines(); len(lines) > 0 {
+		out += "; " + strings.Join(lines, "; ")
+	}
 	return out
 }
 

@@ -88,7 +88,7 @@ func TestGateV2_LedgerSnapshotReplacement(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				slots, err := readSlotStatuses(before, nil, time.Now(), readSnapshot)
+				slots, err := readSlotStatuses(before, nil, time.Now(), readSnapshot, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

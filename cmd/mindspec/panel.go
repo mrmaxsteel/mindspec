@@ -433,11 +433,15 @@ and prints a recovery line.`,
 			}
 			return panelStateRecords(reg, state, stateErr)
 		})
-		changes := collectSlotChanges(reg, facts.Res)
+		var records map[string][]byte
+		if kernelGate {
+			records, _ = panelStateRecords(reg, state, stateErr)
+		}
+		changes := collectSlotChanges(reg, facts.Res, records)
 		if err := panel.WriteCoverageManifest(facts.Res); err != nil {
 			return panelCoverageWriteFailure(reg, err)
 		}
-		slots, slotsErr := panelSlotStatuses(root, facts.Res)
+		slots, slotsErr := panelSlotStatusesRecords(root, facts.Res, records)
 		if slotsErr == nil {
 			for _, annotation := range panel.ReplacementAnnotations(slots) {
 				fmt.Fprintln(cmd.OutOrStdout(), termsafe.Escape(annotation))
@@ -1010,11 +1014,12 @@ type panelVerdictChangesJSON struct {
 
 // collectSlotChanges iterates res.Verdicts of the latest round and, for
 // each REQUEST_CHANGES/REJECT verdict, re-decodes its verdict file's
-// concrete_changes_required array (Bead 4 step 3). A re-parse failure, an
+// concrete_changes_required array (Bead 4 step 3). A stored record in
+// records gives the verdict bytes of its name, as the tally reads them. A re-parse failure, an
 // absent key, or a non-array-of-strings type attributes ZERO items to
 // that slot with an advisory DecodeErr — never fatal, never silently
 // dropped. This read never feeds panel.PanelGateDecision or the exit code.
-func collectSlotChanges(reg panel.Registration, res *panel.Result) []slotChanges {
+func collectSlotChanges(reg panel.Registration, res *panel.Result, records map[string][]byte) []slotChanges {
 	if res == nil {
 		return nil
 	}
@@ -1024,7 +1029,7 @@ func collectSlotChanges(reg panel.Registration, res *panel.Result) []slotChanges
 			continue
 		}
 		sc := slotChanges{Slot: v.Slot}
-		data, err := panel.ReadVerdictFile(filepath.Join(reg.Dir, v.File), res.VerdictSchema)
+		data, err := panel.RecordVerdictBytes(reg.Dir, v.File, res.VerdictSchema, records)
 		if err != nil {
 			sc.DecodeErr = fmt.Sprintf("could not re-read %s: %v", v.File, err)
 			out = append(out, sc)
@@ -1110,6 +1115,9 @@ func renderPanelTally(res *panel.Result, facts panel.GateFacts, changes []slotCh
 	if len(res.Malformed) > 0 {
 		// R3(c): per-element, same discipline as renderPanelVerify above.
 		fmt.Fprintf(&b, "  malformed (counted as missing): %s\n", strings.Join(escapeEach(res.Malformed), ", "))
+	}
+	for _, line := range res.ExclusionLines() {
+		fmt.Fprintf(&b, "  %s\n", line)
 	}
 
 	fmt.Fprintln(&b, panel.RuleLine(res))
@@ -1405,7 +1413,19 @@ func panelCoverageWriteFailure(reg panel.Registration, err error) error {
 }
 
 // panelSlotStatuses supplies config and non-blocking lock probes to the leaf.
+// An enrolled bead or final review gate reads the stored slot records, so a
+// slot whose file is absent keeps the status of its record.
 func panelSlotStatuses(root string, res *panel.Result) ([]panel.SlotStatus, error) {
+	records, err := panelRecords(root, res.Dir)
+	if err != nil {
+		return nil, err
+	}
+	return panelSlotStatusesRecords(root, res, records)
+}
+
+// panelSlotStatusesRecords is panelSlotStatuses with the slot records that
+// the caller read once.
+func panelSlotStatusesRecords(root string, res *panel.Result, records map[string][]byte) ([]panel.SlotStatus, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
@@ -1452,7 +1472,7 @@ func panelSlotStatuses(root string, res *panel.Result) ([]panel.SlotStatus, erro
 		}
 		runtime[slot.Slot] = rt
 	}
-	return panel.ReadSlotStatuses(res, runtime, time.Now())
+	return panel.ReadSlotStatusesRecords(res, runtime, time.Now(), records)
 }
 
 // panelSubjectReader supplies the same document digest to each panel verb.
