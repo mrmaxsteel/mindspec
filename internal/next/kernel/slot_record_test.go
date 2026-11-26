@@ -389,7 +389,8 @@ func slotTally(t *testing.T, f *kerneltest.Fixture, slot string) string {
 
 // A tally takes the verdict of a slot from its stored record when the
 // verdict file is absent, as in a fresh clone. The receipt hash must match
-// the record. A verdict file that differs from the record does not count.
+// the record, or the slot is not counted and names that cause. A verdict
+// file that differs from the record does not count.
 func TestS134Submit_TallyReadsStoredSlotRecord(t *testing.T) {
 	f, id, lease, subject := slotRecordFixture(t)
 	data := verdictBytes(subject, "R1")
@@ -418,7 +419,7 @@ func TestS134Submit_TallyReadsStoredSlotRecord(t *testing.T) {
 	}
 	f.Must(os.Rename(path, filepath.Join(t.TempDir(), "edited.json")))
 	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, strings.Replace(data, "reviewed", "changed", 1))))
-	if got := slotTally(t, f, "R1"); got != "absent" {
-		t.Fatalf("tally with a record that fails its receipt hash: %q, want absent", got)
+	if got := slotTally(t, f, "R1"); got != "stored record does not match its receipt" {
+		t.Fatalf("tally with a record that fails its receipt hash: %q, want the receipt refusal", got)
 	}
 }

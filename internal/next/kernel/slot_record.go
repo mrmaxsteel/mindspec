@@ -195,45 +195,77 @@ func slotRecovery(s State, t Tuple) string {
 	return fmt.Sprintf("mindspec panel prompt %s --slot R%d --spec %s, then write the verdict to the path it names and run the submit command it prints", slug, t.Slot, briefQuote(idrender.Spec(s.SpecID)))
 }
 
-// SlotRecords returns the stored verdict of each current slot step of the
-// panel p, keyed by its verdict file name. The receipt hash must match the
-// record, or the step supplies nothing. A fresh clone thus tallies the votes
-// that the bd store holds, with no verdict file on disk. A verdict file that
-// differs from its record does not count, so its slot gets a retry.
+// SlotRecords returns the stored verdict of each slot of the panel p, keyed
+// by its verdict file name. A fresh clone thus tallies the votes that the bd
+// store holds, with no verdict file on disk. The verdict file of a slot
+// belongs to the newest attempt in its retry lineage that holds a receipted
+// record, so an open or unreceipted retry keeps the record of the attempt
+// before it. The receipt hash must match that record. When it does not, the
+// name maps to nil: the slot is not counted and no disk file substitutes for
+// the record. A verdict file that differs from its record does not count, so
+// its slot gets a retry.
 func SlotRecords(s State, p panel.Registration) map[string][]byte {
 	out := map[string][]byte{}
 	for key, r := range s.Records {
 		t, has, err := r.Tuple()
-		if err != nil || !has || t.Kind != "review-slot" || r.Status != "closed" {
+		if err != nil || !has || t.Kind != "review-slot" {
 			continue
 		}
 		reg, registered, err := Decode[RegistrationRecord](s.Records[activeGate(s, t.Gate)].Metadata, KeyRegistration)
 		if err != nil || !registered || reg.Slug != p.Slug() {
 			continue
 		}
-		receipt, _, err := Decode[Receipt](r.Metadata, KeyClose)
-		if err != nil || receipt.Kind == "superseded" {
+		if root, err := SlotLineageRoot(s, key); err != nil || root != key {
 			continue
 		}
-		root, err := SlotLineageRoot(s, key)
-		if err != nil {
-			continue
+		lineage := slotLineage(s, key)
+		for i := len(lineage) - 1; i >= 0; i-- {
+			attempt := lineage[i]
+			if attempt.Status != "closed" {
+				continue
+			}
+			receipt, _, err := Decode[Receipt](attempt.Metadata, KeyClose)
+			if err != nil || receipt.Kind == "superseded" || receipt.RecordSHA256 == "" {
+				continue
+			}
+			name := fmt.Sprintf("R%d-round-%d.json", t.Slot, t.Round)
+			data, err := ReceiptBytes(attempt, receipt)
+			if err != nil {
+				out[name] = nil
+			} else {
+				out[name] = data
+			}
+			break
 		}
-		if head, err := SlotLineageHead(s, root); err != nil || head.Key() != key {
-			continue
-		}
-		data, err := ReceiptBytes(r, receipt)
-		if err != nil {
-			continue
-		}
-		out[fmt.Sprintf("R%d-round-%d.json", t.Slot, t.Round)] = data
 	}
 	return out
 }
 
+// slotLineage returns the attempts of the slot lineage that starts at root,
+// in order. It stops at the first attempt that is absent or whose lineage
+// does not verify back to root.
+func slotLineage(s State, root string) []Record {
+	lineage := []Record{s.Records[root]}
+	for id := root; ; {
+		next, err := nextAttempt(id)
+		if err != nil {
+			return lineage
+		}
+		candidate, exists := s.Records[next]
+		if !exists {
+			return lineage
+		}
+		if verified, err := SlotLineageRoot(s, next); err != nil || verified != root {
+			return lineage
+		}
+		lineage = append(lineage, candidate)
+		id = next
+	}
+}
+
 // TallyPanel tallies the panel p from the stored slot verdicts. A verdict
-// file with no record counts as before; one that differs from its record
-// does not count.
+// file with no record counts as before; one that differs from its record,
+// or whose record fails its receipt hash, does not count.
 func TallyPanel(s State, p panel.Registration) (*panel.Result, error) {
 	return panel.TallyRecords(p.Dir, SlotRecords(s, p))
 }

@@ -662,21 +662,37 @@ func closeRetalliedChildren(s kernel.State, gate, dir string) error {
 }
 
 // panelRecords returns the stored slot verdicts of the panel at dir when its
-// spec is enrolled. A pre-kernel panel gives nil, so it reads the disk files
-// only. An enrolled panel with no tracker store is refused.
+// spec is enrolled. Only a bead or final review gate holds slot records, so
+// any other gate gives nil and reads no tracker. A pre-kernel panel gives
+// nil, so it reads the disk files only. An enrolled panel with no tracker
+// store is refused.
 func panelRecords(root, dir string) (map[string][]byte, error) {
 	reg := panel.ReadRegistration(dir)
-	if reg.Err != nil || reg.Panel.Spec == "" {
+	if !panelHoldsSlotRecords(reg) {
 		return nil, nil
 	}
 	s, err := panelKernelStateFn(root, reg.Panel.Spec)
+	return panelStateRecords(reg, s, err)
+}
+
+// panelHoldsSlotRecords reports whether reg is a gate whose slot verdicts
+// can be kernel records: a bead or final review panel of a spec.
+func panelHoldsSlotRecords(reg panel.Registration) bool {
+	return reg.Err == nil && reg.Panel.Spec != "" && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review")
+}
+
+// panelStateRecords returns the slot records of reg from a kernel state that
+// the caller read once. A tracker failure on an orchestrated panel is
+// returned, because no disk file substitutes for a record. A tracker failure
+// on another panel gives nil, which reads the disk files.
+func panelStateRecords(reg panel.Registration, s *kernel.State, err error) (map[string][]byte, error) {
 	if err != nil {
 		if reg.Panel.Orchestrated {
 			return nil, err
 		}
 		return nil, nil
 	}
-	return kernel.PanelRecords(s, dir), nil
+	return kernel.PanelRecords(s, reg.Dir), nil
 }
 
 // panelRecordSource gives panelRecords for each panel directory.

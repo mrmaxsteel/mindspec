@@ -107,8 +107,8 @@ const (
 //
 // This function's own rendered template IS a real FamilyGitMerge match
 // (spec 127 R5(a)) — verified: guard.FindFloorMatches on its literal
-// template string returns [{Family:git merge}]. It reaches EIGHT real
-// `Decision{Message:}` diagnostics in this file — seven reached as a
+// template string returns [{Family:git merge}]. It reaches NINE real
+// `Decision{Message:}` diagnostics in this file — eight reached as a
 // %s ARGUMENT to an outer fmt.Sprintf, one via strings.Builder's
 // WriteString. Deliberately NOT cited by absolute line number: spec
 // 127 bead-2 rework round 1 (RULING 10) cited eight exact line numbers
@@ -127,7 +127,7 @@ const (
 // this comment no longer tries to duplicate.
 //
 // internal/lint's product-diagnostic scan does NOT reach any of the
-// eight: the scan's Sprintf fold rule inspects only the template,
+// nine: the scan's Sprintf fold rule inspects only the template,
 // args[0], by design (R5c's own stated shape) — never a substituted
 // argument — and strings.Builder composition is not a fold shape the
 // scan recognizes at all. This is a genuine, disclosed reach gap, not
@@ -248,6 +248,11 @@ func panelGateDecision(f GateFacts) Decision {
 
 	// (2) A panel.json exists but could not be parsed — registered but
 	// malformed. It must NOT read as "no panel".
+	if f.Res.RecordsErr != nil {
+		return Decision{Action: Block, Leg: LegUnreadable, Message: fmt.Sprintf(
+			"panel %s slot records cannot be read from the tracker store: %s — restore the tracker store before completing%s",
+			slug, termsafe.Escape(f.Res.RecordsErr.Error()), RawMergeFence(f.BeadID))}
+	}
 	if f.Res.PanelErr != nil || f.Res.Panel == nil {
 		return Decision{Action: Block, Leg: LegUnreadable, Message: fmt.Sprintf(
 			"panel %s registration (panel.json) is unreadable — fix or remove it before completing%s",
@@ -492,7 +497,14 @@ type GateIO struct {
 func ResolveGateFacts(reg Registration, beadID, scanRoot string, deps GateIO) GateFacts {
 	f := GateFacts{BeadID: beadID, Reg: &reg}
 
-	res, err := TallySource(reg.Dir, deps.Records)
+	records, err := deps.Records.For(reg.Dir)
+	if err != nil {
+		// The stored slot verdicts are required and cannot be read. No
+		// disk file substitutes for them, so the decision blocks.
+		f.Res = &Result{Dir: reg.Dir, PanelErr: err, RecordsErr: err}
+		return f
+	}
+	res, err := TallyRecords(reg.Dir, records)
 	if err != nil {
 		// Directory unreadable — treat as malformed registration (Block),
 		// not "no panel": surface a non-nil Result with PanelErr so the

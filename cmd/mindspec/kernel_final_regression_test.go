@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,7 +183,13 @@ func TestS134Final_SlotRetryVerbs(t *testing.T) {
 				e.must(err)
 				e.tracker("update", e.f.ID(retry), "--metadata", string(raw))
 				if mode == "valid-original" {
-					raw, err = json.Marshal(kernel.Metadata(kernel.KeyClose, kernel.Receipt{Kind: "passed", Retally: "already-voted"}))
+					// A valid original slot holds its stored verdict and a
+					// receipt that names the hash of that record.
+					record := "verdict of " + last.Step
+					raw, err = json.Marshal(map[string]any{
+						kernel.KeyRecord: record,
+						kernel.KeyClose:  kernel.Receipt{Kind: "passed", RecordSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(record)))},
+					})
 					e.must(err)
 					e.tracker("update", e.f.ID(last.Step), "--metadata", string(raw))
 				}

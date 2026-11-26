@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel/kerneltest"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 )
 
@@ -97,5 +98,94 @@ func TestTally_EditedVerdictWithLedgerLineDoesNotCount(t *testing.T) {
 	f.Must(err)
 	if got := slotTally(t, f, "R1"); got != "file differs from the stored record" {
 		t.Fatalf("edited verdict with a ledger line: %q, want the record refusal", got)
+	}
+}
+
+// publishSlot writes data as the registered verdict file of slot and appends
+// its ledger line, as panel submit does.
+func publishSlot(t *testing.T, f *kerneltest.Fixture, dir, slot, data string) {
+	t.Helper()
+	f.Must(os.WriteFile(filepath.Join(dir, slot+"-round-1.json"), []byte(data), 0644))
+	_, err := panel.Submit(panel.SubmitTarget{Dir: dir, Spec: f.SpecID, Panel: "panel", Slot: slot, Round: 1}, []byte(data), func(panel.Panel, panel.RosterSlot) (panel.SubmitResolution, error) {
+		return panel.SubmitResolution{Family: "harness", Model: "test", RunnerKind: "harness", RunnerSource: "default"}, nil
+	})
+	f.Must(err)
+}
+
+// requestChanges is the APPROVE verdict of slot with one finding and the
+// REQUEST_CHANGES verdict word.
+func requestChanges(subject, slot, finding string) string {
+	rc := strings.Replace(verdictBytes(subject, slot), `"verdict":"APPROVE"`, `"verdict":"REQUEST_CHANGES"`, 1)
+	return strings.Replace(rc, `"concrete_changes_required":[]`, `"concrete_changes_required":[{"text":"`+finding+`","basis":"traced"}]`, 1)
+}
+
+// A raw metadata write changes the stored record of a receipted slot, so the
+// record no longer matches the receipt hash. The slot is not counted, and the
+// APPROVE file on disk does not count in its place.
+func TestTally_CorruptStoredRecordDoesNotCountDiskVerdict(t *testing.T) {
+	f, id, lease, subject := slotRecordFixture(t)
+	rc := requestChanges(subject, "R1", "defect")
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: attemptVerdict(t, f, "R1", rc)})
+	f.Must(err)
+	rel, err := kernel.SlotVerdictPath(f.State(), id)
+	f.Must(err)
+	dir := filepath.Dir(filepath.Join(f.Root, rel))
+	publishSlot(t, f, dir, "R1", rc)
+	id2 := strings.TrimSuffix(id, "R1") + "R2"
+	l2 := leaseActor(t, f, id2, kernel.LeaseDeps{})
+	approve2 := verdictBytes(subject, "R2")
+	_, err = kernel.Submit(f.State(), kernel.SubmitOptions{Step: id2, Lease: l2.Token, Artifact: attemptVerdict(t, f, "R2", approve2)})
+	f.Must(err)
+	publishSlot(t, f, dir, "R2", approve2)
+	publishSlot(t, f, dir, "R1", verdictBytes(subject, "R1"))
+	if got := slotTally(t, f, "R1"); got != "file differs from the stored record" {
+		t.Fatalf("edited file before the corruption: %q", got)
+	}
+	f.Must(f.Store.WriteMetadata(id, kernel.Metadata(kernel.KeyRecord, requestChanges(subject, "R1", "changed defect"))))
+	if _, err := kernel.ReceiptBytes(actorRecord(t, f, id), actorReceipt(t, f, id)); err == nil {
+		t.Fatal("the changed record still matches its receipt")
+	}
+	if got := slotTally(t, f, "R1"); got != "stored record does not match its receipt" {
+		t.Fatalf("slot with a corrupt record tallies %q, want the receipt refusal", got)
+	}
+	for _, p := range f.State().Panels {
+		if p.Slug() != "panel" {
+			continue
+		}
+		res, err := kernel.TallyPanel(f.State(), p)
+		f.Must(err)
+		if res.Approves != 1 || res.PassRule(true) {
+			t.Fatalf("disk APPROVE counted for a corrupt record: approves=%d pass=%v", res.Approves, res.PassRule(true))
+		}
+	}
+}
+
+// After a retry opens for an edited verdict file, the file still belongs to
+// the first attempt, whose stored record says REQUEST_CHANGES. The edited
+// APPROVE file does not count while the retry is open or after a raw close of
+// the retry.
+func TestTally_EditedVerdictWithOpenRetryDoesNotCount(t *testing.T) {
+	f, id, lease, subject := slotRecordFixture(t)
+	rc := requestChanges(subject, "R1", "defect")
+	_, err := kernel.Submit(f.State(), kernel.SubmitOptions{Step: id, Lease: lease.Token, Artifact: attemptVerdict(t, f, "R1", rc)})
+	f.Must(err)
+	rel, err := kernel.SlotVerdictPath(f.State(), id)
+	f.Must(err)
+	path := filepath.Join(f.Root, rel)
+	publishSlot(t, f, filepath.Dir(path), "R1", rc)
+	publishSlot(t, f, filepath.Dir(path), "R1", verdictBytes(subject, "R1"))
+	retry := id + ".a2"
+	f.Create(retry, f.Items[0]+".review")
+	// The kernel opens an uncounted retry for a slot whose file is not counted.
+	f.Must(f.Store.WriteMetadata(retry, map[string]any{kernel.KeyFrom: kernel.From(id), kernel.KeySubject: kernel.Subject{Commit: subject}, kernel.KeyUncounted: true}))
+	if root, err := kernel.SlotLineageRoot(f.State(), retry); err != nil || root != id {
+		t.Fatalf("the retry is not in the lineage of the first attempt: %q %v", root, err)
+	}
+	if got := slotTally(t, f, "R1"); got != "file differs from the stored record" {
+		t.Fatalf("edited verdict with an open retry tallies %q, want the record refusal", got)
+	}
+	f.Must(f.Store.SetStatusIf(retry, "open", "closed"))
+	if got := slotTally(t, f, "R1"); got != "file differs from the stored record" {
+		t.Fatalf("edited verdict with a raw-closed retry tallies %q, want the record refusal", got)
 	}
 }

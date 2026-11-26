@@ -78,7 +78,7 @@ var submitCmd = &cobra.Command{SilenceUsage: true, Use: "submit <step-or-decisio
 func init() {
 	submitCmd.Flags().String("lease", "", "Current lease token")
 	submitCmd.Flags().String("record", "", "Record file outside this repository")
-	submitCmd.Flags().String("artifact", "", "Artifact path: a file held by a commit, or the verdict file that the slot prompt names")
+	submitCmd.Flags().String("artifact", "", "Artifact path. A review slot takes its attempt verdict file or a file in the registered panel directory of its gate (with no registered panel, a file in a worktree of this repository). Other steps take a file held by a commit.")
 	submitCmd.Flags().String("commit", "", "Commit that holds the implementation or fix")
 	submitCmd.Flags().String("answer", "", "Listed option for a decision")
 	submitCmd.Flags().Bool("repair", false, "Receipt an unreceipted closed step with fitting evidence")

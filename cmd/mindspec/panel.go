@@ -25,6 +25,7 @@ import (
 	"github.com/mrmaxsteel/mindspec/internal/guard"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate"
 	"github.com/mrmaxsteel/mindspec/internal/idvalidate/idrender"
+	"github.com/mrmaxsteel/mindspec/internal/next/kernel"
 	"github.com/mrmaxsteel/mindspec/internal/panel"
 	"github.com/mrmaxsteel/mindspec/internal/shellquote"
 	"github.com/mrmaxsteel/mindspec/internal/termsafe"
@@ -412,7 +413,26 @@ and prints a recovery line.`,
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "panel directory: %s\nresolved round: %d\n", termsafe.Escape(reg.Dir), reg.Panel.Round)
-		facts := resolvePanelGateFacts(root, reg)
+		// A bead or final review gate reads the kernel state once. The
+		// slot records and the exit decision both use that one read.
+		kernelGate := panelHoldsSlotRecords(reg)
+		var state *kernel.State
+		var stateErr error
+		if kernelGate {
+			state, stateErr = panelKernelStateFn(root, reg.Panel.Spec)
+			if stateErr != nil && reg.Panel.Orchestrated {
+				// The slot verdicts of an orchestrated panel are tracker
+				// records. No disk file substitutes for them, so the tally
+				// counts nothing and names the tracker failure.
+				return stateErr
+			}
+		}
+		facts := resolvePanelGateFactsSource(root, reg, func(string) (map[string][]byte, error) {
+			if !kernelGate {
+				return nil, nil
+			}
+			return panelStateRecords(reg, state, stateErr)
+		})
 		changes := collectSlotChanges(reg, facts.Res)
 		if err := panel.WriteCoverageManifest(facts.Res); err != nil {
 			return panelCoverageWriteFailure(reg, err)
@@ -438,19 +458,8 @@ and prints a recovery line.`,
 		// A kernel gate (bead or final_review of an enrolled spec) prints
 		// no Next block: next-action decides. Every other gate prints the
 		// Next block that the decision leg selects.
-		if reg.Err == nil && reg.Panel.Spec != "" && (reg.Panel.Gate == "bead" || reg.Panel.Gate == "final_review") {
-			s, err := panelKernelStateFn(root, reg.Panel.Spec)
-			if err != nil && reg.Panel.Orchestrated {
-				if d.Action == panel.Block {
-					return err
-				}
-				// The enrolled panel's tracker is unavailable: print no
-				// Next block and keep the decision's exit.
-				return tallyExitAction(d, tallyRecoveryFacts{SpecID: reg.Panel.Spec, Kernel: true})
-			}
-			if err == nil && s != nil && s.Enrolled {
-				return tallyExitAction(d, tallyRecoveryFacts{SpecID: s.SpecID, Kernel: true})
-			}
+		if kernelGate && stateErr == nil && state != nil && state.Enrolled {
+			return tallyExitAction(d, tallyRecoveryFacts{SpecID: state.SpecID, Kernel: true})
 		}
 		recovery := tallyRecoveryFacts{
 			Slug:            slug,
@@ -790,6 +799,12 @@ func panelCreateFailure(err error, slug string, in panel.CreateInput) error {
 // is untouched (zero-byte diff) — this is purely caller-side fact
 // gathering through the GateIO seam ADR-0037 designed for exactly this.
 func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts {
+	return resolvePanelGateFactsSource(root, reg, panelRecordSource(root))
+}
+
+// resolvePanelGateFactsSource is resolvePanelGateFacts with the slot records
+// from records, so a caller that read the kernel state reads it once.
+func resolvePanelGateFactsSource(root string, reg panel.Registration, records panel.RecordSource) panel.GateFacts {
 	beadID := ""
 	if reg.Err == nil && reg.Panel.IsBead() {
 		beadID = *reg.Panel.BeadID
@@ -810,7 +825,7 @@ func resolvePanelGateFacts(root string, reg panel.Registration) panel.GateFacts 
 		Status:        exec.Status,
 		IsRefNotFound: exec.IsRefNotFound,
 		Worktree:      panelBeadWorktreePath(beadID),
-		Records:       panelRecordSource(root),
+		Records:       records,
 	})
 }
 

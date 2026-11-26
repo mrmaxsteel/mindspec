@@ -24,8 +24,8 @@ import (
 // The fix is to stop citing absolute line numbers at all — a reader
 // can `grep -n 'RawMergeFence(f.BeadID)' internal/panel/gate.go` as
 // easily as trust a comment, and grep cannot go stale silently. What
-// the doc comment keeps claiming is the COUNT (8) and the SHAPE SPLIT
-// (7 sites passing RawMergeFence's result as a %s argument to an
+// the doc comment keeps claiming is the COUNT (9) and the SHAPE SPLIT
+// (8 sites passing RawMergeFence's result as a %s argument to an
 // outer fmt.Sprintf, 1 site appending it via strings.Builder) — and
 // THIS test is what makes that claim self-checking: it re-parses
 // gate.go fresh on every run and REDs the moment either number drifts,
@@ -64,11 +64,11 @@ func TestRawMergeFence_CallSiteShapeSentinel(t *testing.T) {
 	})
 
 	total := sprintfArgSites + builderSites + other
-	if total != 8 {
-		t.Errorf("RawMergeFence(...) call-site count = %d, want 8 (update this test AND RawMergeFence's own doc comment together if the count genuinely changed)", total)
+	if total != 9 {
+		t.Errorf("RawMergeFence(...) call-site count = %d, want 9 (update this test AND RawMergeFence's own doc comment together if the count genuinely changed)", total)
 	}
-	if sprintfArgSites != 7 {
-		t.Errorf("RawMergeFence(...) sites reached via an outer fmt.Sprintf %%s argument = %d, want 7", sprintfArgSites)
+	if sprintfArgSites != 8 {
+		t.Errorf("RawMergeFence(...) sites reached via an outer fmt.Sprintf %%s argument = %d, want 8", sprintfArgSites)
 	}
 	if builderSites != 1 {
 		t.Errorf("RawMergeFence(...) sites reached via strings.Builder.WriteString = %d, want 1", builderSites)

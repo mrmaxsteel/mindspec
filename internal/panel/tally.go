@@ -60,7 +60,8 @@ func RoundVerdictFiles(dir string, round int) ([]string, error) {
 
 // RoundVerdictBytes returns the verdict bytes of round, keyed by verdict
 // file name. A stored record gives the bytes of its name, also when a file of
-// that name is on disk. A file with no record gives its own bytes. So the
+// that name is on disk. A file with no record gives its own bytes. A name
+// that maps to nil gives nothing, and its file is not read. So the
 // record-backed names read the same in every checkout. A nil records map
 // gives the disk files only.
 func RoundVerdictBytes(dir string, round int, records map[string][]byte) (map[string][]byte, error) {
@@ -70,6 +71,10 @@ func RoundVerdictBytes(dir string, round int, records map[string][]byte) (map[st
 	}
 	out := map[string][]byte{}
 	for name, data := range records {
+		if data == nil {
+			// A withheld record gives no bytes, and its file is not read.
+			continue
+		}
 		match := verdictFileRE.FindStringSubmatch(name)
 		if match == nil {
 			continue
@@ -79,7 +84,7 @@ func RoundVerdictBytes(dir string, round int, records map[string][]byte) (map[st
 		}
 	}
 	for _, name := range names {
-		if _, ok := out[name]; ok {
+		if _, ok := records[name]; ok {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, name))
@@ -159,7 +164,11 @@ type Result struct {
 	// PanelErr records a panel.json read/parse failure (the file
 	// exists but is unusable). A registered-but-malformed panel must
 	// not be treated as "no panel" by gating consumers.
-	PanelErr      error
+	PanelErr error
+	// RecordsErr records that the stored slot verdicts of an enrolled
+	// panel cannot be read. PanelErr is also set, so every reader fails
+	// closed; the gate decision names this cause, not panel.json.
+	RecordsErr    error
 	IntegrityErr  error
 	Unexpected    []Verdict
 	Unsubmitted   []string
@@ -391,8 +400,10 @@ func Tally(dir string) (*Result, error) {
 // TallyRecords tallies dir with verdict bytes from records, keyed by verdict
 // file name. A record supplies the verdict of its name, with or without a
 // file in dir. A file in dir that differs from its record is not counted, so
-// a hand edit leaves the slot uncounted. The caller stores the records and
-// checks their hashes. A nil records map gives the plain disk tally.
+// a hand edit leaves the slot uncounted. A name that maps to nil has a stored
+// record that fails its receipt hash: it is not counted, and no file in dir
+// substitutes for it. The caller stores the records and checks their hashes.
+// A nil records map gives the plain disk tally.
 func TallyRecords(dir string, records map[string][]byte) (*Result, error) {
 	return tallyWithPanel(dir, ReadLedger, nil, records)
 }
@@ -543,6 +554,10 @@ func tallyWithPanel(dir string, readLedger func(string) ([][]byte, error), regis
 			continue
 		}
 		offRoster := len(roster) > 0 && !roster[vf.slot]
+		if data, ok := records[vf.name]; ok && data == nil {
+			res.NotIn = append(res.NotIn, ExcludedVerdict{File: vf.name, Reason: "stored record does not match its receipt"})
+			continue
+		}
 		if onDisk[vf.name] && !fileMatchesRecord(filepath.Join(dir, vf.name), records[vf.name]) {
 			res.NotIn = append(res.NotIn, ExcludedVerdict{File: vf.name, Reason: "file differs from the stored record"})
 			continue
@@ -799,6 +814,9 @@ func verdictBytes(dir, name string, schema int, records map[string][]byte) ([]by
 	data, ok := records[name]
 	if !ok {
 		return ReadVerdictFile(filepath.Join(dir, name), schema)
+	}
+	if data == nil {
+		return nil, fmt.Errorf("stored record does not match its receipt")
 	}
 	if schema == 2 && len(data) > MaxVerdictBytes {
 		return nil, fmt.Errorf("verdict file exceeds 1 MiB")

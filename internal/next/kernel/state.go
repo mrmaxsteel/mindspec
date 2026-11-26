@@ -146,6 +146,9 @@ func ReadState(store *Store, specID, specDir string) (State, error) {
 			s.Verdicts[path] = data
 		}
 		for name, data := range SlotRecords(s, p) {
+			if data == nil {
+				continue
+			}
 			if _, ok := s.Verdicts[filepath.Join(p.Dir, name)]; !ok {
 				s.Verdicts[filepath.Join(p.Dir, name)] = data
 			}

@@ -66,9 +66,11 @@ func TestS134PanelTally_PreKernelTrackerFailure(t *testing.T) {
 	}
 }
 
-// An orchestrated bead or final gate whose tracker cannot be read keeps the
-// exit of an Allow decision: it prints no Next block and exits 0.
-func TestS134PanelTally_OrchestratedTrackerFailureKeepsAllow(t *testing.T) {
+// An orchestrated bead or final gate whose tracker cannot be read counts no
+// slot: its verdicts are tracker records, and no disk file substitutes for
+// them. The tally reads the tracker once, exits non-zero, names the tracker
+// failure (not panel.json) and prints no Next block.
+func TestS134PanelTally_OrchestratedTrackerFailureFailsClosed(t *testing.T) {
 	f, head := panelPreKernelFixture(t)
 	old := panelKernelStateFn
 	t.Cleanup(func() { panelKernelStateFn = old })
@@ -95,11 +97,14 @@ func TestS134PanelTally_OrchestratedTrackerFailureKeepsAllow(t *testing.T) {
 	calls := 0
 	panelKernelStateFn = func(_, _ string) (*kernel.State, error) { calls++; return nil, errors.New("tracker unavailable") }
 	out, err = kernelPanelRun(t, panelTallyCmd, "orch", "--spec", f.SpecID)
-	if calls == 0 {
-		t.Fatalf("the tally did not read the tracker: %s", out)
+	if calls != 1 {
+		t.Fatalf("the tally read the tracker %d times, want 1: %s", calls, out)
 	}
-	if err != nil {
-		t.Fatalf("an Allow tally on an unreadable tracker exited non-zero: %v\n%s", err, out)
+	if err == nil {
+		t.Fatalf("disk APPROVE verdicts counted on an unreadable tracker:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "tracker unavailable") || strings.Contains(err.Error()+out, "panel.json) is unreadable") {
+		t.Fatalf("the refusal does not name the tracker failure: %v\n%s", err, out)
 	}
 	if strings.Contains(out, "Next:") {
 		t.Fatalf("an orchestrated gate printed a Next block:\n%s", out)
